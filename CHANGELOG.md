@@ -11,160 +11,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-#### Core Features
-- **LoggerManager**: Async logger manager with dual initialization support
-  - `LoggerManager::new()` for zero-dependency initialization
-  - `LoggerManager::from_file()` for config file loading (requires `confers` feature)
-  - `LoggerManager::builder()` for fluent builder pattern
-  - `LoggerManager::load()` for automatic config discovery (requires `confers`)
+#### 核心功能
+- **LoggerManager**: 异步日志管理器，支持多种初始化方式
+  - `LoggerManager::new()` 默认初始化
+  - `LoggerManager::builder()` 构建器模式
+  - `LoggerManager::with_config()` 自定义配置
 
-- **Console Sink**: High-performance console logging with colored output
-  - Synchronous fast path (<50μs latency)
-  - ANSI color support (ERROR=red, WARN=yellow, INFO=green)
-  - Automatic TTY detection (disabled colors for non-TTY)
-  - Configurable stderr分流 for error/warn levels
+- **多输出目标支持**: 基于trait的可扩展sink架构
+  - ConsoleSink: 控制台输出，支持彩色显示
+  - FileSink: 文件输出，支持轮转和压缩
+  - DatabaseSink: 数据库输出，支持批量写入
 
-- **File Sink**: Persistent file logging with rotation and compression
-  - Size-based rotation (configurable threshold)
-  - Time-based rotation (hourly/daily/weekly)
-  - Zstd compression (configurable level 1-22)
-  - AES-256-GCM encryption with per-file nonces
-  - Automatic cleanup with retention policies
-  - Magic header format for encrypted files
+- **配置系统**: 完整的TOML配置支持
+  - 全局配置、性能配置、HTTP服务器配置
+  - 环境变量覆盖
+  - 配置验证和错误处理
 
-- **Database Sink**: Multi-database support with batch writes
-  - SQLite, PostgreSQL, MySQL support via SeaORM
-  - Batch insert with configurable size (default: 100)
-  - Timeout-based flush (default: 500ms)
-  - Monthly partitioning for PostgreSQL
-  - Parquet format export for analytics
+- **性能优化**: 基于crossbeam-channel的异步架构
+  - 有界通道，支持背压控制
+  - 多线程工作池
+  - 内存池优化
 
-- **S3 Archive**: Cloud archiving to S3-compatible storage
-  - Scheduled archiving with cron expressions
-  - Automatic local retention with cleanup
-  - Multiple storage classes (Standard, IA, Glacier)
-  - Multipart upload for large files
-  - SHA256 checksum verification
+- **监控和指标**: 内置健康检查和性能指标
+  - HTTP健康检查端点
+  - Prometheus兼容指标
+  - 实时状态监控
 
-- **HTTP Monitoring**: Built-in HTTP server for observability
-  - `/health` endpoint for health checks
-  - `/metrics` endpoint for Prometheus-compatible metrics
-  - Configurable host, port, and paths
+#### 功能特性
+- **日志轮转**: 基于大小和时间的自动轮转
+- **数据掩码**: 敏感信息自动掩码功能
+- **S3归档**: AWS S3云存储归档（可选功能）
+- **CLI工具**: 配置生成、验证、日志解密命令行工具
 
-- **Metrics**: Comprehensive performance monitoring
-  - Logs written/dropped counters
-  - Latency histograms
-  - Channel usage gauges
-  - Sink health status
+#### 技术栈
+- **异步运行时**: tokio 1.32+
+- **日志框架**: tracing 0.1
+- **序列化**: serde 1.0
+- **并发**: crossbeam-channel 0.5
+- **HTTP服务**: axum 0.6（可选）
 
-- **Masking**: Sensitive data protection
-  - Field name matching (password, token, etc.)
-  - Regex pattern matching (email, phone, etc.)
-  - Configurable masking rules
-
-#### Configuration
-- Dual initialization: zero-dependency default + config file
-- Environment variable overrides (40+ variables)
-- Full TOML configuration support
-- Configuration validation with error messages
-- Feature-gated configuration loading
-
-#### Performance
-- Async architecture with tokio runtime
-- crossbeam-channel for zero-copy message passing
-- Bounded channel with backpressure (default: 10,000)
-- 3-thread worker pool (Dispatcher + File + DB)
-- Object pool for memory optimization
-
-### Changed
-
-- **Breaking**: Renamed initialization methods
-  - `LoggerManager::init()` → `LoggerManager::new()` or `LoggerManager::from_file()`
-- **Breaking**: Configuration field names normalized to snake_case
-- **Performance**: Console output latency improved to <50μs
-- **Performance**: Throughput improved to >3.6M ops/s
-
-### Fixed
-
-- Configuration environment variable override mechanism
-- HTTP server error handling with configurable modes
-- Archive metadata recording with checksum and status
-- Scheduler stability with tokio-cron-scheduler
-- Removed unwrap() calls in critical paths
-
-### Removed
-
-- Legacy `init()` API (replaced with dual initialization)
-
-### Security
-
-- AES-256-GCM encryption for log files
-- Base64-encoded key management via environment variables
-- File permissions set to 600 (owner-only)
-- Sensitive data masking for passwords, tokens, etc.
-
-### Documentation
-
-- PRD (Product Requirements Document)
-- TDD (Technical Design Document)
-- TASK (Development Tasks)
-- TEST (Test Specifications)
-- UAT (User Acceptance Testing)
-- Quickstart Guide
-- Configuration Reference
-- Troubleshooting Guide
-
-### Performance Benchmarks
-
-| Metric | Target | Actual |
-|--------|--------|--------|
-| Console latency | <50μs | ~1μs |
-| Channel enqueue | <5μs | ~0.5μs |
-| Throughput | 500/s | ~3.6M/s |
-| Memory usage | <30MB | ~15MB |
-
-### Compatibility
-
+### 兼容性
 - **Rust**: 1.70+
-- **Platforms**: Linux, macOS, Windows
-- **Databases**: SQLite 3.35+, PostgreSQL 12+, MySQL 8.0+
-- **S3**: AWS S3, MinIO, DigitalOcean Spaces
+- **平台**: Linux, macOS, Windows
+- **数据库**: SQLite, PostgreSQL, MySQL（通过SeaORM）
+- **云存储**: AWS S3兼容存储
 
-### Example Usage
+### 示例用法
 
 ```rust
 use inklog::LoggerManager;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Zero-dependency default
     let _logger = LoggerManager::new().await?;
-    
-    // Or with builder pattern
-    let _logger = LoggerManager::builder()
-        .level("info")
-        .enable_console(true)
-        .enable_file("app.log")
-        .channel_capacity(10000)
-        .build()
-        .await?;
     
     tracing::info!("Hello, inklog!");
     Ok(())
 }
-```
-
-### CLI Tools
-
-```bash
-# Generate config template
-inklog-cli generate -o config.toml
-
-# Validate configuration
-inklog-cli validate -c config.toml
-
-# Decrypt encrypted logs
-inklog-cli decrypt -i encrypted.log.enc -o recovered.log
 ```
 
 ---
@@ -173,11 +76,11 @@ inklog-cli decrypt -i encrypted.log.enc -o recovered.log
 
 ### Added
 
-- Initial project scaffolding
-- Basic Cargo configuration
-- CI/CD workflows
+- 初始项目结构
+- 基础Cargo配置
+- CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/inklog/inklog/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/inklog/inklog/releases/tag/v0.1.0
-[0.0.0]: https://github.com/inklog/inklog/releases/tag/v0.0.0
+[Unreleased]: https://github.com/kirkyx/inklog/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/kirkyx/inklog/releases/tag/v0.1.0
+[0.0.0]: https://github.com/kirkyx/inklog/releases/tag/v0.0.0

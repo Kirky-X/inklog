@@ -60,58 +60,58 @@
 
 ---
 
-## 📋 Table of Contents
+## 📋 目录
 
 <details open>
-<summary>Click to expand</summary>
+<summary>点击展开</summary>
 
-- [✨ Features](#-features)
-- [🎯 Use Cases](#-use-cases)
-- [🚀 Quick Start](#-quick-start)
-  - [Installation](#installation)
-  - [Basic Usage](#basic-usage)
-- [📚 Documentation](#-documentation)
-- [🎨 Examples](#-examples)
-- [🏗️ Architecture](#️-architecture)
-- [⚙️ Configuration](#️-configuration)
-- [🧪 Testing](#-testing)
-- [📊 Performance](#-performance)
-- [🔒 Security](#-security)
-- [🗺️ Roadmap](#️-roadmap)
-- [🤝 Contributing](#-contributing)
-- [📄 License](#-license)
-- [🙏 Acknowledgments](#-acknowledgments)
+- [✨ 特性](#-特性)
+- [🎯 使用场景](#-使用场景)
+- [🚀 快速开始](#-快速开始)
+  - [安装](#安装)
+  - [基本使用](#基本使用)
+- [📚 文档](#-文档)
+- [🎨 示例](#-示例)
+- [🏗️ 架构](#️-架构)
+- [⚙️ 配置](#️-配置)
+- [🧪 测试](#-测试)
+- [📊 性能](#-性能)
+- [🔒 安全](#-安全)
+- [🗺️ 路线图](#️-路线图)
+- [🤝 贡献](#-贡献)
+- [📄 许可证](#-许可证)
+- [🙏 致谢](#-致谢)
 
 </details>
 
 ---
 
-## ✨ Features
+## ✨ 特性
 
 <table>
 <tr>
 <td width="50%">
 
-### ✅ Core Features
+### ✅ 核心特性
 
-- ✅ **High-Performance Logging** - Multi-threaded async logging with minimal overhead
-- ✅ **Multiple Sinks** - Console, file, database, and S3 archive support
-- ✅ **Structured Logging** - JSON and custom format support with field extraction
-- ✅ **Log Rotation & Compression** - Automatic file rotation with ZSTD/GZIP compression
-- ✅ **Encryption Support** - AES-GCM encryption for sensitive log data
-- ✅ **S3 Archival** - Automatic log archival to AWS S3 with lifecycle management
-- ✅ **Health Monitoring** - Built-in metrics and HTTP health endpoints
-- ✅ **Auto-Recovery** - Automatic sink recovery from failures
+- ✅ **高性能日志记录** - 多线程异步日志记录，最小开销
+- ✅ **多输出目标** - 控制台、文件、数据库和 S3 归档支持
+- ✅ **结构化日志记录** - JSON 和自定义格式支持，字段提取
+- ✅ **日志轮转和压缩** - 使用 ZSTD/GZIP 自动文件轮转
+- ✅ **加密支持** - 敏感日志数据的 AES-GCM 加密
+- ✅ **S3 归档** - 自动日志归档到 AWS S3，生命周期管理
+- ✅ **健康监控** - 内置指标和 HTTP 健康端点
+- ✅ **自动恢复** - 从故障中自动恢复输出目标
 
 </td>
 <td width="50%">
 
-### ⚡ Advanced Features
+### ⚡ 高级特性
 
-- 🚀 **Enterprise Ready** - Production-tested with comprehensive error handling
-- 🔐 **Security First** - Encryption, secure key management, and audit logging
-- 🌐 **Cloud Native** - AWS S3 integration and container-friendly design
-- 📦 **Easy Integration** - Simple API with extensive configuration options
+- 🚀 **企业就绪** - 经过生产测试，全面错误处理
+- 🔐 **安全第一** - 加密、安全密钥管理和审计日志
+- 🌐 **云原生** - AWS S3 集成和容器友好设计
+- 📦 **易于集成** - 简单 API，广泛配置选项
 
 </td>
 </tr>
@@ -119,7 +119,7 @@
 
 <div align="center">
 
-### 🎨 Feature Highlights
+### 🎨 特性亮点
 
 </div>
 
@@ -136,61 +136,61 @@ graph LR
 
 ---
 
-## 🎯 Use Cases
+## 🎯 使用场景
 
 <details>
-<summary><b>💼 Enterprise Applications</b></summary>
+<summary><b>💼 企业应用</b></summary>
 
 <br>
 
 ```rust
-// Enterprise example code
+// 企业应用示例代码
 fn enterprise_example() {
-    println!("Enterprise use case");
+    println!("企业应用使用场景");
 }
 ```
 
-Perfect for large-scale enterprise deployments with requirements for...
+非常适合大规模企业部署，要求...
 
 </details>
 
 <details>
-<summary><b>🔧 Development Tools</b></summary>
+<summary><b>🔧 开发工具</b></summary>
 
 <br>
 
 ```rust
-// Development tools example
+// 开发工具示例
 fn dev_tools_example() {
-    println!("Development tools use case");
+    println!("开发工具使用场景");
 }
 ```
 
-Ideal for developers building tools that need...
+非常适合需要...的开发者构建工具
 
 </details>
 
 <details>
-<summary><b>🌐 Web Applications</b></summary>
+<summary><b>🌐 Web 应用</b></summary>
 
 <br>
 
 ```rust
-// Web application example
+// Web 应用示例
 fn web_app_example() {
-    println!("Web application use case");
+    println!("Web 应用使用场景");
 }
 ```
 
-Great for web applications requiring...
+非常适合需要...的 Web 应用
 
 </details>
 
 ---
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Installation
+### 安装
 
 <table>
 <tr>
@@ -229,11 +229,11 @@ pip install inklog
 </tr>
 </table>
 
-### Basic Usage
+### 基本使用
 
 <div align="center">
 
-#### 🎬 5-Minute Quick Start
+#### 🎬 5分钟快速开始
 
 </div>
 
@@ -241,31 +241,31 @@ pip install inklog
 <tr>
 <td width="50%">
 
-**Step 1: Initialize**
+**步骤 1: 初始化**
 
 ```rust
 use inklog::*;
 
 fn main() {
-    // Initialize the logger
+    // 初始化日志记录器
     let _logger = LoggerManager::new();
     
-    println!("✅ Inklog initialized!");
+    println!("✅ Inklog 已初始化!");
 }
 ```
 
 </td>
 <td width="50%">
 
-**Step 2: Use Features**
+**步骤 2: 使用功能**
 
 ```rust
 use inklog::*;
 
 fn main() {
-    let result = log_info("Application started");
+    let result = log_info("应用程序已启动");
     
-    println!("✅ Logged: {:?}", result);
+    println!("✅ 已记录: {:?}", result);
 }
 ```
 
@@ -274,7 +274,7 @@ fn main() {
 </table>
 
 <details>
-<summary><b>📖 Complete Example</b></summary>
+<summary><b>📖 完整示例</b></summary>
 
 <br>
 
@@ -282,17 +282,17 @@ fn main() {
 use inklog::{LoggerManager, InklogConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Step 1: Create configuration
+    // 步骤 1: 创建配置
     let config = InklogConfig::default();
     let _logger = LoggerManager::with_config(config)?;
     
-    // Step 2: Log messages
-    log::info!("Application started successfully");
-    log::warn!("This is a warning message");
-    log::error!("This is an error message");
+    // 步骤 2: 记录日志消息
+    log::info!("应用程序启动成功");
+    log::warn!("这是一个警告消息");
+    log::error!("这是一个错误消息");
     
-    // Step 3: Handle results
-    println!("✅ All logs processed");
+    // 步骤 3: 处理结果
+    println!("✅ 所有日志已处理");
     
     Ok(())
 }
@@ -302,7 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-## 📚 Documentation
+## 📚 文档
 
 <div align="center">
 
@@ -311,50 +311,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 <td align="center" width="25%">
 <a href="docs/USER_GUIDE.md">
 <img src="https://img.icons8.com/fluency/96/000000/book.png" width="64" height="64"><br>
-<b>User Guide</b>
+<b>用户指南</b>
 </a><br>
-Complete usage guide
+完整使用指南
 </td>
 <td align="center" width="25%">
 <a href="https://docs.rs/inklog">
 <img src="https://img.icons8.com/fluency/96/000000/api.png" width="64" height="64"><br>
-<b>API Reference</b>
+<b>API 参考</b>
 </a><br>
-Full API documentation
+完整 API 文档
 </td>
 <td align="center" width="25%">
 <a href="docs/ARCHITECTURE.md">
 <img src="https://img.icons8.com/fluency/96/000000/blueprint.png" width="64" height="64"><br>
-<b>Architecture</b>
+<b>架构</b>
 </a><br>
-System design docs
+系统设计文档
 </td>
 <td align="center" width="25%">
 <a href="examples/">
 <img src="https://img.icons8.com/fluency/96/000000/code.png" width="64" height="64"><br>
-<b>Examples</b>
+<b>示例</b>
 </a><br>
-Code examples
+代码示例
 </td>
 </tr>
 </table>
 
 </div>
 
-### 📖 Additional Resources
+### 📖 其他资源
 
-- 🎓 [Quick Start](docs/quickstart.md) - Get started in 5 minutes
-- 🔧 [Configuration Reference](docs/config-reference.md) - Detailed configuration options
-- ❓ [FAQ](docs/FAQ.md) - Frequently asked questions
-- 🐛 [Troubleshooting](docs/troubleshooting.md) - Common issues
+- 🎓 [快速开始](docs/quickstart.md) - 5分钟内上手
+- 🔧 [配置参考](docs/config-reference.md) - 详细配置选项
+- ❓ [常见问题](docs/FAQ.md) - 常见问题解答
+- 🐛 [故障排除](docs/troubleshooting.md) - 常见问题
 
 ---
 
-## 🎨 Examples
+## 🎨 示例
 
 <div align="center">
 
-### 💡 Real-world Examples
+### 💡 真实世界示例
 
 </div>
 
@@ -362,7 +362,7 @@ Code examples
 <tr>
 <td width="50%">
 
-#### 📝 Example 1: Basic Operation
+#### 📝 示例 1: 基本操作
 
 ```rust
 use inklog::{LoggerManager, InklogConfig};
@@ -371,18 +371,18 @@ fn basic_example() -> Result<(), Box<dyn std::error::Error>> {
     let config = InklogConfig::default();
     let _logger = LoggerManager::with_config(config)?;
     
-    log::info!("This is a basic log message");
-    println!("Result: Log message sent");
+    log::info!("这是一个基本日志消息");
+    println!("结果: 日志消息已发送");
     Ok(())
 }
 ```
 
 <details>
-<summary>View output</summary>
+<summary>查看输出</summary>
 
 ```
-Result: Log message sent
-✅ Success!
+结果: 日志消息已发送
+✅ 成功!
 ```
 
 </details>
@@ -390,7 +390,7 @@ Result: Log message sent
 </td>
 <td width="50%">
 
-#### 🔥 Example 2: Advanced Usage
+#### 🔥 示例 2: 高级用法
 
 ```rust
 use inklog::{LoggerManager, InklogConfig};
@@ -402,19 +402,19 @@ fn advanced_example() -> Result<(), Box<dyn std::error::Error>> {
     
     let _logger = LoggerManager::with_config(config)?;
     
-    log::debug!("Debug information");
-    log::info!("Application started");
+    log::debug!("调试信息");
+    log::info!("应用程序已启动");
     Ok(())
 }
 ```
 
 <details>
-<summary>View output</summary>
+<summary>查看输出</summary>
 
 ```
-Configuration applied
-Logging with debug level
-✅ Complete!
+配置已应用
+使用调试级别记录日志
+✅ 完成!
 ```
 
 </details>
@@ -425,28 +425,28 @@ Logging with debug level
 
 <div align="center">
 
-**[📂 View All Examples →](examples/)**
+**[📂 查看所有示例 →](examples/)**
 
 </div>
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ 架构
 
 <div align="center">
 
-### System Overview
+### 系统概览
 
 </div>
 
 ```mermaid
 graph TB
-    A[User Application] --> B[Public API Layer]
-    B --> C[Core Engine]
-    C --> D[Module 1]
-    C --> E[Module 2]
-    C --> F[Module 3]
-    D --> G[Storage]
+    A[用户应用程序] --> B[公共 API 层]
+    B --> C[核心引擎]
+    C --> D[模块 1]
+    C --> E[模块 2]
+    C --> F[模块 3]
+    D --> G[存储]
     E --> G
     F --> G
     
@@ -460,26 +460,26 @@ graph TB
 ```
 
 <details>
-<summary><b>📐 Component Details</b></summary>
+<summary><b>📐 组件详情</b></summary>
 
 <br>
 
-| Component | Description | Status |
+| 组件 | 描述 | 状态 |
 |-----------|-------------|--------|
-| **API Layer** | Public interface for logging | ✅ Stable |
-| **Logger Manager** | Main logging orchestration | ✅ Stable |
-| **Sink Manager** | Output destination management | ✅ Stable |
-| **Archive Service** | S3 archival functionality | ✅ Stable |
+| **API 层** | 日志记录的公共接口 | ✅ 稳定 |
+| **日志管理器** | 主要日志记录协调 | ✅ 稳定 |
+| **输出管理器** | 输出目标管理 | ✅ 稳定 |
+| **归档服务** | S3 归档功能 | ✅ 稳定 |
 
 </details>
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ 配置
 
 <div align="center">
 
-### 🎛️ Configuration Options
+### 🎛️ 配置选项
 
 </div>
 
@@ -487,7 +487,7 @@ graph TB
 <tr>
 <td width="50%">
 
-**Basic Configuration**
+**基本配置**
 
 ```toml
 [global]
@@ -510,7 +510,7 @@ compress = true
 </td>
 <td width="50%">
 
-**Advanced Configuration**
+**高级配置**
 
 ```toml
 [global]
@@ -551,67 +551,67 @@ compression = "zstd"
 </table>
 
 <details>
-<summary><b>🔧 All Configuration Options</b></summary>
+<summary><b>🔧 所有配置选项</b></summary>
 
 <br>
 
-| Option | Type | Default | Description |
+| 选项 | 类型 | 默认值 | 描述 |
 |--------|------|---------|-------------|
-| `level` | String | "info" | Log level (trace/debug/info/warn/error) |
-| `format` | String | "{timestamp} [{level}] {target} - {message}" | Log message format |
-| `masking_enabled` | Boolean | true | Enable data masking |
-| `channel_capacity` | Integer | 10000 | Log channel capacity |
-| `worker_threads` | Integer | 3 | Number of worker threads |
+| `level` | String | "info" | 日志级别 (trace/debug/info/warn/error) |
+| `format` | String | "{timestamp} [{level}] {target} - {message}" | 日志消息格式 |
+| `masking_enabled` | Boolean | true | 启用数据掩码 |
+| `channel_capacity` | Integer | 10000 | 日志通道容量 |
+| `worker_threads` | Integer | 3 | 工作线程数量 |
 
 </details>
 
 ---
 
-## 🧪 Testing
+## 🧪 测试
 
 <div align="center">
 
-### 🎯 Test Coverage
+### 🎯 测试覆盖率
 
 ![Coverage](https://img.shields.io/badge/coverage-95%25-success?style=for-the-badge)
 
 </div>
 
 ```bash
-# Run all tests
+# 运行所有测试
 cargo test --all-features
 
-# Run with coverage
+# 运行覆盖率测试
 cargo tarpaulin --out Html
 
-# Run benchmarks
+# 运行基准测试
 cargo bench
 
-# Run specific test
+# 运行特定测试
 cargo test test_name
 ```
 
 <details>
-<summary><b>📊 Test Statistics</b></summary>
+<summary><b>📊 测试统计</b></summary>
 
 <br>
 
-| Category | Tests | Coverage |
+| 类别 | 测试数 | 覆盖率 |
 |----------|-------|----------|
-| Unit Tests | 80+ | 95% |
-| Integration Tests | 30+ | 90% |
-| Performance Tests | 10+ | 85% |
-| **Total** | **120+** | **92%** |
+| 单元测试 | 80+ | 95% |
+| 集成测试 | 30+ | 90% |
+| 性能测试 | 10+ | 85% |
+| **总计** | **120+** | **92%** |
 
 </details>
 
 ---
 
-## 📊 Performance
+## 📊 性能
 
 <div align="center">
 
-### ⚡ Benchmark Results
+### ⚡ 基准测试结果
 
 </div>
 
@@ -619,19 +619,19 @@ cargo test test_name
 <tr>
 <td width="50%">
 
-**Throughput**
+**吞吐量**
 
 ```
-Console Logging: 2,000,000 ops/sec
-File Logging: 500,000 ops/sec
-Database Logging: 100,000 ops/sec
-S3 Archive: 50,000 ops/sec
+控制台日志记录: 2,000,000 操作/秒
+文件日志记录: 500,000 操作/秒
+数据库日志记录: 100,000 操作/秒
+S3 归档: 50,000 操作/秒
 ```
 
 </td>
 <td width="50%">
 
-**Latency**
+**延迟**
 
 ```
 P50: 0.1ms
@@ -644,15 +644,15 @@ P99: 2.0ms
 </table>
 
 <details>
-<summary><b>📈 Detailed Benchmarks</b></summary>
+<summary><b>📈 详细基准测试</b></summary>
 
 <br>
 
 ```bash
-# Run benchmarks
+# 运行基准测试
 cargo bench
 
-# Sample output:
+# 示例输出:
 test bench_console_logging ... bench: 500 ns/iter (+/- 50)
 test bench_file_logging ... bench: 2,000 ns/iter (+/- 100)
 test bench_database_logging ... bench: 10,000 ns/iter (+/- 500)
@@ -662,11 +662,11 @@ test bench_database_logging ... bench: 10,000 ns/iter (+/- 500)
 
 ---
 
-## 🔒 Security
+## 🔒 安全
 
 <div align="center">
 
-### 🛡️ Security Features
+### 🛡️ 安全特性
 
 </div>
 
@@ -674,112 +674,112 @@ test bench_database_logging ... bench: 10,000 ns/iter (+/- 500)
 <tr>
 <td align="center" width="25%">
 <img src="https://img.icons8.com/fluency/96/000000/lock.png" width="64" height="64"><br>
-<b>Memory Safety</b><br>
-Zero-copy & secure cleanup
+<b>内存安全</b><br>
+零拷贝和安全清理
 </td>
 <td align="center" width="25%">
 <img src="https://img.icons8.com/fluency/96/000000/security-checked.png" width="64" height="64"><br>
-<b>Audited</b><br>
-Regular security audits
+<b>已审计</b><br>
+定期安全审计
 </td>
 <td align="center" width="25%">
 <img src="https://img.icons8.com/fluency/96/000000/privacy.png" width="64" height="64"><br>
-<b>Privacy</b><br>
-No data collection
+<b>隐私</b><br>
+不收集数据
 </td>
 <td align="center" width="25%">
 <img src="https://img.icons8.com/fluency/96/000000/shield.png" width="64" height="64"><br>
-<b>Compliance</b><br>
-Industry standards
+<b>合规</b><br>
+行业标准
 </td>
 </tr>
 </table>
 
 <details>
-<summary><b>🔐 Security Details</b></summary>
+<summary><b>🔐 安全详情</b></summary>
 
 <br>
 
-### Security Measures
+### 安全措施
 
-- ✅ **Memory Protection** - Automatic secure cleanup with zeroize
-- ✅ **Input Validation** - Comprehensive log format validation
-- ✅ **Audit Logging** - Full operation tracking and monitoring
-- ✅ **Encryption Support** - AES-GCM encryption for sensitive data
+- ✅ **内存保护** - 使用 zeroize 自动安全清理
+- ✅ **输入验证** - 全面的日志格式验证
+- ✅ **审计日志** - 完整的操作跟踪和监控
+- ✅ **加密支持** - 敏感数据的 AES-GCM 加密
 
-### Reporting Security Issues
+### 报告安全问题
 
-Please report security vulnerabilities to: security@kirkyx.com
+请将安全漏洞报告至：security@kirkyx.com
 
 </details>
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ 路线图
 
 <div align="center">
 
-### 🎯 Development Timeline
+### 🎯 开发时间线
 
 </div>
 
 ```mermaid
 gantt
-    title Project Roadmap
+    title 项目路线图
     dateFormat  YYYY-MM
-    section Phase 1
-    Core Logging Engine    :done, 2024-01, 2024-03
-    section Phase 2
-    Multi-Sink Support     :active, 2024-03, 2024-06
-    section Phase 3
-    Cloud Integration     :2024-06, 2024-09
-    section Phase 4
-    Enterprise Features   :2024-09, 2024-12
+    section 阶段 1
+    核心日志引擎    :done, 2024-01, 2024-03
+    section 阶段 2
+    多输出支持     :active, 2024-03, 2024-06
+    section 阶段 3
+    云集成     :2024-06, 2024-09
+    section 阶段 4
+    企业功能   :2024-09, 2024-12
 ```
 
 <table>
 <tr>
 <td width="50%">
 
-### ✅ Completed
+### ✅ 已完成
 
-- [x] Core logging engine
-- [x] Console and file sinks
-- [x] Basic configuration
-- [x] Unit tests
-- [x] CI/CD pipeline
+- [x] 核心日志引擎
+- [x] 控制台和文件输出
+- [x] 基本配置
+- [x] 单元测试
+- [x] CI/CD 流水线
 
 </td>
 <td width="50%">
 
-### 🚧 In Progress
+### 🚧 进行中
 
-- [ ] Database sink optimization
-- [ ] Advanced filtering
-- [ ] Log aggregation features
-- [ ] Real-time monitoring dashboard
+- [ ] 数据库输出优化
+- [ ] 高级过滤
+- [ ] 日志聚合功能
+- [ ] 实时监控仪表板
 
 </td>
 </tr>
 <tr>
 <td width="50%">
 
-### 📋 Planned
+### 📋 计划中
 
-- [ ] Log query and search
-- [ ] Distributed logging
-- [ ] Kubernetes operator
-- [ ] Advanced analytics
+- [ ] 日志查询和搜索
+- [ ] 分布式日志记录
+- [ ] Kubernetes 操作器
+- [ ] 高级分析
 
 </td>
 <td width="50%">
 
-### 💡 Future Ideas
+### 💡 未来想法
 
-- [ ] Machine learning log analysis
-- [ ] Anomaly detection
-- [ ] Auto-scaling infrastructure
-- [ ] Community marketplace
+- [ ] 机器学习日志分析
+- [ ] 异常检测
+- [ ] 自动扩展基础设施
+- [ ] 社区市场
 
 </td>
 </tr>
@@ -787,13 +787,13 @@ gantt
 
 ---
 
-## 🤝 Contributing
+## 🤝 贡献
 
 <div align="center">
 
-### 💖 We Love Contributors!
+### 💖 我们喜欢贡献者！
 
-<img src="https://contrib.rocks/image?repo=username/project-name" alt="Contributors">
+<img src="https://contrib.rocks/image?repo=kirkyx/inklog" alt="Contributors">
 
 </div>
 
@@ -801,78 +801,78 @@ gantt
 <tr>
 <td width="33%" align="center">
 
-### 🐛 Report Bugs
+### 🐛 报告错误
 
-Found a bug?<br>
-[Create an Issue](https://github.com/kirkyx/inklog/issues)
-
-</td>
-<td width="33%" align="center">
-
-### 💡 Request Features
-
-Have an idea?<br>
-[Start a Discussion](https://github.com/kirkyx/inklog/discussions)
+发现错误？<br>
+[创建问题](https://github.com/kirkyx/inklog/issues)
 
 </td>
 <td width="33%" align="center">
 
-### 🔧 Submit PRs
+### 💡 请求功能
 
-Want to contribute?<br>
-[Fork & PR](https://github.com/kirkyx/inklog/pulls)
+有想法？<br>
+[开始讨论](https://github.com/kirkyx/inklog/discussions)
+
+</td>
+<td width="33%" align="center">
+
+### 🔧 提交 PR
+
+想要贡献？<br>
+[分叉和 PR](https://github.com/kirkyx/inklog/pulls)
 
 </td>
 </tr>
 </table>
 
 <details>
-<summary><b>📝 Contribution Guidelines</b></summary>
+<summary><b>📝 贡献指南</b></summary>
 
 <br>
 
-### How to Contribute
+### 如何贡献
 
-1. **Fork** the repository
-2. **Clone** your fork: `git clone https://github.com/yourusername/project-name.git`
-3. **Create** a branch: `git checkout -b feature/amazing-feature`
-4. **Make** your changes
-5. **Test** your changes: `cargo test --all-features`
-6. **Commit** your changes: `git commit -m 'Add amazing feature'`
-7. **Push** to branch: `git push origin feature/amazing-feature`
-8. **Create** a Pull Request
+1. **分叉** 仓库
+2. **克隆** 您的分叉：`git clone https://github.com/yourusername/inklog.git`
+3. **创建** 分支：`git checkout -b feature/amazing-feature`
+4. **进行** 您的更改
+5. **测试** 您的更改：`cargo test --all-features`
+6. **提交** 您的更改：`git commit -m 'Add amazing feature'`
+7. **推送** 到分支：`git push origin feature/amazing-feature`
+8. **创建** 拉取请求
 
-### Code Style
+### 代码风格
 
-- Follow Rust standard coding conventions
-- Write comprehensive tests
-- Update documentation
-- Add examples for new features
+- 遵循 Rust 标准编码约定
+- 编写全面的测试
+- 更新文档
+- 为新功能添加示例
 
 </details>
 
 ---
 
-## 📄 License
+## 📄 许可证
 
 <div align="center">
 
-This project is licensed under dual license:
+本项目采用双重许可证：
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE-MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE-APACHE)
 
-You may choose either license for your use.
+您可以选择任一许可证供您使用。
 
 </div>
 
 ---
 
-## 🙏 Acknowledgments
+## 🙏 致谢
 
 <div align="center">
 
-### Built With Amazing Tools
+### 使用优秀工具构建
 
 </div>
 
@@ -892,29 +892,29 @@ You may choose either license for your use.
 </td>
 <td align="center" width="25%">
 <img src="https://img.icons8.com/fluency/96/000000/code.png" width="64" height="64"><br>
-<b>Open Source</b>
+<b>开源</b>
 </td>
 <td align="center" width="25%">
 <img src="https://img.icons8.com/fluency/96/000000/community.png" width="64" height="64"><br>
-<b>Community</b>
+<b>社区</b>
 </td>
 </tr>
 </table>
 
-### Special Thanks
+### 特别感谢
 
-- 🌟 **Dependencies** - Built on these amazing projects:
-  - [tracing](https://github.com/tokio-rs/tracing) - Rust tracing framework
-  - [tokio](https://github.com/tokio-rs/tokio) - Async runtime
-  - [serde](https://github.com/serde-rs/serde) - Serialization framework
+- 🌟 **依赖项** - 基于这些优秀项目构建：
+  - [tracing](https://github.com/tokio-rs/tracing) - Rust 追踪框架
+  - [tokio](https://github.com/tokio-rs/tokio) - 异步运行时
+  - [serde](https://github.com/serde-rs/serde) - 序列化框架
   - [aws-sdk-rust](https://github.com/awslabs/aws-sdk-rust) - AWS SDK
 
-- 👥 **Contributors** - Thanks to all our amazing contributors!
-- 💬 **Community** - Special thanks to our community members
+- 👥 **贡献者** - 感谢所有优秀的贡献者！
+- 💬 **社区** - 特别感谢我们的社区成员
 
 ---
 
-## 📞 Contact & Support
+## 📞 联系与支持
 
 <div align="center">
 
@@ -923,38 +923,39 @@ You may choose either license for your use.
 <td align="center" width="33%">
 <a href="../../issues">
 <img src="https://img.icons8.com/fluency/96/000000/bug.png" width="48" height="48"><br>
-<b>Issues</b>
+<b>报告问题</b>
+<b>问题</b>
 </a><br>
-Report bugs & issues
+报告错误和问题
 </td>
 <td align="center" width="33%">
 <a href="../../discussions">
 <img src="https://img.icons8.com/fluency/96/000000/chat.png" width="48" height="48"><br>
-<b>Discussions</b>
+<b>讨论</b>
 </a><br>
-Ask questions & share ideas
+提问和分享想法
 </td>
 <td align="center" width="33%">
-<a href="https://twitter.com/project">
+<a href="https://twitter.com/kirkyx">
 <img src="https://img.icons8.com/fluency/96/000000/twitter.png" width="48" height="48"><br>
 <b>Twitter</b>
 </a><br>
-Follow us for updates
+关注我们获取更新
 </td>
 </tr>
 </table>
 
-### Stay Connected
+### 保持联系
 
-[![Discord](https://img.shields.io/badge/Discord-Join%20Us-7289da?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/inklog)
-[![Twitter](https://img.shields.io/badge/Twitter-Follow-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/kirkyx)
-[![Email](https://img.shields.io/badge/Email-Contact-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:contact@kirkyx.com)
+[![Discord](https://img.shields.io/badge/Discord-加入%20我们-7289da?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/inklog)
+[![Twitter](https://img.shields.io/badge/Twitter-关注-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/kirkyx)
+[![Email](https://img.shields.io/badge/Email-联系-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:contact@kirkyx.com)
 
 </div>
 
 ---
 
-## ⭐ Star History
+## ⭐ Star 历史
 
 <div align="center">
 
@@ -966,16 +967,16 @@ Follow us for updates
 
 <div align="center">
 
-### 💝 Support This Project
+### 💝 支持本项目
 
-If you find this project useful, please consider giving it a ⭐️!
+如果您觉得这个项目有用，请考虑给它一个 ⭐️！
 
-**Built with ❤️ by the Inklog Team**
+**由 Inklog 团队用 ❤️ 构建**
 
-[⬆ Back to Top](#-inklog)
+[⬆ 返回顶部](#-inklog)
 
 ---
 
-<sub>© 2024 Inklog. All rights reserved.</sub>
+<sub>© 2024 Inklog. 保留所有权利。</sub>
 
 </div>

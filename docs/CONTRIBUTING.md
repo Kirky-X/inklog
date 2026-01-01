@@ -1,44 +1,44 @@
 <div align="center">
 
-# 🤝 Contributing Guide
+# 🤝 贡献指南
 
-### Join Us in Building Something Great!
+### 与我们一同构建伟大的项目！
 
-[🏠 Home](README.md) • [📖 Docs](docs/USER_GUIDE.md) • [💬 Discussions](https://github.com/kirkyx/inklog/discussions)
+[🏠 首页](../README.md) • [📖 文档](USER_GUIDE.md) • [💬 讨论](https://github.com/kirkyx/inklog/discussions)
 
 ---
 
 </div>
 
-## 🎯 Welcome Contributors!
+## 🎯 欢迎贡献者！
 
-Thank you for your interest in contributing to **Inklog**! We're excited to have you here. Whether you're fixing a bug, adding a feature, improving documentation, or helping others, your contributions are valuable and appreciated.
+感谢您对 **Inklog** 项目的关注！我们很高兴您的加入。无论您是修复错误、添加功能、改进文档还是帮助他人，您的贡献都是宝贵和值得赞赏的。
 
 <div align="center">
 
-### 🌟 Ways to Contribute
+### 🌟 贡献方式
 
 <table>
 <tr>
 <td width="25%" align="center">
 <img src="https://img.icons8.com/fluency/96/000000/code.png" width="64"><br>
-<b>Code</b><br>
-Fix bugs & add features
+<b>代码</b><br>
+修复错误和添加功能
 </td>
 <td width="25%" align="center">
 <img src="https://img.icons8.com/fluency/96/000000/documentation.png" width="64"><br>
-<b>Documentation</b><br>
-Improve docs & guides
+<b>文档</b><br>
+改进文档和指南
 </td>
 <td width="25%" align="center">
 <img src="https://img.icons8.com/fluency/96/000000/test-tube.png" width="64"><br>
-<b>Testing</b><br>
-Write tests & find bugs
+<b>测试</b><br>
+编写测试和发现错误
 </td>
 <td width="25%" align="center">
 <img src="https://img.icons8.com/fluency/96/000000/chat.png" width="64"><br>
-<b>Community</b><br>
-Help & support others
+<b>社区</b><br>
+帮助和支持他人
 </td>
 </tr>
 </table>
@@ -47,91 +47,91 @@ Help & support others
 
 ---
 
-## 📋 Table of Contents
+## 📋 目录
 
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Workflow](#development-workflow)
-- [Coding Standards](#coding-standards)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation](#documentation)
-- [Submitting Changes](#submitting-changes)
-- [Review Process](#review-process)
-- [Community](#community)
+- [行为准则](#行为准则)
+- [快速开始](#快速开始)
+- [开发工作流](#开发工作流)
+- [编码标准](#编码标准)
+- [测试指南](#测试指南)
+- [文档](#文档)
+- [提交更改](#提交更改)
+- [审查流程](#审查流程)
+- [社区](#社区)
 
 ---
 
-## Code of Conduct
+## 行为准则
 
 <div align="center">
 
-### 🤗 Be Kind and Respectful
+### 🤗 友善和尊重
 
 </div>
 
-We are committed to providing a welcoming and inclusive environment. By participating, you agree to:
+我们致力于提供一个热情和包容的环境。通过参与，您同意：
 
 <table>
 <tr>
 <td width="50%">
 
-**✅ DO**
-- Be respectful and considerate
-- Welcome newcomers
-- Accept constructive criticism
-- Focus on what's best for the community
-- Show empathy towards others
+**✅ 应该做**
+- 尊重和体贴
+- 欢迎新手
+- 接受建设性批评
+- 专注于对社区最有利的事情
+- 对他人表现出同理心
 
 </td>
 <td width="50%">
 
-**❌ DON'T**
-- Use offensive language
-- Harass or insult others
-- Publish private information
-- Make personal attacks
-- Disrupt discussions
+**❌ 不应该做**
+- 使用冒犯性语言
+- 骚扰或侮辱他人
+- 发布私人信息
+- 进行人身攻击
+- 扰乱讨论
 
 </td>
 </tr>
 </table>
 
-> 📜 **Full Code of Conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+> 📜 **完整行为准则**: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ---
 
-## Getting Started
+## 快速开始
 
-### Prerequisites
+### 前置要求
 
-Before you begin, ensure you have:
+在开始之前，请确保您拥有：
 
-- ✅ **Git** - Version control
-- ✅ **Rust 1.75+** - Programming language
-- ✅ **Cargo** - Rust package manager
-- ✅ **IDE** - VS Code, IntelliJ, or similar
+- ✅ **Git** - 版本控制
+- ✅ **Rust 1.75+** - 编程语言
+- ✅ **Cargo** - Rust 包管理器
+- ✅ **IDE** - VS Code、IntelliJ 或类似工具
 
 <details>
-<summary><b>🔧 Setting Up Your Environment</b></summary>
+<summary><b>🔧 设置您的环境</b></summary>
 
-**1. Install Rust:**
+**1. 安装 Rust:**
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-**2. Install additional tools:**
+**2. 安装额外工具:**
 ```bash
-# Code formatter
+# 代码格式化工具
 rustup component add rustfmt
 
-# Linter
+# 代码检查工具
 rustup component add clippy
 
-# Code coverage (optional)
+# 代码覆盖率工具（可选）
 cargo install cargo-tarpaulin
 ```
 
-**3. Verify installation:**
+**3. 验证安装:**
 ```bash
 rustc --version
 cargo --version
@@ -139,20 +139,20 @@ cargo --version
 
 </details>
 
-### Fork and Clone
+### 分叉和克隆
 
 <table>
 <tr>
 <td width="50%">
 
-**1. Fork the Repository**
+**1. 分叉仓库**
 
-Click the "Fork" button on GitHub
+点击 GitHub 上的 "Fork" 按钮
 
 </td>
 <td width="50%">
 
-**2. Clone Your Fork**
+**2. 克隆您的分叉**
 
 ```bash
 git clone https://github.com/kirkyx/inklog.git
@@ -164,7 +164,7 @@ cd inklog
 <tr>
 <td width="50%">
 
-**3. Add Upstream Remote**
+**3. 添加上游远程仓库**
 
 ```bash
 git remote add upstream \
@@ -174,103 +174,103 @@ git remote add upstream \
 </td>
 <td width="50%">
 
-**4. Verify Remotes**
+**4. 验证远程仓库**
 
 ```bash
 git remote -v
-# origin    your-fork
-# upstream  original-repo
+# origin    您的分叉
+# upstream  原始仓库
 ```
 
 </td>
 </tr>
 </table>
 
-### Build and Test
+### 构建和测试
 
 ```bash
-# Build the project
+# 构建项目
 cargo build
 
-# Run tests
+# 运行测试
 cargo test
 
-# Run with examples
+# 运行示例
 cargo run --example basic
 ```
 
-✅ **Success!** You're ready to contribute!
+✅ **成功！** 您已准备好贡献！
 
 ---
 
-## Development Workflow
+## 开发工作流
 
 <div align="center">
 
-### 🔄 Standard Contribution Flow
+### 🔄 标准贡献流程
 
 </div>
 
 ```mermaid
 graph LR
-    A[Fork Repo] --> B[Create Branch]
-    B --> C[Make Changes]
-    C --> D[Write Tests]
-    D --> E[Run Tests]
-    E --> F{Tests Pass?}
-    F -->|No| C
-    F -->|Yes| G[Commit]
-    G --> H[Push to Fork]
-    H --> I[Create PR]
-    I --> J[Code Review]
-    J --> K{Approved?}
-    K -->|Changes| C
-    K -->|Yes| L[Merge!]
+    A[分叉仓库] --> B[创建分支]
+    B --> C[进行更改]
+    C --> D[编写测试]
+    D --> E[运行测试]
+    E --> F{测试通过?}
+    F -->|否| C
+    F -->|是| G[提交]
+    G --> H[推送到分叉]
+    H --> I[创建 PR]
+    I --> J[代码审查]
+    J --> K{已批准?}
+    K -->|需要更改| C
+    K -->|是| L[合并!]
     
     style A fill:#e1f5ff
     style L fill:#4caf50
 ```
 
-### Step-by-Step Guide
+### 分步指南
 
-#### 1️⃣ Create a Branch
+#### 1️⃣ 创建分支
 
 ```bash
-# Update your fork
+# 更新您的分叉
 git fetch upstream
 git checkout main
 git merge upstream/main
 
-# Create feature branch
+# 创建功能分支
 git checkout -b feature/your-feature-name
 
-# Or for bug fixes
+# 或修复错误
 git checkout -b fix/issue-123
 ```
 
-**Branch Naming:**
-- `feature/` - New features
-- `fix/` - Bug fixes
-- `docs/` - Documentation
-- `test/` - Test improvements
-- `refactor/` - Code refactoring
+**分支命名:**
+- `feature/` - 新功能
+- `fix/` - 错误修复
+- `docs/` - 文档
+- `test/` - 测试改进
+- `refactor/` - 代码重构
 
-#### 2️⃣ Make Your Changes
+#### 2️⃣ 进行您的更改
 
 <table>
 <tr>
 <td width="50%">
 
-**Writing Code:**
+**编写代码:**
 ```rust
-// Add your implementation
+// 添加您的实现
 pub fn new_logging_feature() -> Result<()> {
-    // Your code here
+    // 您的代码在这里
     Ok(())
 }
 ```
 
-**Adding Tests:**
+**添加测试:**
 ```rust
 #[test]
 fn test_new_logging_feature() {
@@ -282,16 +282,16 @@ fn test_new_logging_feature() {
 </td>
 <td width="50%">
 
-**Writing Code:**
+**编写代码:**
 ```rust
-// Add your implementation
+// 添加您的实现
 pub fn new_logging_feature() -> Result<()> {
-    // Your code here
+    // 您的代码在这里
     Ok(())
 }
 ```
 
-**Adding Tests:**
+**添加测试:**
 ```rust
 #[test]
 fn test_new_logging_feature() {
@@ -304,31 +304,31 @@ fn test_new_logging_feature() {
 </tr>
 </table>
 
-#### 3️⃣ Test Your Changes
+#### 3️⃣ 测试您的更改
 
 ```bash
-# Format code
+# 格式化代码
 cargo fmt
 
-# Run linter
+# 运行检查工具
 cargo clippy -- -D warnings
 
-# Run all tests
+# 运行所有测试
 cargo test --all-features
 
-# Run specific test
+# 运行特定测试
 cargo test test_new_logging_feature
 
-# Check coverage (optional)
+# 检查覆盖率（可选）
 cargo tarpaulin --out Html
 ```
 
-#### 4️⃣ Commit Your Changes
+#### 4️⃣ 提交您的更改
 
-**Good Commit Messages:**
+**好的提交消息:**
 
 ```bash
-# Format: <type>(<scope>): <description>
+# 格式: <type>(<scope>): <description>
 
 git commit -m "feat(logging): add structured logging support"
 git commit -m "fix(sink): resolve file rotation issue"
@@ -336,27 +336,27 @@ git commit -m "docs(readme): update installation instructions"
 git commit -m "test(config): add configuration validation tests"
 ```
 
-**Commit Types:**
-- `feat` - New feature
-- `fix` - Bug fix
-- `docs` - Documentation
-- `style` - Formatting
-- `refactor` - Code restructuring
-- `test` - Adding tests
-- `chore` - Maintenance
+**提交类型:**
+- `feat` - 新功能
+- `fix` - 错误修复
+- `docs` - 文档
+- `style` - 格式化
+- `refactor` - 代码重构
+- `test` - 添加测试
+- `chore` - 维护
 
 <details>
-<summary><b>📝 Commit Message Template</b></summary>
+<summary><b>📝 提交消息模板</b></summary>
 
 ```
-<type>(<scope>): <short summary>
+<type>(<scope>): <简短描述>
 
-<detailed description>
+<详细描述>
 
-<footer>
+<页脚>
 ```
 
-**Example:**
+**示例:**
 ```
 feat(logging): add batch processing support
 
@@ -368,50 +368,50 @@ Closes #123
 
 </details>
 
-#### 5️⃣ Push to Your Fork
+#### 5️⃣ 推送到您的分叉
 
 ```bash
 git push origin feature/your-feature-name
 ```
 
-#### 6️⃣ Create Pull Request
+#### 6️⃣ 创建拉取请求
 
-1. Go to your fork on GitHub
-2. Click "Compare & pull request"
-3. Fill in the PR template
-4. Link related issues
-5. Submit!
+1. 访问您在 GitHub 上的分叉
+2. 点击 "Compare & pull request"
+3. 填写 PR 模板
+4. 链接相关问题
+5. 提交！
 
 ---
 
-## Coding Standards
+## 编码标准
 
 <div align="center">
 
-### ✨ Write Clean, Maintainable Code
+### ✨ 编写干净、可维护的代码
 
 </div>
 
-### Rust Style Guide
+### Rust 风格指南
 
-Follow the [Rust Style Guide](https://rust-lang.github.io/api-guidelines/):
+遵循 [Rust 风格指南](https://rust-lang.github.io/api-guidelines/):
 
 <table>
 <tr>
 <td width="50%">
 
-**✅ Good**
+**✅ 好的**
 
 ```rust
-// Descriptive names
+// 描述性名称
 pub fn encrypt_data(
     plaintext: &[u8],
     key: &Key,
 ) -> Result<Vec<u8>> {
-    // Implementation
+    // 实现
 }
 
-// Proper error handling
+// 适当的错误处理
 match operation() {
     Ok(result) => result,
     Err(e) => return Err(e),
@@ -421,16 +421,16 @@ match operation() {
 </td>
 <td width="50%">
 
-**❌ Bad**
+**❌ 不好的**
 
 ```rust
-// Vague names
+// 模糊的名称
 pub fn enc(d: &[u8], k: &Key) 
     -> Result<Vec<u8>> {
-    // Implementation
+    // 实现
 }
 
-// Ignoring errors
+// 忽略错误
 let result = operation().unwrap();
 ```
 
@@ -438,124 +438,124 @@ let result = operation().unwrap();
 </tr>
 </table>
 
-### Code Organization
+### 代码组织
 
 ```
 src/
-├── lib.rs           # Public API
-├── core/            # Core functionality
+├── lib.rs           # 公共 API
+├── core/            # 核心功能
 │   ├── mod.rs
 │   ├── engine.rs
 │   └── manager.rs
-├── algorithms/      # Algorithm implementations
+├── algorithms/      # 算法实现
 │   ├── mod.rs
 │   ├── aes.rs
 │   └── ecdsa.rs
-├── error.rs         # Error types
-└── utils/           # Utilities
+├── error.rs         # 错误类型
+└── utils/           # 工具
     ├── mod.rs
     └── helpers.rs
 ```
 
-### Documentation
+### 文档
 
 <details>
-<summary><b>📖 Documentation Standards</b></summary>
+<summary><b>📖 文档标准</b></summary>
 
-**Every public item must have documentation:**
+**每个公共项目都必须有文档:**
 
 ```rust
-/// Encrypts data using the specified algorithm.
+/// 使用指定算法加密数据。
 ///
-/// # Arguments
+/// # 参数
 ///
-/// * `data` - The plaintext data to encrypt
-/// * `key` - The encryption key
+/// * `data` - 要加密的明文数据
+/// * `key` - 加密密钥
 ///
-/// # Returns
+/// # 返回值
 ///
-/// Returns the encrypted ciphertext on success.
+/// 成功时返回加密的密文。
 ///
-/// # Errors
+/// # 错误
 ///
-/// Returns `Error::EncryptionFailed` if encryption fails.
+/// 如果加密失败则返回 `Error::EncryptionFailed`。
 ///
-/// # Examples
+/// # 示例
 ///
 /// ```
-/// use project_name::{encrypt, Key};
+/// use inklog::{encrypt, Key};
 ///
 /// let key = Key::generate()?;
 /// let ciphertext = encrypt(b"secret", &key)?;
 /// ```
 pub fn encrypt(data: &[u8], key: &Key) -> Result<Vec<u8>> {
-    // Implementation
+    // 实现
 }
 ```
 
 </details>
 
-### Error Handling
+### 错误处理
 
 ```rust
-// ✅ Use Result types
+// ✅ 使用 Result 类型
 pub fn fallible_operation() -> Result<Value, Error> {
-    // Implementation
+    // 实现
 }
 
-// ✅ Provide context
+// ✅ 提供上下文
 Err(Error::EncryptionFailed {
     reason: "Invalid key size",
     context: format!("Expected {}, got {}", expected, actual),
 })
 
-// ❌ Don't panic in library code
-// panic!("Something went wrong");  // Bad!
+// ❌ 不要在库代码中 panic
+// panic!("Something went wrong");  // 不好!
 ```
 
 ---
 
-## Testing Guidelines
+## 测试指南
 
 <div align="center">
 
-### 🧪 Test Everything!
+### 🧪 测试所有内容！
 
 </div>
 
-### Test Categories
+### 测试类别
 
 <table>
 <tr>
-<th>Type</th>
-<th>Purpose</th>
-<th>Location</th>
+<th>类型</th>
+<th>目的</th>
+<th>位置</th>
 </tr>
 <tr>
-<td><b>Unit Tests</b></td>
-<td>Test individual functions</td>
-<td><code>src/*.rs</code> (inline)</td>
+<td><b>单元测试</b></td>
+<td>测试单个函数</td>
+<td><code>src/*.rs</code> (内联)</td>
 </tr>
 <tr>
-<td><b>Integration Tests</b></td>
-<td>Test public API</td>
+<td><b>集成测试</b></td>
+<td>测试公共 API</td>
 <td><code>tests/</code></td>
 </tr>
 <tr>
-<td><b>Doc Tests</b></td>
-<td>Test examples in docs</td>
-<td>Doc comments</td>
+<td><b>文档测试</b></td>
+<td>测试文档中的示例</td>
+<td>文档注释</td>
 </tr>
 <tr>
-<td><b>Benchmarks</b></td>
-<td>Performance tests</td>
+<td><b>基准测试</b></td>
+<td>性能测试</td>
 <td><code>benches/</code></td>
 </tr>
 </table>
 
-### Writing Tests
+### 编写测试
 
-**Unit Test Example:**
+**单元测试示例:**
 
 ```rust
 #[cfg(test)]
@@ -581,7 +581,7 @@ mod tests {
 }
 ```
 
-**Integration Test Example:**
+**集成测试示例:**
 
 ```rust
 // tests/integration_test.rs
@@ -592,145 +592,145 @@ fn test_full_logging_workflow() {
     let config = InklogConfig::default();
     let _logger = LoggerManager::with_config(config).unwrap();
     
-    // Test basic logging
-    log::info!("Integration test message");
-    log::warn!("Test warning");
-    log::error!("Test error");
+    // 测试基本日志记录
+    log::info!("集成测试消息");
+    log::warn!("测试警告");
+    log::error!("测试错误");
     
-    // Verify logs are processed
-    // Add assertions based on your logging system
-    assert!(true); // Placeholder
+    // 验证日志已处理
+    // 根据您的日志记录系统添加断言
+    assert!(true); // 占位符
 }
 ```
 
-### Test Coverage
+### 测试覆盖率
 
-**Aim for ≥90% coverage:**
+**目标 ≥90% 覆盖率:**
 
 ```bash
-# Generate coverage report
+# 生成覆盖率报告
 cargo tarpaulin --out Html --output-dir coverage
 
-# View report
+# 查看报告
 open coverage/index.html
 ```
 
 ---
 
-## Documentation
+## 文档
 
 <div align="center">
 
-### 📚 Documentation Matters!
+### 📚 文档很重要！
 
 </div>
 
-### What to Document
+### 需要文档化的内容
 
 <table>
 <tr>
 <td width="50%">
 
-**Code Documentation:**
-- ✅ Public functions
-- ✅ Public types
-- ✅ Complex algorithms
-- ✅ Non-obvious behavior
+**代码文档:**
+- ✅ 公共函数
+- ✅ 公共类型
+- ✅ 复杂算法
+- ✅ 不明显的行为
 
 </td>
 <td width="50%">
 
-**User Documentation:**
-- ✅ README updates
-- ✅ User guide changes
-- ✅ API reference
-- ✅ Examples
+**用户文档:**
+- ✅ README 更新
+- ✅ 用户指南更改
+- ✅ API 参考
+- ✅ 示例
 
 </td>
 </tr>
 </table>
 
-### Documentation Checklist
+### 文档检查清单
 
-- [ ] All public items have doc comments
-- [ ] Examples compile and run
-- [ ] README is updated (if needed)
-- [ ] CHANGELOG is updated
-- [ ] User guide reflects changes
-- [ ] Migration guide (for breaking changes)
+- [ ] 所有公共项目都有文档注释
+- [ ] 示例编译并运行
+- [ ] README 已更新（如需要）
+- [ ] CHANGELOG 已更新
+- [ ] 用户指南反映更改
+- [ ] 迁移指南（针对破坏性更改）
 
 ---
 
-## Submitting Changes
+## 提交更改
 
 <div align="center">
 
-### 📤 Pull Request Process
+### 📤 拉取请求流程
 
 </div>
 
-### PR Template
+### PR 模板
 
 <details>
-<summary><b>📋 Pull Request Template</b></summary>
+<summary><b>📋 拉取请求模板</b></summary>
 
 ```markdown
-## Description
-Brief description of changes
+## 描述
+更改的简要描述
 
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Documentation update
-- [ ] Performance improvement
-- [ ] Code refactoring
+## 更改类型
+- [ ] 错误修复
+- [ ] 新功能
+- [ ] 文档更新
+- [ ] 性能改进
+- [ ] 代码重构
 
-## Changes Made
-- Change 1
-- Change 2
-- Change 3
+## 所做的更改
+- 更改 1
+- 更改 2
+- 更改 3
 
-## Testing
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] Manual testing completed
+## 测试
+- [ ] 单元测试通过
+- [ ] 集成测试通过
+- [ ] 手动测试完成
 
-## Checklist
-- [ ] Code follows style guidelines
-- [ ] Self-review completed
-- [ ] Comments added for complex code
-- [ ] Documentation updated
-- [ ] No new warnings
-- [ ] Tests added/updated
+## 检查清单
+- [ ] 代码遵循风格指南
+- [ ] 自我审查完成
+- [ ] 为复杂代码添加注释
+- [ ] 文档已更新
+- [ ] 没有新警告
+- [ ] 测试已添加/更新
 
-## Related Issues
-Closes #123
+## 相关问题
+关闭 #123
 ```
 
 </details>
 
-### PR Best Practices
+### PR 最佳实践
 
 <table>
 <tr>
 <td width="50%">
 
-**✅ Good PRs:**
-- Focused on single issue
-- Small, reviewable size
-- Clear description
-- Tests included
-- Documentation updated
+**✅ 好的 PR:**
+- 专注于单个问题
+- 小的、可审查的大小
+- 清晰的描述
+- 包含测试
+- 文档已更新
 
 </td>
 <td width="50%">
 
-**❌ Avoid:**
-- Multiple unrelated changes
-- Huge diffs (>500 lines)
-- Missing context
-- No tests
-- Undocumented changes
+**❌ 避免:**
+- 多个不相关的更改
+- 巨大的差异（>500 行）
+- 缺少上下文
+- 没有测试
+- 未记录的更改
 
 </td>
 </tr>
@@ -738,62 +738,62 @@ Closes #123
 
 ---
 
-## Review Process
+## 审查流程
 
 <div align="center">
 
-### 👀 What to Expect
+### 👀 预期内容
 
 </div>
 
-### Timeline
+### 时间线
 
 ```mermaid
 gantt
-    title PR Review Timeline
+    title PR 审查时间线
     dateFormat  YYYY-MM-DD
-    section Review
-    Initial Review       :a1, 2024-01-01, 2d
-    Feedback Round 1     :a2, after a1, 3d
-    Feedback Round 2     :a3, after a2, 2d
-    Final Approval       :a4, after a3, 1d
-    Merge                :milestone, after a4, 0d
+    section 审查
+    初始审查       :a1, 2024-01-01, 2d
+    反馈轮次 1     :a2, after a1, 3d
+    反馈轮次 2     :a3, after a2, 2d
+    最终批准       :a4, after a3, 1d
+    合并                :milestone, after a4, 0d
 ```
 
-**Typical Timeline:**
-- 📧 Initial review: 1-3 days
-- 💬 Feedback rounds: 2-5 days each
-- ✅ Approval & merge: 1-2 days
+**典型时间线:**
+- 📧 初始审查: 1-3 天
+- 💬 反馈轮次: 每次 2-5 天
+- ✅ 批准和合并: 1-2 天
 
-### Review Criteria
+### 审查标准
 
-Reviewers will check:
+审查者将检查：
 
-- ✅ **Functionality**: Does it work as intended?
-- ✅ **Code Quality**: Is it clean and maintainable?
-- ✅ **Tests**: Are there adequate tests?
-- ✅ **Documentation**: Is it well documented?
-- ✅ **Performance**: Any performance impact?
-- ✅ **Security**: Any security concerns?
+- ✅ **功能性**: 是否按预期工作？
+- ✅ **代码质量**: 是否干净和可维护？
+- ✅ **测试**: 是否有足够的测试？
+- ✅ **文档**: 是否有良好的文档？
+- ✅ **性能**: 是否有性能影响？
+- ✅ **安全性**: 是否有安全问题？
 
-### Responding to Feedback
+### 响应反馈
 
 ```bash
-# Address feedback
+# 处理反馈
 git add .
 git commit -m "Address review comments"
 git push origin feature/your-feature
 
-# PR automatically updates!
+# PR 自动更新！
 ```
 
 ---
 
-## Community
+## 社区
 
 <div align="center">
 
-### 💬 Connect With Us
+### 💬 与我们联系
 
 </div>
 
@@ -802,51 +802,51 @@ git push origin feature/your-feature
 <td width="33%" align="center">
 <a href="https://github.com/kirkyx/inklog/issues">
 <img src="https://img.icons8.com/fluency/96/000000/bug.png" width="64"><br>
-<b>Issues</b>
+<b>问题</b>
 </a><br>
-Report bugs & issues
+报告错误和问题
 </td>
 <td width="33%" align="center">
 <a href="https://github.com/kirkyx/inklog/discussions">
 <img src="https://img.icons8.com/fluency/96/000000/chat.png" width="64"><br>
-<b>Discussions</b>
+<b>讨论</b>
 </a><br>
-Ask questions & share ideas
+提问和分享想法
 </td>
 <td width="33%" align="center">
 <a href="https://discord.gg/inklog">
 <img src="https://img.icons8.com/fluency/96/000000/discord-logo.png" width="64"><br>
 <b>Discord</b>
 </a><br>
-Live chat & news
+实时聊天和新闻
 </td>
 </tr>
 </table>
 
-### Recognition
+### 认可
 
-We value all contributions! Contributors will be:
+我们重视所有贡献！贡献者将：
 
-- 🎖️ Listed in [CONTRIBUTORS.md](CONTRIBUTORS.md)
-- 🌟 Shown in README contributors section
-- 💝 Mentioned in release notes
+- 🎖️ 列在 [CONTRIBUTORS.md](CONTRIBUTORS.md) 中
+- 🌟 显示在 README 贡献者部分
+- 💝 在发布说明中提及
 
 ---
 
 <div align="center">
 
-## 🎉 Thank You!
+## 🎉 谢谢您！
 
-Your contributions make this project better for everyone.
+您的贡献让这个项目对每个人都更好。
 
-**Ready to contribute?** [Open your first issue](https://github.com/kirkyx/inklog/issues/new) or [start a discussion](https://github.com/kirkyx/inklog/discussions/new)!
+**准备贡献？** [打开您的第一个问题](https://github.com/kirkyx/inklog/issues/new) 或 [开始讨论](https://github.com/kirkyx/inklog/discussions/new)！
 
 ---
 
-**[🏠 Home](README.md)** • **[📖 User Guide](docs/USER_GUIDE.md)** • **[🔧 API Docs](https://docs.rs/inklog)** • **[🏠 Home](README.md)**
+**[🏠 首页](../README.md)** • **[📖 用户指南](USER_GUIDE.md)** • **[🔧 API 文档](https://docs.rs/inklog)** • **[🏠 首页](../README.md)**
 
-Made with ❤️ by our amazing community
+由我们优秀的社区用 ❤️ 制作
 
-[⬆ Back to Top](#-contributing-guide)
+[⬆ 返回顶部](#-贡献指南)
 
 </div>
