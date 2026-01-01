@@ -1,0 +1,36 @@
+# IDE and Editor
+.claude/
+.trae/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build
+target/
+**/target/
+Cargo.lock
+
+# Logs
+logs/
+*.log
+
+# Temp
+temp/
+tmp/
+*.tmp
+
+# Testing
+*.profraw
+*.profdata
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Backup
+*.bak
+*.backup
