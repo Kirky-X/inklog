@@ -2,11 +2,11 @@
 //!
 //! 测试Parquet导出功能的正确性、性能和兼容性
 
-use std::time::Instant;
-use inklog::sink::database::convert_logs_to_parquet;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use arrow_array::RecordBatchReader;
 use bytes::Bytes;
+use inklog::sink::database::convert_logs_to_parquet;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use std::time::Instant;
 
 /// 创建测试日志数据
 fn create_test_logs(count: usize) -> Vec<inklog::sink::database::Model> {
@@ -38,17 +38,30 @@ fn create_test_logs(count: usize) -> Vec<inklog::sink::database::Model> {
 /// 验证Parquet文件可读性和Schema正确性
 fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
-    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?
-        .build()?;
+    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
 
     // 验证Schema
     let schema = reader.schema();
     assert_eq!(schema.fields().len(), 9, "Schema should have 9 fields");
 
-    let field_names: Vec<String> = schema.fields().iter().map(|f| f.name().to_string()).collect();
+    let field_names: Vec<String> = schema
+        .fields()
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect();
     assert_eq!(
         field_names,
-        vec!["id", "timestamp", "level", "target", "message", "fields", "file", "line", "thread_id"],
+        vec![
+            "id",
+            "timestamp",
+            "level",
+            "target",
+            "message",
+            "fields",
+            "file",
+            "line",
+            "thread_id"
+        ],
         "Schema field names should match"
     );
 
@@ -86,7 +99,10 @@ fn test_parquet_small_dataset() {
     let result = convert_logs_to_parquet(&logs);
     let duration = start.elapsed();
 
-    assert!(result.is_ok(), "Parquet conversion should succeed for 1K records");
+    assert!(
+        result.is_ok(),
+        "Parquet conversion should succeed for 1K records"
+    );
     let parquet_data = result.unwrap();
 
     println!("1K records conversion time: {:?}", duration);
@@ -113,7 +129,10 @@ fn test_parquet_medium_dataset() {
     let result = convert_logs_to_parquet(&logs);
     let duration = start.elapsed();
 
-    assert!(result.is_ok(), "Parquet conversion should succeed for 10K records");
+    assert!(
+        result.is_ok(),
+        "Parquet conversion should succeed for 10K records"
+    );
     let parquet_data = result.unwrap();
 
     println!("10K records conversion time: {:?}", duration);
@@ -136,7 +155,10 @@ fn test_parquet_large_dataset() {
     let result = convert_logs_to_parquet(&logs);
     let duration = start.elapsed();
 
-    assert!(result.is_ok(), "Parquet conversion should succeed for 100K records");
+    assert!(
+        result.is_ok(),
+        "Parquet conversion should succeed for 100K records"
+    );
     let parquet_data = result.unwrap();
 
     println!("100K records conversion time: {:?}", duration);
@@ -181,11 +203,17 @@ fn test_parquet_empty_dataset() {
     let logs: Vec<inklog::sink::database::Model> = vec![];
     let result = convert_logs_to_parquet(&logs);
 
-    assert!(result.is_ok(), "Parquet conversion should succeed for empty dataset");
+    assert!(
+        result.is_ok(),
+        "Parquet conversion should succeed for empty dataset"
+    );
     let parquet_data = result.unwrap();
 
     // 空数据集应该产生一个有效的Parquet文件（即使没有数据行）
-    assert!(!parquet_data.is_empty(), "Parquet file should have metadata even for empty data");
+    assert!(
+        !parquet_data.is_empty(),
+        "Parquet file should have metadata even for empty data"
+    );
 }
 
 #[test]

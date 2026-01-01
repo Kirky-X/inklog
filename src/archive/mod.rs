@@ -255,7 +255,7 @@ impl S3ArchiveManager {
 
     /// 计算校验和（SHA256）
     fn calculate_checksum(data: &[u8]) -> String {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(data);
         format!("{:x}", hasher.finalize())
@@ -301,7 +301,7 @@ impl S3ArchiveManager {
                     }
                 }
                 EncryptionAlgorithm::CustomerKey => {
-                    return Err(InklogError::ConfigurationError(
+                    return Err(InklogError::ConfigError(
                         "Customer-provided encryption keys not yet implemented".to_string(),
                     ));
                 }
@@ -319,7 +319,10 @@ impl S3ArchiveManager {
                 "compression",
                 format!("{:?}", self.config.compression).to_lowercase(),
             )
-            .metadata("storage-class", format!("{:?}", self.config.storage_class).to_lowercase())
+            .metadata(
+                "storage-class",
+                format!("{:?}", self.config.storage_class).to_lowercase(),
+            )
             .metadata("checksum", metadata.checksum.clone())
             .metadata("archive-version", metadata.archive_version.clone())
             .metadata("archive-type", metadata.archive_type.clone())
@@ -373,7 +376,7 @@ impl S3ArchiveManager {
                     }
                 }
                 EncryptionAlgorithm::CustomerKey => {
-                    return Err(InklogError::ConfigurationError(
+                    return Err(InklogError::ConfigError(
                         "Customer-provided encryption keys not yet implemented".to_string(),
                     ));
                 }
@@ -391,7 +394,10 @@ impl S3ArchiveManager {
                 "compression",
                 format!("{:?}", self.config.compression).to_lowercase(),
             )
-            .metadata("storage-class", format!("{:?}", self.config.storage_class).to_lowercase())
+            .metadata(
+                "storage-class",
+                format!("{:?}", self.config.storage_class).to_lowercase(),
+            )
             .metadata("checksum", metadata.checksum.clone())
             .metadata("archive-version", metadata.archive_version.clone())
             .metadata("archive-type", metadata.archive_type.clone())

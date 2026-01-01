@@ -843,7 +843,10 @@ impl InklogConfig {
                     "warn" => HttpErrorMode::Warn,
                     "strict" => HttpErrorMode::Strict,
                     _ => {
-                        eprintln!("Invalid INKLOG_HTTP_ERROR_MODE: {}, using default (panic)", val);
+                        eprintln!(
+                            "Invalid INKLOG_HTTP_ERROR_MODE: {}, using default (panic)",
+                            val
+                        );
                         HttpErrorMode::Panic
                     }
                 };

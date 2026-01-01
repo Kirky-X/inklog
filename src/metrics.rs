@@ -182,14 +182,13 @@ impl Metrics {
     }
 
     pub fn get_status(&self, channel_len: usize, channel_cap: usize) -> HealthStatus {
-        let sinks: std::collections::HashMap<String, SinkHealth> = 
-            match self.sink_health.lock() {
-                Ok(guard) => guard.clone(),
-                Err(_e) => {
-                    eprintln!("Metrics mutex poisoned, using empty data");
-                    std::collections::HashMap::new()
-                }
-            };
+        let sinks: std::collections::HashMap<String, SinkHealth> = match self.sink_health.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_e) => {
+                eprintln!("Metrics mutex poisoned, using empty data");
+                std::collections::HashMap::new()
+            }
+        };
         let overall = sinks.values().all(|s| s.healthy);
 
         let count = self.latency_count.load(Ordering::Relaxed);

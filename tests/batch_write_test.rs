@@ -22,11 +22,20 @@ fn test_database_batch_write() {
 
     let mut sink = DatabaseSink::new(config).unwrap();
 
+    // Write 3 records (buffer=3, not enough to trigger batch flush)
     for i in 0..3 {
         let record = LogRecord::new(Level::INFO, "batch_test".into(), format!("Message {}", i));
         sink.write(&record).unwrap();
     }
 
+    // Wait for flush interval to pass
+    std::thread::sleep(Duration::from_millis(1100));
+
+    // Write 4th record - this triggers time-based flush (3 records flushed)
+    let record = LogRecord::new(Level::INFO, "batch_test".into(), "Trigger flush".into());
+    sink.write(&record).unwrap();
+
+    // Wait for flush to complete
     std::thread::sleep(Duration::from_millis(200));
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -38,13 +47,16 @@ fn test_database_batch_write() {
         let logs = Entity::find().all(&db).await.unwrap();
         logs.len() as i64
     });
-    assert_eq!(count_before, 0, "数据不应该在批次未满时写入");
+    // After time-based flush, 4 records should be in DB
+    assert_eq!(count_before, 4, "时间刷新应该写入4条记录");
 
-    for i in 3..6 {
+    // Write 5 more records to trigger batch-based flush (batch_size=5)
+    for i in 4..9 {
         let record = LogRecord::new(Level::INFO, "batch_test".into(), format!("Message {}", i));
         sink.write(&record).unwrap();
     }
 
+    // Wait for batch flush to complete
     std::thread::sleep(Duration::from_millis(500));
 
     let count_after = rt.block_on(async {
@@ -55,8 +67,9 @@ fn test_database_batch_write() {
         let logs = Entity::find().all(&db).await.unwrap();
         logs.len() as i64
     });
-    assert!(
-        count_after >= 5,
+    // Total should be 4 (first flush) + 5 (batch flush) = 9
+    assert_eq!(
+        count_after, 9,
         "批次写入应该触发，当前记录数: {}",
         count_after
     );

@@ -32,9 +32,6 @@ pub enum InklogError {
     #[error("Runtime error: {0}")]
     RuntimeError(String),
 
-    #[error("Configuration error: {0}")]
-    ConfigurationError(String),
-
     #[error("HTTP server error: {0}")]
     HttpServerError(String),
 

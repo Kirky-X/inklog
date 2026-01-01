@@ -152,8 +152,9 @@ impl LoggerManager {
             }
         });
 
-        let mut server_handle = self.http_server_handle.lock()
-            .map_err(|e| InklogError::HttpServerError(format!("Failed to acquire server handle lock: {}", e)))?;
+        let mut server_handle = self.http_server_handle.lock().map_err(|e| {
+            InklogError::HttpServerError(format!("Failed to acquire server handle lock: {}", e))
+        })?;
         *server_handle = Some(handle);
 
         Ok(())

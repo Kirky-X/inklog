@@ -214,12 +214,7 @@ impl DatabaseSink {
     }
 
     fn flush_buffer(&mut self) -> Result<(), InklogError> {
-        eprintln!(
-            "DEBUG: flush_buffer called, buffer.len()={}",
-            self.buffer.len()
-        );
         if self.buffer.is_empty() {
-            eprintln!("DEBUG: flush_buffer - buffer is empty, returning early");
             return Ok(());
         }
 
@@ -231,25 +226,15 @@ impl DatabaseSink {
                 self.config.batch_size
             };
 
-        eprintln!(
-            "DEBUG: flush_buffer - current_batch_size={}, flush_interval_ms={}, elapsed={}ms",
-            current_batch_size,
-            self.config.flush_interval_ms,
-            self.last_flush.elapsed().as_millis()
-        );
-
         // 只有在缓冲区大小小于当前批次大小且距离上次刷新时间小于刷新间隔时才跳过刷新
         if self.buffer.len() < current_batch_size
             && self.last_flush.elapsed() < Duration::from_millis(self.config.flush_interval_ms)
         {
-            eprintln!("DEBUG: flush_buffer - skipping due to conditions");
             return Ok(());
         }
 
         // 检查断路器
-        eprintln!("DEBUG: flush_buffer - checking circuit breaker");
         if !self.circuit_breaker.can_execute() {
-            eprintln!("DEBUG: flush_buffer - circuit breaker blocked");
             self.fallback_to_file()?;
             self.buffer.clear();
             self.last_flush = Instant::now();
@@ -264,10 +249,6 @@ impl DatabaseSink {
         }
 
         let mut success = false;
-        eprintln!(
-            "DEBUG: flush_buffer - preparing to insert {} records",
-            self.buffer.len()
-        );
         if let Some(db) = &self.db {
             let logs: Vec<ActiveModel> = self
                 .buffer
@@ -286,10 +267,7 @@ impl DatabaseSink {
                     ..Default::default()
                 })
                 .collect();
-
-            eprintln!("DEBUG: flush_buffer - logs prepared, entering async block");
             let res = self.rt.block_on(async {
-                eprintln!("DEBUG: flush_buffer - inside async block");
                 match self.config.driver {
                     DatabaseDriver::PostgreSQL => {
                         if should_check_partition {
@@ -321,10 +299,7 @@ impl DatabaseSink {
                     }
                     DatabaseDriver::SQLite => {}
                 }
-                eprintln!("DEBUG: flush_buffer - about to insert {} records", logs.len());
-                let insert_result = Entity::insert_many(logs).exec(db).await;
-                eprintln!("DEBUG: flush_buffer - insert result: {:?}", insert_result);
-                insert_result
+                Entity::insert_many(logs).exec(db).await
             });
 
             match res {
@@ -333,7 +308,7 @@ impl DatabaseSink {
                     success = true;
                 }
                 Err(e) => {
-                    eprintln!("Database insert error: {}", e);
+                    tracing::error!(error = %e, "Database insert failed");
                     self.circuit_breaker.record_failure();
                     // 尝试重新连接（如果是半开启状态或连接丢失）
                     let _ = self.init_db();
@@ -369,28 +344,21 @@ impl LogSink for DatabaseSink {
         if self.buffer.len() >= self.config.batch_size
             || self.last_flush.elapsed() >= Duration::from_millis(self.config.flush_interval_ms)
         {
-            eprintln!(
-                "DEBUG: write - buffer.len()={}, batch_size={}, elapsed={}ms",
-                self.buffer.len(),
-                self.config.batch_size,
-                self.last_flush.elapsed().as_millis()
-            );
-            eprintln!("DEBUG: write - db.is_some()={}", self.db.is_some());
             if let Err(e) = self.flush_buffer() {
-                eprintln!("DEBUG: flush_buffer error: {:?}", e);
+                tracing::error!(error = ?e, "Failed to flush database buffer");
             }
         }
 
-        // Periodically check for archive
-        let now = Utc::now();
-        // Check if it's 2 AM and we haven't checked today
-        if now.hour() == 2 && self.last_archive_check.date_naive() != now.date_naive() {
-            self.last_archive_check = now;
-            let db_opt = self.db.clone();
-            let config = self.config.clone();
+        // Periodically check for archive - only if S3 archive is configured
+        if self.config.archive_to_s3 {
+            let now = Utc::now();
+            // Check if it's 2 AM and we haven't checked today
+            if now.hour() == 2 && self.last_archive_check.date_naive() != now.date_naive() {
+                self.last_archive_check = now;
+                let db_opt = self.db.clone();
+                let config = self.config.clone();
 
-            if let Some(db) = db_opt {
-                if config.archive_to_s3 {
+                if let Some(db) = db_opt {
                     let res = self.rt.block_on(async move {
                         // Logic from archive_logs adapted to not use self
                         let days = config.archive_after_days as i64;
@@ -470,13 +438,13 @@ impl LogSink for DatabaseSink {
                             // 本地归档：保存Parquet文件到本地目录
                             let archive_dir = std::path::Path::new("logs/archive");
                             if let Err(e) = std::fs::create_dir_all(archive_dir) {
-                                eprintln!("Failed to create archive directory: {}", e);
+                                tracing::error!(error = %e, "Failed to create archive directory");
                             } else {
                                 let filename =
                                     format!("logs_{}.parquet", Utc::now().format("%Y%m%d_%H%M%S"));
                                 let filepath = archive_dir.join(&filename);
                                 if let Err(e) = std::fs::write(&filepath, &parquet_data) {
-                                    eprintln!("Failed to write archive file: {}", e);
+                                    tracing::error!(error = %e, "Failed to write archive file");
                                 } else {
                                     let meta = ArchiveMetadataActiveModel {
                                         archive_date: Set(Utc::now()),
@@ -491,7 +459,7 @@ impl LogSink for DatabaseSink {
                                         .await
                                         .map_err(|e| InklogError::DatabaseError(e.to_string()))
                                     {
-                                        eprintln!("Failed to insert archive metadata: {}", e);
+                                        tracing::error!(error = %e, "Failed to insert archive metadata");
                                     }
 
                                     let ids: Vec<i64> = logs.iter().map(|l| l.id).collect();
@@ -501,7 +469,7 @@ impl LogSink for DatabaseSink {
                                         .await
                                         .map_err(|e| InklogError::DatabaseError(e.to_string()))
                                     {
-                                        eprintln!("Failed to delete archived logs: {}", e);
+                                        tracing::error!(error = %e, "Failed to delete archived logs");
                                     }
                                 }
                             }
@@ -510,7 +478,7 @@ impl LogSink for DatabaseSink {
                     });
 
                     if let Err(e) = res {
-                        eprintln!("Archive error: {}", e);
+                        tracing::error!(error = %e, "Archive operation failed");
                     }
                 }
             }

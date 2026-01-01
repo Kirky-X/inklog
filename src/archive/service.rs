@@ -99,11 +99,14 @@ impl ArchiveService {
                 let db_conn = db_conn.clone();
                 let config = config_for_archive.clone();
                 Box::pin(async move {
-                    if let Err(e) = Self::perform_archive_with_deps(&config, &archive_manager, db_conn).await {
+                    if let Err(e) =
+                        Self::perform_archive_with_deps(&config, &archive_manager, db_conn).await
+                    {
                         error!("Archive task failed: {}", e);
                     }
                 })
-            }).map_err(|e| {
+            })
+            .map_err(|e| {
                 InklogError::ConfigError(format!("Failed to create archive job: {}", e))
             })?;
 
@@ -121,11 +124,14 @@ impl ArchiveService {
                 let db_conn = db_conn.clone();
                 let config = config_for_archive.clone();
                 Box::pin(async move {
-                    if let Err(e) = Self::perform_archive_with_deps(&config, &archive_manager, db_conn).await {
+                    if let Err(e) =
+                        Self::perform_archive_with_deps(&config, &archive_manager, db_conn).await
+                    {
                         error!("Archive task failed: {}", e);
                     }
                 })
-            }).map_err(|e| {
+            })
+            .map_err(|e| {
                 InklogError::ConfigError(format!("Failed to create interval job: {}", e))
             })?;
 
@@ -147,25 +153,27 @@ impl ArchiveService {
                     error!("Cleanup task failed: {}", e);
                 }
             })
-        }).map_err(|e| {
-            InklogError::ConfigError(format!("Failed to create cleanup job: {}", e))
-        })?;
+        })
+        .map_err(|e| InklogError::ConfigError(format!("Failed to create cleanup job: {}", e)))?;
 
-        self.scheduler.add(cleanup_job).await.map_err(|e| {
-            InklogError::ConfigError(format!("Failed to add cleanup job: {}", e))
-        })?;
+        self.scheduler
+            .add(cleanup_job)
+            .await
+            .map_err(|e| InklogError::ConfigError(format!("Failed to add cleanup job: {}", e)))?;
 
         // 启动调度器
-        self.scheduler.start().await.map_err(|e| {
-            InklogError::ConfigError(format!("Failed to start scheduler: {}", e))
-        })?;
+        self.scheduler
+            .start()
+            .await
+            .map_err(|e| InklogError::ConfigError(format!("Failed to start scheduler: {}", e)))?;
 
         // 等待关闭信号
-        let _ = shutdown_rx.recv().await
-            .ok_or_else(|| InklogError::ChannelError("Failed to receive shutdown signal".to_string()))?;
+        shutdown_rx.recv().await.ok_or_else(|| {
+            InklogError::ChannelError("Failed to receive shutdown signal".to_string())
+        })?;
 
         // 停止调度器
-        self.scheduler.shutdown().await;
+        let _ = self.scheduler.shutdown().await;
 
         info!("Archive service stopped");
         Ok(())
@@ -202,12 +210,18 @@ impl ArchiveService {
             }
 
             let log_data = convert_logs_to_parquet(&logs).map_err(|e| {
-                InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(e.to_string())))
+                InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
+                    e.to_string(),
+                )))
             })?;
 
-            let metadata = ArchiveMetadata::new(log_data.len() as i64, log_data.len() as i64, "database_logs")
-                .with_tag("automated")
-                .with_tag("daily");
+            let metadata = ArchiveMetadata::new(
+                log_data.len() as i64,
+                log_data.len() as i64,
+                "database_logs",
+            )
+            .with_tag("automated")
+            .with_tag("daily");
 
             archive_manager
                 .archive_logs(log_data, start_date, end_date, metadata)
@@ -252,7 +266,10 @@ impl ArchiveService {
             if let Ok(metadata) = entry.path().metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if let Some(modified_date) = DateTime::from_timestamp(
-                        modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64,
+                        modified
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64,
                         0,
                     ) {
                         if modified_date < cutoff {
@@ -279,6 +296,7 @@ impl ArchiveService {
         Ok(())
     }
 
+    #[allow(dead_code)]
     /// 执行归档任务
     async fn perform_archive(&self) -> Result<(), InklogError> {
         #[cfg(not(feature = "aws"))]
@@ -348,6 +366,7 @@ impl ArchiveService {
         }
     }
 
+    #[allow(dead_code)]
     /// 执行本地数据清理
     async fn perform_cleanup(&self) -> Result<(), InklogError> {
         info!("Starting cleanup task");
@@ -463,6 +482,7 @@ impl ArchiveService {
         Ok(all_data)
     }
 
+    #[allow(dead_code)]
     /// 清理旧的数据库日志
     async fn cleanup_old_database_logs(
         &self,
@@ -482,6 +502,7 @@ impl ArchiveService {
         Ok(())
     }
 
+    #[allow(dead_code)]
     /// 清理旧的日志文件
     async fn cleanup_old_files(&self, cutoff_date: DateTime<Utc>) -> Result<(), InklogError> {
         let log_dir = &self.local_retention_path;
@@ -558,10 +579,11 @@ impl ArchiveService {
             )))
         })?;
 
-        let file_name = local_path.file_name()
-            .ok_or_else(|| InklogError::IoError(std::io::Error::other(
-                "Failed to get file name from local path".to_string()
-            )))?;
+        let file_name = local_path.file_name().ok_or_else(|| {
+            InklogError::IoError(std::io::Error::other(
+                "Failed to get file name from local path".to_string(),
+            ))
+        })?;
         let file_path = date_dir.join(file_name);
 
         // 写入数据
