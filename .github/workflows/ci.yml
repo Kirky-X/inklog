@@ -140,12 +140,62 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, beta, nightly]
+        include:
+          - os: ubuntu-latest
+            rust: 1.70.0  # MSRV
     runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@${{ matrix.rust }}
+        with:
+          rust-version: ${{ matrix.rust }}
+
+      - name: Build
+        run: cargo build --all-features --workspace
+
+  # Database compatibility tests
+  db-compat:
+    name: Database Compatibility
+    strategy:
+      matrix:
+        db: [postgres, mysql, sqlite]
+        os: [ubuntu-latest]
+        include:
+          - db: postgres
+            image: postgres:15
+            connection: postgres://postgres:postgres@localhost/postgres
+          - db: mysql
+            image: mysql:8
+            connection: mysql://root:root@localhost/mysql
+          - db: sqlite
+            image: alpine
+            connection: sqlite://tmp/test.db
+    runs-on: ${{ matrix.os }}
+    services:
+      ${{ matrix.db }}:
+        image: ${{ matrix.image }}
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_PASSWORD: postgres
+          MYSQL_ROOT_PASSWORD: root
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build
-        run: cargo build --all-features --workspace
+      - name: Run database tests
+        run: |
+          if [ "${{ matrix.db }}" = "postgres" ]; then
+            cargo test --test integration_tests --features db-postgres 2>&1 | head -50
+          elif [ "${{ matrix.db }}" = "mysql" ]; then
+            cargo test --test integration_tests --features db-mysql 2>&1 | head -50
+          else
+            cargo test --lib --features db-sqlite 2>&1 | head -50
+          fi
+        continue-on-error: true

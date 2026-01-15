@@ -221,6 +221,11 @@ pub struct ParquetConfig {
 
     /// 页面大小（字节，默认1MB）
     pub max_page_size: usize,
+
+    /// 包含的字段列表（逗号分隔，默认包含所有字段）
+    /// 可用字段: id, timestamp, level, target, message, fields, file, line, thread_id
+    #[serde(default)]
+    pub include_fields: Vec<String>,
 }
 
 impl Default for ParquetConfig {
@@ -230,6 +235,7 @@ impl Default for ParquetConfig {
             encoding: "PLAIN".to_string(),
             max_row_group_size: 10000,
             max_page_size: 1024 * 1024,
+            include_fields: Vec::new(),
         }
     }
 }
@@ -248,9 +254,16 @@ pub struct DatabaseSinkConfig {
     pub s3_bucket: Option<String>,
     pub s3_region: Option<String>,
     pub table_name: String,
+    /// 归档格式（json/parquet，默认json）
+    #[serde(default = "default_archive_format")]
+    pub archive_format: String,
     /// Parquet导出配置
     #[serde(default)]
     pub parquet_config: ParquetConfig,
+}
+
+fn default_archive_format() -> String {
+    "json".to_string()
 }
 
 impl Default for DatabaseSinkConfig {
@@ -267,6 +280,7 @@ impl Default for DatabaseSinkConfig {
             s3_bucket: None,
             s3_region: Some("us-east-1".to_string()),
             table_name: "logs".to_string(),
+            archive_format: "json".to_string(),
             parquet_config: ParquetConfig::default(),
         }
     }
@@ -684,14 +698,6 @@ impl InklogConfig {
                 }
             }
 
-            if let Ok(val) = std::env::var("INKLOG_DB_S3_BUCKET") {
-                db.s3_bucket = Some(val);
-            }
-
-            if let Ok(val) = std::env::var("INKLOG_DB_S3_REGION") {
-                db.s3_region = Some(val);
-            }
-
             // Parquet config overrides
             if let Ok(val) = std::env::var("INKLOG_DB_PARQUET_COMPRESSION_LEVEL") {
                 if let Ok(num) = val.parse() {
@@ -808,6 +814,41 @@ impl InklogConfig {
             if let Ok(val) = std::env::var("INKLOG_S3_MAX_FILE_SIZE_MB") {
                 if let Ok(num) = val.parse() {
                     s3.max_file_size_mb = num;
+                }
+            }
+
+            if let Ok(val) = std::env::var("INKLOG_ARCHIVE_FORMAT") {
+                s3.archive_format = val;
+            }
+
+            if let Ok(val) = std::env::var("INKLOG_S3_ENCRYPTION_ALGORITHM") {
+                let algorithm = match val.to_uppercase().as_str() {
+                    "AWSKMS" | "KMS" => crate::archive::EncryptionAlgorithm::AwsKms,
+                    "CUSTOMERKEY" | "CUSTOMER_KEY" => {
+                        crate::archive::EncryptionAlgorithm::CustomerKey
+                    }
+                    _ => crate::archive::EncryptionAlgorithm::Aes256,
+                };
+                if let Some(ref mut enc) = s3.encryption {
+                    enc.algorithm = algorithm;
+                } else {
+                    s3.encryption = Some(crate::archive::EncryptionConfig {
+                        algorithm,
+                        kms_key_id: None,
+                        customer_key: None,
+                    });
+                }
+            }
+
+            if let Ok(val) = std::env::var("INKLOG_S3_ENCRYPTION_KMS_KEY_ID") {
+                if let Some(ref mut enc) = s3.encryption {
+                    enc.kms_key_id = Some(val);
+                } else {
+                    s3.encryption = Some(crate::archive::EncryptionConfig {
+                        algorithm: crate::archive::EncryptionAlgorithm::Aes256,
+                        kms_key_id: Some(val),
+                        customer_key: None,
+                    });
                 }
             }
         }

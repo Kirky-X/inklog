@@ -253,6 +253,56 @@ impl Metrics {
             self.active_workers.get()
         ));
 
+        //
+        let count = self.latency_count.load(Ordering::Relaxed);
+        let total = self.total_latency_us.load(Ordering::Relaxed);
+        let avg_latency = if count > 0 { total / count } else { 0 };
+
+        s.push_str("# HELP inklog_avg_latency_us Average log processing latency in microseconds\n");
+        s.push_str("# TYPE inklog_avg_latency_us gauge\n");
+        s.push_str(&format!("inklog_avg_latency_us {}\n", avg_latency));
+
+        //
+        let uptime = self.uptime().as_secs();
+        if uptime > 0 {
+            s.push_str("# HELP inklog_uptime_seconds Uptime in seconds\n");
+            s.push_str("# TYPE inklog_uptime_seconds gauge\n");
+            s.push_str(&format!("inklog_uptime_seconds {}\n", uptime));
+        }
+
+        //
+        s.push_str("# HELP inklog_sink_healthy Sink health status (1=healthy, 0=unhealthy)\n");
+        s.push_str("# TYPE inklog_sink_healthy gauge\n");
+        if let Ok(health_map) = self.sink_health.lock() {
+            for (name, health) in health_map.iter() {
+                let value = if health.healthy { 1 } else { 0 };
+                s.push_str(&format!(
+                    "inklog_sink_healthy{{sink=\"{}\"}} {}\n",
+                    name, value
+                ));
+            }
+        }
+
+        //
+        s.push_str("# HELP inklog_latency_bucket Latency histogram bucket\n");
+        s.push_str("# TYPE inklog_latency_bucket counter\n");
+        let bounds = [1000, 5000, 10000, 50000, 100000, 500000, 1000000];
+        let buckets = self.latency_histogram.snapshot();
+        for (i, &bound) in bounds.iter().enumerate() {
+            if i < buckets.len() {
+                s.push_str(&format!(
+                    "inklog_latency_bucket{{le=\"{}\"}} {}\n",
+                    bound, buckets[i]
+                ));
+            }
+        }
+        //
+        let total_count: u64 = buckets.iter().sum();
+        s.push_str(&format!(
+            "inklog_latency_bucket{{le=\"+Inf\"}} {}\n",
+            total_count
+        ));
+
         s
     }
 }

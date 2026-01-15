@@ -17,9 +17,7 @@ use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 #[cfg(feature = "aws")]
 use tracing::debug;
-#[cfg(not(feature = "aws"))]
-use tracing::warn;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// 归档服务
 pub struct ArchiveService {
@@ -35,6 +33,10 @@ pub struct ArchiveService {
     scheduler: JobScheduler,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
+    /// 调度状态跟踪（用于并发控制和持久化）
+    schedule_state: std::sync::Mutex<super::ScheduleState>,
+    /// Parquet配置（用于归档格式）
+    parquet_config: crate::config::ParquetConfig,
 }
 
 impl ArchiveService {
@@ -64,13 +66,15 @@ impl ArchiveService {
         })?;
 
         Ok(Self {
-            config,
+            config: config.clone(),
             archive_manager,
             database_connection: database_connection.map(Arc::new),
             local_retention_path,
             scheduler,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
+            schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+            parquet_config: config.parquet_config.clone(),
         })
     }
 
@@ -78,6 +82,9 @@ impl ArchiveService {
     pub async fn start(&mut self) -> Result<(), InklogError> {
         info!("Starting S3 archive service");
 
+        // 将 schedule_state 转换为 Arc 以便在闭包中共享
+        let schedule_state: Arc<std::sync::Mutex<super::ScheduleState>> =
+            Arc::new(std::mem::take(&mut self.schedule_state));
         let mut shutdown_rx = self.shutdown_rx.take().ok_or_else(|| {
             InklogError::ConfigError("Shutdown receiver already taken".to_string())
         })?;
@@ -98,9 +105,15 @@ impl ArchiveService {
                 let archive_manager = Arc::clone(&archive_manager);
                 let db_conn = db_conn.clone();
                 let config = config_for_archive.clone();
+                let schedule_state = schedule_state.clone();
                 Box::pin(async move {
-                    if let Err(e) =
-                        Self::perform_archive_with_deps(&config, &archive_manager, db_conn).await
+                    if let Err(e) = Self::perform_archive_with_deps(
+                        &config,
+                        &archive_manager,
+                        db_conn,
+                        &schedule_state,
+                    )
+                    .await
                     {
                         error!("Archive task failed: {}", e);
                     }
@@ -116,16 +129,21 @@ impl ArchiveService {
 
             info!("Using cron schedule: {}", cron_expr);
         } else {
-            // 使用间隔调度
-            let interval_secs = config.archive_interval_days as u64 * 24 * 60 * 60;
-            let cron_expr = format!("*/{} * * * * *", (interval_secs / 60).max(1));
+            // 使用间隔调度: 每天凌晨 2 点执行 + 程序内日期检查
+            let cron_expr = "0 0 2 * * *".to_string(); // 每天 02:00:00
             let job = Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
                 let archive_manager = Arc::clone(&archive_manager);
                 let db_conn = db_conn.clone();
                 let config = config_for_archive.clone();
+                let schedule_state = Arc::clone(&schedule_state);
                 Box::pin(async move {
-                    if let Err(e) =
-                        Self::perform_archive_with_deps(&config, &archive_manager, db_conn).await
+                    if let Err(e) = Self::perform_archive_with_deps(
+                        &config,
+                        &archive_manager,
+                        db_conn,
+                        &schedule_state,
+                    )
+                    .await
                     {
                         error!("Archive task failed: {}", e);
                     }
@@ -179,12 +197,27 @@ impl ArchiveService {
         Ok(())
     }
 
-    /// 执行归档任务（供调度器调用）
+    /// 执行归档任务（供调度器调用）- 包含并发控制和重试
     async fn perform_archive_with_deps(
         config: &S3ArchiveConfig,
         archive_manager: &Arc<S3ArchiveManager>,
         db_conn: Option<Arc<DatabaseConnection>>,
+        schedule_state: &Arc<std::sync::Mutex<super::ScheduleState>>,
     ) -> Result<(), InklogError> {
+        // 并发控制：检查是否可以执行（在锁内）
+        let _can_run = {
+            let mut state = schedule_state.lock().map_err(|e| {
+                InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
+            })?;
+            if !state.can_run_today() {
+                info!("Archive already running or completed today, skipping");
+                return Ok(());
+            }
+            state.start_execution();
+            // 返回需要的信息后释放锁
+            state.locked_date
+        };
+
         #[cfg(feature = "aws")]
         {
             use crate::sink::database::{convert_logs_to_parquet, Column, Entity};
@@ -193,27 +226,48 @@ impl ArchiveService {
             let start_date = Utc::now() - Duration::days(config.archive_interval_days as i64);
             let end_date = Utc::now();
 
-            let logs = if let Some(db) = &db_conn {
-                Entity::find()
-                    .filter(Column::Timestamp.gte(start_date))
-                    .filter(Column::Timestamp.lt(end_date))
-                    .all(db.as_ref())
-                    .await
-                    .map_err(|e| InklogError::DatabaseError(e.to_string()))?
-            } else {
-                Vec::new()
-            };
+            // 带重试的数据库查询
+            let logs = Self::retry_with_backoff(|| async {
+                if let Some(db) = &db_conn {
+                    Entity::find()
+                        .filter(Column::Timestamp.gte(start_date))
+                        .filter(Column::Timestamp.lt(end_date))
+                        .all(db.as_ref())
+                        .await
+                        .map_err(|e| InklogError::DatabaseError(e.to_string()))
+                } else {
+                    Ok(Vec::new())
+                }
+            })
+            .await?;
 
             if logs.is_empty() {
                 debug!("No logs to archive");
+                let mut state = schedule_state.lock().map_err(|e| {
+                    InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
+                })?;
+                state.mark_success();
                 return Ok(());
             }
 
-            let log_data = convert_logs_to_parquet(&logs).map_err(|e| {
-                InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
-                    e.to_string(),
-                )))
-            })?;
+            // 根据配置选择归档格式
+            let log_data = if config.archive_format.to_lowercase() == "parquet" {
+                // 带重试的 Parquet 转换
+                Self::retry_with_backoff(|| async {
+                    convert_logs_to_parquet(&logs, &config.parquet_config).map_err(|e| {
+                        InklogError::SerializationError(serde_json::Error::io(
+                            std::io::Error::other(e.to_string()),
+                        ))
+                    })
+                })
+                .await?
+            } else {
+                serde_json::to_vec(&logs).map_err(|e| {
+                    InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
+                        e.to_string(),
+                    )))
+                })?
+            };
 
             let metadata = ArchiveMetadata::new(
                 log_data.len() as i64,
@@ -223,11 +277,29 @@ impl ArchiveService {
             .with_tag("automated")
             .with_tag("daily");
 
-            archive_manager
-                .archive_logs(log_data, start_date, end_date, metadata)
-                .await?;
+            // 带重试的 S3 上传
+            let result = Self::retry_with_backoff(|| async {
+                archive_manager
+                    .archive_logs(log_data.clone(), start_date, end_date, metadata.clone())
+                    .await
+            })
+            .await;
 
-            info!("Archived {} logs to S3", logs.len());
+            // 更新状态
+            let mut state = schedule_state.lock().map_err(|e| {
+                InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
+            })?;
+
+            match result {
+                Ok(_) => {
+                    state.mark_success();
+                    info!("Archived {} logs to S3", logs.len());
+                }
+                Err(e) => {
+                    state.mark_failed();
+                    return Err(e);
+                }
+            }
         }
         #[cfg(not(feature = "aws"))]
         {
@@ -235,6 +307,35 @@ impl ArchiveService {
         }
 
         Ok(())
+    }
+
+    /// 指数退避重试辅助函数
+    async fn retry_with_backoff<T, F, Fut>(mut attempt: F) -> Result<T, InklogError>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, InklogError>>,
+    {
+        let mut retries = 0;
+        let max_retries = 3;
+        let base_delay = std::time::Duration::from_secs(1);
+
+        loop {
+            match attempt().await {
+                Ok(result) => return Ok(result),
+                Err(e) if retries < max_retries => {
+                    retries += 1;
+                    let delay = base_delay * 2_u32.pow(retries - 1);
+                    warn!(
+                        "Archive attempt {} failed: {}, retrying in {:?}",
+                        retries, e, delay
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
     }
 
     /// 执行清理任务（供调度器调用）
@@ -422,7 +523,7 @@ impl ArchiveService {
             return Ok(Vec::new());
         }
 
-        convert_logs_to_parquet(&logs).map_err(|e| {
+        convert_logs_to_parquet(&logs, &self.parquet_config).map_err(|e| {
             InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
                 e.to_string(),
             )))
@@ -436,7 +537,7 @@ impl ArchiveService {
         logs: &[crate::sink::database::Model],
     ) -> Result<Vec<u8>, InklogError> {
         use crate::sink::database::convert_logs_to_parquet;
-        convert_logs_to_parquet(logs).map_err(|e| {
+        convert_logs_to_parquet(logs, &self.parquet_config).map_err(|e| {
             InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
                 e.to_string(),
             )))
@@ -759,6 +860,8 @@ impl ArchiveServiceBuilder {
             scheduler: JobScheduler::new().await?,
             shutdown_tx,
             shutdown_rx: None,
+            schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+            parquet_config: config.parquet_config.clone(),
         })
     }
 }

@@ -59,6 +59,16 @@ pub struct S3ArchiveConfig {
     pub max_file_size_mb: u32,
     /// 加密设置
     pub encryption: Option<EncryptionConfig>,
+    /// 归档格式（json/parquet，默认json）
+    #[serde(default = "default_archive_format")]
+    pub archive_format: String,
+    /// Parquet导出配置
+    #[serde(default)]
+    pub parquet_config: crate::config::ParquetConfig,
+}
+
+fn default_archive_format() -> String {
+    "json".to_string()
 }
 
 impl Default for S3ArchiveConfig {
@@ -82,6 +92,8 @@ impl Default for S3ArchiveConfig {
             skip_bucket_validation: false,
             max_file_size_mb: 100,
             encryption: None,
+            archive_format: "json".to_string(),
+            parquet_config: crate::config::ParquetConfig::default(),
         }
     }
 }
@@ -140,6 +152,59 @@ pub enum EncryptionAlgorithm {
     AwsKms,
     /// 客户提供的密钥
     CustomerKey,
+}
+
+/// 调度状态跟踪（用于持久化）
+#[derive(Debug, Clone, Default)]
+pub struct ScheduleState {
+    /// 上次调度执行时间
+    pub last_scheduled_run: Option<DateTime<Utc>>,
+    /// 上次成功执行时间
+    pub last_successful_run: Option<DateTime<Utc>>,
+    /// 上次执行状态
+    pub last_run_status: Option<ArchiveStatus>,
+    /// 连续失败次数
+    pub consecutive_failures: u32,
+    /// 锁定的归档时间（防止并发）
+    pub locked_date: Option<chrono::NaiveDate>,
+    /// 是否正在执行归档
+    pub is_running: bool,
+}
+
+impl ScheduleState {
+    /// 检查是否可以执行归档（基于日期锁）
+    pub fn can_run_today(&self) -> bool {
+        let today = Utc::now().date_naive();
+        match self.locked_date {
+            Some(locked) if locked == today && self.is_running => false,
+            Some(locked) if locked == today => true, // 同一天未运行，可以执行
+            _ => true,                               // 新的一天
+        }
+    }
+
+    /// 标记开始执行
+    pub fn start_execution(&mut self) {
+        let now = Utc::now();
+        self.last_scheduled_run = Some(now);
+        self.locked_date = Some(now.date_naive());
+        self.is_running = true;
+    }
+
+    /// 标记执行成功
+    pub fn mark_success(&mut self) {
+        let now = Utc::now();
+        self.last_successful_run = Some(now);
+        self.last_run_status = Some(ArchiveStatus::Success);
+        self.consecutive_failures = 0;
+        self.is_running = false;
+    }
+
+    /// 标记执行失败
+    pub fn mark_failed(&mut self) {
+        self.last_run_status = Some(ArchiveStatus::Failed);
+        self.consecutive_failures += 1;
+        self.is_running = false;
+    }
 }
 
 /// S3归档管理器
@@ -618,7 +683,7 @@ impl S3ArchiveManager {
                     last_modified.secs(),
                     last_modified.subsec_nanos(),
                 )
-                .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
+                .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default());
 
                 // 过滤日期范围
                 let in_date_range = match (start_date, end_date) {
@@ -783,6 +848,9 @@ pub struct ArchiveMetadata {
     pub original_size: i64,
     /// 压缩后大小（字节）
     pub compressed_size: i64,
+    /// 压缩率（原始大小/压缩后大小）
+    #[serde(default)]
+    pub compression_ratio: f64,
     /// 归档类型
     pub archive_type: String,
     /// 归档开始时间
@@ -802,6 +870,12 @@ pub struct ArchiveMetadata {
     /// 归档版本
     #[serde(default = "default_archive_version")]
     pub archive_version: String,
+    /// Parquet 版本（仅 Parquet 格式使用）
+    #[serde(default)]
+    pub parquet_version: Option<String>,
+    /// Row Group 数量（仅 Parquet 格式使用）
+    #[serde(default)]
+    pub row_group_count: i32,
     /// 标签
     pub tags: Vec<String>,
     /// S3对象键
@@ -822,6 +896,7 @@ impl ArchiveMetadata {
             record_count,
             original_size,
             compressed_size: 0,
+            compression_ratio: 0.0,
             archive_type: archive_type.to_string(),
             start_date: None,
             end_date: None,
@@ -829,6 +904,8 @@ impl ArchiveMetadata {
             storage_class: None,
             checksum: String::new(),
             archive_version: default_archive_version(),
+            parquet_version: None,
+            row_group_count: 0,
             tags: vec![],
             s3_key: String::new(),
             status: ArchiveStatus::InProgress,
@@ -855,6 +932,12 @@ impl ArchiveMetadata {
 
     /// 标记为成功
     pub fn mark_success(mut self) -> Self {
+        // Calculate compression ratio
+        if self.compressed_size > 0 {
+            self.compression_ratio = self.original_size as f64 / self.compressed_size as f64;
+        } else {
+            self.compression_ratio = 1.0;
+        }
         self.status = ArchiveStatus::Success;
         self
     }
