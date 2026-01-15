@@ -4,7 +4,39 @@ use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// 验证文件路径是否在允许的目录内，防止路径遍历攻击
+fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
+    // 规范化路径
+    let canonical_path = file_path
+        .canonicalize()
+        .map_err(|e| anyhow!("Cannot canonicalize file path: {}", e))?;
+
+    let canonical_base = base_dir
+        .canonicalize()
+        .map_err(|e| anyhow!("Cannot canonicalize base directory: {}", e))?;
+
+    // 检查规范化后的路径是否以基础目录开头
+    if !canonical_path.starts_with(&canonical_base) {
+        return Err(anyhow!(
+            "Path traversal attempt detected: {} is outside base directory {}",
+            file_path.display(),
+            base_dir.display()
+        ));
+    }
+
+    // 检查路径中是否包含可疑模式
+    let path_str = file_path.to_string_lossy();
+    if path_str.contains("..") || path_str.contains("~") {
+        return Err(anyhow!(
+            "Invalid path characters detected in: {}",
+            file_path.display()
+        ));
+    }
+
+    Ok(())
+}
 
 const MAGIC_HEADER: &[u8] = b"ENCLOG1\0";
 
@@ -218,26 +250,34 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32]> {
     let key_str = std::env::var(env_var)
         .map_err(|e| anyhow!("Failed to read encryption key from {}: {}", env_var, e))?;
 
+    // 尝试解码 Base64 编码的密钥
     if let Ok(decoded) = general_purpose::STANDARD.decode(key_str.trim()) {
         if decoded.len() == 32 {
             let mut key = [0u8; 32];
             key.copy_from_slice(&decoded);
             return Ok(key);
+        } else {
+            return Err(anyhow!(
+                "Encryption key must be exactly 32 bytes (256 bits) after Base64 decoding, got {} bytes. \
+                 Please provide a valid 32-byte key encoded in Base64.",
+                decoded.len()
+            ));
         }
     }
 
-    let mut key = [0u8; 32];
+    // 如果不是 Base64，尝试使用原始字节
     let bytes = key_str.as_bytes();
-    if bytes.len() < 32 {
-        key[..bytes.len()].copy_from_slice(bytes);
-        for (i, key_byte) in key.iter_mut().enumerate().skip(bytes.len()) {
-            *key_byte = (i % 256) as u8;
-        }
+    if bytes.len() == 32 {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(bytes);
+        Ok(key)
     } else {
-        key.copy_from_slice(&bytes[..32]);
+        Err(anyhow!(
+            "Encryption key must be exactly 32 bytes (256 bits), got {} bytes. \
+             Please provide a valid 32-byte key.",
+            bytes.len()
+        ))
     }
-
-    Ok(key)
 }
 
 #[allow(dead_code)]
@@ -273,6 +313,16 @@ pub fn decrypt_directory(
                     let file_name = path.file_name().unwrap();
                     let output_path = output_dir.join(file_name).with_extension("log");
 
+                    // 验证输出路径是否在允许的目录内
+                    if let Err(e) = validate_file_path(&output_path, output_dir) {
+                        eprintln!(
+                            "Path validation failed for {}: {}",
+                            output_path.display(),
+                            e
+                        );
+                        continue;
+                    }
+
                     println!(
                         "Decrypting: {} -> {}",
                         path.display(),
@@ -285,7 +335,19 @@ pub fn decrypt_directory(
                 }
             }
         } else if recursive && path.is_dir() {
-            let sub_output_dir = output_dir.join(path.file_name().unwrap());
+            let file_name = path.file_name().unwrap();
+            let sub_output_dir = output_dir.join(file_name);
+
+            // 验证子目录路径是否在允许的目录内
+            if let Err(e) = validate_file_path(&sub_output_dir, output_dir) {
+                eprintln!(
+                    "Path validation failed for {}: {}",
+                    sub_output_dir.display(),
+                    e
+                );
+                continue;
+            }
+
             decrypt_directory(&path, &sub_output_dir, key_env, recursive)?;
         }
     }
@@ -304,6 +366,11 @@ pub fn decrypt_directory_compatible(
             "Input directory does not exist: {}",
             input_dir.display()
         ));
+    }
+
+    // 验证输出目录路径安全
+    if let Err(e) = validate_file_path(output_dir, output_dir) {
+        return Err(anyhow!("Invalid output directory: {}", e));
     }
 
     std::fs::create_dir_all(output_dir).with_context(|| {
@@ -325,6 +392,16 @@ pub fn decrypt_directory_compatible(
                     let file_name = path.file_name().unwrap();
                     let output_path = output_dir.join(file_name).with_extension("log");
 
+                    // 验证输出路径是否在允许的目录内
+                    if let Err(e) = validate_file_path(&output_path, output_dir) {
+                        eprintln!(
+                            "Path validation failed for {}: {}",
+                            output_path.display(),
+                            e
+                        );
+                        continue;
+                    }
+
                     println!(
                         "Decrypting: {} -> {}",
                         path.display(),
@@ -337,7 +414,19 @@ pub fn decrypt_directory_compatible(
                 }
             }
         } else if recursive && path.is_dir() {
-            let sub_output_dir = output_dir.join(path.file_name().unwrap());
+            let file_name = path.file_name().unwrap();
+            let sub_output_dir = output_dir.join(file_name);
+
+            // 验证子目录路径是否在允许的目录内
+            if let Err(e) = validate_file_path(&sub_output_dir, output_dir) {
+                eprintln!(
+                    "Path validation failed for {}: {}",
+                    sub_output_dir.display(),
+                    e
+                );
+                continue;
+            }
+
             decrypt_directory_compatible(&path, &sub_output_dir, key_env, recursive)?;
         }
     }
@@ -346,10 +435,25 @@ pub fn decrypt_directory_compatible(
 }
 
 pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -> Result<()> {
+    // 验证 glob 模式安全性 - 防止路径遍历
+    if input_pattern.contains("..")
+        || input_pattern.starts_with("/")
+        || input_pattern.starts_with("\\")
+    {
+        return Err(anyhow!(
+            "Invalid glob pattern: cannot contain '..' or start with '/' or '\\'"
+        ));
+    }
+
     let paths = glob::glob(input_pattern)
         .map_err(|e| anyhow!("Invalid glob pattern: {}", e))?
         .filter_map(|p| p.ok())
         .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "enc"));
+
+    // 验证输出目录路径安全
+    if let Err(e) = validate_file_path(output_dir, output_dir) {
+        return Err(anyhow!("Invalid output directory: {}", e));
+    }
 
     std::fs::create_dir_all(output_dir).with_context(|| {
         format!(
@@ -361,6 +465,16 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
     for path in paths {
         let file_name = path.file_name().unwrap();
         let output_path = output_dir.join(file_name).with_extension("log");
+
+        // 验证输出路径是否在允许的目录内
+        if let Err(e) = validate_file_path(&output_path, output_dir) {
+            eprintln!(
+                "Path validation failed for {}: {}",
+                output_path.display(),
+                e
+            );
+            continue;
+        }
 
         println!(
             "Decrypting: {} -> {}",

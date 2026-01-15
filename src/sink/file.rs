@@ -7,9 +7,11 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Default)]
 #[allow(dead_code)]
@@ -38,6 +40,8 @@ pub struct FileSink {
     next_rotation_time: Option<DateTime<Utc>>,
     last_rotation_date: Option<i32>,
     cleanup_timer_handle: Option<thread::JoinHandle<()>>,
+    // Shutdown flag for graceful thread termination
+    shutdown_flag: Arc<AtomicBool>,
 }
 
 impl FileSink {
@@ -73,6 +77,7 @@ impl FileSink {
             next_rotation_time,
             last_rotation_date,
             cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         };
 
         let _ = sink.open_file();
@@ -375,42 +380,40 @@ impl FileSink {
 
     #[allow(dead_code)]
     fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
-        let env_value = std::env::var(env_var).map_err(|_| {
+        // 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
+        let env_value = Zeroizing::new(std::env::var(env_var).map_err(|_| {
             InklogError::ConfigError(format!("Environment variable {} not set", env_var))
-        })?;
+        })?);
 
-        let key = if let Ok(decoded) = general_purpose::STANDARD.decode(&env_value) {
+        // 尝试解码 Base64 编码的密钥
+        if let Ok(decoded) = general_purpose::STANDARD.decode(env_value.as_str()) {
             if decoded.len() == 32 {
                 let mut result = [0u8; 32];
                 result.copy_from_slice(&decoded);
-                result
-            } else if decoded.len() < 32 {
-                let mut result = [0u8; 32];
-                result[..decoded.len()].copy_from_slice(&decoded);
-                result
-            } else {
-                let mut result = [0u8; 32];
-                result.copy_from_slice(&decoded[..32]);
-                result
+                return Ok(result);
             }
-        } else {
-            let raw_bytes = env_value.as_bytes();
-            if raw_bytes.len() == 32 {
-                let mut result = [0u8; 32];
-                result.copy_from_slice(raw_bytes);
-                result
-            } else if raw_bytes.len() < 32 {
-                let mut result = [0u8; 32];
-                result[..raw_bytes.len()].copy_from_slice(raw_bytes);
-                result
-            } else {
-                let mut result = [0u8; 32];
-                result.copy_from_slice(&raw_bytes[..32]);
-                result
-            }
-        };
+            // If Base64 decode succeeded but length is wrong, fall through to try raw bytes
+            // This handles cases where the key looks like Base64 but isn't valid 32-byte key
+        }
 
-        Ok(key)
+        // 如果不是 Base64，尝试使用原始字节
+        let raw_bytes = env_value.as_bytes();
+        if raw_bytes.len() >= 32 {
+            // Truncate to 32 bytes if longer
+            let mut result = [0u8; 32];
+            result.copy_from_slice(&raw_bytes[..32]);
+            Ok(result)
+        } else if raw_bytes.len() == 32 {
+            let mut result = [0u8; 32];
+            result.copy_from_slice(raw_bytes);
+            Ok(result)
+        } else {
+            Err(InklogError::ConfigError(format!(
+                "Encryption key must be exactly 32 bytes (256 bits), got {} bytes. \
+                     Please provide a valid 32-byte key.",
+                raw_bytes.len()
+            )))
+        }
     }
 
     fn check_rotation(&mut self) -> Result<(), InklogError> {
@@ -657,9 +660,21 @@ impl FileSink {
         let interval = StdDuration::from_secs(self.config.cleanup_interval_minutes * 60);
         let config = self.config.clone();
         let fallback_sink = self.fallback_sink.clone();
+        // Clone the shutdown flag for the cleanup timer thread
+        let shutdown_flag = self.shutdown_flag.clone();
 
         let handle = thread::spawn(move || loop {
+            // Check shutdown flag before sleeping to allow graceful exit
+            if shutdown_flag.load(Ordering::Relaxed) {
+                break;
+            }
+
             thread::sleep(interval);
+
+            // Check again after sleep to avoid race condition
+            if shutdown_flag.load(Ordering::Relaxed) {
+                break;
+            }
 
             if let Some(parent) = config.path.parent() {
                 let file_stem = config
@@ -865,6 +880,7 @@ mod tests {
             last_rotation_date: None,
             cleanup_timer_handle: None,
             last_cleanup_time: Instant::now(),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         };
 
         // Create some dummy log files with different modification times
@@ -909,13 +925,16 @@ mod tests {
         let key = FileSink::get_encryption_key("TEST_KEY_BASE64").unwrap();
         assert_eq!(key, [1u8; 32]);
 
-        // Test raw string padding with zeros
+        // Test raw string that is too short (should fail)
         std::env::set_var("TEST_KEY_RAW", "short_key");
-        let key = FileSink::get_encryption_key("TEST_KEY_RAW").unwrap();
-        assert_eq!(&key[..9], b"short_key");
-        // Rest should be zero-padded
-        assert_eq!(key[9], 0);
-        assert_eq!(key[10], 0);
+        let result = FileSink::get_encryption_key("TEST_KEY_RAW");
+        assert!(result.is_err(), "Short key should fail");
+
+        // Test raw string with exact 32 bytes
+        let valid_key = "a".repeat(32);
+        std::env::set_var("TEST_KEY_VALID", valid_key.clone());
+        let key = FileSink::get_encryption_key("TEST_KEY_VALID").unwrap();
+        assert_eq!(&key[..], valid_key.as_bytes());
 
         // Test raw string truncation (use special chars that aren't valid base64)
         let long_key = "@".repeat(40);
@@ -950,6 +969,7 @@ mod tests {
             last_rotation_date: None,
             cleanup_timer_handle: None,
             last_cleanup_time: Instant::now(),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         };
 
         // On most systems, this should return Ok(true) unless the disk is actually full
@@ -983,6 +1003,7 @@ mod tests {
             last_rotation_date: None,
             cleanup_timer_handle: None,
             last_cleanup_time: Instant::now(),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         };
 
         // Test disk space info
@@ -1139,7 +1160,20 @@ impl LogSink for FileSink {
     }
 
     fn shutdown(&mut self) -> Result<(), InklogError> {
-        self.stop_rotation_timer();
+        // Signal shutdown to all timer threads first
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+
+        // Stop rotation timer with graceful shutdown
+        if let Some(handle) = self.timer_handle.take() {
+            let _ = handle.join(); // Join without timeout for simplicity
+        }
+        self.rotation_timer = None;
+
+        // Stop cleanup timer with graceful shutdown
+        if let Some(handle) = self.cleanup_timer_handle.take() {
+            let _ = handle.join();
+        }
+
         self.flush()
     }
 
@@ -1148,10 +1182,23 @@ impl LogSink for FileSink {
         let last_rotation = Arc::new(Mutex::new(self.last_rotation));
         self.rotation_timer = Some(last_rotation.clone());
 
+        // Clone the shutdown flag for the timer thread
+        let shutdown_flag = self.shutdown_flag.clone();
+
         let timer_handle = thread::spawn(move || {
             let check_interval = StdDuration::from_secs(60); // Check every minute
             loop {
+                // Check shutdown flag before sleeping to allow graceful exit
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 thread::sleep(check_interval);
+
+                // Check again after sleep to avoid race condition
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
 
                 if let Ok(mut last_rotation_guard) = last_rotation.lock() {
                     if last_rotation_guard.elapsed() >= rotation_interval {
@@ -1168,11 +1215,11 @@ impl LogSink for FileSink {
     }
 
     fn stop_rotation_timer(&mut self) {
+        // Signal shutdown to the timer thread
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+
         if let Some(handle) = self.timer_handle.take() {
-            // Note: In a production system, we'd want a proper shutdown mechanism
-            // For now, we'll just drop the handle which will terminate the thread
-            // when the program exits
-            drop(handle);
+            let _ = handle.join();
         }
         self.rotation_timer = None;
     }

@@ -1,6 +1,6 @@
 [package]
 name = "inklog"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Kirky.X"]
 description = "Enterprise-grade Rust logging infrastructure"
@@ -24,6 +24,7 @@ tracing-core = "0.1"
 crossbeam-channel = "0.5"
 tokio = { version = "1.32", features = ["full"] }
 rayon = "1.8"
+num_cpus = "1.16"
 
 # Formatting & Display
 owo-colors = { version = "3.5", features = ["supports-colors"] }
@@ -76,6 +77,10 @@ lz4 = "1.24"
 cron = "0.12"
 chrono-tz = "0.8"
 tokio-cron-scheduler = "0.10"
+
+# Security - Secret memory cleanup
+zeroize = "1.7"
+zeroize_derive = "1.4"
 
 # Cryptography
 sha2 = "0.10"
