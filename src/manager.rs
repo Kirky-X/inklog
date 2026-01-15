@@ -838,7 +838,7 @@ impl LoggerManager {
                 let status =
                     metrics_health.get_status(receiver.len(), config.performance.channel_capacity);
                 for (name, sink_status) in status.sinks {
-                    if !sink_status.healthy {
+                    if !sink_status.status.is_operational() {
                         eprintln!(
                             "Health Check: Sink '{}' is unhealthy. Last error: {:?}",
                             name, sink_status.last_error
@@ -910,7 +910,7 @@ impl LoggerManager {
         let mut recovered_sinks = Vec::new();
 
         for (sink_name, sink_status) in &health_status.sinks {
-            if !sink_status.healthy && self.recover_sink(sink_name).is_ok() {
+            if !sink_status.status.is_operational() && self.recover_sink(sink_name).is_ok() {
                 recovered_sinks.push(sink_name.clone());
             }
         }
@@ -1059,7 +1059,17 @@ mod tests {
         let resp = client.get(&health_url).send().await.unwrap();
         assert!(resp.status().is_success());
         let health_json: serde_json::Value = resp.json().await.unwrap();
-        assert!(health_json.get("overall").unwrap().as_bool().unwrap());
+        // Check overall_status is operational (healthy, degraded, or not started but no unhealthy)
+        let overall_status = health_json.get("overall_status").unwrap();
+        assert!(
+            overall_status.is_object(),
+            "overall_status should be an object"
+        );
+        // If status is "Healthy" or "Degraded", system is operational
+        let status_type = overall_status
+            .get("Healthy")
+            .or(overall_status.get("Degraded"));
+        assert!(status_type.is_some() || overall_status.get("NotStarted").is_some());
 
         // Test metrics endpoint
         let metrics_url = format!("http://127.0.0.1:{}/metrics", port);

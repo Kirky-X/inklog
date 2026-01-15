@@ -4,6 +4,80 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+/// Represents the health status of a sink component.
+///
+/// This enum provides more granular status information than a simple boolean,
+/// allowing for better observability and debugging.
+#[derive(Debug, Serialize, Clone, PartialEq, Default)]
+pub enum SinkStatus {
+    /// Sink is operating normally
+    Healthy,
+    /// Sink is degraded but still functioning
+    Degraded { reason: String },
+    /// Sink has failed and is not functioning
+    Unhealthy { error: String },
+    #[default]
+    /// Sink has not been initialized yet
+    NotStarted,
+}
+
+impl SinkStatus {
+    /// Returns true if the sink is operational (healthy or degraded but functional)
+    pub fn is_operational(&self) -> bool {
+        match self {
+            SinkStatus::Healthy => true,
+            SinkStatus::Degraded { .. } => true,
+            SinkStatus::Unhealthy { .. } => false,
+            SinkStatus::NotStarted => false,
+        }
+    }
+
+    /// Returns true if the sink is completely healthy with no issues
+    pub fn is_fully_healthy(&self) -> bool {
+        self == &SinkStatus::Healthy
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct SinkHealth {
+    pub status: SinkStatus,
+    pub last_error: Option<String>,
+    pub consecutive_failures: u32,
+}
+
+impl Default for SinkHealth {
+    fn default() -> Self {
+        Self {
+            status: SinkStatus::NotStarted,
+            last_error: None,
+            consecutive_failures: 0,
+        }
+    }
+}
+
+impl SinkHealth {
+    /// Creates a healthy sink status
+    pub fn healthy() -> Self {
+        Self {
+            status: SinkStatus::Healthy,
+            last_error: None,
+            consecutive_failures: 0,
+        }
+    }
+
+    /// Creates an unhealthy sink status with the given error
+    pub fn unhealthy(error: String) -> Self {
+        Self {
+            status: SinkStatus::Unhealthy {
+                error: error.clone(),
+            },
+            last_error: Some(error),
+            consecutive_failures: 1,
+        }
+    }
+}
+
+/// Gauge metric for atomic counter values
 #[derive(Debug)]
 pub struct Gauge {
     value: AtomicI64,
@@ -29,6 +103,7 @@ impl Gauge {
     }
 }
 
+/// Histogram metric for latency distribution
 #[derive(Debug)]
 pub struct Histogram {
     buckets: Vec<AtomicU64>,
@@ -63,13 +138,6 @@ impl Histogram {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct SinkHealth {
-    pub healthy: bool,
-    pub last_error: Option<String>,
-    pub consecutive_failures: u32,
-}
-
 #[derive(Debug, Serialize)]
 pub struct MetricsSnapshot {
     pub logs_written: u64,
@@ -83,7 +151,8 @@ pub struct MetricsSnapshot {
 
 #[derive(Debug, Serialize)]
 pub struct HealthStatus {
-    pub overall: bool,
+    /// Overall health level (derived from individual sink statuses)
+    pub overall_status: SinkStatus,
     pub sinks: HashMap<String, SinkHealth>,
     pub channel_usage: f64,
     pub uptime_seconds: u64,
@@ -158,22 +227,49 @@ impl Metrics {
         self.latency_histogram.record(micros);
     }
 
+    /// Updates the health status of a sink component.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the sink
+    /// * `healthy` - Whether the sink is healthy
+    /// * `error` - Optional error message if the sink is unhealthy
     pub fn update_sink_health(&self, name: &str, healthy: bool, error: Option<String>) {
         if let Ok(mut map) = self.sink_health.lock() {
-            let entry = map.entry(name.to_string()).or_insert(SinkHealth {
-                healthy: true,
-                last_error: None,
-                consecutive_failures: 0,
-            });
+            let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
 
-            entry.healthy = healthy;
-            if !healthy {
-                entry.consecutive_failures += 1;
-                entry.last_error = error;
-            } else {
+            if healthy {
+                entry.status = SinkStatus::Healthy;
                 entry.consecutive_failures = 0;
                 entry.last_error = None;
+            } else {
+                let error_msg = error.unwrap_or_else(|| "Unknown error".to_string());
+                entry.status = SinkStatus::Unhealthy {
+                    error: error_msg.clone(),
+                };
+                entry.consecutive_failures += 1;
+                entry.last_error = Some(error_msg);
             }
+        }
+    }
+
+    /// Reports that a sink has started (transitions from NotStarted to Healthy)
+    pub fn sink_started(&self, name: &str) {
+        if let Ok(mut map) = self.sink_health.lock() {
+            let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
+            entry.status = SinkStatus::Healthy;
+            entry.consecutive_failures = 0;
+            entry.last_error = None;
+        }
+    }
+
+    /// Reports that a sink has degraded but is still operational
+    pub fn sink_degraded(&self, name: &str, reason: String) {
+        if let Ok(mut map) = self.sink_health.lock() {
+            let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
+            entry.status = SinkStatus::Degraded {
+                reason: reason.clone(),
+            };
+            entry.last_error = Some(reason);
         }
     }
 
@@ -189,14 +285,60 @@ impl Metrics {
                 std::collections::HashMap::new()
             }
         };
-        let overall = sinks.values().all(|s| s.healthy);
+
+        // Determine overall status based on sink statuses
+        let overall_status = if sinks.is_empty() {
+            SinkStatus::NotStarted
+        } else {
+            let all_healthy = sinks.values().all(|s| s.status.is_fully_healthy());
+            let any_unhealthy = sinks
+                .values()
+                .any(|s| matches!(s.status, SinkStatus::Unhealthy { .. }));
+            let any_degraded = sinks
+                .values()
+                .any(|s| matches!(s.status, SinkStatus::Degraded { .. }));
+
+            if all_healthy {
+                SinkStatus::Healthy
+            } else if any_unhealthy {
+                let errors: Vec<String> = sinks
+                    .values()
+                    .filter_map(|s| {
+                        if let SinkStatus::Unhealthy { error } = &s.status {
+                            Some(error.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                SinkStatus::Unhealthy {
+                    error: errors.join("; "),
+                }
+            } else if any_degraded {
+                let reasons: Vec<String> = sinks
+                    .values()
+                    .filter_map(|s| {
+                        if let SinkStatus::Degraded { reason } = &s.status {
+                            Some(reason.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                SinkStatus::Degraded {
+                    reason: reasons.join("; "),
+                }
+            } else {
+                SinkStatus::Healthy
+            }
+        };
 
         let count = self.latency_count.load(Ordering::Relaxed);
         let total = self.total_latency_us.load(Ordering::Relaxed);
         let avg_latency = if count > 0 { total / count } else { 0 };
 
         HealthStatus {
-            overall,
+            overall_status,
             sinks,
             channel_usage: if channel_cap > 0 {
                 channel_len as f64 / channel_cap as f64
@@ -275,7 +417,7 @@ impl Metrics {
         s.push_str("# TYPE inklog_sink_healthy gauge\n");
         if let Ok(health_map) = self.sink_health.lock() {
             for (name, health) in health_map.iter() {
-                let value = if health.healthy { 1 } else { 0 };
+                let value = if health.status.is_operational() { 1 } else { 0 };
                 s.push_str(&format!(
                     "inklog_sink_healthy{{sink=\"{}\"}} {}\n",
                     name, value
