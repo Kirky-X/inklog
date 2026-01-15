@@ -77,8 +77,11 @@ fn validate_table_name(name: &str) -> Result<String, InklogError> {
             "Table name too long".to_string(),
         ));
     }
-    // 检查首字符
-    let first_char = name.chars().next().unwrap();
+    // 检查首字符（防御性检查：确保字符串不为空）
+    let first_char = name
+        .chars()
+        .next()
+        .ok_or_else(|| InklogError::DatabaseError("Table name is empty".to_string()))?;
     if !first_char.is_ascii_alphabetic() && first_char != '_' {
         return Err(InklogError::DatabaseError(format!(
             "Table name must start with letter or underscore, got: {}",

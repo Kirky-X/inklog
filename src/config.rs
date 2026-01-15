@@ -68,6 +68,28 @@ impl Default for InklogConfig {
     }
 }
 
+impl InklogConfig {
+    /// Returns a list of enabled sink names for audit logging purposes.
+    /// Sensitive configuration values are not included in the output.
+    #[doc(hidden)]
+    pub fn sinks_enabled(&self) -> Vec<&'static str> {
+        let mut sinks = Vec::new();
+        if self.console_sink.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("console");
+        }
+        if self.file_sink.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("file");
+        }
+        if self.database_sink.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("database");
+        }
+        if self.s3_archive.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("s3_archive");
+        }
+        sinks
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     #[serde(default = "default_level")]
@@ -789,6 +811,12 @@ impl InklogConfig {
 
             if let Ok(val) = std::env::var("INKLOG_S3_ACCESS_KEY_ID") {
                 s3.access_key_id = Some(val);
+                // Security audit: Log that credentials were loaded without exposing values
+                #[cfg(any(feature = "aws", feature = "http"))]
+                tracing::debug!(
+                    event = "security_config_s3_credentials",
+                    "S3 credentials configured from environment"
+                );
             }
 
             if let Ok(val) = std::env::var("INKLOG_S3_SECRET_ACCESS_KEY") {

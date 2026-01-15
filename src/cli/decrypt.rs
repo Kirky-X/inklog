@@ -248,7 +248,7 @@ pub fn decrypt_file_to_string(input_path: &PathBuf, key_env: &str) -> Result<Str
 
 fn get_encryption_key(env_var: &str) -> Result<[u8; 32]> {
     let key_str = std::env::var(env_var)
-        .map_err(|e| anyhow!("Failed to read encryption key from {}: {}", env_var, e))?;
+        .map_err(|_| anyhow!("Encryption key environment variable not set. Please ensure INKLOG_DECRYPT_KEY or INKLOG_ENCRYPTION_KEY is defined."))?;
 
     // 尝试解码 Base64 编码的密钥
     if let Ok(decoded) = general_purpose::STANDARD.decode(key_str.trim()) {

@@ -70,7 +70,38 @@ impl LoggerManager {
         Self::with_config(InklogConfig::default()).await
     }
 
+    /// Creates a new LoggerManager with the given configuration.
+    ///
+    /// This is the primary entry point for initializing the logging system.
+    /// The configuration determines which sinks are enabled and how logs are handled.
+    ///
+    /// # Arguments
+    /// * `config` - Configuration for the logging system
+    ///
+    /// # Returns
+    /// A Result containing the LoggerManager or an error if initialization fails
+    ///
+    /// # Example
+    /// ```ignore
+    /// use inklog::{LoggerManager, InklogConfig};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let config = InklogConfig::default();
+    ///     let _logger = LoggerManager::with_config(config).await?;
+    ///     Ok(())
+    /// }
+    /// ```
     pub async fn with_config(config: InklogConfig) -> Result<Self, InklogError> {
+        // Security audit: Log logger initialization
+        #[cfg(any(feature = "aws", feature = "http"))]
+        tracing::info!(
+            event = "security_logger_initialized",
+            sinks = ?config.sinks_enabled(),
+            masking_enabled = config.global.masking_enabled,
+            "Logger manager initialized"
+        );
+
         let (manager, subscriber, filter) = Self::build_detached(config.clone()).await?;
         let registry = tracing_subscriber::registry().with(subscriber).with(filter);
         if let Err(_e) = registry.try_init() {

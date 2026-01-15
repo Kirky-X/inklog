@@ -60,6 +60,60 @@ static SENSITIVE_FIELDS: &[&str] = &[
     "recovery_code",
 ];
 
+/// Data masking utility for sensitive information protection.
+///
+/// The `DataMasker` struct provides functionality to detect and mask sensitive
+/// data in log messages and JSON structures. It uses a combination of pattern
+/// matching and field name detection to identify sensitive information.
+///
+/// # Features
+/// - **Pattern-based masking**: Detects sensitive data by regex patterns (emails, phones, etc.)
+/// - **Field name detection**: Identifies sensitive fields by name (password, api_key, etc.)
+/// - **Nested structure support**: Recursively processes nested JSON objects and arrays
+/// - **Customizable rules**: Supports multiple mask rules with configurable patterns
+///
+/// # Sensitive Field Detection
+///
+/// The following field name patterns are automatically detected as sensitive:
+/// - Authentication: `password`, `token`, `secret`, `credential`, `auth`
+/// - API Keys: `api_key`, `api_secret`, `access_key`, `secret_key`
+/// - Encryption: `encryption_key`, `decryption_key`, `private_key`
+/// - OAuth: `oauth`, `oauth_token`, `bearer_token`, `jwt`
+/// - AWS: `aws_secret`, `aws_key`, `aws_credentials`
+/// - Payment: `credit_card`, `card_number`, `cvv`, `ssn`
+///
+/// # Pattern-based Detection
+///
+/// In addition to field names, the following patterns are detected:
+/// - Email addresses (partial masking: `***@***.***`)
+/// - Phone numbers (last 4 digits shown: `138****5678`)
+/// - ID card numbers (partial masking)
+/// - Bank card numbers (partial masking)
+/// - JWT tokens
+/// - AWS access keys
+/// - Generic API keys
+///
+/// # Example
+///
+/// ```ignore
+/// use inklog::masking::DataMasker;
+///
+/// let masker = DataMasker::new();
+///
+/// // Mask by pattern
+/// let mut email = serde_json::json!("user@example.com");
+/// masker.mask_value(&mut email);
+/// assert_eq!(email, serde_json::json!("***@***.***"));
+///
+/// // Detect sensitive fields
+/// assert!(DataMasker::is_sensitive_field("password"));
+/// assert!(DataMasker::is_sensitive_field("api_key"));
+/// assert!(!DataMasker::is_sensitive_field("message"));
+/// ```
+///
+/// # Thread Safety
+///
+/// `DataMasker` is immutable and can be safely shared between threads.
 #[derive(Debug, Clone, Default)]
 pub struct DataMasker {
     rules: Vec<MaskRule>,
@@ -281,7 +335,8 @@ pub fn mask_id_card(id_card: &str) -> String {
     // 身份证号掩码：只保留后4位，如果是X结尾则保留最后3位+X
     ID_CARD_REGEX
         .replace(id_card, |caps: &regex::Captures| {
-            let suffix = caps.get(3).unwrap().as_str();
+            // Defensive: ensure the capture group exists
+            let suffix = caps.get(3).map(|m| m.as_str()).unwrap_or("");
             format!("******{}", suffix)
         })
         .to_string()

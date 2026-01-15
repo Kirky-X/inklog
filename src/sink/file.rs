@@ -21,6 +21,51 @@ struct CleanupReport {
     errors: Vec<String>,
 }
 
+/// File-based log sink with rotation, compression, and encryption support.
+///
+/// The `FileSink` struct handles writing logs to files with automatic rotation
+/// based on size or time intervals. It supports compression (ZSTD, GZIP, LZ4)
+/// and optional AES-256-GCM encryption.
+///
+/// # Features
+/// - **Automatic Rotation**: Rotates log files when size or time thresholds are reached
+/// - **Compression**: Compresses rotated logs using ZSTD (default), GZIP, LZ4, or Brotli
+/// - **Encryption**: Optional AES-256-GCM encryption for sensitive log data
+/// - **Retention**: Automatic cleanup of old log files based on retention settings
+/// - **Fallback**: Falls back to console logging if file writing fails
+///
+/// # Example
+/// ```ignore
+/// use inklog::{FileSinkConfig, LoggerManager};
+/// use std::path::PathBuf;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let file_config = FileSinkConfig {
+///         enabled: true,
+///         path: PathBuf::from("logs/app.log"),
+///         max_size: "100MB".to_string(),
+///         rotation_time: "daily".to_string(),
+///         compress: true,
+///         encrypt: false,
+///         ..Default::default()
+///     };
+///
+///     let config = inklog::InklogConfig {
+///         file_sink: Some(file_config),
+///         ..Default::default()
+///     };
+///
+///     let _logger = LoggerManager::with_config(config).await?;
+///     Ok(())
+/// }
+/// ```
+///
+/// # Thread Safety
+///
+/// FileSink is designed to be used within the logging pipeline and handles
+/// internal synchronization. Multiple FileSink instances can be created
+/// for different log files if needed.
 #[derive(Debug)]
 pub struct FileSink {
     config: FileSinkConfig,
@@ -40,11 +85,53 @@ pub struct FileSink {
     next_rotation_time: Option<DateTime<Utc>>,
     last_rotation_date: Option<i32>,
     cleanup_timer_handle: Option<thread::JoinHandle<()>>,
-    // Shutdown flag for graceful thread termination
+    /// Shutdown flag for graceful thread termination
     shutdown_flag: Arc<AtomicBool>,
 }
 
 impl FileSink {
+    /// Creates a new FileSink with the given configuration.
+    ///
+    /// This function initializes the file sink, opens the log file for writing,
+    /// and starts background timer threads for rotation and cleanup.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration for the file sink including path, rotation, and encryption settings
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(FileSink)` on success, or an `InklogError` if:
+    /// - The log file cannot be created or opened
+    /// - The encryption key is invalid (if encryption is enabled)
+    /// - Any I/O operation fails during initialization
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The parent directory of the log path does not exist and cannot be created
+    /// - The file cannot be opened for writing (permissions, disk space, etc.)
+    /// - Encryption is enabled but the encryption key environment variable is not set
+    ///   or contains an invalid key
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use inklog::FileSinkConfig;
+    /// use std::path::PathBuf;
+    ///
+    /// let config = FileSinkConfig {
+    ///     enabled: true,
+    ///     path: PathBuf::from("logs/app.log"),
+    ///     max_size: "100MB".to_string(),
+    ///     rotation_time: "daily".to_string(),
+    ///     compress: true,
+    ///     encrypt: false,
+    ///     ..Default::default()
+    /// };
+    ///
+    /// let sink = FileSink::new(config)?;
+    /// ```
     pub fn new(config: FileSinkConfig) -> Result<Self, InklogError> {
         let rotation_interval = match config.rotation_time.as_str() {
             "hourly" => StdDuration::from_secs(3600),
@@ -382,7 +469,7 @@ impl FileSink {
     fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
         // 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
         let env_value = Zeroizing::new(std::env::var(env_var).map_err(|_| {
-            InklogError::ConfigError(format!("Environment variable {} not set", env_var))
+            InklogError::ConfigError("Encryption key environment variable not set. Please configure INKLOG_ENCRYPTION_KEY.".to_string())
         })?);
 
         // 尝试解码 Base64 编码的密钥
@@ -433,6 +520,25 @@ impl FileSink {
         Ok(())
     }
 
+    /// Checks available disk space and performs cleanup if necessary.
+    ///
+    /// This method checks if there is sufficient disk space for logging operations.
+    /// If disk space is low, it attempts to clean up old log files.
+    ///
+    /// # Return Value Semantics
+    ///
+    /// - `Ok(true)`: Disk space is sufficient, logging can proceed normally
+    /// - `Ok(false)`: Disk space is critically low even after cleanup
+    /// - `Err(_)`: Disk space check failed ( filesystem error, path not accessible)
+    ///
+    /// # Note
+    ///
+    /// The method uses the following thresholds:
+    /// - Warning threshold: Less than 5% free space or less than 100MB
+    /// - Critical threshold: Less than 50MB after cleanup attempt
+    ///
+    /// When disk space is critically low, the circuit breaker will be triggered
+    /// and the fallback sink (console) will be used.
     fn check_disk_space(&self) -> Result<bool, InklogError> {
         use nix::sys::statvfs::statvfs;
         if let Some(parent) = self
@@ -778,6 +884,20 @@ impl FileSink {
     }
 
     #[allow(dead_code)]
+    /// Returns disk space information for the log file's filesystem.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok((total_bytes, available_bytes))` on success, or an error if:
+    /// - The parent directory doesn't exist or is inaccessible
+    /// - The filesystem stat call fails
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let (total, available) = sink.get_disk_space_info()?;
+    /// println!("Total: {} bytes, Available: {} bytes", total, available);
+    /// ```
     fn get_disk_space_info(&self) -> Result<(u64, u64), InklogError> {
         if let Some(parent) = self.config.path.parent() {
             if let Ok(_metadata) = fs::metadata(parent) {
