@@ -39,7 +39,7 @@ fn test_console_sink_format() {
 
 #[test]
 fn test_file_sink_rotation() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("app.log");
 
     let config = FileSinkConfig {
@@ -49,15 +49,15 @@ fn test_file_sink_rotation() {
         ..Default::default()
     };
 
-    let mut sink = inklog::sink::file::FileSink::new(config).unwrap();
+    let mut sink = inklog::sink::file::FileSink::new(config).expect("Failed to create FileSink");
 
     // Write enough data to trigger rotation
     for i in 0..10 {
         let record = LogRecord::new(Level::INFO, "test".into(), format!("msg {}", i));
-        sink.write(&record).unwrap();
+        sink.write(&record).expect("Failed to write log record");
     }
 
     // Check if files created
-    let entries = std::fs::read_dir(temp_dir.path()).unwrap();
+    let entries = std::fs::read_dir(temp_dir.path()).expect("Failed to read temp directory");
     assert!(entries.count() >= 1);
 }

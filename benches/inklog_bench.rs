@@ -28,7 +28,7 @@ fn bench_log_creation(c: &mut Criterion) {
 }
 
 fn bench_console_sink_latency(c: &mut Criterion) {
-    let _rt = Runtime::new().unwrap();
+    let _rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("console_sink_latency");
     group.measurement_time(Duration::from_secs(5));
 
@@ -44,9 +44,12 @@ fn bench_console_sink_latency(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let rt = Runtime::new().unwrap();
-            let (_manager, subscriber, filter) =
-                rt.block_on(async { LoggerManager::build_detached(config).await.unwrap() });
+            let rt = Runtime::new().expect("Benchmark setup failed");
+            let (_manager, subscriber, filter) = rt.block_on(async {
+                LoggerManager::build_detached(config)
+                    .await
+                    .expect("Benchmark setup failed")
+            });
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -61,13 +64,13 @@ fn bench_console_sink_latency(c: &mut Criterion) {
 }
 
 fn bench_channel_enqueue_latency(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("channel_enqueue_latency");
     group.measurement_time(Duration::from_secs(5));
 
     group.bench_function("async_channel_enqueue", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("channel_bench.log");
 
             let config = InklogConfig {
@@ -80,8 +83,9 @@ fn bench_channel_enqueue_latency(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (_manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (_manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -96,14 +100,14 @@ fn bench_channel_enqueue_latency(c: &mut Criterion) {
 }
 
 fn bench_throughput_sustained(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("throughput_sustained");
     group.throughput(Throughput::Elements(100));
     group.measurement_time(Duration::from_secs(30));
 
     group.bench_function("sustained_5_logs_per_sec", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("throughput_sustained.log");
 
             let config = InklogConfig {
@@ -116,8 +120,9 @@ fn bench_throughput_sustained(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (_manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (_manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -141,14 +146,14 @@ fn bench_throughput_sustained(c: &mut Criterion) {
 }
 
 fn bench_throughput_burst(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("throughput_burst");
     group.throughput(Throughput::Elements(500));
     group.measurement_time(Duration::from_secs(10));
 
     group.bench_function("burst_500_logs_per_sec", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("throughput_burst.log");
 
             let config = InklogConfig {
@@ -161,8 +166,9 @@ fn bench_throughput_burst(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (_manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (_manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -177,14 +183,14 @@ fn bench_throughput_burst(c: &mut Criterion) {
 }
 
 fn bench_file_sink_throughput(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("file_sink");
     group.throughput(Throughput::Elements(1));
     group.measurement_time(Duration::from_secs(10));
 
     group.bench_function("async_file_log", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("bench.log");
 
             let config = InklogConfig {
@@ -198,8 +204,9 @@ fn bench_file_sink_throughput(c: &mut Criterion) {
             };
 
             // Use build_detached to avoid setting global subscriber repeatedly
-            let (_manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (_manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
 
             // Set subscriber for the current scope/thread
@@ -216,7 +223,7 @@ fn bench_file_sink_throughput(c: &mut Criterion) {
 }
 
 fn bench_noop_throughput(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("noop_sink");
     group.throughput(Throughput::Elements(1));
     group.measurement_time(Duration::from_secs(10));
@@ -229,8 +236,9 @@ fn bench_noop_throughput(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (_manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (_manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
 
             let _guard = tracing::subscriber::set_default(registry);
@@ -246,13 +254,13 @@ fn bench_noop_throughput(c: &mut Criterion) {
 }
 
 fn bench_memory_usage(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("memory_usage");
     group.measurement_time(Duration::from_secs(10));
 
     group.bench_function("steady_state_memory", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("memory_bench.log");
 
             let config = InklogConfig {
@@ -265,8 +273,9 @@ fn bench_memory_usage(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (_manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (_manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -319,7 +328,7 @@ fn bench_parquet_conversion(c: &mut Criterion) {
     group.bench_function("convert_100_logs", |b| {
         b.iter(|| {
             let logs = generate_test_logs(100);
-            let _ = convert_logs_to_parquet(&logs);
+            let _ = convert_logs_to_parquet(&logs, &Default::default());
         })
     });
 
@@ -327,7 +336,7 @@ fn bench_parquet_conversion(c: &mut Criterion) {
     group.bench_function("convert_1000_logs", |b| {
         b.iter(|| {
             let logs = generate_test_logs(1000);
-            let _ = convert_logs_to_parquet(&logs);
+            let _ = convert_logs_to_parquet(&logs, &Default::default());
         })
     });
 
@@ -335,7 +344,7 @@ fn bench_parquet_conversion(c: &mut Criterion) {
     group.bench_function("convert_10000_logs", |b| {
         b.iter(|| {
             let logs = generate_test_logs(10000);
-            let _ = convert_logs_to_parquet(&logs);
+            let _ = convert_logs_to_parquet(&logs, &Default::default());
         })
     });
 
@@ -344,7 +353,7 @@ fn bench_parquet_conversion(c: &mut Criterion) {
         b.iter(|| {
             let logs = generate_test_logs(1000);
             let start = Instant::now();
-            let _ = convert_logs_to_parquet(&logs);
+            let _ = convert_logs_to_parquet(&logs, &Default::default());
             1000.0 / start.elapsed().as_secs_f64()
         })
     });
@@ -415,14 +424,14 @@ fn bench_masking(c: &mut Criterion) {
 // ============ 背压性能测试 ============
 
 fn bench_backpressure(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("backpressure");
     group.measurement_time(Duration::from_secs(15));
 
     // 测试小容量 Channel 的背压效果
     group.bench_function("backpressure_100_capacity", |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("backpressure.log");
 
             let config = InklogConfig {
@@ -439,8 +448,9 @@ fn bench_backpressure(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (_manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (_manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -458,7 +468,7 @@ fn bench_backpressure(c: &mut Criterion) {
     // 测试大批量写入时的延迟
     group.bench_function("backpressure_burst_10k", |b| {
         b.to_async(&rt).iter_custom(|_iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("backpressure_burst.log");
 
             let config = InklogConfig {
@@ -475,8 +485,9 @@ fn bench_backpressure(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -486,7 +497,7 @@ fn bench_backpressure(c: &mut Criterion) {
             }
 
             // 等待所有日志处理完成
-            manager.shutdown().unwrap();
+            manager.shutdown().expect("Benchmark setup failed");
 
             start.elapsed()
         })
@@ -498,7 +509,7 @@ fn bench_backpressure(c: &mut Criterion) {
 // ============ 并发性能测试 ============
 
 fn bench_concurrency(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().expect("Benchmark setup failed");
     let mut group = c.benchmark_group("concurrency");
     group.measurement_time(Duration::from_secs(15));
     group.throughput(Throughput::Elements(1));
@@ -506,7 +517,7 @@ fn bench_concurrency(c: &mut Criterion) {
     // 多线程并发写入
     group.bench_function("concurrent_4_threads", |b| {
         b.to_async(&rt).iter_custom(|_iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("concurrent.log");
 
             let config = InklogConfig {
@@ -519,8 +530,9 @@ fn bench_concurrency(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -540,7 +552,7 @@ fn bench_concurrency(c: &mut Criterion) {
                 .count();
 
             // 等待完成
-            manager.shutdown().unwrap();
+            manager.shutdown().expect("Benchmark setup failed");
 
             assert_eq!(result, 1000);
             start.elapsed()
@@ -550,7 +562,7 @@ fn bench_concurrency(c: &mut Criterion) {
     // 异步任务并发
     group.bench_function("concurrent_async_tasks", |b| {
         b.to_async(&rt).iter_custom(|_iters| async move {
-            let temp_dir = TempDir::new().unwrap();
+            let temp_dir = TempDir::new().expect("Benchmark setup failed");
             let log_path = temp_dir.path().join("async_concurrent.log");
 
             let config = InklogConfig {
@@ -563,8 +575,9 @@ fn bench_concurrency(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let (manager, subscriber, filter) =
-                LoggerManager::build_detached(config).await.unwrap();
+            let (manager, subscriber, filter) = LoggerManager::build_detached(config)
+                .await
+                .expect("Benchmark setup failed");
             let registry = tracing_subscriber::registry().with(subscriber).with(filter);
             let _guard = tracing::subscriber::set_default(registry);
 
@@ -586,10 +599,10 @@ fn bench_concurrency(c: &mut Criterion) {
                 .collect();
 
             for handle in handles {
-                handle.await.unwrap();
+                handle.await.expect("Benchmark setup failed");
             }
 
-            manager.shutdown().unwrap();
+            manager.shutdown().expect("Benchmark setup failed");
             start.elapsed()
         })
     });

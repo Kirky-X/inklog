@@ -13,7 +13,7 @@ async fn test_e2e_logging() {
         // Give some time for async workers
         std::thread::sleep(Duration::from_millis(200));
 
-        logger.shutdown().unwrap();
+        logger.shutdown().expect("Failed to shutdown logger");
     }
 }
 
@@ -21,7 +21,7 @@ async fn test_e2e_logging() {
 #[tokio::test]
 async fn test_load_from_file() {
     use std::io::Write;
-    let mut file = tempfile::NamedTempFile::new().unwrap();
+    let mut file = tempfile::NamedTempFile::new().expect("Failed to create temp file");
     write!(
         file,
         r#"
@@ -31,7 +31,7 @@ async fn test_load_from_file() {
         channel_capacity = 500
     "#
     )
-    .unwrap();
+    .expect("Failed to write config to temp file");
 
     let _ = LoggerManager::from_file(file.path()).await;
 }

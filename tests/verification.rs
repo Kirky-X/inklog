@@ -10,20 +10,22 @@ use tempfile::TempDir;
 use tracing::Level;
 
 fn get_log_count(url: &str) -> i64 {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     rt.block_on(async {
         use inklog::sink::database::Entity;
         use sea_orm::{Database, EntityTrait};
 
-        let db = Database::connect(url).await.unwrap();
-        let logs = Entity::find().all(&db).await.unwrap();
+        let db = Database::connect(url)
+            .await
+            .expect("Failed to connect to database");
+        let logs = Entity::find().all(&db).await.expect("Failed to query logs");
         logs.len() as i64
     })
 }
 
 #[test]
 fn verify_file_sink_compression() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("test.log");
 
     let config = FileSinkConfig {
@@ -35,31 +37,33 @@ fn verify_file_sink_compression() {
         ..Default::default()
     };
 
-    let mut sink = FileSink::new(config).unwrap();
+    let mut sink = FileSink::new(config).expect("Failed to create FileSink");
     let record = LogRecord::new(
         Level::INFO,
         "test".into(),
         "A long message to trigger rotation".into(),
     );
-    sink.write(&record).unwrap();
+    sink.write(&record).expect("Failed to write log record");
 
     // Trigger rotation
     for _ in 0..5 {
-        sink.write(&record).unwrap();
+        sink.write(&record)
+            .expect("Failed to write log record during rotation");
     }
 
     // Wait for background compression
     std::thread::sleep(Duration::from_millis(1000));
 
-    let entries = std::fs::read_dir(temp_dir.path()).unwrap();
+    let entries = std::fs::read_dir(temp_dir.path()).expect("Failed to read temp directory");
     let mut found_zst = false;
     for entry in entries {
-        let path = entry.unwrap().path();
+        let path = entry.expect("Failed to get directory entry").path();
         if path.extension().is_some_and(|ext| ext == "zst") {
             found_zst = true;
-            let mut file = File::open(path).unwrap();
+            let mut file = File::open(&path).expect("Failed to open compressed file");
             let mut magic = [0u8; 4];
-            file.read_exact(&mut magic).unwrap();
+            file.read_exact(&mut magic)
+                .expect("Failed to read file magic bytes");
             // Zstd magic: 0xFD2FB528 (LE: 28 B5 2F FD)
             assert_eq!(magic, [0x28, 0xB5, 0x2F, 0xFD]);
         }
@@ -69,7 +73,7 @@ fn verify_file_sink_compression() {
 
 #[test]
 fn verify_file_sink_encryption() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("enc.log");
 
     // Use a proper base64-encoded 32-byte key (44 characters)
@@ -85,23 +89,24 @@ fn verify_file_sink_encryption() {
         ..Default::default()
     };
 
-    let mut sink = FileSink::new(config).unwrap();
+    let mut sink = FileSink::new(config).expect("Failed to create FileSink");
     let record = LogRecord::new(Level::INFO, "test".into(), "Secret message".into());
-    sink.write(&record).unwrap();
+    sink.write(&record).expect("Failed to write log record");
 
     for _ in 0..5 {
-        sink.write(&record).unwrap();
+        sink.write(&record)
+            .expect("Failed to write log record during rotation");
     }
 
     std::thread::sleep(Duration::from_millis(500));
 
-    let entries = std::fs::read_dir(temp_dir.path()).unwrap();
+    let entries = std::fs::read_dir(temp_dir.path()).expect("Failed to read temp directory");
     let mut found_enc = false;
     for entry in entries {
-        let path = entry.unwrap().path();
+        let path = entry.expect("Failed to get directory entry").path();
         if path.extension().is_some_and(|ext| ext == "enc") {
             found_enc = true;
-            let metadata = std::fs::metadata(path).unwrap();
+            let metadata = std::fs::metadata(&path).expect("Failed to get file metadata");
             assert!(
                 metadata.len() > 12,
                 "Encrypted file should have nonce (12 bytes) + ciphertext"
@@ -113,7 +118,7 @@ fn verify_file_sink_encryption() {
 
 #[test]
 fn verify_database_sink_sqlite() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let db_path = temp_dir.path().join("logs.db");
 
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -127,10 +132,11 @@ fn verify_database_sink_sqlite() {
         ..Default::default()
     };
 
-    let mut sink = DatabaseSink::new(config).unwrap();
+    let mut sink = DatabaseSink::new(config).expect("Failed to create DatabaseSink");
 
     let record = LogRecord::new(Level::INFO, "db_test".into(), "message to db".into());
-    sink.write(&record).unwrap();
+    sink.write(&record)
+        .expect("Failed to write log record to database");
 
     std::thread::sleep(Duration::from_millis(500));
 

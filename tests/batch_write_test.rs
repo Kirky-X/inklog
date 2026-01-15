@@ -7,7 +7,7 @@ use tracing::Level;
 
 #[test]
 fn test_database_batch_write() {
-    let temp_dir = tempfile::TempDir::new().unwrap();
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
     let db_path = temp_dir.path().join("batch_test.db");
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
@@ -20,12 +20,12 @@ fn test_database_batch_write() {
         ..Default::default()
     };
 
-    let mut sink = DatabaseSink::new(config).unwrap();
+    let mut sink = DatabaseSink::new(config).expect("Failed to create DatabaseSink");
 
     // Write 3 records (buffer=3, not enough to trigger batch flush)
     for i in 0..3 {
         let record = LogRecord::new(Level::INFO, "batch_test".into(), format!("Message {}", i));
-        sink.write(&record).unwrap();
+        sink.write(&record).expect("Failed to write log record");
     }
 
     // Wait for flush interval to pass
@@ -33,18 +33,20 @@ fn test_database_batch_write() {
 
     // Write 4th record - this triggers time-based flush (3 records flushed)
     let record = LogRecord::new(Level::INFO, "batch_test".into(), "Trigger flush".into());
-    sink.write(&record).unwrap();
+    sink.write(&record).expect("Failed to write log record");
 
     // Wait for flush to complete
     std::thread::sleep(Duration::from_millis(200));
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let count_before = rt.block_on(async {
         use inklog::sink::database::Entity;
         use sea_orm::{Database, EntityTrait};
 
-        let db = Database::connect(&url).await.unwrap();
-        let logs = Entity::find().all(&db).await.unwrap();
+        let db = Database::connect(&url)
+            .await
+            .expect("Failed to connect to database");
+        let logs = Entity::find().all(&db).await.expect("Failed to query logs");
         logs.len() as i64
     });
     // After time-based flush, 4 records should be in DB
@@ -53,7 +55,7 @@ fn test_database_batch_write() {
     // Write 5 more records to trigger batch-based flush (batch_size=5)
     for i in 4..9 {
         let record = LogRecord::new(Level::INFO, "batch_test".into(), format!("Message {}", i));
-        sink.write(&record).unwrap();
+        sink.write(&record).expect("Failed to write log record");
     }
 
     // Wait for batch flush to complete
@@ -63,8 +65,10 @@ fn test_database_batch_write() {
         use inklog::sink::database::Entity;
         use sea_orm::{Database, EntityTrait};
 
-        let db = Database::connect(&url).await.unwrap();
-        let logs = Entity::find().all(&db).await.unwrap();
+        let db = Database::connect(&url)
+            .await
+            .expect("Failed to connect to database");
+        let logs = Entity::find().all(&db).await.expect("Failed to query logs");
         logs.len() as i64
     });
     // Total should be 4 (first flush) + 5 (batch flush) = 9
@@ -79,7 +83,7 @@ fn test_database_batch_write() {
 
 #[test]
 fn test_database_timeout_flush() {
-    let temp_dir = tempfile::TempDir::new().unwrap();
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
     let db_path = temp_dir.path().join("timeout_test.db");
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
@@ -92,25 +96,29 @@ fn test_database_timeout_flush() {
         ..Default::default()
     };
 
-    let mut sink = DatabaseSink::new(config).unwrap();
+    let mut sink = DatabaseSink::new(config).expect("Failed to create DatabaseSink");
 
     let record1 = LogRecord::new(Level::INFO, "timeout_test".into(), "First message".into());
-    sink.write(&record1).unwrap();
+    sink.write(&record1)
+        .expect("Failed to write first log record");
 
     std::thread::sleep(Duration::from_millis(500));
 
     let record2 = LogRecord::new(Level::INFO, "timeout_test".into(), "Second message".into());
-    sink.write(&record2).unwrap();
+    sink.write(&record2)
+        .expect("Failed to write second log record");
 
     std::thread::sleep(Duration::from_millis(500));
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let count = rt.block_on(async {
         use inklog::sink::database::Entity;
         use sea_orm::{Database, EntityTrait};
 
-        let db = Database::connect(&url).await.unwrap();
-        let logs = Entity::find().all(&db).await.unwrap();
+        let db = Database::connect(&url)
+            .await
+            .expect("Failed to connect to database");
+        let logs = Entity::find().all(&db).await.expect("Failed to query logs");
         logs.len() as i64
     });
 

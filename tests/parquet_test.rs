@@ -81,10 +81,10 @@ fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_parquet_basic_conversion() {
     let logs = create_test_logs(100);
-    let result = convert_logs_to_parquet(&logs);
+    let result = convert_logs_to_parquet(&logs, &Default::default());
 
     assert!(result.is_ok(), "Parquet conversion should succeed");
-    let parquet_data = result.unwrap();
+    let parquet_data = result.expect("Parquet conversion should succeed");
 
     assert!(!parquet_data.is_empty(), "Parquet data should not be empty");
 
@@ -96,14 +96,10 @@ fn test_parquet_basic_conversion() {
 fn test_parquet_small_dataset() {
     let logs = create_test_logs(1_000);
     let start = Instant::now();
-    let result = convert_logs_to_parquet(&logs);
+    let result = convert_logs_to_parquet(&logs, &Default::default());
     let duration = start.elapsed();
 
-    assert!(
-        result.is_ok(),
-        "Parquet conversion should succeed for 1K records"
-    );
-    let parquet_data = result.unwrap();
+    let parquet_data = result.expect("Parquet conversion should succeed for 1K records");
 
     println!("1K records conversion time: {:?}", duration);
     println!("1K records Parquet size: {} bytes", parquet_data.len());
@@ -126,14 +122,10 @@ fn test_parquet_small_dataset() {
 fn test_parquet_medium_dataset() {
     let logs = create_test_logs(10_000);
     let start = Instant::now();
-    let result = convert_logs_to_parquet(&logs);
+    let result = convert_logs_to_parquet(&logs, &Default::default());
     let duration = start.elapsed();
 
-    assert!(
-        result.is_ok(),
-        "Parquet conversion should succeed for 10K records"
-    );
-    let parquet_data = result.unwrap();
+    let parquet_data = result.expect("Parquet conversion should succeed for 10K records");
 
     println!("10K records conversion time: {:?}", duration);
     println!("10K records Parquet size: {} bytes", parquet_data.len());
@@ -152,14 +144,10 @@ fn test_parquet_medium_dataset() {
 fn test_parquet_large_dataset() {
     let logs = create_test_logs(100_000);
     let start = Instant::now();
-    let result = convert_logs_to_parquet(&logs);
+    let result = convert_logs_to_parquet(&logs, &Default::default());
     let duration = start.elapsed();
 
-    assert!(
-        result.is_ok(),
-        "Parquet conversion should succeed for 100K records"
-    );
-    let parquet_data = result.unwrap();
+    let parquet_data = result.expect("Parquet conversion should succeed for 100K records");
 
     println!("100K records conversion time: {:?}", duration);
     println!("100K records Parquet size: {} bytes", parquet_data.len());
@@ -177,7 +165,8 @@ fn test_parquet_large_dataset() {
 #[test]
 fn test_parquet_compression_ratio() {
     let logs = create_test_logs(10_000);
-    let result = convert_logs_to_parquet(&logs).expect("Parquet conversion should succeed");
+    let result = convert_logs_to_parquet(&logs, &Default::default())
+        .expect("Parquet conversion should succeed");
 
     // 计算原始JSON大小
     let json_data = serde_json::to_vec(&logs).expect("JSON serialization should succeed");
@@ -201,13 +190,9 @@ fn test_parquet_compression_ratio() {
 #[test]
 fn test_parquet_empty_dataset() {
     let logs: Vec<inklog::sink::database::Model> = vec![];
-    let result = convert_logs_to_parquet(&logs);
+    let result = convert_logs_to_parquet(&logs, &Default::default());
 
-    assert!(
-        result.is_ok(),
-        "Parquet conversion should succeed for empty dataset"
-    );
-    let parquet_data = result.unwrap();
+    let parquet_data = result.expect("Parquet conversion should succeed for empty dataset");
 
     // 空数据集应该产生一个有效的Parquet文件（即使没有数据行）
     assert!(
@@ -219,7 +204,8 @@ fn test_parquet_empty_dataset() {
 #[test]
 fn test_parquet_schema_compatibility() {
     let logs = create_test_logs(100);
-    let result = convert_logs_to_parquet(&logs).expect("Parquet conversion should succeed");
+    let result = convert_logs_to_parquet(&logs, &Default::default())
+        .expect("Parquet conversion should succeed");
 
     let bytes = Bytes::from(result);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)

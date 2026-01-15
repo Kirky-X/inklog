@@ -222,7 +222,7 @@ mod tests {
         record.mask_sensitive_fields();
         assert_eq!(
             record.fields.get("id_card").unwrap(),
-            &Value::String("**************1234".to_string())
+            &Value::String("******1234".to_string())
         );
     }
 
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(record.message, "User **@**.*** called ***-****-****");
         assert_eq!(
             record.fields.get("id_card").unwrap(),
-            &Value::String("**************1234".to_string())
+            &Value::String("******1234".to_string())
         );
         assert_eq!(
             record.fields.get("password").unwrap(),

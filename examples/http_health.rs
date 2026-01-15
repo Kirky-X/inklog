@@ -5,7 +5,11 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
-    let logger = Arc::new(LoggerManager::new().await.unwrap());
+    let logger = Arc::new(
+        LoggerManager::new()
+            .await
+            .expect("Failed to create LoggerManager"),
+    );
 
     let app = Router::new().route(
         "/health",
@@ -20,9 +24,11 @@ async fn main() {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("Health check listening on {}", addr);
-    let _listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let _listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind TCP listener");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
-        .unwrap();
+        .expect("HTTP server failed");
 }
