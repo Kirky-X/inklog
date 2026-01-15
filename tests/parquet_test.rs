@@ -3,12 +3,15 @@
 //! 测试Parquet导出功能的正确性、性能和兼容性
 
 use arrow_array::RecordBatchReader;
+use arrow_schema::DataType;
 use bytes::Bytes;
 use inklog::sink::database::convert_logs_to_parquet;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::time::Instant;
 
-/// 创建测试日志数据
+// ============ Test Data Helper Functions ============
+
+/// Creates test log data with specified count
 fn create_test_logs(count: usize) -> Vec<inklog::sink::database::Model> {
     (0..count)
         .map(|i| inklog::sink::database::Model {
@@ -35,37 +38,63 @@ fn create_test_logs(count: usize) -> Vec<inklog::sink::database::Model> {
         .collect()
 }
 
-/// 验证Parquet文件可读性和Schema正确性
-fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+// ============ Parquet Verification Helper Functions ============
+
+/// Expected schema field names
+const EXPECTED_FIELD_NAMES: &[&str] = &[
+    "id",
+    "timestamp",
+    "level",
+    "target",
+    "message",
+    "fields",
+    "file",
+    "line",
+    "thread_id",
+];
+
+/// Expected schema field types
+const EXPECTED_FIELD_TYPES: &[DataType] = &[
+    DataType::Int64, // id
+    DataType::Utf8,  // timestamp
+    DataType::Utf8,  // level
+    DataType::Utf8,  // target
+    DataType::Utf8,  // message
+    DataType::Utf8,  // fields
+    DataType::Utf8,  // file
+    DataType::Int64, // line
+    DataType::Utf8,  // thread_id
+];
+
+/// Verifies Parquet file schema (names and types)
+fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
 
-    // 验证Schema
     let schema = reader.schema();
-    assert_eq!(schema.fields().len(), 9, "Schema should have 9 fields");
+    let fields = schema.fields();
 
-    let field_names: Vec<String> = schema
-        .fields()
+    // Verify field count
+    assert_eq!(fields.len(), 9, "Schema should have 9 fields");
+
+    // Verify field names and types
+    for (i, (name, dtype)) in EXPECTED_FIELD_NAMES
         .iter()
-        .map(|f| f.name().to_string())
-        .collect();
-    assert_eq!(
-        field_names,
-        vec![
-            "id",
-            "timestamp",
-            "level",
-            "target",
-            "message",
-            "fields",
-            "file",
-            "line",
-            "thread_id"
-        ],
-        "Schema field names should match"
-    );
+        .zip(EXPECTED_FIELD_TYPES.iter())
+        .enumerate()
+    {
+        assert_eq!(fields[i].name(), *name);
+        assert_eq!(fields[i].data_type(), dtype);
+    }
 
-    // 验证数据
+    Ok(())
+}
+
+/// Verifies Parquet file data content
+fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = Bytes::copy_from_slice(data);
+    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
+
     let mut total_rows = 0;
     for batch in reader {
         let batch = batch?;
@@ -78,6 +107,15 @@ fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Complete Parquet file verification (schema + data)
+fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    verify_parquet_schema(data)?;
+    verify_parquet_data(data)?;
+    Ok(())
+}
+
+// ============ Parquet Tests ============
+
 #[test]
 fn test_parquet_basic_conversion() {
     let logs = create_test_logs(100);
@@ -88,7 +126,6 @@ fn test_parquet_basic_conversion() {
 
     assert!(!parquet_data.is_empty(), "Parquet data should not be empty");
 
-    // 验证文件可读性
     verify_parquet_file(&parquet_data).expect("Parquet file should be valid");
 }
 
@@ -104,7 +141,7 @@ fn test_parquet_small_dataset() {
     println!("1K records conversion time: {:?}", duration);
     println!("1K records Parquet size: {} bytes", parquet_data.len());
 
-    // 验证压缩率（假设原始JSON约为每条记录200字节）
+    // Verify compression ratio (assuming ~200 bytes per record in JSON)
     let estimated_original_size = logs.len() * 200;
     let compression_ratio = estimated_original_size as f64 / parquet_data.len() as f64;
     println!("Estimated compression ratio: {:.2}x", compression_ratio);
@@ -130,7 +167,7 @@ fn test_parquet_medium_dataset() {
     println!("10K records conversion time: {:?}", duration);
     println!("10K records Parquet size: {} bytes", parquet_data.len());
 
-    // 验证性能（10K记录应该在5秒内完成）
+    // Verify performance (10K records should complete in < 5 seconds)
     assert!(
         duration.as_secs() < 5,
         "10K records conversion should complete in < 5 seconds, took {:?}",
@@ -152,7 +189,7 @@ fn test_parquet_large_dataset() {
     println!("100K records conversion time: {:?}", duration);
     println!("100K records Parquet size: {} bytes", parquet_data.len());
 
-    // 验证性能（100K记录应该在30秒内完成）
+    // Verify performance (100K records should complete in < 30 seconds)
     assert!(
         duration.as_secs() < 30,
         "100K records conversion should complete in < 30 seconds, took {:?}",
@@ -168,7 +205,7 @@ fn test_parquet_compression_ratio() {
     let result = convert_logs_to_parquet(&logs, &Default::default())
         .expect("Parquet conversion should succeed");
 
-    // 计算原始JSON大小
+    // Calculate original JSON size
     let json_data = serde_json::to_vec(&logs).expect("JSON serialization should succeed");
     let original_size = json_data.len();
     let compressed_size = result.len();
@@ -179,7 +216,7 @@ fn test_parquet_compression_ratio() {
     println!("Compressed Parquet size: {} bytes", compressed_size);
     println!("Actual compression ratio: {:.2}x", compression_ratio);
 
-    // 验证压缩率 > 50%
+    // Verify compression ratio > 50%
     assert!(
         compression_ratio > 2.0,
         "Compression ratio should be > 2.0x, got {:.2}x",
@@ -194,7 +231,7 @@ fn test_parquet_empty_dataset() {
 
     let parquet_data = result.expect("Parquet conversion should succeed for empty dataset");
 
-    // 空数据集应该产生一个有效的Parquet文件（即使没有数据行）
+    // Empty dataset should produce a valid Parquet file (even without data rows)
     assert!(
         !parquet_data.is_empty(),
         "Parquet file should have metadata even for empty data"
@@ -207,40 +244,6 @@ fn test_parquet_schema_compatibility() {
     let result = convert_logs_to_parquet(&logs, &Default::default())
         .expect("Parquet conversion should succeed");
 
-    let bytes = Bytes::from(result);
-    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)
-        .expect("Should create Parquet reader")
-        .build()
-        .expect("Should build reader");
-
-    let schema = reader.schema();
-
-    // 验证每个字段的类型
-    let fields = schema.fields();
-    assert_eq!(fields[0].name(), "id");
-    assert_eq!(fields[0].data_type(), &arrow_schema::DataType::Int64);
-
-    assert_eq!(fields[1].name(), "timestamp");
-    assert_eq!(fields[1].data_type(), &arrow_schema::DataType::Utf8);
-
-    assert_eq!(fields[2].name(), "level");
-    assert_eq!(fields[2].data_type(), &arrow_schema::DataType::Utf8);
-
-    assert_eq!(fields[3].name(), "target");
-    assert_eq!(fields[3].data_type(), &arrow_schema::DataType::Utf8);
-
-    assert_eq!(fields[4].name(), "message");
-    assert_eq!(fields[4].data_type(), &arrow_schema::DataType::Utf8);
-
-    assert_eq!(fields[5].name(), "fields");
-    assert_eq!(fields[5].data_type(), &arrow_schema::DataType::Utf8);
-
-    assert_eq!(fields[6].name(), "file");
-    assert_eq!(fields[6].data_type(), &arrow_schema::DataType::Utf8);
-
-    assert_eq!(fields[7].name(), "line");
-    assert_eq!(fields[7].data_type(), &arrow_schema::DataType::Int64);
-
-    assert_eq!(fields[8].name(), "thread_id");
-    assert_eq!(fields[8].data_type(), &arrow_schema::DataType::Utf8);
+    // Use the consolidated schema verification
+    verify_parquet_schema(&result).expect("Schema verification should pass");
 }

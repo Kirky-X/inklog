@@ -89,19 +89,27 @@ impl LogRecord {
         record
     }
 
+    /// Sensitive key patterns to mask (lowercase for case-insensitive matching)
+    const SENSITIVE_KEY_PATTERNS: &[&str] =
+        &["password", "token", "secret", "key", "credential", "auth"];
+
+    /// Checks if a key contains sensitive patterns
+    fn is_sensitive_key(key: &str) -> bool {
+        let key_lower = key.to_lowercase();
+        Self::SENSITIVE_KEY_PATTERNS
+            .iter()
+            .any(|pattern| key_lower.contains(*pattern))
+    }
+
     fn mask_sensitive_fields(&mut self) {
         let masker = DataMasker::new();
         self.message = masker.mask(&self.message);
         for (_, v) in self.fields.iter_mut() {
             masker.mask_value(v);
         }
-        let sensitive_keys = ["password", "token", "secret", "key", "credential", "auth"];
         for (k, v) in self.fields.iter_mut() {
-            for sensitive in sensitive_keys {
-                if k.to_lowercase().contains(sensitive) {
-                    *v = Value::String("***MASKED***".to_string());
-                    break;
-                }
+            if Self::is_sensitive_key(k) {
+                *v = Value::String("***MASKED***".to_string());
             }
         }
     }
