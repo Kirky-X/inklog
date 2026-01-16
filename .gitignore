@@ -7,6 +7,11 @@
 *.swo
 *~
 .DS_Store
+*.sublime-project
+*.sublime-workspace
+.vscode/
+.fleet/
+.jb/
 
 # Build
 target/
@@ -16,21 +21,91 @@ Cargo.lock
 # Logs
 logs/
 *.log
+*.log.*
 
 # Temp
 temp/
 tmp/
 *.tmp
+*.temp
 
 # Testing
 *.profraw
 *.profdata
+*.prof
+test_results/
+coverage/
+*.cover
 
 # Environment
 .env
 .env.local
 .env.*.local
+*.env
+secrets/
 
 # Backup
 *.bak
 *.backup
+*.old
+*~
+
+# Project docs and configs
+.sisyphus/
+AGENTS.md
+docs/prd.md
+docs/task.md
+docs/tdd.md
+docs/test.md
+docs/uat.md
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Rust specific
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Dependency directories
+vendor/
+
+# Misc
+.cache/
+*.pid
+*.seed
+*.pid.lock
+node_modules/
+.npm/
+.yarn/
+bower_components/
+
+# Package manager
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Archive and compression
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# S3 and cloud storage
+.s3cfg
+.aws/
+
+# Docker
+.dockerignore.local
