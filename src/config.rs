@@ -1,3 +1,4 @@
+use crate::archive::SecretString;
 use crate::error::InklogError;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -810,7 +811,7 @@ impl InklogConfig {
             }
 
             if let Ok(val) = std::env::var("INKLOG_S3_ACCESS_KEY_ID") {
-                s3.access_key_id = Some(val);
+                s3.access_key_id = SecretString::new(val);
                 // Security audit: Log that credentials were loaded without exposing values
                 #[cfg(any(feature = "aws", feature = "http"))]
                 tracing::debug!(
@@ -820,11 +821,11 @@ impl InklogConfig {
             }
 
             if let Ok(val) = std::env::var("INKLOG_S3_SECRET_ACCESS_KEY") {
-                s3.secret_access_key = Some(val);
+                s3.secret_access_key = SecretString::new(val);
             }
 
             if let Ok(val) = std::env::var("INKLOG_S3_SESSION_TOKEN") {
-                s3.session_token = Some(val);
+                s3.session_token = SecretString::new(val);
             }
 
             if let Ok(val) = std::env::var("INKLOG_S3_ENDPOINT_URL") {
@@ -863,7 +864,7 @@ impl InklogConfig {
                     s3.encryption = Some(crate::archive::EncryptionConfig {
                         algorithm,
                         kms_key_id: None,
-                        customer_key: None,
+                        customer_key: SecretString::default(),
                     });
                 }
             }
@@ -875,7 +876,7 @@ impl InklogConfig {
                     s3.encryption = Some(crate::archive::EncryptionConfig {
                         algorithm: crate::archive::EncryptionAlgorithm::Aes256,
                         kms_key_id: Some(val),
-                        customer_key: None,
+                        customer_key: SecretString::default(),
                     });
                 }
             }

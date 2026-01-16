@@ -375,7 +375,7 @@ impl DatabaseSink {
                                     ));
                                 }
                             };
-                            
+
                             let start_date = now.format("%Y-%m-01").to_string();
                             let next_month = if now.month() == 12 {
                                 format!("{}-01-01", now.year() + 1)
@@ -423,7 +423,7 @@ impl DatabaseSink {
                                         tracing::error!("Invalid partition name: {}", partition_name);
                                         partition_name.clone()
                                     });
-                                
+
                                 // MySQL 使用反引号引用标识符
                                 let partition_sql = format!(
                                     "CREATE TABLE IF NOT EXISTS `{}` PARTITION OF `logs` FOR VALUES IN (TO_DAYS('{}'))",

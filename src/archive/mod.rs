@@ -18,8 +18,83 @@ use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use zeroize::{Zeroize, Zeroizing};
+
+/// 敏感字符串类型，用于安全存储凭据
+/// - 在内存中使用 Zeroizing 保护
+/// - 序列化时自动跳过
+/// - 反序列化时从 String 转换
+#[derive(Debug, Clone, Default)]
+pub struct SecretString(Option<Zeroizing<String>>);
+
+impl SecretString {
+    pub fn new(value: String) -> Self {
+        Self(Some(Zeroizing::new(value)))
+    }
+
+    pub fn take(&mut self) -> Option<String> {
+        self.0.take().map(|s| s.as_str().to_string())
+    }
+
+    pub fn as_deref(&self) -> Option<&str> {
+        self.0.as_ref().map(|s| s.as_str())
+    }
+
+    pub fn is_some(&self) -> bool {
+        self.0.is_some()
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
+}
+
+impl From<String> for SecretString {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<Option<String>> for SecretString {
+    fn from(value: Option<String>) -> Self {
+        match value {
+            Some(s) => Self::new(s),
+            None => Self(None),
+        }
+    }
+}
+
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        if let Some(s) = &mut self.0 {
+            s.zeroize();
+        }
+    }
+}
+
+/// 自定义序列化，跳过敏感值
+impl Serialize for SecretString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_none()
+    }
+}
+
+/// 自定义反序列化
+impl<'de> Deserialize<'de> for SecretString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<String>::deserialize(deserializer).map(|opt| opt.into())
+    }
+}
+
 /// S3归档配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct S3ArchiveConfig {
     /// 是否启用S3归档
     pub enabled: bool,
@@ -44,11 +119,11 @@ pub struct S3ArchiveConfig {
     /// 前缀路径
     pub prefix: String,
     /// AWS访问密钥ID（可选，使用IAM角色时不需设置）
-    pub access_key_id: Option<String>,
+    pub access_key_id: SecretString,
     /// AWS秘密访问密钥（可选，使用IAM角色时不需设置）
-    pub secret_access_key: Option<String>,
+    pub secret_access_key: SecretString,
     /// 会话令牌（可选，临时凭证时使用）
-    pub session_token: Option<String>,
+    pub session_token: SecretString,
     /// 端点URL（用于MinIO等兼容S3的服务）
     pub endpoint_url: Option<String>,
     /// 是否使用路径样式访问
@@ -84,9 +159,9 @@ impl Default for S3ArchiveConfig {
             compression: CompressionType::Zstd,
             storage_class: StorageClass::Standard,
             prefix: "logs/".to_string(),
-            access_key_id: None,
-            secret_access_key: None,
-            session_token: None,
+            access_key_id: SecretString::default(),
+            secret_access_key: SecretString::default(),
+            session_token: SecretString::default(),
             endpoint_url: None,
             force_path_style: false,
             skip_bucket_validation: false,
@@ -95,6 +170,36 @@ impl Default for S3ArchiveConfig {
             archive_format: "json".to_string(),
             parquet_config: crate::config::ParquetConfig::default(),
         }
+    }
+}
+
+/// 自定义序列化，跳过敏感凭据字段
+impl Serialize for S3ArchiveConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("S3ArchiveConfig", 21)?;
+        state.serialize_field("enabled", &self.enabled)?;
+        state.serialize_field("bucket", &self.bucket)?;
+        state.serialize_field("region", &self.region)?;
+        state.serialize_field("archive_interval_days", &self.archive_interval_days)?;
+        state.serialize_field("schedule_expression", &self.schedule_expression)?;
+        state.serialize_field("local_retention_days", &self.local_retention_days)?;
+        state.serialize_field("local_retention_path", &self.local_retention_path)?;
+        state.serialize_field("compression", &self.compression)?;
+        state.serialize_field("storage_class", &self.storage_class)?;
+        state.serialize_field("prefix", &self.prefix)?;
+        // 跳过 access_key_id, secret_access_key, session_token（敏感）
+        state.serialize_field("endpoint_url", &self.endpoint_url)?;
+        state.serialize_field("force_path_style", &self.force_path_style)?;
+        state.serialize_field("skip_bucket_validation", &self.skip_bucket_validation)?;
+        state.serialize_field("max_file_size_mb", &self.max_file_size_mb)?;
+        state.serialize_field("encryption", &self.encryption)?;
+        state.serialize_field("archive_format", &self.archive_format)?;
+        state.serialize_field("parquet_config", &self.parquet_config)?;
+        state.end()
     }
 }
 
@@ -133,14 +238,29 @@ pub enum StorageClass {
 }
 
 /// 加密配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct EncryptionConfig {
     /// 服务器端加密算法
     pub algorithm: EncryptionAlgorithm,
     /// KMS密钥ID（使用KMS加密时必需）
     pub kms_key_id: Option<String>,
     /// 客户提供的密钥（使用SSE-C时必需）
-    pub customer_key: Option<String>,
+    pub customer_key: SecretString,
+}
+
+/// 自定义序列化，跳过客户密钥
+impl Serialize for EncryptionConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("EncryptionConfig", 3)?;
+        state.serialize_field("algorithm", &self.algorithm)?;
+        state.serialize_field("kms_key_id", &self.kms_key_id)?;
+        // 跳过 customer_key（敏感）
+        state.end()
+    }
 }
 
 /// 加密算法
@@ -254,13 +374,11 @@ impl S3ArchiveManager {
         }
 
         // 配置凭证
-        if let (Some(access_key), Some(secret_key)) =
-            (&config.access_key_id, &config.secret_access_key)
-        {
+        if config.access_key_id.is_some() && config.secret_access_key.is_some() {
             let credentials = aws_credential_types::Credentials::new(
-                access_key,
-                secret_key,
-                config.session_token.clone(),
+                config.access_key_id.as_deref().unwrap_or(""),
+                config.secret_access_key.as_deref().unwrap_or(""),
+                config.session_token.as_deref().map(|s| s.to_string()),
                 None,
                 "inklog-s3-archive",
             );

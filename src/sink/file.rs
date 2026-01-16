@@ -1181,6 +1181,33 @@ mod tests {
     }
 }
 
+impl Drop for FileSink {
+    fn drop(&mut self) {
+        // Set shutdown flag to signal threads to stop
+        self.shutdown_flag.store(true, Ordering::SeqCst);
+
+        // Close current file handle
+        if let Some(mut file) = self.current_file.take() {
+            let _ = file.flush();
+        }
+
+        // Wait for rotation timer thread to finish
+        if let Some(handle) = self.timer_handle.take() {
+            let _ = handle.join();
+        }
+
+        // Wait for cleanup timer thread to finish
+        if let Some(handle) = self.cleanup_timer_handle.take() {
+            let _ = handle.join();
+        }
+
+        // Close fallback console sink
+        if let Some(mut fallback) = self.fallback_sink.take() {
+            let _ = fallback.shutdown();
+        }
+    }
+}
+
 impl LogSink for FileSink {
     fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
         // 检查断路器
