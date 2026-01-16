@@ -131,7 +131,7 @@ sequenceDiagram
     participant Processor as 日志处理器
     participant Sink as 输出管理器
     participant Output as 输出目标
-    
+
     App->>API: log!(message)
     API->>Manager: LogRecord
     Manager->>Processor: 处理记录
@@ -243,7 +243,7 @@ graph TB
     E --> G[文件输出]
     E --> H[数据库输出]
     E --> I[S3 归档]
-    
+
     J[配置] --> C
     K[指标] --> C
     L[健康监控] --> C
@@ -294,7 +294,7 @@ graph TB
     D --> E[加密]
     E --> F[审计日志]
     F --> G[安全存储]
-    
+
     style A fill:#e1f5ff
     style B fill:#b3e5fc
     style C fill:#81d4fa
@@ -371,11 +371,11 @@ graph TB
     LB --> A[实例 1]
     LB --> B[实例 2]
     LB --> C[实例 3]
-    
+
     A --> DB[(共享数据库)]
     B --> DB
     C --> DB
-    
+
     style LB fill:#81d4fa
     style A fill:#4fc3f7
     style B fill:#4fc3f7

@@ -15,9 +15,9 @@
 <details>
 <summary><b>❓ 什么是 Inklog？</b></summary>
 
-答: Inklog 是一个企业级 Rust 日志记录基础设施，提供高性能、可靠且功能丰富的日志记录能力。它支持多个输出目标（控制台、文件、数据库）、S3 归档、结构化日志记录和全面监控。
+答：Inklog 是一个企业级 Rust 日志记录基础设施，提供高性能、可靠且功能丰富的日志记录能力。
 
-**主要特性:**
+**主要特性：**
 - 高吞吐量异步日志记录
 - 多输出目标支持（控制台、文件、数据库）
 - 带压缩的 S3 归档
@@ -27,18 +27,21 @@
 - 可配置日志轮转
 - 性能监控
 
-它为需要[主要使用场景]的[目标受众]而设计。
+它为需要可靠日志记录系统的微服务、云原生应用和企业级应用而设计。
 
-**了解更多:** [用户指南](USER_GUIDE.md)
+**了解更多：**
+- [用户指南](./USER_GUIDE.md)
+- [快速开始](./quickstart.md)
+- [配置参考](./config-reference.md)
 
 </details>
 
 <details>
 <summary><b>❓ Inklog 是否可用于生产环境？</b></summary>
 
-答: 是的！Inklog 专为生产使用而设计：
+答：是的！Inklog 专为生产使用而设计：
 
-**生产特性:**
+**生产特性：**
 - ✅ 全面的错误处理
 - ✅ 优雅关闭
 - ✅ 健康监控
@@ -48,28 +51,28 @@
 - ✅ S3 归档
 - ✅ 多输出目标
 
-**生产环境用户:**
+**适用场景：**
 - 高流量 Web 应用程序
-- 金融服务
+- 金融服务系统
 - 医疗保健系统
 - 电子商务平台
 
-**SLA:** 99.9% 正常运行时间保证
+**SLA：** 99.9% 正常运行时间保证
 
 </details>
 
 <details>
 <summary><b>❓ 系统要求是什么？</b></summary>
 
-答: Inklog 设计为轻量级和高效：
+答：Inklog 设计为轻量级和高效：
 
-**最低要求:**
+**最低要求：**
 - Rust 1.75+
 - 512MB RAM
 - 10MB 磁盘空间
 - 任何支持的操作系统（Linux、macOS、Windows）
 
-**生产环境推荐:**
+**生产环境推荐：**
 - 2GB+ RAM
 - SSD 存储
 - 多 CPU 核心
@@ -80,152 +83,116 @@
 <details>
 <summary><b>❓ 如何开始使用 Inklog？</b></summary>
 
-答: 开始使用很简单！添加依赖项并初始化日志记录器：
+答：开始使用很简单！
+
+**步骤 1：添加依赖**
+
+```toml
+[dependencies]
+inklog = "0.2"
+tokio = { version = "1", features = ["full"] }
+```
+
+**步骤 2：初始化日志记录器**
 
 ```rust
 use inklog::{LoggerManager, InklogConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 使用默认配置初始化
     let _logger = LoggerManager::new().await?;
-    
-    // 开始日志记录
     log::info!("应用程序已启动");
-    
     Ok(())
 }
 ```
 
-了解更多详情，请参阅我们的[用户指南](USER_GUIDE.md)。
+了解更多详情，请参阅[快速开始指南](./quickstart.md)。
 
 </details>
 
 <details>
-<summary><b>❓ How do I configure multiple sinks?**
+<summary><b>❓ 如何配置多个输出目标？</b></summary>
 
-A: Inklog supports multiple output sinks simultaneously:
+答：Inklog 支持同时配置多个输出目标：
 
 ```rust
 use inklog::{LoggerManager, InklogConfig, FileSinkConfig, DatabaseSinkConfig};
 
-let mut config = InklogConfig::default();
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = InklogConfig::default();
 
-// Enable console sink (default)
-config.console_sink = Some(Default::default());
+    // 启用控制台输出（默认）
+    config.console_sink = Some(Default::default());
 
-// Enable file sink
-config.file_sink = Some(FileSinkConfig {
-    enabled: true,
-    path: "/var/log/app.log".into(),
-    max_size: "100MB".to_string(),
-    // ... other settings
-});
+    // 启用文件输出
+    config.file_sink = Some(FileSinkConfig {
+        enabled: true,
+        path: "/var/log/app.log".into(),
+        max_size: "100MB".to_string(),
+        rotation_time: "daily".to_string(),
+        compress: true,
+        ..Default::default()
+    });
 
-// Enable database sink
-config.database_sink = Some(DatabaseSinkConfig {
-    enabled: true,
-    url: "postgresql://user:pass@localhost/logs".to_string(),
-    // ... other settings
-});
+    // 启用数据库输出
+    config.database_sink = Some(DatabaseSinkConfig {
+        enabled: true,
+        url: "postgresql://user:pass@localhost/logs".to_string(),
+        ..Default::default()
+    });
 
-let _logger = LoggerManager::with_config(config).await?;
+    let _logger = LoggerManager::with_config(config).await?;
+    Ok(())
+}
 ```
 
-</details>
-
-<details>
-use inklog::{LoggerManager, InklogConfig, FileSinkConfig, DatabaseSinkConfig};
-
-let mut config = InklogConfig::default();
-
-// 启用控制台输出目标（默认）
-config.console_sink = Some(Default::default());
-
-// 启用文件输出目标
-config.file_sink = Some(FileSinkConfig {
-    enabled: true,
-    path: "/var/log/app.log".into(),
-    max_size: "100MB".to_string(),
-    // ... 其他设置
-});
-
-// 启用数据库输出目标
-config.database_sink = Some(DatabaseSinkConfig {
-    enabled: true,
-    url: "postgresql://user:pass@localhost/logs".to_string(),
-    // ... 其他设置
-});
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-</details>
-
-<details>
-<summary><b>❓ How do I enable S3 archival?**
-
-A: Configure S3 archival in your configuration:
-
-```rust
-use inklog::{LoggerManager, InklogConfig, S3ArchiveConfig};
-
-let mut config = InklogConfig::default();
-config.s3_archive = Some(S3ArchiveConfig {
-    bucket: "my-log-archive".to_string(),
-    region: "us-west-2".to_string(),
-    archive_interval: "0 2 * * *".to_string(), // Daily at 2 AM
-    local_retention_days: 7,
-    compression_type: inklog::CompressionType::Zstd,
-    storage_class: "STANDARD".to_string(),
-    prefix: "logs/".to_string(),
-});
-
-let logger = LoggerManager::with_config(config).await?;
-logger.start_archive_service().await?;
-```
-
-**Requirements:**
-- AWS credentials configured
-- S3 bucket with appropriate permissions
-- `aws` feature enabled
+每个输出目标都可以独立配置和启用。
 
 </details>
 
 <details>
 <summary><b>❓ 如何启用 S3 归档？</b></summary>
 
-答: 在配置中配置 S3 归档：
+答：在配置中配置 S3 归档：
 
 ```rust
 use inklog::{LoggerManager, InklogConfig, S3ArchiveConfig};
 
-let mut config = InklogConfig::default();
-config.s3_archive = Some(S3ArchiveConfig {
-    bucket: "my-log-archive".to_string(),
-    region: "us-west-2".to_string(),
-    archive_interval: "0 2 * * *".to_string(), // 每天凌晨 2 点
-    local_retention_days: 7,
-    compression_type: inklog::CompressionType::Zstd,
-    storage_class: "STANDARD".to_string(),
-    prefix: "logs/".to_string(),
-});
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = InklogConfig::default();
+    config.s3_archive = Some(S3ArchiveConfig {
+        enabled: true,
+        bucket: "my-log-archive".to_string(),
+        region: "us-west-2".to_string(),
+        archive_interval_days: 1,
+        local_retention_days: 7,
+        compression: inklog::CompressionType::Zstd,
+        storage_class: inklog::StorageClass::Standard,
+        prefix: "logs/".to_string(),
+        ..Default::default()
+    });
 
-let logger = LoggerManager::with_config(config).await?;
-logger.start_archive_service().await?;
+    let logger = LoggerManager::with_config(config).await?;
+    logger.start_archive_service().await?;
+    Ok(())
+}
 ```
 
-**要求:**
-- 已配置 AWS 凭证
+**要求：**
+- 已配置 AWS 凭证（通过环境变量或配置文件）
 - 具有适当权限的 S3 存储桶
 - 启用了 `aws` 功能
+
+**了解更多：** [S3 归档示例](../examples/s3_archive.rs)
 
 </details>
 
 <details>
-<summary><b>❓ How does log rotation work?**
+<summary><b>❓ 日志轮转如何工作？</b></summary>
 
-A: Inklog provides automatic log rotation based on size and time:
+答：Inklog 提供基于大小和时间的自动日志轮转：
 
 ```rust
 use inklog::FileSinkConfig;
@@ -233,19 +200,21 @@ use inklog::FileSinkConfig;
 let file_config = FileSinkConfig {
     enabled: true,
     path: "/var/log/app.log".into(),
-    max_size: "100MB".to_string(),        // Rotate when file reaches 100MB
-    rotation_time: "daily".to_string(),    // Or rotate daily
-    keep_files: 7,                         // Keep 7 rotated files
-    compress: true,                        // Compress rotated files
-    retention_days: 30,                    // Delete files older than 30 days
-    // ... other settings
+    max_size: "100MB".to_string(),     // 文件达到 100MB 时轮转
+    rotation_time: "daily".to_string(), // 或每天轮转
+    keep_files: 7,                      // 保留 7 个轮转文件
+    compress: true,                     // 压缩轮转后的文件
+    retention_days: 30,                 // 删除 30 天前的文件
+    ..Default::default()
 };
 ```
 
-Rotation options:
-- **Size-based**: Rotate when file reaches specified size
-- **Time-based**: Rotate on schedule (hourly, daily, weekly)
-- **Combined**: Use both size and time triggers
+**轮转选项：**
+- **基于大小**：当文件达到指定大小时轮转
+- **基于时间**：按计划轮转（每小时、每天、每周）
+- **组合使用**：同时使用大小和时间触发器
+
+**了解更多：** [配置参考](./config-reference.md)
 
 </details>
 

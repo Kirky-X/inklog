@@ -96,7 +96,7 @@
 </tr>
 </table>
 
-> 📜 **完整行为准则**: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+> 📜 **完整行为准则**: 遵循 Rust 社区的 [行为准则](https://www.rust-lang.org/conduct)
 
 ---
 
@@ -226,7 +226,7 @@ graph LR
     J --> K{已批准?}
     K -->|需要更改| C
     K -->|是| L[合并!]
-    
+
     style A fill:#e1f5ff
     style L fill:#4caf50
 ```
@@ -425,7 +425,7 @@ match operation() {
 
 ```rust
 // 模糊的名称
-pub fn enc(d: &[u8], k: &Key) 
+pub fn enc(d: &[u8], k: &Key)
     -> Result<Vec<u8>> {
     // 实现
 }
@@ -566,10 +566,10 @@ mod tests {
     fn test_encrypt_decrypt() {
         let key = Key::generate().unwrap();
         let plaintext = b"Hello, World!";
-        
+
         let ciphertext = encrypt(plaintext, &key).unwrap();
         let decrypted = decrypt(&ciphertext, &key).unwrap();
-        
+
         assert_eq!(plaintext, &decrypted[..]);
     }
 
@@ -591,12 +591,12 @@ use inklog::{LoggerManager, InklogConfig};
 fn test_full_logging_workflow() {
     let config = InklogConfig::default();
     let _logger = LoggerManager::with_config(config).unwrap();
-    
+
     // 测试基本日志记录
     log::info!("集成测试消息");
     log::warn!("测试警告");
     log::error!("测试错误");
-    
+
     // 验证日志已处理
     // 根据您的日志记录系统添加断言
     assert!(true); // 占位符

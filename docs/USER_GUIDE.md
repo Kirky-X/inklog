@@ -187,9 +187,9 @@ use inklog::{LoggerManager, InklogConfig};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化日志记录器
     let _logger = LoggerManager::new().await?;
-    
+
     println!("✅ Inklog 已准备就绪!");
-    
+
     Ok(())
 }
 ```
@@ -239,7 +239,7 @@ graph TD
     C --> F[后端]
     D --> F
     E --> F
-    
+
     style A fill:#e1f5ff
     style B fill:#81d4fa
     style C fill:#4fc3f7
@@ -331,11 +331,11 @@ use inklog::{LoggerManager, InklogConfig};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 简单初始化
     let _logger = LoggerManager::new().await?;
-    
+
     // 或使用自定义配置
     let config = InklogConfig::default();
     let _logger = LoggerManager::with_config(config).await?;
-    
+
     Ok(())
 }
 ```
@@ -474,14 +474,14 @@ use inklog::{LoggerManager, InklogConfig};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = InklogConfig::default();
     let _logger = LoggerManager::with_config(config).await?;
-    
+
     // 创建日志条目
     log::info!("用户 {} 已登录", "user-123");
     log::warn!("系统内存使用率: {}%", 85);
     log::error!("无法连接到数据库");
-    
+
     println!("✅ 所有日志已处理");
-    
+
     Ok(())
 }
 ```
@@ -504,7 +504,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = InklogConfig::default();
     config.global.level = "info".to_string();
     config.global.masking_enabled = true;
-    
+
     // 启用带压缩的文件输出
     config.file_sink = Some(inklog::config::FileSinkConfig {
         enabled: true,
@@ -513,16 +513,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         encryption: false,
         ..Default::default()
     });
-    
+
     // 性能调优
     config.performance.channel_capacity = 20000;
     config.performance.worker_threads = num_cpus::get();
-    
+
     let _logger = LoggerManager::with_config(config).await?;
-    
+
     // 启用指标和监控
     log::info!("应用程序已使用生产配置启动");
-    
+
     Ok(())
 }
 ```
@@ -593,16 +593,16 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     // 日志记录是非阻塞的
     log::info!("这不会阻塞您的应用程序");
-    
+
     // 继续异步工作
     tokio::spawn(async {
         // 后台处理
         process_data().await;
     });
-    
+
     Ok(())
 }
 ```
@@ -672,7 +672,7 @@ fn handle_logging() -> Result<(), InklogError> {
 fn main() {
     // 在开始时初始化
     let _logger = inklog::LoggerManager::new();
-    
+
     // 然后使用日志记录器
     do_work();
 }
@@ -792,7 +792,7 @@ struct RequestContext {
 
 fn handle_request(request: RequestContext) {
     let _logger = LoggerManager::new().unwrap();
-    
+
     log::info!(
         "请求已处理",
         user_id = %request.user_id,
@@ -826,7 +826,7 @@ fn setup_multi_sink() -> Result<(), Box<dyn std::error::Error>> {
         }),
         ..Default::default()
     };
-    
+
     let _logger = LoggerManager::with_config(config).await?;
     Ok(())
 }
@@ -839,17 +839,17 @@ use inklog::LoggerManager;
 
 fn conditional_logging() {
     let _logger = LoggerManager::new().unwrap();
-    
+
     // 只在开发环境记录调试日志
     if cfg!(debug_assertions) {
         log::debug!("详细的调试信息");
     }
-    
+
     // 根据环境记录日志
     if std::env::var("ENVIRONMENT").unwrap_or_default() == "production" {
         log::info!("生产环境事件");
     }
-    
+
     // 条件结构化日志记录
     let should_log_details = std::env::var("LOG_DETAILS").unwrap_or_default() == "true";
     if should_log_details {
