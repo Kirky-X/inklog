@@ -109,3 +109,7 @@ pnpm-lock.yaml
 
 # Docker
 .dockerignore.local
+
+# OpenSpec
+openspec/
+.opencode/
