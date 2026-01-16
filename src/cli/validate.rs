@@ -171,22 +171,35 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
             return Err(anyhow::anyhow!("file_sink.encrypt must be a boolean"));
         }
 
-        if encrypt.as_bool().unwrap_or(false) {
-            if let Some(key_env) = file.get("encryption_key_env") {
-                if let Some(env_name) = key_env.as_str() {
-                    if env_name.is_empty() {
-                        return Err(anyhow::anyhow!(
-                            "file_sink.encrypt is true but encryption_key_env is empty"
-                        ));
-                    }
-                    println!("  ✓ Encryption key env: {}", env_name);
-                }
-            } else {
+        // Early return if encryption is not enabled
+        if !encrypt.as_bool().unwrap_or(false) {
+            return Ok(());
+        }
+
+        // Encryption enabled - validate encryption_key_env
+        let key_env = match file.get("encryption_key_env") {
+            Some(v) => v,
+            None => {
                 return Err(anyhow::anyhow!(
                     "file_sink.encrypt is true but encryption_key_env is not set"
                 ));
             }
+        };
+
+        let env_name = match key_env.as_str() {
+            Some(s) => s,
+            None => {
+                return Err(anyhow::anyhow!("encryption_key_env must be a string"));
+            }
+        };
+
+        if env_name.is_empty() {
+            return Err(anyhow::anyhow!(
+                "file_sink.encrypt is true but encryption_key_env is empty"
+            ));
         }
+
+        println!("  ✓ Encryption key env: {}", env_name);
     }
 
     Ok(())

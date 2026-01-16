@@ -29,6 +29,7 @@ use tracing::info;
 use tracing_subscriber::prelude::*;
 
 // Control messages for sink recovery
+/// Messages used to control sink recovery and status queries.
 #[derive(Debug, Clone)]
 pub enum SinkControlMessage {
     RecoverSink(String), // sink name
@@ -47,6 +48,28 @@ struct WorkerParams {
     error_sink: Arc<Mutex<Option<FileSink>>>,
 }
 
+/// Core logging manager that coordinates log collection and routing to sinks.
+///
+/// LoggerManager is the main entry point for the inklog logging system.
+/// It handles:
+/// - Log message routing to configured sinks (console, file, database)
+/// - Health monitoring and metrics collection
+/// - Sink recovery on failure
+/// - Archive service lifecycle (when S3 is enabled)
+/// - HTTP server for health endpoints (when http feature is enabled)
+///
+/// # Examples
+///
+/// ```ignore
+/// use inklog::{LoggerManager, InklogConfig};
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = InklogConfig::default();
+///     let _logger = LoggerManager::with_config(config).await?;
+///     Ok(())
+/// }
+/// ```
 pub struct LoggerManager {
     #[allow(dead_code)]
     config: InklogConfig,
