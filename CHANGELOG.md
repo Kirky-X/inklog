@@ -5,54 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-01-16
 
 ### Added
 
-#### 配置系统增强
-- S3加密算法环境变量支持 (`INKLOG_S3_ENCRYPTION_ALGORITHM`)
-- S3 KMS密钥ID环境变量支持 (`INKLOG_S3_ENCRYPTION_KMS_KEY_ID`)
-- INKLOG_ARCHIVE_FORMAT 环境变量支持
+#### AWS S3 归档功能
+- S3 云存储集成
+- 分片上传支持（>5MB 文件）
+- 多种存储类别支持（Standard, Glacier, etc.）
+- SSE-AES256 和 SSE-KMS 加密支持
 
-#### 归档功能增强
-- 归档格式配置支持 (`archive_format`: json/parquet)
-- Parquet导出字段过滤配置 (`include_fields`)
-- Parquet压缩级别、编码、行组大小配置
-- 归档元数据增强 (compression_ratio, row_group_count, parquet_version)
+#### HTTP 健康监控端点
+- `/metrics` - Prometheus 指标端点
+- `/health` - 健康检查端点
+- 实时 sink 状态监控
+- 延迟直方图指标
 
-#### 监控指标增强
-- `inklog_avg_latency_us`: 平均处理延迟
-- `inklog_uptime_seconds`: 服务器运行时间
-- `inklog_sink_healthy{sink="..."}`: 每个sink的健康状态
-- `inklog_latency_bucket{le="..."}`: 延迟直方图
+#### CLI 工具支持
+- `decrypt` - 解密加密日志文件
+- `generate` - 生成配置模板
+- `validate` - 验证配置文件
 
-#### 文档
-- 快速开始指南 (`docs/quickstart.md`)
-- 配置参考手册 (`docs/config-reference.md`)
-- 故障排除指南 (`docs/troubleshooting.md`)
-- 环境变量配置测试 (`tests/config_env_test.rs`)
-- 故障排除指南 (`docs/troubleshooting.md`)
+#### 数据脱敏功能
+- 敏感字段自动检测（password, token, api_key 等）
+- 模式匹配脱敏（邮箱、电话、身份证等）
+- JSON 结构递归脱敏
 
-#### 示例
-- `examples/basic.rs`: 基础日志示例
-- `examples/file_logging.rs`: 文件日志示例
-- `examples/database_logging.rs`: 数据库日志示例
-- `examples/custom_format.rs`: 自定义格式示例
-- `examples/encryption.rs`: 加密日志示例
+#### 数据库增强
+- Parquet 格式导出
+- 分区表管理
+- MySQL 支持
+- Parquet 字段过滤配置
 
 ### Changed
 
 #### 代码质量改进
 - 测试代码中 `unwrap()` → `expect()` 替换 (~52处)
 - 示例代码中 `unwrap()` → `expect()` 替换
-- 修复clippy警告
+- 修复 clippy 警告
+
+#### 配置系统增强
+- S3 加密算法环境变量支持 (`INKLOG_S3_ENCRYPTION_ALGORITHM`)
+- S3 KMS 密钥 ID 环境变量支持 (`INKLOG_S3_ENCRYPTION_KMS_KEY_ID`)
+- INKLOG_ARCHIVE_FORMAT 环境变量支持
 
 ### Fixed
 
 - 配置系统环境变量处理优化
-- HTTP监控端点实现完成
-- 归档服务Parquet导出配置传递修复
-- `src/archive/mod.rs` 中时间戳转换unwrap修复
+- HTTP 监控端点实现完成
+- 归档服务 Parquet 导出配置传递修复
+- `src/archive/mod.rs` 中时间戳转换 unwrap 修复
+- 文件锁竞争问题修复
+- 异步上下文日志丢失问题修复
+- 数据库连接池泄漏修复
+- S3 分片上传重试逻辑修复
 
 ## [0.1.0] - 2026-01-01
 
@@ -111,7 +117,7 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     tracing::info!("Hello, inklog!");
     Ok(())
 }
