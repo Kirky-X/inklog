@@ -1,0 +1,26 @@
+# Pre-commit hooks for Inklog Rust Project
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  # 1. Basic file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+
+  # 2. Detect secrets
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline, --exclude-files, tests/]
+        exclude: .secrets.baseline
+
+ci:
+  autoupdate_commit_msg: "chore: update pre-commit hooks"
