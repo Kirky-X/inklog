@@ -6,6 +6,11 @@ authors = ["Kirky.X"]
 description = "Enterprise-grade Rust logging infrastructure"
 license = "MIT OR Apache-2.0"
 
+[package.metadata.docs.rs]
+features = ["default", "aws", "http", "cli", "confers"]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = ["aws", "http", "cli"]
 confers = ["dep:confers", "dep:toml"]
