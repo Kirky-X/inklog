@@ -363,7 +363,15 @@ impl ArchiveService {
                 e
             )))
         })? {
-            if let Ok(metadata) = entry.path().metadata() {
+            let path = entry.path();
+
+            // Defensive check: verify path still exists before deletion
+            // This mitigates TOCTOU race conditions
+            if !path.exists() {
+                continue;
+            }
+
+            if let Ok(metadata) = path.metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if let Some(modified_date) = DateTime::from_timestamp(
                         modified
@@ -373,10 +381,10 @@ impl ArchiveService {
                         0,
                     ) {
                         if modified_date < cutoff {
-                            if let Err(e) = fs::remove_file(entry.path()).await {
+                            if let Err(e) = fs::remove_file(&path).await {
                                 error!("Failed to remove old log file: {}", e);
                             } else {
-                                info!("Removed old log file: {:?}", entry.path());
+                                info!("Removed old log file: {:?}", path);
                             }
                         }
                     }

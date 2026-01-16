@@ -3,6 +3,8 @@ use aes_gcm::Aes256Gcm;
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 #[cfg(test)]
+use sha2::Digest as Sha256Digest;
+#[cfg(test)]
 use sha2::Sha256;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -503,7 +505,7 @@ mod tests {
     /// Generate a test key from a seed (allows deterministic or environment-based keys)
     fn get_test_key(seed: &str) -> [u8; 32] {
         let seed = std::env::var("INKLOG_TEST_KEY_SEED").unwrap_or_else(|_| seed.to_string());
-        let hash = Sha256::digest(seed);
+        let hash = Sha256Digest::digest(seed);
         let mut key = [0u8; 32];
         key.copy_from_slice(hash.as_slice());
         key
