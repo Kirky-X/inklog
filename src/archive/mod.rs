@@ -1,6 +1,51 @@
-//! S3归档模块
+//! # S3 归档模块
 //!
-//! 提供日志数据的S3云存储归档功能，支持自动归档、压缩和生命周期管理
+//! 提供日志数据的 S3 云存储归档功能，支持自动归档、压缩和生命周期管理。
+//!
+//! ## 概述
+//!
+//! `S3ArchiveManager` 处理日志文件到 AWS S3 的归档流程，包括：
+//! - 单文件上传（< 5MB）和分片上传（≥ 5MB）
+//! - 多种压缩算法支持（ZSTD、GZIP、LZ4、Brotli）
+//! - 加密支持（SSE-AES256、SSE-KMS）
+//! - S3 存储类别选择
+//!
+//! ## 使用条件
+//!
+//! 此模块需要启用 `aws` 特性：
+//!
+//! ```toml
+//! [features]
+//! default = ["aws", "http", "cli"]
+//! ```
+//!
+// ## 功能特性
+//!
+//! - **智能上传**：根据文件大小自动选择上传策略
+//! - **并行压缩**：大于 1MB 的数据使用 Rayon 并行压缩
+//! - **安全存储**：内存保护（Zeroize）和凭据脱敏
+//! - **灵活调度**：Cron 表达式或间隔调度
+//! - **错误恢复**：S3 失败时保存到本地
+//!
+//! ## 存储键命名规范
+//!
+//! ```
+//! {prefix}/{year}/{month}/logs_{start}_{end}_{count}.parquet.{ext}
+//! ```
+//!
+//! ## 架构说明
+//!
+//! ```text
+//! 日志文件
+//!      ↓
+//! 压缩 (ZSTD/GZIP/LZ4/Brotli)
+//!      ↓
+//! 加密 (SSE-AES256/SSE-KMS)
+//!      ↓
+//! S3 上传
+//!      ├─ < 5MB: 单次 PUT
+//!      └─ ≥ 5MB: 分片上传
+//! ```
 
 mod service;
 pub use service::{ArchiveService, ArchiveServiceBuilder};
@@ -25,7 +70,7 @@ use zeroize::{Zeroize, Zeroizing};
 /// - 序列化时自动跳过
 /// - 反序列化时从 String 转换
 #[derive(Debug, Clone, Default)]
-pub struct SecretString(Option<Zeroizing<String>>);
+pub(crate) struct SecretString(Option<Zeroizing<String>>);
 
 impl SecretString {
     pub fn new(value: String) -> Self {
@@ -239,7 +284,7 @@ pub enum StorageClass {
 
 /// 加密配置
 #[derive(Debug, Clone, Deserialize)]
-pub struct EncryptionConfig {
+pub(crate) struct EncryptionConfig {
     /// 服务器端加密算法
     pub algorithm: EncryptionAlgorithm,
     /// KMS密钥ID（使用KMS加密时必需）
@@ -276,7 +321,7 @@ pub enum EncryptionAlgorithm {
 
 /// 调度状态跟踪（用于持久化）
 #[derive(Debug, Clone, Default)]
-pub struct ScheduleState {
+struct ScheduleState {
     /// 上次调度执行时间
     pub last_scheduled_run: Option<DateTime<Utc>>,
     /// 上次成功执行时间
@@ -945,7 +990,7 @@ impl S3ArchiveManager {
 
 /// 归档状态
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub enum ArchiveStatus {
+enum ArchiveStatus {
     /// 进行中
     #[default]
     InProgress,
@@ -959,7 +1004,7 @@ pub enum ArchiveStatus {
 
 /// 归档元数据（完整版）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArchiveMetadata {
+struct ArchiveMetadata {
     /// 记录数量
     pub record_count: i64,
     /// 原始数据大小（字节）
@@ -1075,7 +1120,7 @@ impl ArchiveMetadata {
 
 /// 归档信息
 #[derive(Debug, Clone)]
-pub struct ArchiveInfo {
+struct ArchiveInfo {
     /// S3键名
     pub key: String,
     /// 文件大小

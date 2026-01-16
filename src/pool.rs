@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 /// A simple thread-safe object pool
-pub struct Pool<T: Default> {
+pub(crate) struct Pool<T: Default> {
     items: Mutex<Vec<T>>,
     max_size: usize,
 }
@@ -35,7 +35,7 @@ impl<T: Default> Pool<T> {
 }
 
 /// Global pool for LogRecord to reduce allocations
-pub static LOG_RECORD_POOL: Lazy<Pool<LogRecord>> = Lazy::new(|| Pool::new(1024));
+pub(crate) static LOG_RECORD_POOL: Lazy<Pool<LogRecord>> = Lazy::new(|| Pool::new(1024));
 
 /// Global pool for String buffers to reduce allocations
-pub static STRING_POOL: Lazy<Pool<String>> = Lazy::new(|| Pool::new(1024));
+pub(crate) static STRING_POOL: Lazy<Pool<String>> = Lazy::new(|| Pool::new(1024));

@@ -1,3 +1,12 @@
+//! # 日志模板模块
+//!
+//! 提供自定义日志格式化和字段提取功能，支持灵活的日志消息模板配置。
+//!
+//! ## 概述
+//!
+//! `LogTemplate` 结构体实现日志消息的模板化渲染，支持自定义占位符和格式。
+//! 通过模板系统，可以灵活控制日志输出的格式和内容。
+
 use crate::log_record::LogRecord;
 use serde_json::Value;
 
@@ -19,7 +28,7 @@ pub struct LogTemplate {
 }
 
 #[derive(Debug, Clone)]
-pub enum Placeholder {
+enum Placeholder {
     Timestamp,
     Level,
     Target,
@@ -147,6 +156,7 @@ impl Default for LogTemplate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::log_record::LogRecord;
     use chrono::Utc;
     use serde_json::Value;

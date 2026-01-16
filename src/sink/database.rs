@@ -1,3 +1,72 @@
+//! # 数据库日志输出模块
+//!
+//! 提供将日志消息批量写入数据库的功能，支持 PostgreSQL、MySQL 和 SQLite。
+//!
+//! ## 概述
+//!
+//! `DatabaseSink` 实现 `LogSink` trait，提供异步批量写入数据库的能力。
+//! 使用 Sea-ORM 作为 ORM 层，支持多种数据库后端。
+//!
+//! ## 功能特性
+//!
+//! - **多数据库支持**：PostgreSQL、MySQL、SQLite
+//! - **批量写入**：提高写入性能，减少数据库连接开销
+//! - **连接池管理**：自动管理数据库连接池
+//! - **分区表支持**：自动按年月创建分区表
+//! - **Parquet 导出**：支持导出为 Parquet 格式进行归档
+//! - **自动归档**：配置后可自动归档到 S3
+//! - **断路器保护**：防止数据库故障影响整体系统
+//!
+//! ## 性能优化
+//!
+//! - **批量写入**：默认 batch_size=100
+//! - **异步刷新**：默认 flush_interval_ms=500
+//! - **连接池**：默认 pool_size=10
+//! - **专用运行时**：独立的 tokio multi-thread runtime
+//!
+//! ## 配置示例
+//!
+//! ```rust
+//! use inklog::config::{DatabaseSinkConfig, DatabaseDriver};
+//!
+//! let config = DatabaseSinkConfig {
+//!     enabled: true,
+//!     driver: DatabaseDriver::PostgreSQL,
+//!     url: "postgres://user:pass@localhost/logs".to_string(),
+//!     batch_size: 100,
+//!     flush_interval_ms: 500,
+//!     ..Default::default()
+//! };
+//! ```
+//!
+//! ## 数据模型
+//!
+//! 日志数据存储在以下结构的表中：
+//!
+//! | 字段 | 类型 | 描述 |
+//! |------|------|------|
+//! | `id` | `i64` | 主键，自动递增 |
+//! | `timestamp` | `DateTimeUtc` | 日志时间戳 |
+//! | `level` | `String` | 日志级别 |
+//! | `target` | `String` | 目标模块 |
+//! | `message` | `String` | 日志消息 |
+//! | `fields` | `Json` | 结构化字段 |
+//! | `file` | `String?` | 源文件 |
+//! | `line` | `i32?` | 行号 |
+//! | `thread_id` | `String` | 线程 ID |
+//!
+//! ## 架构说明
+//!
+//! ```text
+//! LogRecord Buffer
+//!      ↓
+//! Batch Processor (configurable batch size)
+//!      ↓
+//! Database Connection Pool
+//!      ↓
+//! PostgreSQL / MySQL / SQLite
+//! ```
+
 use crate::config::{DatabaseDriver, DatabaseSinkConfig, FileSinkConfig};
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
@@ -39,7 +108,7 @@ pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
 
 // Archive Metadata Entity Module
-pub mod archive_metadata {
+mod archive_metadata {
     use sea_orm::entity::prelude::*;
     use serde::Serialize;
 
@@ -138,7 +207,7 @@ fn validate_partition_name(partition_name: &str) -> Result<String, InklogError> 
     Ok(partition_name.to_string())
 }
 
-pub struct DatabaseSink {
+pub(crate) struct DatabaseSink {
     config: DatabaseSinkConfig,
     buffer: Vec<LogRecord>,
     last_flush: Instant,
@@ -645,7 +714,7 @@ impl LogSink for DatabaseSink {
 }
 
 /// Convert logs to Parquet format using Arrow schema
-pub fn convert_logs_to_parquet(
+pub(crate) fn convert_logs_to_parquet(
     logs: &[Model],
     config: &crate::config::ParquetConfig,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {

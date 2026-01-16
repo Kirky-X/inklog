@@ -30,7 +30,7 @@ pub trait LogSink: Send + Sync {
 
 /// 断路器状态
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CircuitState {
+enum CircuitState {
     Closed,   // 正常运行
     Open,     // 开启（停止写入，进入降级）
     HalfOpen, // 半开启（尝试恢复）
@@ -38,7 +38,7 @@ pub enum CircuitState {
 
 /// 断路器实现，用于 Sink 的故障隔离与自动恢复
 #[derive(Debug)]
-pub struct CircuitBreaker {
+struct CircuitBreaker {
     state: CircuitState,
     failure_count: u32,
     failure_threshold: u32,

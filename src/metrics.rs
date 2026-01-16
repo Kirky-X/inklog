@@ -1,3 +1,48 @@
+//! # 健康监控模块
+//!
+//! 提供 Inklog 的健康监控和指标收集功能，支持 Prometheus 格式导出。
+//!
+//! ## 概述
+//!
+//! 此模块包含：
+//! - **SinkStatus/SinkHealth**：Sink 组件健康状态跟踪
+//! - **Metrics**：核心指标收集器
+//! - **Prometheus 导出**：HTTP 端点可读格式
+//!
+// ## 功能特性
+//!
+//! - **实时健康检查**：跟踪各 sink 的运行状态
+//! - **指标收集**：记录日志写入、错误、延迟等
+//! - **直方图统计**：延迟分布统计
+//! - **Prometheus 兼容**：可直接与 Prometheus 集成
+//!
+// ## 使用示例
+//!
+//! ```rust
+//! use inklog::metrics::{Metrics, SinkHealth, SinkStatus};
+//!
+//! let metrics = Metrics::new();
+//!
+//! // 记录日志写入
+//! metrics.record_write("console");
+//!
+//! // 记录错误
+//! metrics.record_error("database");
+//!
+//! // 获取健康状态
+//! let health = metrics.get_health_status();
+//! ```
+//!
+//! ## Prometheus 指标
+//!
+//! | 指标 | 类型 | 描述 |
+//! |------|------|------|
+//! | `inklog_records_total` | Counter | 总日志记录数 |
+//! | `inklog_errors_total` | Counter | 总错误数 |
+//! | `inklog_latency_us` | Histogram | 处理延迟（微秒）|
+//! | `inklog_sink_healthy` | Gauge | Sink 健康状态 |
+//! | `inklog_uptime_seconds` | Gauge | 运行时间（秒）|
+
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -33,13 +78,13 @@ impl SinkStatus {
     }
 
     /// Returns true if the sink is completely healthy with no issues
-    pub fn is_fully_healthy(&self) -> bool {
+    fn is_fully_healthy(&self) -> bool {
         self == &SinkStatus::Healthy
     }
 }
 
 #[derive(Debug, Serialize, Clone)]
-pub struct SinkHealth {
+pub(crate) struct SinkHealth {
     pub status: SinkStatus,
     pub last_error: Option<String>,
     pub consecutive_failures: u32,
@@ -105,7 +150,7 @@ impl Gauge {
 
 /// Histogram metric for latency distribution
 #[derive(Debug)]
-pub struct Histogram {
+struct Histogram {
     buckets: Vec<AtomicU64>,
     bounds: Vec<u64>, // in microseconds
 }
@@ -139,7 +184,7 @@ impl Histogram {
 }
 
 #[derive(Debug, Serialize)]
-pub struct MetricsSnapshot {
+struct MetricsSnapshot {
     pub logs_written: u64,
     pub logs_dropped: u64,
     pub channel_blocked: u64,

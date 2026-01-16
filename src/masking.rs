@@ -1,3 +1,66 @@
+//! # 数据掩码模块
+//!
+//! 提供敏感数据（PII）的自动检测和脱敏功能，保护日志中的隐私信息。
+//!
+//! ## 概述
+//!
+//! `DataMasker` 结构体提供日志消息和 JSON 结构中敏感数据的检测和脱敏功能。
+//! 它结合模式匹配和字段名检测来识别敏感信息。
+//!
+//! ## 功能特性
+//!
+//! - **基于模式的脱敏**：通过正则表达式模式检测敏感数据（邮箱、电话等）
+//! - **字段名检测**：通过字段名识别敏感字段（password、api_key 等）
+//! - **嵌套结构支持**：递归处理嵌套的 JSON 对象和数组
+//! - **自定义规则**：支持多个脱敏规则，可配置模式
+//!
+//! ## 敏感字段检测
+//!
+//! 以下字段名模式会自动检测为敏感字段：
+//! - **认证信息**：`password`, `token`, `secret`, `credential`, `auth`
+//! - **API 密钥**：`api_key`, `api_secret`, `access_key`, `secret_key`
+//! - **加密密钥**：`encryption_key`, `decryption_key`, `private_key`
+//! - **OAuth**：`oauth`, `oauth_token`, `bearer_token`, `jwt`
+//! - **AWS 凭据**：`aws_secret`, `aws_key`, `aws_credentials`
+//! - **支付信息**：`credit_card`, `card_number`, `cvv`, `ssn`
+//!
+//! ## 基于模式的检测
+//!
+//! 除了字段名，以下模式也会被检测：
+//! - **邮箱地址**（部分脱敏：`***@***.***`）
+//! - **电话号码**（显示后4位：`138****5678`）
+//! - **身份证号**（部分脱敏）
+//! - **银行卡号**（部分脱敏）
+//! - **JWT 令牌**
+//! - **AWS 访问密钥**
+//! - **通用 API 密钥**
+//!
+//! ## 使用示例
+//!
+//! ```rust
+//! use inklog::masking::DataMasker;
+//!
+//! let masker = DataMasker::new();
+//!
+//! // 脱敏日志消息
+//! let message = "User login: email=test@example.com";
+//! let masked = masker.mask(message);
+//! // 邮箱脱敏格式: **@**.***
+//! assert!(masked.contains("**@**.***"));
+//! assert!(!masked.contains("test@example.com"));
+//!
+//! // 检查字段名是否为敏感字段
+//! assert!(DataMasker::is_sensitive_field("password"));
+//! assert!(DataMasker::is_sensitive_field("api_key"));
+//! assert!(!DataMasker::is_sensitive_field("username"));
+//! ```
+//!
+//! ## 性能考虑
+//!
+//! - 预编译正则表达式以提高性能
+//! - 批量处理时使用缓存
+//! - 支持禁用特定检测规则以减少开销
+
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -115,7 +178,7 @@ static SENSITIVE_FIELDS: &[&str] = &[
 ///
 /// `DataMasker` is immutable and can be safely shared between threads.
 #[derive(Debug, Clone, Default)]
-pub struct DataMasker {
+pub(crate) struct DataMasker {
     rules: Vec<MaskRule>,
 }
 
@@ -323,15 +386,15 @@ impl MaskRule {
     }
 }
 
-pub fn mask_email(email: &str) -> String {
+fn mask_email(email: &str) -> String {
     EMAIL_REGEX.replace(email, "**@**.***").to_string()
 }
 
-pub fn mask_phone(phone: &str) -> String {
+fn mask_phone(phone: &str) -> String {
     PHONE_REGEX.replace(phone, "***-****-****").to_string()
 }
 
-pub fn mask_id_card(id_card: &str) -> String {
+fn mask_id_card(id_card: &str) -> String {
     // 身份证号掩码：只保留后4位，如果是X结尾则保留最后3位+X
     ID_CARD_REGEX
         .replace(id_card, |caps: &regex::Captures| {
@@ -342,7 +405,7 @@ pub fn mask_id_card(id_card: &str) -> String {
         .to_string()
 }
 
-pub fn mask_bank_card(bank_card: &str) -> String {
+fn mask_bank_card(bank_card: &str) -> String {
     // 银行卡号掩码：只保留后4位，支持16位和19位卡号
     if bank_card.len() > 4 {
         let last_four = &bank_card[bank_card.len() - 4..];

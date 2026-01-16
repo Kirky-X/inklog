@@ -31,7 +31,7 @@ use tracing_subscriber::prelude::*;
 // Control messages for sink recovery
 /// Messages used to control sink recovery and status queries.
 #[derive(Debug, Clone)]
-pub enum SinkControlMessage {
+enum SinkControlMessage {
     RecoverSink(String), // sink name
     GetStatus,
 }
