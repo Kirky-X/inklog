@@ -10,9 +10,9 @@ use super::S3ArchiveManager;
 use crate::error::InklogError;
 use chrono::{DateTime, Datelike, Duration, Utc};
 use sea_orm::{ColumnTrait, DatabaseConnection, QueryFilter};
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::fs;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 #[cfg(feature = "aws")]
@@ -53,12 +53,14 @@ impl ArchiveService {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
         let local_retention_path = config.local_retention_path.clone();
-        fs::create_dir_all(&local_retention_path).map_err(|e| {
-            InklogError::IoError(std::io::Error::other(format!(
-                "Failed to create local retention directory: {}",
-                e
-            )))
-        })?;
+        fs::create_dir_all(&local_retention_path)
+            .await
+            .map_err(|e| {
+                InklogError::IoError(std::io::Error::other(format!(
+                    "Failed to create local retention directory: {}",
+                    e
+                )))
+            })?;
 
         // 创建调度器
         let scheduler = JobScheduler::new().await.map_err(|e| {
@@ -340,8 +342,6 @@ impl ArchiveService {
 
     /// 执行清理任务（供调度器调用）
     async fn perform_cleanup_with_deps(config: &S3ArchiveConfig) -> Result<(), InklogError> {
-        use std::fs;
-
         let retention_path = &config.local_retention_path;
         if !retention_path.exists() {
             return Ok(());
@@ -349,21 +349,20 @@ impl ArchiveService {
 
         let cutoff = Utc::now() - Duration::days(config.local_retention_days as i64);
 
-        let entries = fs::read_dir(retention_path).map_err(|e| {
+        let entries = fs::read_dir(retention_path).await.map_err(|e| {
             InklogError::IoError(std::io::Error::other(format!(
                 "Failed to read retention directory: {}",
                 e
             )))
         })?;
 
-        for entry in entries {
-            let entry = entry.map_err(|e| {
-                InklogError::IoError(std::io::Error::other(format!(
-                    "Failed to read directory entry: {}",
-                    e
-                )))
-            })?;
-
+        let mut entries = Box::pin(entries);
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            InklogError::IoError(std::io::Error::other(format!(
+                "Failed to read directory entry: {}",
+                e
+            )))
+        })? {
             if let Ok(metadata) = entry.path().metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if let Some(modified_date) = DateTime::from_timestamp(
@@ -374,7 +373,7 @@ impl ArchiveService {
                         0,
                     ) {
                         if modified_date < cutoff {
-                            if let Err(e) = fs::remove_file(entry.path()) {
+                            if let Err(e) = fs::remove_file(entry.path()).await {
                                 error!("Failed to remove old log file: {}", e);
                             } else {
                                 info!("Removed old log file: {:?}", entry.path());
@@ -544,7 +543,7 @@ impl ArchiveService {
         })
     }
 
-    /// 从文件系统获取日志数据
+    /// 从文件系统获取日志数据 (异步版本)
     #[cfg(feature = "aws")]
     async fn fetch_file_logs(
         &self,
@@ -555,19 +554,28 @@ impl ArchiveService {
         let log_dir = PathBuf::from("logs");
         let mut all_data = Vec::new();
 
-        if let Ok(entries) = fs::read_dir(&log_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|ext| ext == "log") {
-                    if let Ok(metadata) = path.metadata() {
-                        if let Ok(modified) = metadata.modified() {
-                            let modified_utc: DateTime<Utc> = modified.into();
-                            if modified_utc >= start_date && modified_utc < end_date {
-                                if let Ok(data) = fs::read(&path) {
-                                    all_data.extend_from_slice(&data);
-                                }
-                            }
-                        }
+        let entries = match fs::read_dir(&log_dir).await {
+            Ok(dir) => dir,
+            Err(_) => return Ok(Vec::new()),
+        };
+
+        let mut entries = Box::pin(entries);
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "log") {
+                let metadata = match path.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let modified = match metadata.modified() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let modified_utc: DateTime<Utc> = modified.into();
+                if modified_utc >= start_date && modified_utc < end_date {
+                    match fs::read(&path).await {
+                        Ok(data) => all_data.extend_from_slice(&data),
+                        Err(_) => continue,
                     }
                 }
             }
@@ -604,32 +612,35 @@ impl ArchiveService {
     }
 
     #[allow(dead_code)]
-    /// 清理旧的日志文件
+    /// 清理旧的日志文件（异步版本）
     async fn cleanup_old_files(&self, cutoff_date: DateTime<Utc>) -> Result<(), InklogError> {
         let log_dir = &self.local_retention_path;
         let mut count = 0;
 
-        if let Ok(entries) = fs::read_dir(log_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file()
-                    && path
-                        .extension()
-                        .is_some_and(|ext| ext == "log" || ext == "zst" || ext == "enc")
-                {
-                    if let Ok(metadata) = path.metadata() {
-                        if let Ok(modified) = metadata.modified() {
-                            let modified_utc: DateTime<Utc> = modified.into();
-                            if modified_utc < cutoff_date {
-                                if let Err(e) = fs::remove_file(&path) {
-                                    error!(
-                                        "Failed to remove old log file {}: {}",
-                                        path.display(),
-                                        e
-                                    );
-                                } else {
-                                    count += 1;
-                                }
+        let entries = match fs::read_dir(log_dir).await {
+            Ok(dir) => dir,
+            Err(e) => {
+                error!("Failed to read log directory: {}", e);
+                return Ok(());
+            }
+        };
+
+        let mut entries = Box::pin(entries);
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|ext| ext == "log" || ext == "zst" || ext == "enc")
+            {
+                if let Ok(metadata) = path.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        let modified_utc: DateTime<Utc> = modified.into();
+                        if modified_utc < cutoff_date {
+                            if let Err(e) = fs::remove_file(&path).await {
+                                error!("Failed to remove old log file {}: {}", path.display(), e);
+                            } else {
+                                count += 1;
                             }
                         }
                     }
@@ -649,6 +660,7 @@ impl ArchiveService {
     }
 
     #[allow(dead_code)]
+    /// 保存归档数据到本地保留目录（异步版本）
     async fn save_to_local_retention(
         &self,
         data: Vec<u8>,
@@ -673,7 +685,7 @@ impl ArchiveService {
             start_date.day()
         ));
 
-        fs::create_dir_all(&date_dir).map_err(|e| {
+        fs::create_dir_all(&date_dir).await.map_err(|e| {
             InklogError::IoError(std::io::Error::other(format!(
                 "Failed to create local retention date directory: {}",
                 e
@@ -688,7 +700,7 @@ impl ArchiveService {
         let file_path = date_dir.join(file_name);
 
         // 写入数据
-        fs::write(&file_path, &data).map_err(|e| {
+        fs::write(&file_path, &data).await.map_err(|e| {
             InklogError::IoError(std::io::Error::other(format!(
                 "Failed to write local retention file {}: {}",
                 file_path.display(),

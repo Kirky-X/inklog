@@ -127,8 +127,8 @@ impl LoggerManager {
 
         let (manager, subscriber, filter) = Self::build_detached(config.clone()).await?;
         let registry = tracing_subscriber::registry().with(subscriber).with(filter);
-        if let Err(_e) = registry.try_init() {
-            // eprintln!("Failed to set global subscriber: {}", e);
+        if let Err(ref e) = registry.try_init() {
+            tracing::warn!("Failed to set global subscriber: {}", e);
         }
 
         // Start HTTP server if enabled

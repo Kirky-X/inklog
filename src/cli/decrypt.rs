@@ -2,6 +2,8 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes256Gcm;
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose, Engine as _};
+#[cfg(test)]
+use sha2::Sha256;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -498,11 +500,19 @@ mod tests {
     use rand::Rng;
     use std::io::Write;
 
-    const TEST_KEY: [u8; 32] = [
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
-        0x1f, 0x20,
-    ];
+    /// Generate a test key from a seed (allows deterministic or environment-based keys)
+    fn get_test_key(seed: &str) -> [u8; 32] {
+        let seed = std::env::var("INKLOG_TEST_KEY_SEED").unwrap_or_else(|_| seed.to_string());
+        let hash = Sha256::digest(seed);
+        let mut key = [0u8; 32];
+        key.copy_from_slice(hash.as_slice());
+        key
+    }
+
+    /// Generate a test encryption key (with optional seed for determinism)
+    fn generate_test_key() -> [u8; 32] {
+        get_test_key("inklog-test-seed-2024")
+    }
 
     fn create_encrypted_file_v1(path: &PathBuf, plaintext: &[u8], key: &[u8; 32]) -> Result<()> {
         let mut file = File::create(path)?;
@@ -593,11 +603,12 @@ mod tests {
 
     #[test]
     fn test_get_encryption_key_base64() {
-        let key_base64 = general_purpose::STANDARD.encode(TEST_KEY);
+        let test_key = generate_test_key();
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
         std::env::set_var("TEST_ENCRYPTION_KEY", &key_base64);
 
         let key = get_encryption_key("TEST_ENCRYPTION_KEY").unwrap();
-        assert_eq!(key, TEST_KEY);
+        assert_eq!(key, test_key);
 
         std::env::remove_var("TEST_ENCRYPTION_KEY");
     }
@@ -608,10 +619,11 @@ mod tests {
         let input_file = temp_dir.path().join("test_v1.enc");
         let output_file = temp_dir.path().join("test_v1.log");
         let plaintext = b"Hello, World! V1 format test.";
+        let test_key = generate_test_key();
 
-        create_encrypted_file_v1(&input_file, plaintext, &TEST_KEY).unwrap();
+        create_encrypted_file_v1(&input_file, plaintext, &test_key).unwrap();
 
-        std::env::set_var("TEST_V1_KEY", general_purpose::STANDARD.encode(TEST_KEY));
+        std::env::set_var("TEST_V1_KEY", general_purpose::STANDARD.encode(test_key));
         let result = decrypt_file(&input_file, &output_file, "TEST_V1_KEY");
 
         assert!(result.is_ok());
@@ -632,12 +644,13 @@ mod tests {
         let input_file = temp_dir.path().join("test_legacy.enc");
         let output_file = temp_dir.path().join("test_legacy.log");
         let plaintext = b"Hello, World! Legacy format test.";
+        let test_key = generate_test_key();
 
-        create_encrypted_file_legacy(&input_file, plaintext, &TEST_KEY).unwrap();
+        create_encrypted_file_legacy(&input_file, plaintext, &test_key).unwrap();
 
         std::env::set_var(
             "TEST_LEGACY_KEY",
-            general_purpose::STANDARD.encode(TEST_KEY),
+            general_purpose::STANDARD.encode(test_key),
         );
         let result = decrypt_file_legacy(&input_file, &output_file, "TEST_LEGACY_KEY");
 
@@ -659,12 +672,13 @@ mod tests {
         let input_file = temp_dir.path().join("test_compat.enc");
         let output_file = temp_dir.path().join("test_compat.log");
         let plaintext = b"Auto-detect format test.";
+        let test_key = generate_test_key();
 
-        create_encrypted_file_v1(&input_file, plaintext, &TEST_KEY).unwrap();
+        create_encrypted_file_v1(&input_file, plaintext, &test_key).unwrap();
 
         std::env::set_var(
             "TEST_COMPAT_KEY",
-            general_purpose::STANDARD.encode(TEST_KEY),
+            general_purpose::STANDARD.encode(test_key),
         );
         let result = decrypt_file_compatible(&input_file, &output_file, "TEST_COMPAT_KEY");
 
