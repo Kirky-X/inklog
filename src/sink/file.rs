@@ -485,22 +485,18 @@ impl FileSink {
 
         // 如果不是 Base64，尝试使用原始字节
         let raw_bytes = env_value.as_bytes();
-        if raw_bytes.len() >= 32 {
-            // Truncate to 32 bytes if longer
-            let mut result = [0u8; 32];
-            result.copy_from_slice(&raw_bytes[..32]);
-            Ok(result)
-        } else if raw_bytes.len() == 32 {
-            let mut result = [0u8; 32];
-            result.copy_from_slice(raw_bytes);
-            Ok(result)
-        } else {
-            Err(InklogError::ConfigError(format!(
-                "Encryption key must be exactly 32 bytes (256 bits), got {} bytes. \
-                     Please provide a valid 32-byte key.",
+        if raw_bytes.len() < 32 {
+            return Err(InklogError::ConfigError(format!(
+                "Encryption key must be at least 32 bytes (256 bits), got {} bytes. \
+                     Please provide a valid 32-byte key or Base64-encoded key.",
                 raw_bytes.len()
-            )))
+            )));
         }
+
+        // Truncate to 32 bytes if longer
+        let mut result = [0u8; 32];
+        result.copy_from_slice(&raw_bytes[..32]);
+        Ok(result)
     }
 
     fn check_rotation(&mut self) -> Result<(), InklogError> {
@@ -1183,6 +1179,8 @@ mod tests {
 
 impl Drop for FileSink {
     fn drop(&mut self) {
+        const SHUTDOWN_TIMEOUT_MS: u64 = 5000; // 5 second timeout
+
         // Set shutdown flag to signal threads to stop
         self.shutdown_flag.store(true, Ordering::SeqCst);
 
@@ -1191,14 +1189,34 @@ impl Drop for FileSink {
             let _ = file.flush();
         }
 
-        // Wait for rotation timer thread to finish
+        // Wait for rotation timer thread to finish with timeout
         if let Some(handle) = self.timer_handle.take() {
-            let _ = handle.join();
+            let start = std::time::Instant::now();
+            while handle.is_finished() {
+                if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
+                    eprintln!(
+                        "Warning: rotation timer shutdown timeout after {}ms",
+                        SHUTDOWN_TIMEOUT_MS
+                    );
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
 
-        // Wait for cleanup timer thread to finish
+        // Wait for cleanup timer thread to finish with timeout
         if let Some(handle) = self.cleanup_timer_handle.take() {
-            let _ = handle.join();
+            let start = std::time::Instant::now();
+            while handle.is_finished() {
+                if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
+                    eprintln!(
+                        "Warning: cleanup timer shutdown timeout after {}ms",
+                        SHUTDOWN_TIMEOUT_MS
+                    );
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
 
         // Close fallback console sink
