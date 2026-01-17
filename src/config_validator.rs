@@ -70,9 +70,9 @@ where
         + std::cmp::PartialOrd<T>
         + std::fmt::Display
         + Copy
-        + Into<i64>,
+        + num_traits::Zero,
 {
-    if value <= 0.into() {
+    if value <= T::zero() {
         return Err(InklogError::ConfigError(format!(
             "{} must be > 0, got {}",
             field_name, value

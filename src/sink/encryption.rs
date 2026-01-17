@@ -40,6 +40,15 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
         )
     })?);
 
+    let raw_bytes = env_value.as_bytes();
+
+    // 如果长度是32字节，尝试直接使用原始字节
+    if raw_bytes.len() == 32 {
+        let mut result = [0u8; 32];
+        result.copy_from_slice(raw_bytes);
+        return Ok(result);
+    }
+
     // 尝试解码 Base64 编码的密钥
     if let Ok(decoded) = general_purpose::STANDARD.decode(env_value.as_str()) {
         if decoded.len() == 32 {
@@ -53,14 +62,6 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
              Please provide a valid 32-byte key encoded in Base64.",
             decoded.len()
         )));
-    }
-
-    // 如果不是 Base64，检查是否为原始字节
-    let raw_bytes = env_value.as_bytes();
-    if raw_bytes.len() == 32 {
-        let mut result = [0u8; 32];
-        result.copy_from_slice(raw_bytes);
-        return Ok(result);
     }
 
     // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥

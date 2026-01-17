@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
     // 检查路径中是否包含可疑字符（包括 Unicode 变体）
     let path_str = file_path.to_string_lossy();
-    let suspicious_chars = ['.', '~', '\0', '\u{2024}', '\u{2025}', '\u{FE52}']; // 包括各种点字符
+    let suspicious_chars = ['~', '\0', '\u{2024}', '\u{2025}', '\u{FE52}']; // 包括各种点字符，但不包括单个 '.'
     for c in path_str.chars() {
         if suspicious_chars.contains(&c) {
             return Err(anyhow!(
@@ -27,6 +27,15 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
                 file_path.display()
             ));
         }
+    }
+
+    // 检查路径遍历模式
+    let path_str_lower = path_str.to_lowercase();
+    if path_str_lower.contains("..") || path_str_lower.contains("~/") {
+        return Err(anyhow!(
+            "Path traversal pattern detected in: {}",
+            file_path.display()
+        ));
     }
 
     // 规范化路径

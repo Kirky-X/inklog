@@ -531,8 +531,16 @@ impl DatabaseSink {
                             let quoted_partition = format!("\"{}\"", validated_partition);
 
                             // 验证日期格式以防止 SQL 注入
-                            validate_date_format(&start_date)?;
-                            validate_date_format(&next_month)?;
+                            if let Err(e) = validate_date_format(&start_date) {
+                                return Err(sea_orm::DbErr::Query(
+                                    sea_orm::RuntimeErr::Internal(e.to_string())
+                                ));
+                            }
+                            if let Err(e) = validate_date_format(&next_month) {
+                                return Err(sea_orm::DbErr::Query(
+                                    sea_orm::RuntimeErr::Internal(e.to_string())
+                                ));
+                            }
 
                             let sql = format!(
                                 "CREATE TABLE IF NOT EXISTS {} PARTITION OF {} FOR VALUES FROM ('{}') TO ('{}')",
@@ -562,7 +570,11 @@ impl DatabaseSink {
 
                                 // MySQL 使用反引号引用标识符
                                 // 验证日期格式以防止 SQL 注入
-                                validate_date_format(&start_date)?;
+                                if let Err(e) = validate_date_format(&start_date) {
+                                    return Err(sea_orm::DbErr::Query(
+                                        sea_orm::RuntimeErr::Internal(e.to_string())
+                                    ));
+                                }
 
                                 let partition_sql = format!(
                                     "CREATE TABLE IF NOT EXISTS `{}` PARTITION OF `logs` FOR VALUES IN (TO_DAYS('{}'))",

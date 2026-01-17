@@ -284,12 +284,8 @@ impl AsyncFileSink {
     }
 
     fn try_write(&self, record: &LogRecord) -> bool {
-        let mut buffer = Vec::with_capacity(256);
-        if let Err(_) = self.template.format(record, &mut buffer) {
-            return false;
-        }
-
-        let bytes = Bytes::from(buffer);
+        let rendered = self.template.render(record);
+        let bytes = Bytes::from(rendered);
 
         match self.sender.send(bytes) {
             Ok(()) => true,

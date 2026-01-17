@@ -81,7 +81,7 @@ fn sanitize_message(msg: &str) -> String {
     // 使用正则表达式进行更精确的匹配
     for (pattern, replacement) in SENSITIVE_PATTERNS {
         if let Ok(re) = regex::Regex::new(pattern) {
-            result = re.replace_all(&result, replacement).to_string();
+            result = re.replace_all(&result, *replacement).to_string();
         }
     }
 

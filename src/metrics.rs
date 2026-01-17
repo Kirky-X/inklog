@@ -355,9 +355,9 @@ impl Metrics {
         let status = if healthy {
             SinkStatus::Healthy
         } else {
-            let error_msg = error.unwrap_or_else(|| "Unknown error".to_string());
+            let error_msg = error.as_ref().unwrap_or(&"Unknown error".to_string()).clone();
             SinkStatus::Unhealthy {
-                error: error_msg.clone(),
+                error: error_msg,
             }
         };
 

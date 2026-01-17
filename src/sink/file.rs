@@ -8,6 +8,7 @@ use crate::error::InklogError;
 use crate::log_record::LogRecord;
 use crate::sink::{compression, console::ConsoleSink, encryption, CircuitBreaker, LogSink};
 use crate::template::LogTemplate;
+use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
@@ -965,29 +966,46 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_get_encryption_key() {
-        // Test base64 decoding
-        let base64_key = general_purpose::STANDARD.encode([1u8; 32]);
-        std::env::set_var("TEST_KEY_BASE64", base64_key);
-        let key = FileSink::get_encryption_key("TEST_KEY_BASE64").unwrap();
-        assert_eq!(key, [1u8; 32]);
+        // Clean up any existing test environment variables
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_BASE64", "");
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD", "");
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_VALID", "");
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_LONG", "");
+        std::env::set_var("LOG_KEY", ""); // Clear any LOG_KEY set by other tests
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_BASE64");
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_VALID");
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_LONG");
+        std::env::remove_var("LOG_KEY");
 
-        // Test raw string that is too short (should fail)
-        std::env::set_var("TEST_KEY_RAW", "short_key");
-        let result = FileSink::get_encryption_key("TEST_KEY_RAW");
-        assert!(result.is_err(), "Short key should fail");
+        // Test base64 decoding of 32-byte key
+        let base64_key = base64::engine::general_purpose::STANDARD.encode([1u8; 32]);
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_BASE64", &base64_key);
+        let key = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_BASE64").unwrap();
+        assert_eq!(key, [1u8; 32]);
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_BASE64");
+
+        // Test password-based key derivation (short keys now succeed via PBKDF2)
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD", "short_key");
+        let result = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
+        assert!(result.is_ok(), "Short key should succeed via PBKDF2 derivation");
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
 
         // Test raw string with exact 32 bytes
         let valid_key = "a".repeat(32);
-        std::env::set_var("TEST_KEY_VALID", valid_key.clone());
-        let key = FileSink::get_encryption_key("TEST_KEY_VALID").unwrap();
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_VALID", &valid_key);
+        let key = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_VALID").unwrap();
         assert_eq!(&key[..], valid_key.as_bytes());
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_VALID");
 
-        // Test raw string truncation (use special chars that aren't valid base64)
-        let long_key = "@".repeat(40);
-        std::env::set_var("TEST_KEY_LONG", long_key);
-        let key = FileSink::get_encryption_key("TEST_KEY_LONG").unwrap();
-        assert_eq!(&key[..32], [b'@'; 32]);
+        // Test raw string that is too long (should fail)
+        let long_key = "a".repeat(128);
+        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_LONG", &long_key);
+        let result = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_LONG");
+        assert!(result.is_err(), "Key longer than 127 chars should fail");
+        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_LONG");
     }
 
     #[test]
