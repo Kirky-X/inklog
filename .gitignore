@@ -3,19 +3,15 @@
 .trae/
 .idea/
 .vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-*.sublime-project
-*.sublime-workspace
-.vscode/
 .fleet/
 .jb/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
 
 # Build
 target/
-**/target/
 Cargo.lock
 
 # Logs
@@ -53,6 +49,8 @@ secrets/
 # Project docs and configs
 .sisyphus/
 AGENTS.md
+CLAUDE.md
+.secrets.baseline
 docs/prd.md
 docs/task.md
 docs/tdd.md
@@ -72,16 +70,9 @@ desktop.ini
 # Rust specific
 **/*.rs.bk
 *.pdb
-Cargo.lock
 
 # Dependency directories
 vendor/
-
-# Misc
-.cache/
-*.pid
-*.seed
-*.pid.lock
 node_modules/
 .npm/
 .yarn/
@@ -113,3 +104,9 @@ pnpm-lock.yaml
 # OpenSpec
 openspec/
 .opencode/
+
+# Misc
+.cache/
+*.pid
+*.seed
+*.pid.lock
