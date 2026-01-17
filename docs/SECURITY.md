@@ -51,7 +51,7 @@ use rand::Rng;
 fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
     // 使用 Zeroizing 保护环境变量值
     let env_value = Zeroizing::new(std::env::var(env_var)?);
-    
+
     // 支持 Base64 编码格式
     if let Ok(decoded) = general_purpose::STANDARD.decode(env_value.as_str()) {
         if decoded.len() == 32 {
@@ -60,7 +60,7 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
             return Ok(result);
         }
     }
-    
+
     // 支持原始 32 字节格式
     let raw_bytes = env_value.as_bytes();
     if raw_bytes.len() >= 32 {
@@ -68,7 +68,7 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
         result.copy_bytes[..32]);
 _from_slice(&raw        return Ok(result);
     }
-    
+
     Err(InklogError::ConfigError(
         "Key must be 32 bytes (256 bits)".into()
     ))
@@ -99,38 +99,38 @@ export INKLOG_ENCRYPTION_KEY=your-32-byte-base64-encoded-key
 ```rust
 fn encrypt_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
     let encrypted_path = path.with_extension("enc");
-    
+
     // 1. 安全获取密钥
     let key = self.get_encryption_key()?;
-    
+
     // 2. 生成随机 nonce (12 字节)
     let nonce: [u8; 12] = rand::thread_rng().gen();
-    
+
     // 3. 读取明文
     let plaintext = std::fs::read_to_string(path)?;
-    
+
     // 4. 使用 AES-256-GCM 加密
     let cipher = Aes256Gcm::new((&key).into());
     let nonce_slice = aes_gcm::Nonce::from_slice(&nonce);
     let ciphertext = cipher
         .encrypt(nonce_slice, plaintext.as_ref())
         .map_err(|e| InklogError::EncryptionError(e.to_string()))?;
-    
+
     // 5. 写入加密文件
     let mut output_file = File::create(&encrypted_path)?;
-    
+
     // 文件头: [8字节 MAGIC][2字节版本][2字节算法][12字节 nonce]
     output_file.write_all(MAGIC_HEADER)?;           // "ENCLOG1\0"
     output_file.write_all(&1u16.to_le_bytes())?;    // 版本 = 1
     output_file.write_all(&1u16.to_le_bytes())?;    // 算法 = 1 (AES-256-GCM)
     output_file.write_all(&nonce)?;                  // 12 字节 nonce
     output_file.write_all(&ciphertext)?;             // 加密数据
-    
+
     // 6. 设置安全权限
     let mut perms = metadata.permissions();
     perms.set_mode(0o600);  // 仅所有者可读写
     file.set_permissions(perms)?;
-    
+
     Ok(encrypted_path)
 }
 ```
@@ -316,25 +316,25 @@ r"(?i)([^\s:=]*(?:token|secret|key|password|passwd|pwd|credential)s?[^\s:=]*\s*[
 static SENSITIVE_FIELDS: &[&str] = &[
     // 认证凭据
     "password", "token", "secret", "key", "credential", "auth",
-    
+
     // API 密钥
     "api_key", "api_key_id", "api_secret", "access_key", "access_key_id",
-    "secret_key", "private_key", "public_key", "encryption_key", 
+    "secret_key", "private_key", "public_key", "encryption_key",
     "decryption_key", "master_key", "session_key",
-    
+
     // OAuth 相关
-    "oauth", "oauth_token", "oauth_secret", "bearer", "bearer_token", 
+    "oauth", "oauth_token", "oauth_secret", "bearer", "bearer_token",
     "jwt", "session_id", "session_token",
-    
+
     // AWS 凭据
     "aws_secret", "aws_key", "aws_credentials",
-    
+
     // 数据库连接
     "database_url", "db_password", "db_user", "connection_string",
-    
+
     // 支付和个人身份信息
     "credit_card", "card_number", "cvv", "ssn", "social_security",
-    
+
     // 其他敏感信息
     "client_secret", "client_id", "refresh_token", "pin", "pin_code",
     "two_factor", "totp", "backup_code", "recovery_code",
@@ -369,7 +369,7 @@ impl DataMasker {
             // 内置规则
             MaskRule::new_email_rule(),
             MaskRule::new_phone_rule(),
-            
+
             // 添加自定义规则
             MaskRule {
                 pattern: LazyLock::new(|| {
@@ -391,26 +391,26 @@ impl DataMasker {
 impl LogRecord {
     pub fn from_event(event: &Event) -> Self {
         let mut record = /* ... */;
-        
+
         // 创建日志记录时自动应用脱敏
         if config.global.masking_enabled {
             record.mask_sensitive_fields();
         }
-        
+
         record
     }
-    
+
     fn mask_sensitive_fields(&mut self) {
         let masker = DataMasker::new();
-        
+
         // 1. 脱敏日志消息 (正则模式)
         self.message = masker.mask(&self.message);
-        
+
         // 2. 递归脱敏所有字段值
         for (_, v) in self.fields.iter_mut() {
             masker.mask_value(v);
         }
-        
+
         // 3. 敏感字段完全脱敏 (字段名检测)
         for (k, v) in self.fields.iter_mut() {
             if Self::is_sensitive_key(k) {
@@ -516,12 +516,12 @@ impl SecretString {
     pub fn new(value: String) -> Self {
         Self(Some(Zeroizing::new(value)))
     }
-    
+
     /// 安全获取字符串引用 (不消耗值)
     pub fn as_str_safe(&self) -> Option<&str> {
         self.0.as_deref()
     }
-    
+
     /// 带审计日志的安全获取 (仅调试模式)
     pub fn take_audited(&mut self, event: &str) -> Option<String> {
         #[cfg(feature = "debug")]
@@ -558,9 +558,9 @@ impl Serialize for SecretString {
 fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
     // 使用 Zeroizing 包装环境变量值
     let env_value = Zeroizing::new(std::env::var(env_var)?);
-    
+
     // ... 处理密钥 ...
-    
+
     // env_value 超出作用域时自动清零
 }
 ```
@@ -625,10 +625,10 @@ fn encrypt_sensitive_data(data: &[u8]) -> Result<Vec<u8>> {
     let key_bytes = Zeroizing::new(
         std::env::var("ENCRYPTION_KEY")?
     );
-    
+
     // 使用密钥加密
     let encrypted = /* ... */;
-    
+
     // key_bytes 超出作用域时自动清零
     Ok(encrypted)
 }
@@ -664,24 +664,24 @@ if let Err(e) = file.set_permissions(perms) {
 fn create_log_file(path: &PathBuf) -> Result<File, InklogError> {
     // 1. 验证路径不在系统目录
     validate_path_not_in_system_dirs(path)?;
-    
+
     // 2. 确保父目录存在且安全
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
         set_secure_permissions(parent)?;
     }
-    
+
     // 3. 创建文件
     let file = File::options()
         .write(true)
         .create_new(true)  // 防止覆盖现有文件
         .open(path)?;
-    
+
     // 4. 设置安全权限
     let mut perms = file.metadata()?.permissions();
     perms.set_mode(0o600);
     file.set_permissions(perms)?;
-    
+
     Ok(file)
 }
 ```
@@ -719,13 +719,13 @@ fn validate_table_name(name: &str) -> Result<String, InklogError> {
             "Table name cannot be empty".to_string(),
         ));
     }
-    
+
     if name.len() > 128 {
         return Err(InklogError::DatabaseError(
             "Table name too long".to_string(),
         ));
     }
-    
+
     // 验证首字符
     let first_char = name.chars().next()
         .ok_or_else(|| InklogError::DatabaseError("Empty name".to_string()))?;
@@ -734,14 +734,14 @@ fn validate_table_name(name: &str) -> Result<String, InklogError> {
             "Table name must start with letter or underscore".to_string()
         ));
     }
-    
+
     // 验证所有字符
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(InklogError::DatabaseError(
             "Table name contains invalid characters".to_string()
         ));
     }
-    
+
     Ok(name.to_string())
 }
 ```
@@ -756,7 +756,7 @@ fn validate_partition_name(partition_name: &str) -> Result<String, InklogError> 
             "Partition name must start with 'logs_'".to_string()
         ));
     }
-    
+
     // 验证日期部分格式 YYYY_MM
     let date_part = &partition_name[5..];
     if date_part.len() != 7 || date_part.chars().nth(4) != Some('_') {
@@ -764,20 +764,20 @@ fn validate_partition_name(partition_name: &str) -> Result<String, InklogError> 
             "Invalid partition date format, expected YYYY_MM".to_string()
         ));
     }
-    
+
     let year = &date_part[..4];
     let month = &date_part[5..];
-    
+
     // 验证年份和月份为有效数字
     if !year.chars().all(|c| c.is_ascii_digit()) {
         return Err(InklogError::DatabaseError("Invalid year".to_string()));
     }
-    
+
     let month_num: u32 = month.parse().unwrap_or(0);
     if month_num == 0 || month_num > 12 {
         return Err(InklogError::DatabaseError("Invalid month".to_string()));
     }
-    
+
     Ok(partition_name.to_string())
 }
 ```
@@ -892,7 +892,7 @@ fn validate_file_path(input_path: &Path, base_dir: &Path) -> Result<PathBuf> {
         .map_err(|e| anyhow!("Failed to canonicalize input path: {}", e))?;
     let canonical_base = std::fs::canonicalize(base_dir)
         .map_err(|e| anyhow!("Failed to canonicalize base dir: {}", e))?;
-    
+
     // 验证路径在基础目录内
     if !canonical_input.starts_with(&canonical_base) {
         return Err(anyhow!(
@@ -901,7 +901,7 @@ fn validate_file_path(input_path: &Path, base_dir: &Path) -> Result<PathBuf> {
             base_dir.display()
         ));
     }
-    
+
     Ok(canonical_input)
 }
 ```
@@ -1123,7 +1123,7 @@ pub async fn cleanup_old_logs(
         .exec(db)
         .await
         .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-    
+
     Ok(rows_affected)
 }
 ```
