@@ -3,16 +3,6 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-//! 单元测试入口文件
-//!
-//! 此文件作为单元测试的入口点，包含所有单元测试模块的测试用例。
-//!
-//! 测试模块组织：
-//! - 配置测试 (unit::config)
-//! - 输出端测试 (unit::sink)
-//! - 归档测试 (unit::archive)
-//! - CLI测试 (unit::cli)
-
 use inklog::log_record::LogRecord;
 use inklog::sink::console::ConsoleSink;
 use inklog::sink::LogSink;
@@ -20,8 +10,6 @@ use inklog::template::LogTemplate;
 use inklog::{ConsoleSinkConfig, FileSinkConfig, InklogConfig, LoggerManager};
 use tempfile::TempDir;
 use tracing::Level;
-
-// ============ 配置单元测试 (unit::config) ============
 
 #[test]
 fn test_config_validation() {
@@ -41,8 +29,6 @@ fn test_builder() {
         .channel_capacity(100)
         .build();
 }
-
-// ============ 输出端单元测试 (unit::sink) ============
 
 #[test]
 fn test_console_sink_format() {
@@ -80,9 +66,3 @@ fn test_file_sink_rotation() {
     let entries = std::fs::read_dir(temp_dir.path()).expect("Failed to read temp directory");
     assert!(entries.count() >= 1);
 }
-
-// ============ 归档单元测试 (unit::archive) ============
-// (归档单元测试的具体实现待补充)
-
-// ============ CLI 单元测试 (unit::cli) ============
-// (CLI 单元测试的具体实现待补充)
