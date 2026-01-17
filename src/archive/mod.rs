@@ -29,7 +29,7 @@
 //!
 //! ## 存储键命名规范
 //!
-//! ```
+//! ```text
 //! {prefix}/{year}/{month}/logs_{start}_{end}_{count}.parquet.{ext}
 //! ```
 //!
@@ -46,6 +46,7 @@
 //!      ├─ < 5MB: 单次 PUT
 //!      └─ ≥ 5MB: 分片上传
 //! ```
+//!
 
 mod service;
 pub use service::{ArchiveService, ArchiveServiceBuilder};
@@ -70,7 +71,7 @@ use zeroize::{Zeroize, Zeroizing};
 /// - 序列化时自动跳过
 /// - 反序列化时从 String 转换
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SecretString(Option<Zeroizing<String>>);
+pub struct SecretString(Option<Zeroizing<String>>);
 
 impl SecretString {
     pub fn new(value: String) -> Self {
@@ -284,7 +285,7 @@ pub enum StorageClass {
 
 /// 加密配置
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct EncryptionConfig {
+pub struct EncryptionConfig {
     /// 服务器端加密算法
     pub algorithm: EncryptionAlgorithm,
     /// KMS密钥ID（使用KMS加密时必需）
@@ -321,7 +322,7 @@ pub enum EncryptionAlgorithm {
 
 /// 调度状态跟踪（用于持久化）
 #[derive(Debug, Clone, Default)]
-struct ScheduleState {
+pub struct ScheduleState {
     /// 上次调度执行时间
     pub last_scheduled_run: Option<DateTime<Utc>>,
     /// 上次成功执行时间
@@ -990,7 +991,7 @@ impl S3ArchiveManager {
 
 /// 归档状态
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-enum ArchiveStatus {
+pub enum ArchiveStatus {
     /// 进行中
     #[default]
     InProgress,
@@ -1004,7 +1005,7 @@ enum ArchiveStatus {
 
 /// 归档元数据（完整版）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ArchiveMetadata {
+pub struct ArchiveMetadata {
     /// 记录数量
     pub record_count: i64,
     /// 原始数据大小（字节）
@@ -1120,7 +1121,7 @@ impl ArchiveMetadata {
 
 /// 归档信息
 #[derive(Debug, Clone)]
-struct ArchiveInfo {
+pub struct ArchiveInfo {
     /// S3键名
     pub key: String,
     /// 文件大小

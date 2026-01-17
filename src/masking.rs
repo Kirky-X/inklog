@@ -178,7 +178,7 @@ static SENSITIVE_FIELDS: &[&str] = &[
 ///
 /// `DataMasker` is immutable and can be safely shared between threads.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DataMasker {
+pub struct DataMasker {
     rules: Vec<MaskRule>,
 }
 
@@ -386,11 +386,11 @@ impl MaskRule {
     }
 }
 
-fn mask_email(email: &str) -> String {
+pub fn mask_email(email: &str) -> String {
     EMAIL_REGEX.replace(email, "**@**.***").to_string()
 }
 
-fn mask_phone(phone: &str) -> String {
+pub fn mask_phone(phone: &str) -> String {
     PHONE_REGEX.replace(phone, "***-****-****").to_string()
 }
 

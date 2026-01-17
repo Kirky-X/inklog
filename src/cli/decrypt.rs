@@ -199,6 +199,9 @@ pub fn decrypt_file_compatible(
     let plaintext: Vec<u8>;
 
     if algo == 1 {
+        if read_count < 24 {
+            return Err(anyhow!("File too small for V1 format"));
+        }
         let nonce_slice: [u8; 12] = header[12..24].try_into().unwrap();
         let nonce = aes_gcm::Nonce::from_slice(&nonce_slice);
 
@@ -210,12 +213,22 @@ pub fn decrypt_file_compatible(
         plaintext = cipher
             .decrypt(nonce, ciphertext.as_ref())
             .map_err(|e| anyhow!("Decryption failed: {}", e))?;
-    } else if header[10] == 0 && header[11] == 0 && read_count >= 22 {
+    } else {
+        // Assume Legacy format (MAGIC + VER + NONCE + CIPHERTEXT)
+        // Legacy header is 22 bytes (8 MAGIC + 2 VER + 12 NONCE)
+        if read_count < 22 {
+            return Err(anyhow!("File too small to be a valid encrypted file"));
+        }
+
         let mut nonce_bytes = [0u8; 12];
         nonce_bytes.copy_from_slice(&header[10..22]);
         let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
 
         let mut ciphertext = Vec::new();
+        // If we read more than 22 bytes, the extras are part of the ciphertext
+        if read_count > 22 {
+            ciphertext.extend_from_slice(&header[22..read_count]);
+        }
         file.read_to_end(&mut ciphertext)
             .with_context(|| "Failed to read ciphertext")?;
 
@@ -223,8 +236,6 @@ pub fn decrypt_file_compatible(
         plaintext = cipher
             .decrypt(nonce, ciphertext.as_ref())
             .map_err(|e| anyhow!("Decryption failed: {}", e))?;
-    } else {
-        return Err(anyhow!("Unsupported encryption format"));
     }
 
     let mut output_file = File::create(output_path)
@@ -505,7 +516,7 @@ mod tests {
     /// Generate a test key from a seed (allows deterministic or environment-based keys)
     fn get_test_key(seed: &str) -> [u8; 32] {
         let seed = std::env::var("INKLOG_TEST_KEY_SEED").unwrap_or_else(|_| seed.to_string());
-        let hash = Sha256Digest::digest(seed);
+        let hash = Sha256::digest(seed);
         let mut key = [0u8; 32];
         key.copy_from_slice(hash.as_slice());
         key
@@ -625,19 +636,15 @@ mod tests {
 
         create_encrypted_file_v1(&input_file, plaintext, &test_key).unwrap();
 
-        std::env::set_var("TEST_V1_KEY", general_purpose::STANDARD.encode(test_key));
-        let result = decrypt_file(&input_file, &output_file, "TEST_V1_KEY");
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
+        std::env::set_var("TEST_KEY_V1", key_base64);
 
-        assert!(result.is_ok());
+        decrypt_file(&input_file, &output_file, "TEST_KEY_V1").unwrap();
 
-        let mut decrypted_content = String::new();
-        File::open(&output_file)
-            .unwrap()
-            .read_to_string(&mut decrypted_content)
-            .unwrap();
-        assert_eq!(decrypted_content.as_bytes(), plaintext);
+        let decrypted_content = std::fs::read(&output_file).unwrap();
+        assert_eq!(decrypted_content, plaintext);
 
-        std::env::remove_var("TEST_V1_KEY");
+        std::env::remove_var("TEST_KEY_V1");
     }
 
     #[test]
@@ -650,69 +657,58 @@ mod tests {
 
         create_encrypted_file_legacy(&input_file, plaintext, &test_key).unwrap();
 
-        std::env::set_var(
-            "TEST_LEGACY_KEY",
-            general_purpose::STANDARD.encode(test_key),
-        );
-        let result = decrypt_file_legacy(&input_file, &output_file, "TEST_LEGACY_KEY");
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
+        std::env::set_var("TEST_KEY_LEGACY", key_base64);
 
-        assert!(result.is_ok());
+        decrypt_file_legacy(&input_file, &output_file, "TEST_KEY_LEGACY").unwrap();
 
-        let mut decrypted_content = String::new();
-        File::open(&output_file)
-            .unwrap()
-            .read_to_string(&mut decrypted_content)
-            .unwrap();
-        assert_eq!(decrypted_content.as_bytes(), plaintext);
+        let decrypted_content = std::fs::read(&output_file).unwrap();
+        assert_eq!(decrypted_content, plaintext);
 
-        std::env::remove_var("TEST_LEGACY_KEY");
+        std::env::remove_var("TEST_KEY_LEGACY");
     }
 
     #[test]
-    fn test_decrypt_compatible_auto_detect() {
+    fn test_decrypt_file_compatible() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let input_file = temp_dir.path().join("test_compat.enc");
-        let output_file = temp_dir.path().join("test_compat.log");
-        let plaintext = b"Auto-detect format test.";
         let test_key = generate_test_key();
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
+        std::env::set_var("TEST_KEY_COMPAT", &key_base64);
 
-        create_encrypted_file_v1(&input_file, plaintext, &test_key).unwrap();
+        // Test V1 format
+        let v1_file = temp_dir.path().join("v1.enc");
+        let v1_out = temp_dir.path().join("v1.log");
+        let v1_text = b"V1 Content";
+        create_encrypted_file_v1(&v1_file, v1_text, &test_key).unwrap();
 
-        std::env::set_var(
-            "TEST_COMPAT_KEY",
-            general_purpose::STANDARD.encode(test_key),
-        );
-        let result = decrypt_file_compatible(&input_file, &output_file, "TEST_COMPAT_KEY");
+        decrypt_file_compatible(&v1_file, &v1_out, "TEST_KEY_COMPAT").unwrap();
+        assert_eq!(std::fs::read(&v1_out).unwrap(), v1_text);
 
-        assert!(result.is_ok());
+        // Test Legacy format
+        let legacy_file = temp_dir.path().join("legacy.enc");
+        let legacy_out = temp_dir.path().join("legacy.log");
+        let legacy_text = b"Legacy Content";
+        create_encrypted_file_legacy(&legacy_file, legacy_text, &test_key).unwrap();
 
-        let mut decrypted_content = String::new();
-        File::open(&output_file)
-            .unwrap()
-            .read_to_string(&mut decrypted_content)
-            .unwrap();
-        assert_eq!(decrypted_content.as_bytes(), plaintext);
+        decrypt_file_compatible(&legacy_file, &legacy_out, "TEST_KEY_COMPAT").unwrap();
+        assert_eq!(std::fs::read(&legacy_out).unwrap(), legacy_text);
 
-        std::env::remove_var("TEST_COMPAT_KEY");
+        std::env::remove_var("TEST_KEY_COMPAT");
     }
 
     #[test]
-    fn test_version_detection() {
-        let header_v1 = *b"ENCLOG1\0\x01\x00\x01\x00";
-        let header_legacy = *b"ENCLOG1\0\x01\x00\x00\x00";
-        let header_invalid = *b"INVALID\x00\x01\x00\x00";
+    fn test_path_traversal_protection() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_dir = temp_dir.path();
 
-        assert_eq!(
-            detect_version(&header_v1[..10]),
-            EncryptionVersion::V1Legacy
-        );
-        assert_eq!(
-            detect_version(&header_legacy[..10]),
-            EncryptionVersion::V1Legacy
-        );
-        assert_eq!(
-            detect_version(&header_invalid[..10]),
-            EncryptionVersion::Unknown
-        );
+        // Test parent directory traversal
+        let malicious_path = base_dir.join("../passwd");
+        assert!(validate_file_path(&malicious_path, base_dir).is_err());
+
+        // Test valid path
+        let valid_path = base_dir.join("valid.log");
+        // Create file to make canonicalize work
+        File::create(&valid_path).unwrap();
+        assert!(validate_file_path(&valid_path, base_dir).is_ok());
     }
 }

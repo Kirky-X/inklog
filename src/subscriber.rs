@@ -8,7 +8,7 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
-pub(crate) struct LoggerSubscriber {
+pub struct LoggerSubscriber {
     console_sink: Arc<Mutex<ConsoleSink>>,
     async_sender: Sender<LogRecord>,
     metrics: Arc<Metrics>,

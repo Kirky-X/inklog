@@ -24,13 +24,16 @@
 //! let metrics = Metrics::new();
 //!
 //! // 记录日志写入
-//! metrics.record_write("console");
+//! metrics.inc_logs_written();
 //!
 //! // 记录错误
-//! metrics.record_error("database");
+//! metrics.inc_sink_error();
 //!
-//! // 获取健康状态
-//! let health = metrics.get_health_status();
+//! // 更新 Sink 健康状态
+//! metrics.update_sink_health("console", true, None);
+//!
+//! // 获取整体健康状态
+//! let health = metrics.get_status(0, 10000);
 //! ```
 //!
 //! ## Prometheus 指标
@@ -84,7 +87,7 @@ impl SinkStatus {
 }
 
 #[derive(Debug, Serialize, Clone)]
-pub(crate) struct SinkHealth {
+pub struct SinkHealth {
     pub status: SinkStatus,
     pub last_error: Option<String>,
     pub consecutive_failures: u32,
@@ -150,7 +153,7 @@ impl Gauge {
 
 /// Histogram metric for latency distribution
 #[derive(Debug)]
-struct Histogram {
+pub struct Histogram {
     buckets: Vec<AtomicU64>,
     bounds: Vec<u64>, // in microseconds
 }
@@ -184,7 +187,7 @@ impl Histogram {
 }
 
 #[derive(Debug, Serialize)]
-struct MetricsSnapshot {
+pub struct MetricsSnapshot {
     pub logs_written: u64,
     pub logs_dropped: u64,
     pub channel_blocked: u64,

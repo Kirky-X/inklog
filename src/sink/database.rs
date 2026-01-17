@@ -207,7 +207,7 @@ fn validate_partition_name(partition_name: &str) -> Result<String, InklogError> 
     Ok(partition_name.to_string())
 }
 
-pub(crate) struct DatabaseSink {
+pub struct DatabaseSink {
     config: DatabaseSinkConfig,
     buffer: Vec<LogRecord>,
     last_flush: Instant,
@@ -714,7 +714,7 @@ impl LogSink for DatabaseSink {
 }
 
 /// Convert logs to Parquet format using Arrow schema
-pub(crate) fn convert_logs_to_parquet(
+pub fn convert_logs_to_parquet(
     logs: &[Model],
     config: &crate::config::ParquetConfig,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
