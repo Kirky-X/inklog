@@ -16,7 +16,7 @@ repos:
 
   # 2. Detect secrets
   - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.4.0
+    rev: v1.5.0
     hooks:
       - id: detect-secrets
         args: [--baseline, .secrets.baseline, --exclude-files, tests/]

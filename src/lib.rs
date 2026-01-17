@@ -5,6 +5,7 @@
 
 pub mod archive;
 pub mod config;
+mod config_validator;
 mod error;
 pub mod log_record;
 mod manager;

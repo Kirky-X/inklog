@@ -351,21 +351,34 @@ impl Metrics {
     /// * `healthy` - Whether the sink is healthy
     /// * `error` - Optional error message if the sink is unhealthy
     pub fn update_sink_health(&self, name: &str, healthy: bool, error: Option<String>) {
-        if let Ok(mut map) = self.sink_health.lock() {
-            let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
-
-            if healthy {
-                entry.status = SinkStatus::Healthy;
-                entry.consecutive_failures = 0;
-                entry.last_error = None;
-            } else {
-                let error_msg = error.unwrap_or_else(|| "Unknown error".to_string());
-                entry.status = SinkStatus::Unhealthy {
-                    error: error_msg.clone(),
-                };
-                entry.consecutive_failures += 1;
-                entry.last_error = Some(error_msg);
+        // 减少锁持有时间：在锁外准备状态
+        let status = if healthy {
+            SinkStatus::Healthy
+        } else {
+            let error_msg = error.unwrap_or_else(|| "Unknown error".to_string());
+            SinkStatus::Unhealthy {
+                error: error_msg.clone(),
             }
+        };
+
+        let (new_failures, new_error) = if healthy {
+            (0, None)
+        } else {
+            // 需要获取当前失败次数，所以需要先读取
+            let current_failures = if let Ok(map) = self.sink_health.lock() {
+                map.get(name).map(|h| h.consecutive_failures).unwrap_or(0)
+            } else {
+                0
+            };
+            (current_failures + 1, error)
+        };
+
+        // 现在快速更新
+        if let Ok(mut map) = self.sink_health.lock() {
+            let entry = map.entry(name.to_string()).or_insert_with(SinkHealth::healthy);
+            entry.status = status;
+            entry.consecutive_failures = new_failures;
+            entry.last_error = new_error;
         }
     }
 

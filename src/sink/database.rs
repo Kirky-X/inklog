@@ -212,6 +212,64 @@ fn validate_partition_name(partition_name: &str) -> Result<String, InklogError> 
     Ok(partition_name.to_string())
 }
 
+/// 验证日期格式是否为有效的 YYYY-MM-DD 格式
+/// 防止通过日期字符串进行 SQL 注入
+fn validate_date_format(date_str: &str) -> Result<(), InklogError> {
+    // 检查格式：YYYY-MM-DD
+    if date_str.len() != 10 {
+        return Err(InklogError::DatabaseError(
+            "Date must be in YYYY-MM-DD format".to_string(),
+        ));
+    }
+
+    // 检查分隔符
+    if &date_str[4..5] != "-" || &date_str[7..8] != "-" {
+        return Err(InklogError::DatabaseError(
+            "Date must be in YYYY-MM-DD format with hyphens".to_string(),
+        ));
+    }
+
+    // 检查年份部分
+    let year = &date_str[0..4];
+    if !year.chars().all(|c| c.is_ascii_digit()) {
+        return Err(InklogError::DatabaseError(
+            "Year must be numeric".to_string(),
+        ));
+    }
+
+    // 检查月份部分
+    let month = &date_str[5..7];
+    if !month.chars().all(|c| c.is_ascii_digit()) {
+        return Err(InklogError::DatabaseError(
+            "Month must be numeric".to_string(),
+        ));
+    }
+    let month_num: u32 = month.parse().unwrap_or(0);
+    if month_num < 1 || month_num > 12 {
+        return Err(InklogError::DatabaseError(
+            format!("Invalid month: {}", month_num),
+        ));
+    }
+
+    // 检查日期部分
+    let day = &date_str[8..10];
+    if !day.chars().all(|c| c.is_ascii_digit()) {
+        return Err(InklogError::DatabaseError(
+            "Day must be numeric".to_string(),
+        ));
+    }
+
+    // 使用 chrono 验证日期的有效性
+    chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| {
+        InklogError::DatabaseError(format!(
+            "Invalid date: {}",
+            date_str
+        ))
+    })?;
+
+    Ok(())
+}
+
 pub struct DatabaseSink {
     config: DatabaseSinkConfig,
     buffer: Vec<LogRecord>,
@@ -472,6 +530,10 @@ impl DatabaseSink {
                             let quoted_table = format!("\"{}\"", validated_table);
                             let quoted_partition = format!("\"{}\"", validated_partition);
 
+                            // 验证日期格式以防止 SQL 注入
+                            validate_date_format(&start_date)?;
+                            validate_date_format(&next_month)?;
+
                             let sql = format!(
                                 "CREATE TABLE IF NOT EXISTS {} PARTITION OF {} FOR VALUES FROM ('{}') TO ('{}')",
                                 quoted_partition, quoted_table, start_date, next_month
@@ -499,6 +561,9 @@ impl DatabaseSink {
                                     });
 
                                 // MySQL 使用反引号引用标识符
+                                // 验证日期格式以防止 SQL 注入
+                                validate_date_format(&start_date)?;
+
                                 let partition_sql = format!(
                                     "CREATE TABLE IF NOT EXISTS `{}` PARTITION OF `logs` FOR VALUES IN (TO_DAYS('{}'))",
                                     validated_partition,

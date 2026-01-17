@@ -3,9 +3,13 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
+pub mod async_file;
+pub mod compression;
 pub mod console;
 pub mod database;
+pub mod encryption;
 pub mod file;
+pub mod ring_buffered_file;
 
 use crate::error::InklogError;
 use crate::log_record::LogRecord;

@@ -6,9 +6,8 @@
 use crate::config::{ConsoleSinkConfig, FileSinkConfig};
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
-use crate::sink::{console::ConsoleSink, CircuitBreaker, LogSink};
+use crate::sink::{compression, console::ConsoleSink, encryption, CircuitBreaker, LogSink};
 use crate::template::LogTemplate;
-use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
@@ -16,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
-use zeroize::Zeroizing;
+use tracing::error;
 
 #[derive(Debug, Default)]
 #[allow(dead_code)]
@@ -246,7 +245,7 @@ impl FileSink {
     fn open_file(&mut self) -> Result<(), InklogError> {
         if let Some(parent) = self.config.path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("Failed to create log directory {}: {}", parent.display(), e);
+                error!("Failed to create log directory {}: {}", parent.display(), e);
                 // Try to fallback to console sink
                 if let Some(sink) = &mut self.fallback_sink {
                     let fallback_record = LogRecord {
@@ -284,7 +283,7 @@ impl FileSink {
                             let mut perms = metadata.permissions();
                             perms.set_mode(0o600);
                             if let Err(e) = file.set_permissions(perms) {
-                                eprintln!("Failed to set file permissions: {}", e);
+                                error!("Failed to set file permissions: {}", e);
                             }
                         }
                     }
@@ -295,7 +294,7 @@ impl FileSink {
                 Ok(())
             }
             Err(e) => {
-                eprintln!(
+                error!(
                     "Failed to open log file {}: {}",
                     self.config.path.display(),
                     e
@@ -347,7 +346,7 @@ impl FileSink {
                 .with_file_name(format!("{}_{}.{}", file_stem, timestamp, extension));
 
             if let Err(e) = fs::rename(&self.config.path, &rotated_path) {
-                eprintln!("Failed to rotate log file: {}", e);
+                error!("Failed to rotate log file: {}", e);
                 return Err(InklogError::IoError(e));
             }
 
@@ -372,46 +371,7 @@ impl FileSink {
     }
 
     fn compress_file(&self, path: &std::path::PathBuf) -> Result<std::path::PathBuf, InklogError> {
-        let compressed_path = path.with_extension("zst");
-
-        let input_file = File::open(path).map_err(|e| {
-            eprintln!("Failed to open file for compression: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let mut reader = std::io::BufReader::new(input_file);
-        let output_file = File::create(&compressed_path).map_err(|e| {
-            eprintln!("Failed to create compressed file: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let mut encoder = zstd::stream::Encoder::new(output_file, self.config.compression_level)
-            .map_err(|e| {
-                eprintln!("Failed to create zstd encoder: {}", e);
-                InklogError::CompressionError(e.to_string())
-            })?;
-
-        {
-            let mut writer = std::io::BufWriter::new(encoder.by_ref());
-
-            let mut buffer = [0u8; 8192];
-            loop {
-                let bytes_read = std::io::Read::read(&mut reader, &mut buffer)?;
-                if bytes_read == 0 {
-                    break;
-                }
-                std::io::Write::write_all(&mut writer, &buffer[..bytes_read])?;
-            }
-        }
-
-        encoder.finish().map_err(|e| {
-            eprintln!("Failed to finish compression: {}", e);
-            InklogError::CompressionError(e.to_string())
-        })?;
-
-        let _ = fs::remove_file(path);
-
-        Ok(compressed_path)
+        compression::compress_file(path, self.config.compression_level)
     }
 
     fn encrypt_file(&self, path: &std::path::PathBuf) -> Result<std::path::PathBuf, InklogError> {
@@ -425,17 +385,17 @@ impl FileSink {
             InklogError::ConfigError("Encryption key env variable not set".to_string())
         })?;
 
-        let key = Self::get_encryption_key(key_env)?;
+        let key = encryption::get_encryption_key(key_env)?;
 
         let input_file = File::open(path).map_err(|e| {
-            eprintln!("Failed to open file for encryption: {}", e);
+            error!("Failed to open file for encryption: {}", e);
             InklogError::IoError(e)
         })?;
 
         let mut reader = std::io::BufReader::new(input_file);
         let mut plaintext = Vec::new();
         reader.read_to_end(&mut plaintext).map_err(|e| {
-            eprintln!("Failed to read file for encryption: {}", e);
+            error!("Failed to read file for encryption: {}", e);
             InklogError::IoError(e)
         })?;
 
@@ -446,62 +406,28 @@ impl FileSink {
         let ciphertext = cipher
             .encrypt(nonce_slice, plaintext.as_ref())
             .map_err(|e| {
-                eprintln!("Failed to encrypt data: {}", e);
+                error!("Failed to encrypt data: {}", e);
                 InklogError::EncryptionError(e.to_string())
             })?;
 
         let mut output_file = File::create(&encrypted_path).map_err(|e| {
-            eprintln!("Failed to create encrypted file: {}", e);
+            error!("Failed to create encrypted file: {}", e);
             InklogError::IoError(e)
         })?;
 
         output_file.write_all(&nonce).map_err(|e| {
-            eprintln!("Failed to write nonce: {}", e);
+            error!("Failed to write nonce: {}", e);
             InklogError::IoError(e)
         })?;
 
         output_file.write_all(&ciphertext).map_err(|e| {
-            eprintln!("Failed to write encrypted file: {}", e);
+            error!("Failed to write encrypted file: {}", e);
             InklogError::IoError(e)
         })?;
 
         let _ = fs::remove_file(path);
 
         Ok(encrypted_path)
-    }
-
-    #[allow(dead_code)]
-    fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
-        // 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
-        let env_value = Zeroizing::new(std::env::var(env_var).map_err(|_| {
-            InklogError::ConfigError("Encryption key environment variable not set. Please configure INKLOG_ENCRYPTION_KEY.".to_string())
-        })?);
-
-        // 尝试解码 Base64 编码的密钥
-        if let Ok(decoded) = general_purpose::STANDARD.decode(env_value.as_str()) {
-            if decoded.len() == 32 {
-                let mut result = [0u8; 32];
-                result.copy_from_slice(&decoded);
-                return Ok(result);
-            }
-            // If Base64 decode succeeded but length is wrong, fall through to try raw bytes
-            // This handles cases where the key looks like Base64 but isn't valid 32-byte key
-        }
-
-        // 如果不是 Base64，尝试使用原始字节
-        let raw_bytes = env_value.as_bytes();
-        if raw_bytes.len() < 32 {
-            return Err(InklogError::ConfigError(format!(
-                "Encryption key must be at least 32 bytes (256 bits), got {} bytes. \
-                     Please provide a valid 32-byte key or Base64-encoded key.",
-                raw_bytes.len()
-            )));
-        }
-
-        // Truncate to 32 bytes if longer
-        let mut result = [0u8; 32];
-        result.copy_from_slice(&raw_bytes[..32]);
-        Ok(result)
     }
 
     fn check_rotation(&mut self) -> Result<(), InklogError> {
@@ -798,7 +724,7 @@ impl FileSink {
                     if has_rotated_files {
                         if let Err(e) = Self::perform_timed_cleanup(&config, fallback_sink.clone())
                         {
-                            eprintln!("Timed cleanup failed: {}", e);
+                            error!("Timed cleanup failed: {}", e);
                         }
                     }
                 }
@@ -870,7 +796,7 @@ impl FileSink {
                     }
 
                     if let Err(e) = fs::remove_file(entry.path()) {
-                        eprintln!("Failed to remove {}: {}", entry.path().display(), e);
+                        error!("Failed to remove {}: {}", entry.path().display(), e);
                     }
                 }
             } else if expired_count > 0 {
@@ -1199,7 +1125,7 @@ impl Drop for FileSink {
             let start = std::time::Instant::now();
             while handle.is_finished() {
                 if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
-                    eprintln!(
+                    tracing::warn!(
                         "Warning: rotation timer shutdown timeout after {}ms",
                         SHUTDOWN_TIMEOUT_MS
                     );
@@ -1214,7 +1140,7 @@ impl Drop for FileSink {
             let start = std::time::Instant::now();
             while handle.is_finished() {
                 if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
-                    eprintln!(
+                    tracing::warn!(
                         "Warning: cleanup timer shutdown timeout after {}ms",
                         SHUTDOWN_TIMEOUT_MS
                     );
@@ -1243,7 +1169,7 @@ impl LogSink for FileSink {
 
         // 检查磁盘空间
         if !self.check_disk_space()? {
-            eprintln!("Disk space insufficient");
+            tracing::warn!("Disk space insufficient");
             self.circuit_breaker.record_failure();
 
             // 记录磁盘空间不足的警告
@@ -1265,7 +1191,7 @@ impl LogSink for FileSink {
         }
 
         if let Err(e) = self.check_rotation() {
-            eprintln!("Rotation error: {}", e);
+            error!("Rotation error: {}", e);
             self.circuit_breaker.record_failure();
             if let Some(sink) = &mut self.fallback_sink {
                 let _ = sink.write(record);
@@ -1296,7 +1222,7 @@ impl LogSink for FileSink {
                     success = true;
                 }
                 Err(e) => {
-                    eprintln!("File write error: {}", e);
+                    error!("File write error: {}", e);
                     self.circuit_breaker.record_failure();
                     // 尝试重新打开文件
                     let _ = self.open_file();

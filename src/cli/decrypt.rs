@@ -17,6 +17,18 @@ use std::path::{Path, PathBuf};
 
 /// 验证文件路径是否在允许的目录内，防止路径遍历攻击
 fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
+    // 检查路径中是否包含可疑字符（包括 Unicode 变体）
+    let path_str = file_path.to_string_lossy();
+    let suspicious_chars = ['.', '~', '\0', '\u{2024}', '\u{2025}', '\u{FE52}']; // 包括各种点字符
+    for c in path_str.chars() {
+        if suspicious_chars.contains(&c) {
+            return Err(anyhow!(
+                "Invalid path character detected in: {}",
+                file_path.display()
+            ));
+        }
+    }
+
     // 规范化路径
     let canonical_path = file_path
         .canonicalize()
@@ -35,13 +47,59 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
         ));
     }
 
-    // 检查路径中是否包含可疑模式
-    let path_str = file_path.to_string_lossy();
-    if path_str.contains("..") || path_str.contains("~") {
-        return Err(anyhow!(
-            "Invalid path characters detected in: {}",
-            file_path.display()
-        ));
+    // 检查符号链接
+    if let Ok(metadata) = file_path.metadata() {
+        if metadata.file_type().is_symlink() {
+            return Err(anyhow!(
+                "Symbolic links are not allowed: {}",
+                file_path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// 验证 glob 模式是否安全
+fn validate_glob_pattern(pattern: &str) -> Result<()> {
+    // 检查绝对路径
+    if pattern.starts_with('/') || pattern.starts_with('\\') {
+        return Err(anyhow!("Absolute paths are not allowed in glob patterns"));
+    }
+
+    // 检查路径遍历
+    if pattern.contains("..") || pattern.contains("~") {
+        return Err(anyhow!("Path traversal is not allowed in glob patterns"));
+    }
+
+    // 检查可疑字符（包括 Unicode 变体）
+    let suspicious_chars = ['\0', '\u{2024}', '\u{2025}', '\u{FE52}'];
+    for c in pattern.chars() {
+        if suspicious_chars.contains(&c) {
+            return Err(anyhow!("Invalid character in glob pattern"));
+        }
+    }
+
+    // 尝试解析为路径，确保不包含危险元素
+    let path = Path::new(pattern);
+    if path.is_absolute() {
+        return Err(anyhow!("Absolute paths are not allowed"));
+    }
+
+    // 检查组件
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(anyhow!("Parent directory references are not allowed"));
+            }
+            std::path::Component::Prefix(_) => {
+                return Err(anyhow!("Path prefixes are not allowed"));
+            }
+            std::path::Component::RootDir => {
+                return Err(anyhow!("Root directory references are not allowed"));
+            }
+            _ => {}
+        }
     }
 
     Ok(())
@@ -456,14 +514,7 @@ pub fn decrypt_directory_compatible(
 
 pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -> Result<()> {
     // 验证 glob 模式安全性 - 防止路径遍历
-    if input_pattern.contains("..")
-        || input_pattern.starts_with("/")
-        || input_pattern.starts_with("\\")
-    {
-        return Err(anyhow!(
-            "Invalid glob pattern: cannot contain '..' or start with '/' or '\\'"
-        ));
-    }
+    validate_glob_pattern(input_pattern)?;
 
     let paths = glob::glob(input_pattern)
         .map_err(|e| anyhow!("Invalid glob pattern: {}", e))?

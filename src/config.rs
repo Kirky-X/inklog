@@ -442,28 +442,15 @@ impl InklogConfig {
     }
 
     pub fn validate(&self) -> Result<(), InklogError> {
-        let valid_levels = ["trace", "debug", "info", "warn", "error"];
-        if !valid_levels.contains(&self.global.level.to_lowercase().as_str()) {
-            return Err(InklogError::ConfigError(format!(
-                "Invalid log level: {}",
-                self.global.level
-            )));
-        }
+        use crate::config_validator::{validate_log_level, validate_non_empty, validate_path, validate_positive};
 
+        // 验证全局配置
+        validate_log_level(&self.global.level)?;
+
+        // 验证文件 sink 配置
         if let Some(ref file) = self.file_sink {
             if file.enabled {
-                if file.path.as_os_str().is_empty() {
-                    return Err(InklogError::ConfigError(
-                        "File sink path cannot be empty".into(),
-                    ));
-                }
-                if let Some(parent) = file.path.parent() {
-                    if !parent.exists() {
-                        fs::create_dir_all(parent).map_err(|e| {
-                            InklogError::ConfigError(format!("Cannot create log dir: {}", e))
-                        })?;
-                    }
-                }
+                validate_path(&file.path)?;
                 if file.encrypt && file.encryption_key_env.is_none() {
                     return Err(InklogError::ConfigError(
                         "Encryption enabled but no key env var specified".into(),
@@ -472,50 +459,25 @@ impl InklogConfig {
             }
         }
 
+        // 验证数据库 sink 配置
         if let Some(ref db) = self.database_sink {
             if db.enabled {
-                if db.url.is_empty() {
-                    return Err(InklogError::ConfigError(
-                        "Database URL cannot be empty".into(),
-                    ));
-                }
-                if db.batch_size == 0 {
-                    return Err(InklogError::ConfigError("Batch size must be > 0".into()));
-                }
+                validate_url(&db.url, "Database URL")?;
+                validate_positive(db.batch_size, "Batch size")?;
             }
         }
 
-        if self.performance.channel_capacity == 0 {
-            return Err(InklogError::ConfigError(
-                "Channel capacity must be > 0".into(),
-            ));
-        }
-        if self.performance.worker_threads == 0 {
-            return Err(InklogError::ConfigError(
-                "Worker threads must be > 0".into(),
-            ));
-        }
+        // 验证性能配置
+        validate_positive(self.performance.channel_capacity, "Channel capacity")?;
+        validate_positive(self.performance.worker_threads, "Worker threads")?;
 
+        // 验证 S3 归档配置
         if let Some(ref archive) = self.s3_archive {
             if archive.enabled {
-                if archive.bucket.is_empty() {
-                    return Err(InklogError::ConfigError(
-                        "S3 bucket name cannot be empty".into(),
-                    ));
-                }
-                if archive.region.is_empty() {
-                    return Err(InklogError::ConfigError("S3 region cannot be empty".into()));
-                }
-                if archive.archive_interval_days == 0 {
-                    return Err(InklogError::ConfigError(
-                        "Archive interval must be > 0 days".into(),
-                    ));
-                }
-                if archive.max_file_size_mb == 0 {
-                    return Err(InklogError::ConfigError(
-                        "Max file size must be > 0 MB".into(),
-                    ));
-                }
+                validate_non_empty(&archive.bucket, "S3 bucket name")?;
+                validate_non_empty(&archive.region, "S3 region")?;
+                validate_positive(archive.archive_interval_days, "Archive interval")?;
+                validate_positive(archive.max_file_size_mb, "Max file size")?;
             }
         }
 

@@ -50,7 +50,6 @@ secrets/
 .sisyphus/
 AGENTS.md
 CLAUDE.md
-.secrets.baseline
 docs/prd.md
 docs/task.md
 docs/tdd.md

@@ -45,32 +45,46 @@ use thiserror::Error;
 /// Sensitive pattern redaction rules for error messages.
 /// Each tuple contains (pattern, replacement).
 const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
-    // AWS Access Key ID pattern (20 characters, starts with AKIA)
-    ("AKIA[0-9A-Z]{16}", "[AWS_ACCESS_KEY_ID]"),
-    // AWS Secret Key pattern (40 characters, base64-like)
-    ("[0-9a-zA-Z+/]{40}=?", "[AWS_SECRET_ACCESS_KEY]"),
-    // JWT Token pattern
-    (
-        "eyJ[a-zA-Z0-9_-]*\\.eyJ[a-zA-Z0-9_-]*\\.[a-zA-Z0-9_-]*",
-        "[JWT_TOKEN]",
-    ),
-    // Database connection strings
-    ("postgres://[^:]+:[^@]+@[^/]+/[^?]*", "[DB_CONNECTION]"),
-    ("mysql://[^:]+:[^@]+@[^/]+/[^?]*", "[DB_CONNECTION]"),
-    ("sqlite://[^?]*\\?[^&]*", "[DB_CONNECTION]"),
+    // AWS Access Key ID pattern (20 characters, starts with AKIA, ABIA, ACCA, ASIA)
+    ("(?i)(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\\b", "[AWS_ACCESS_KEY_ID]"),
+    // AWS Secret Key pattern (40 characters, base64-like with word boundary)
+    ("[0-9a-zA-Z+/]{40}={0,2}\\b", "[AWS_SECRET_ACCESS_KEY]"),
+    // JWT Token pattern (with word boundaries)
+    ("\\beyJ[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\b", "[JWT_TOKEN]"),
+    // Database connection strings (postgres, mysql, sqlite)
+    ("(?i)(postgres|postgresql)://[^@]+:[^@]+@", "$1://***:***@"),
+    ("(?i)mysql://[^@]+:[^@]+@", "mysql://***:***@"),
+    ("(?i)sqlite://[^?]*\\?[^&]*", "sqlite://***"),
+    // API keys (generic pattern)
+    ("(?i)(api[_-]?key|access[_-]?key|secret[_-]?key)[\"']?\\s*[=:]\\s*[\"']?[a-zA-Z0-9_\\-]{20,}", "$1=***REDACTED***"),
+    // Bearer tokens
+    ("(?i)(bearer|authorization)\\s*:\\s*[a-zA-Z0-9_\\-\\.]+", "$1: ***REDACTED***"),
     // Sensitive paths
     ("/home/[a-zA-Z0-9_-]+/", "[USER_HOME_PATH]"),
     ("/etc/inklog/", "[CONFIG_PATH]"),
     ("/run/secrets/", "[SECRETS_PATH]"),
+    // Passwords in URLs
+    ("(?i)(password|passwd|pwd)=[^&\\s]+", "$1=***"),
+    // Email addresses
+    ("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "***@***.***"),
+    // Phone numbers (Chinese)
+    ("\\b1[3-9]\\d{9}\\b", "***-****-****"),
+    // Credit card numbers (basic pattern)
+    ("\\b\\d{4}[ -]?\\d{4}[ -]?\\d{4}[ -]?\\d{4}\\b", "****-****-****-****"),
 ];
 
 /// Sanitizes a message by removing sensitive information.
-/// Uses pattern matching to detect and redact common sensitive patterns.
+/// Uses regex pattern matching to detect and redact common sensitive patterns.
 fn sanitize_message(msg: &str) -> String {
     let mut result = msg.to_string();
+
+    // 使用正则表达式进行更精确的匹配
     for (pattern, replacement) in SENSITIVE_PATTERNS {
-        result = result.replace(pattern, replacement);
+        if let Ok(re) = regex::Regex::new(pattern) {
+            result = re.replace_all(&result, replacement).to_string();
+        }
     }
+
     result
 }
 

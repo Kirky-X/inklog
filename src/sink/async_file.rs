@@ -8,7 +8,7 @@
 use crate::config::FileSinkConfig;
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
-use crate::sink::LogSink;
+use crate::sink::{compression, LogSink};
 use crate::template::LogTemplate;
 use bytes::Bytes;
 use crossbeam_channel;
@@ -250,7 +250,7 @@ impl AsyncFileSink {
             }
         }
 
-        let compressed = zstd::encode_all(combined.as_bytes(), level as i32)
+        let compressed = compression::compress_data(combined.as_bytes(), level)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         if let Ok(mut file_guard) = file.lock() {
