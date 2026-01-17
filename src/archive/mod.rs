@@ -70,12 +70,50 @@ use zeroize::{Zeroize, Zeroizing};
 /// - 在内存中使用 Zeroizing 保护
 /// - 序列化时自动跳过
 /// - 反序列化时从 String 转换
+///
+/// # Security Methods
+///
+/// - [`as_str_safe()`](struct.SecretString.html#method.as_str_safe) - 安全获取字符串引用（不消耗值）
+/// - [`take_audited()`](struct.SecretString.html#method.take_audited) - 带审计日志的获取方法（仅调试模式）
+///
+/// # Example
+///
+/// ```rust
+/// use inklog::archive::SecretString;
+///
+/// let secret = SecretString::new("password".to_string());
+/// assert_eq!(secret.as_str_safe(), Some("password"));
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct SecretString(Option<Zeroizing<String>>);
 
 impl SecretString {
     pub fn new(value: String) -> Self {
         Self(Some(Zeroizing::new(value)))
+    }
+
+    /// Returns a safe reference to the contained string.
+    /// This method provides a safe way to access the value without consuming it.
+    pub fn as_str_safe(&self) -> Option<&str> {
+        self.as_deref()
+    }
+
+    /// Internal take method for use within the crate.
+    /// Does not include audit logging.
+    pub(crate) fn take_internal(&mut self) -> Option<String> {
+        self.take()
+    }
+
+    /// Takes the value with audit logging (debug builds only).
+    /// Records a warning when sensitive data is accessed.
+    #[cfg(feature = "debug")]
+    pub fn take_audited(&mut self, operation: &str) -> Option<String> {
+        tracing::warn!(
+            event = "sensitive_data_access",
+            operation = operation,
+            "Sensitive data accessed via SecretString::take_audited()"
+        );
+        self.take()
     }
 
     pub fn take(&mut self) -> Option<String> {

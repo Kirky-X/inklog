@@ -394,6 +394,7 @@ pub fn mask_phone(phone: &str) -> String {
     PHONE_REGEX.replace(phone, "***-****-****").to_string()
 }
 
+#[allow(dead_code)]
 fn mask_id_card(id_card: &str) -> String {
     // 身份证号掩码：只保留后4位，如果是X结尾则保留最后3位+X
     ID_CARD_REGEX
@@ -405,6 +406,7 @@ fn mask_id_card(id_card: &str) -> String {
         .to_string()
 }
 
+#[allow(dead_code)]
 fn mask_bank_card(bank_card: &str) -> String {
     // 银行卡号掩码：只保留后4位，支持16位和19位卡号
     if bank_card.len() > 4 {

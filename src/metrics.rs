@@ -207,24 +207,41 @@ pub struct HealthStatus {
     pub metrics: MetricsSnapshot,
 }
 
+/// Health monitoring metrics collector.
+///
+/// This struct provides the following accessor methods for reading counter values:
+/// - [`logs_written()`](struct.Metrics.html#method.logs_written) - Total logs successfully written
+/// - [`logs_dropped()`](struct.Metrics.html#method.logs_dropped) - Total logs dropped
+/// - [`channel_blocked()`](struct.Metrics.html#method.channel_blocked) - Total channel blocking events
+/// - [`sink_errors()`](struct.Metrics.html#method.sink_errors) - Total sink errors
+///
+/// # Example
+///
+/// ```rust
+/// use inklog::Metrics;
+///
+/// let metrics = Metrics::new();
+/// metrics.inc_logs_written();
+/// assert_eq!(metrics.logs_written(), 1);
+/// ```
 #[derive(Debug)]
 pub struct Metrics {
-    pub logs_written_total: AtomicU64,
-    pub logs_dropped_total: AtomicU64,
-    pub channel_send_blocked_total: AtomicU64,
-    pub sink_errors_total: AtomicU64,
-    pub start_time: Instant,
+    pub(crate) logs_written_total: AtomicU64,
+    pub(crate) logs_dropped_total: AtomicU64,
+    pub(crate) channel_send_blocked_total: AtomicU64,
+    pub(crate) sink_errors_total: AtomicU64,
+    pub(crate) start_time: Instant,
 
     // Latency tracking
-    pub total_latency_us: AtomicU64,
-    pub latency_count: AtomicU64,
-    pub latency_histogram: Histogram,
+    pub(crate) total_latency_us: AtomicU64,
+    pub(crate) latency_count: AtomicU64,
+    pub(crate) latency_histogram: Histogram,
 
     // Gauges
-    pub active_workers: Gauge,
+    pub(crate) active_workers: Gauge,
 
     // Sink Health
-    pub sink_health: Mutex<HashMap<String, SinkHealth>>,
+    pub(crate) sink_health: Mutex<HashMap<String, SinkHealth>>,
 }
 
 impl Default for Metrics {
@@ -249,6 +266,26 @@ impl Default for Metrics {
 impl Metrics {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the total number of logs successfully written.
+    pub fn logs_written(&self) -> u64 {
+        self.logs_written_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the total number of logs dropped.
+    pub fn logs_dropped(&self) -> u64 {
+        self.logs_dropped_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the total number of times the channel was blocked.
+    pub fn channel_blocked(&self) -> u64 {
+        self.channel_send_blocked_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the total number of sink errors.
+    pub fn sink_errors(&self) -> u64 {
+        self.sink_errors_total.load(Ordering::Relaxed)
     }
 
     pub fn inc_logs_written(&self) {

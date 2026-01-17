@@ -91,10 +91,12 @@ impl CircuitBreaker {
         self.state
     }
 
+    #[allow(dead_code)]
     pub fn failure_count(&self) -> u32 {
         self.failure_count
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.state = CircuitState::Closed;
         self.failure_count = 0;
