@@ -18,6 +18,8 @@ http = ["dep:axum"]
 test-local = []
 aws = ["dep:aws-sdk-s3", "dep:aws-config", "dep:aws-types", "dep:aws-credential-types"]
 cli = ["dep:clap", "dep:glob", "dep:toml"]
+# Debug feature enables additional security audit logging
+debug = []
 
 [dependencies]
 # Logging

@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
 //! # 日志模板模块
 //!
 //! 提供自定义日志格式化和字段提取功能，支持灵活的日志消息模板配置。

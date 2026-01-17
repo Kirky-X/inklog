@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
 //! # 数据库日志输出模块
 //!
 //! 提供将日志消息批量写入数据库的功能，支持 PostgreSQL、MySQL 和 SQLite。

@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
 //! # S3 归档模块
 //!
 //! 提供日志数据的 S3 云存储归档功能，支持自动归档、压缩和生命周期管理。
@@ -100,6 +105,7 @@ impl SecretString {
 
     /// Internal take method for use within the crate.
     /// Does not include audit logging.
+    #[allow(dead_code)]
     pub(crate) fn take_internal(&mut self) -> Option<String> {
         self.take()
     }

@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
 //! # 健康监控模块
 //!
 //! 提供 Inklog 的健康监控和指标收集功能，支持 Prometheus 格式导出。

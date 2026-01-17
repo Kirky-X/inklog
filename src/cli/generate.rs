@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
 use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::Write;

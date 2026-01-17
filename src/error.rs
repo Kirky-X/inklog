@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
 //! # 错误类型模块
 //!
 //! 定义 Inklog 项目中使用的所有错误类型。

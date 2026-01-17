@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
 //! # 数据掩码模块
 //!
 //! 提供敏感数据（PII）的自动检测和脱敏功能，保护日志中的隐私信息。
