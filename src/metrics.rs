@@ -273,6 +273,13 @@ impl Metrics {
         Self::default()
     }
 
+    /// Audit helper for internal state access logging.
+    /// Only logs when tracing is at debug level or lower.
+    #[inline]
+    fn audit_access(&self, field: &str) {
+        tracing::debug!(event = "internal_state_access", field = field,);
+    }
+
     /// Returns the total number of logs successfully written.
     pub fn logs_written(&self) -> u64 {
         self.logs_written_total.load(Ordering::Relaxed)
@@ -291,6 +298,26 @@ impl Metrics {
     /// Returns the total number of sink errors.
     pub fn sink_errors(&self) -> u64 {
         self.sink_errors_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of active workers (with audit logging).
+    pub fn active_workers(&self) -> i64 {
+        self.audit_access("active_workers");
+        self.active_workers.get()
+    }
+
+    /// Returns the sink health status map (with audit logging).
+    pub fn sink_health(&self) -> std::collections::HashMap<String, SinkHealth> {
+        self.audit_access("sink_health");
+        match self.sink_health.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => std::collections::HashMap::new(),
+        }
+    }
+
+    /// Returns the uptime duration.
+    pub fn uptime(&self) -> Duration {
+        self.start_time.elapsed()
     }
 
     pub fn inc_logs_written(&self) {
@@ -361,10 +388,6 @@ impl Metrics {
             };
             entry.last_error = Some(reason);
         }
-    }
-
-    pub fn uptime(&self) -> Duration {
-        self.start_time.elapsed()
     }
 
     pub fn get_status(&self, channel_len: usize, channel_cap: usize) -> HealthStatus {

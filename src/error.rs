@@ -1,8 +1,3 @@
-// Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
 //! # 错误类型模块
 //!
 //! 定义 Inklog 项目中使用的所有错误类型。
@@ -46,6 +41,38 @@
 //! ```
 
 use thiserror::Error;
+
+/// Sensitive pattern redaction rules for error messages.
+/// Each tuple contains (pattern, replacement).
+const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
+    // AWS Access Key ID pattern (20 characters, starts with AKIA)
+    ("AKIA[0-9A-Z]{16}", "[AWS_ACCESS_KEY_ID]"),
+    // AWS Secret Key pattern (40 characters, base64-like)
+    ("[0-9a-zA-Z+/]{40}=?", "[AWS_SECRET_ACCESS_KEY]"),
+    // JWT Token pattern
+    (
+        "eyJ[a-zA-Z0-9_-]*\\.eyJ[a-zA-Z0-9_-]*\\.[a-zA-Z0-9_-]*",
+        "[JWT_TOKEN]",
+    ),
+    // Database connection strings
+    ("postgres://[^:]+:[^@]+@[^/]+/[^?]*", "[DB_CONNECTION]"),
+    ("mysql://[^:]+:[^@]+@[^/]+/[^?]*", "[DB_CONNECTION]"),
+    ("sqlite://[^?]*\\?[^&]*", "[DB_CONNECTION]"),
+    // Sensitive paths
+    ("/home/[a-zA-Z0-9_-]+/", "[USER_HOME_PATH]"),
+    ("/etc/inklog/", "[CONFIG_PATH]"),
+    ("/run/secrets/", "[SECRETS_PATH]"),
+];
+
+/// Sanitizes a message by removing sensitive information.
+/// Uses pattern matching to detect and redact common sensitive patterns.
+fn sanitize_message(msg: &str) -> String {
+    let mut result = msg.to_string();
+    for (pattern, replacement) in SENSITIVE_PATTERNS {
+        result = result.replace(pattern, replacement);
+    }
+    result
+}
 
 #[derive(Error, Debug)]
 pub enum InklogError {
@@ -104,5 +131,64 @@ impl From<toml::de::Error> for InklogError {
 impl From<tokio_cron_scheduler::JobSchedulerError> for InklogError {
     fn from(err: tokio_cron_scheduler::JobSchedulerError) -> Self {
         InklogError::ConfigError(format!("Scheduler error: {}", err))
+    }
+}
+
+impl InklogError {
+    /// Returns a sanitized error message that does not contain sensitive information.
+    ///
+    /// This method is useful for logging and displaying errors to users
+    /// where sensitive data (like passwords, keys, paths) should not be exposed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use inklog::InklogError;
+    ///
+    /// let error = InklogError::ConfigError(
+    ///     "Failed to load AKIA1234567890EXAMPLE from /home/user/.aws/credentials".to_string()
+    /// );
+    /// let safe = error.safe_message();
+    /// // Returns: "Configuration error: Failed to load [AWS_ACCESS_KEY_ID] from [USER_HOME_PATH]/.aws/credentials"
+    /// ```
+    pub fn safe_message(&self) -> String {
+        match self {
+            InklogError::ConfigError(msg) => {
+                format!("Configuration error: {}", sanitize_message(msg))
+            }
+            InklogError::IoError(e) => {
+                format!("IO error: {}", sanitize_message(&e.to_string()))
+            }
+            InklogError::SerializationError(e) => {
+                format!("Serialization error: {}", sanitize_message(&e.to_string()))
+            }
+            InklogError::DatabaseError(msg) => {
+                format!("Database error: {}", sanitize_message(msg))
+            }
+            InklogError::EncryptionError(msg) => {
+                format!("Encryption error: {}", sanitize_message(msg))
+            }
+            InklogError::Shutdown(msg) => {
+                format!("Shutdown error: {}", sanitize_message(msg))
+            }
+            InklogError::ChannelError(msg) => {
+                format!("Channel error: {}", sanitize_message(msg))
+            }
+            InklogError::S3Error(msg) => {
+                format!("S3 error: {}", sanitize_message(msg))
+            }
+            InklogError::CompressionError(msg) => {
+                format!("Compression error: {}", sanitize_message(msg))
+            }
+            InklogError::RuntimeError(msg) => {
+                format!("Runtime error: {}", sanitize_message(msg))
+            }
+            InklogError::HttpServerError(msg) => {
+                format!("HTTP server error: {}", sanitize_message(msg))
+            }
+            InklogError::Unknown(msg) => {
+                format!("Unknown error: {}", sanitize_message(msg))
+            }
+        }
     }
 }

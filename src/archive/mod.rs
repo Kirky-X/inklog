@@ -89,7 +89,7 @@ use zeroize::{Zeroize, Zeroizing};
 /// let secret = SecretString::new("password".to_string());
 /// assert_eq!(secret.as_str_safe(), Some("password"));
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct SecretString(Option<Zeroizing<String>>);
 
 impl SecretString {
@@ -162,6 +162,15 @@ impl Drop for SecretString {
     }
 }
 
+impl std::fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(_) => write!(f, "SecretString(Some(***))"),
+            None => write!(f, "SecretString(None)"),
+        }
+    }
+}
+
 /// 自定义序列化，跳过敏感值
 impl Serialize for SecretString {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -183,7 +192,7 @@ impl<'de> Deserialize<'de> for SecretString {
 }
 
 /// S3归档配置
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(default)]
 pub struct S3ArchiveConfig {
     /// 是否启用S3归档
@@ -263,6 +272,31 @@ impl Default for S3ArchiveConfig {
     }
 }
 
+impl std::fmt::Debug for S3ArchiveConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3ArchiveConfig")
+            .field("enabled", &self.enabled)
+            .field("bucket", &self.bucket)
+            .field("region", &self.region)
+            .field("archive_interval_days", &self.archive_interval_days)
+            .field("schedule_expression", &self.schedule_expression)
+            .field("local_retention_days", &self.local_retention_days)
+            .field("local_retention_path", &self.local_retention_path)
+            .field("compression", &self.compression)
+            .field("storage_class", &self.storage_class)
+            .field("prefix", &self.prefix)
+            // Skip sensitive fields: access_key_id, secret_access_key, session_token
+            .field("endpoint_url", &self.endpoint_url.as_ref().map(|_| "***"))
+            .field("force_path_style", &self.force_path_style)
+            .field("skip_bucket_validation", &self.skip_bucket_validation)
+            .field("max_file_size_mb", &self.max_file_size_mb)
+            .field("encryption", &self.encryption.as_ref().map(|_| "***"))
+            .field("archive_format", &self.archive_format)
+            .field("parquet_config", &self.parquet_config)
+            .finish_non_exhaustive()
+    }
+}
+
 /// 自定义序列化，跳过敏感凭据字段
 impl Serialize for S3ArchiveConfig {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -290,6 +324,65 @@ impl Serialize for S3ArchiveConfig {
         state.serialize_field("archive_format", &self.archive_format)?;
         state.serialize_field("parquet_config", &self.parquet_config)?;
         state.end()
+    }
+}
+
+impl S3ArchiveConfig {
+    /// Validates the configuration for security concerns.
+    /// This method checks for potentially sensitive or risky configuration settings
+    /// and logs warnings where appropriate.
+    ///
+    /// # Security Checks
+    ///
+    /// - Detects custom endpoint URLs (may indicate non-AWS S3 compatible services)
+    /// - Detects customer-provided encryption keys (SSE-C)
+    /// - Warns when S3 archive is enabled but no credentials are configured
+    ///
+    /// # Returns
+    ///
+    /// Always returns `Ok(())`. Warnings are logged, not returned as errors.
+    pub fn validate_security(&self) -> Result<(), InklogError> {
+        // Detect custom endpoint configuration
+        if self.endpoint_url.is_some() {
+            tracing::warn!(
+                event = "sensitive_config_detected",
+                field = "endpoint_url",
+                "S3 archive configured with custom endpoint URL: custom endpoints may have different security characteristics"
+            );
+        }
+
+        // Detect customer-provided encryption key (SSE-C)
+        if let Some(ref enc) = self.encryption {
+            if enc.customer_key.is_some() {
+                tracing::info!(
+                    event = "customer_key_configured",
+                    "S3 archive configured with customer-provided encryption key (SSE-C). Ensure key is stored securely."
+                );
+            }
+        }
+
+        // Warn about missing credentials when enabled
+        let has_credentials = self.access_key_id.is_some() || self.secret_access_key.is_some();
+        if self.enabled && !has_credentials {
+            tracing::warn!(
+                event = "missing_credentials",
+                "S3 archive enabled but no AWS credentials configured. Ensure IAM role or external credential provider is available."
+            );
+        }
+
+        tracing::debug!(
+            event = "security_validation_complete",
+            has_endpoint_url = self.endpoint_url.is_some(),
+            has_customer_key = self
+                .encryption
+                .as_ref()
+                .map(|e| e.customer_key.is_some())
+                .unwrap_or(false),
+            has_credentials = has_credentials,
+            "Security validation completed for S3ArchiveConfig"
+        );
+
+        Ok(())
     }
 }
 
@@ -328,7 +421,7 @@ pub enum StorageClass {
 }
 
 /// 加密配置
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct EncryptionConfig {
     /// 服务器端加密算法
     pub algorithm: EncryptionAlgorithm,
@@ -350,6 +443,15 @@ impl Serialize for EncryptionConfig {
         state.serialize_field("kms_key_id", &self.kms_key_id)?;
         // 跳过 customer_key（敏感）
         state.end()
+    }
+}
+
+impl std::fmt::Debug for EncryptionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EncryptionConfig")
+            .field("algorithm", &self.algorithm)
+            .field("kms_key_id", &self.kms_key_id)
+            .finish_non_exhaustive() // Skip customer_key (sensitive)
     }
 }
 
