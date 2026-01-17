@@ -455,18 +455,18 @@ const MaxRetryAttempts: u32 = 3;
 
 ```rust
 /// 文件日志 Sink 实现
-/// 
+///
 /// 提供:
 /// - 自动日志轮转 (基于大小或时间)
 /// - 压缩支持 (ZSTD, GZIP, Brotli, LZ4)
 /// - AES-256-GCM 加密
 /// - 断路器保护
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// use inklog::{FileSinkConfig, LoggerManager};
-/// 
+///
 /// let config = FileSinkConfig {
 ///     enabled: true,
 ///     path: "logs/app.log".into(),
@@ -492,15 +492,15 @@ pub enum InklogError {
     /// 配置错误
     #[error("Configuration error: {0}")]
     ConfigError(String),
-    
+
     /// I/O 错误
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     /// 数据库错误
     #[error("Database error: {0}")]
     DatabaseError(String),
-    
+
     /// 加密错误
     #[error("Encryption error: {0}")]
     EncryptionError(String),
@@ -516,10 +516,10 @@ async fn process_logs() -> Result<()> {
     let logs = fetch_logs()
         .await
         .context("Failed to fetch logs from database")?;
-    
+
     write_to_file(&logs)
         .context("Failed to write logs to file")?;
-    
+
     Ok(())
 }
 ```
@@ -1045,7 +1045,7 @@ inklog/
 │   ├── sink/               # 输出目标实现
 │   │   ├── mod.rs
 │   │   ├── console.rs      # 控制台输出
-│   │   ├── file.rs         # 文件输出 (1350+ 行)
+│   │   ├── file.rs         # 文件输出 (1513 行)
 │   │   ├── database.rs     # 数据库输出
 │   │   ├── async_file.rs   # 异步文件输出
 │   │   └── ring_buffered_file.rs
@@ -1073,16 +1073,16 @@ inklog/
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| `src/manager.rs` | 1046 | 核心日志管理器 |
-| `src/config.rs` | 952 | 配置系统 |
-| `src/sink/file.rs` | 1351 | 文件 sink (最复杂) |
+| `src/manager.rs` | 1113 | 核心日志管理器 |
+| `src/config.rs` | 989 | 配置系统 |
+| `src/sink/file.rs` | 1513 | 文件 sink (最复杂) |
 | `docs/ARCHITECTURE.md` | 1103 | 架构文档 |
-| `docs/SECURITY.md` | 1978 | 安全指南 |
+| `docs/SECURITY.md` | 1979 | 安全指南 |
 
 ---
 
 **文档版本**: 1.0  
-**最后更新**: 2026-01-17  
+**最后更新**: 2026-01-18  
 **项目**: Inklog - Enterprise-grade Rust Logging Infrastructure  
 
 ---

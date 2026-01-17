@@ -70,12 +70,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         ..Default::default()
     };
-    
+
     let _logger = LoggerManager::with_config(config).await?;
-    
+
     log::info!("Application started successfully");
     log::error!("Something went wrong with error details");
-    
+
     Ok(())
 }
 ```
@@ -202,7 +202,7 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     log::info!("Logger initialized");
     Ok(())
 }
@@ -219,13 +219,13 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     log::trace!("Trace message");
     log::debug!("Debug message");
     log::info!("Info message");
     log::warn!("Warning message");
     log::error!("Error message");
-    
+
     Ok(())
 }
 ```
@@ -400,7 +400,7 @@ inklog = { version = "0.1", features = [
 | **aws** | aws-sdk-s3, aws-config, aws-types | AWS S3 cloud archive |
 | **http** | axum | HTTP health check endpoint |
 | **cli** | clap, glob, toml | Command-line utilities |
-| **confers** | confers, toml | External TOML configuration |
+| **confers** | confers, toml | External TOML configuration support |
 | **test-local** | - | Local testing mode |
 | **debug** | - | Security audit logging |
 
@@ -472,10 +472,10 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     log::info!("Application started");
     log::error!("An error occurred: {}", err);
-    
+
     Ok(())
 }
 ```

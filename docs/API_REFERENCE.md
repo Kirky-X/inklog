@@ -313,6 +313,115 @@ pub async fn trigger_archive(&self) -> Result<String, InklogError>
 
 ---
 
+##### `build_detached`
+
+构建 LoggerManager 但不安装全局订阅者。这主要用于测试和基准测试。
+
+**签名**
+```rust
+pub async fn build_detached(
+    config: InklogConfig,
+) -> Result<(LoggerManager, LoggerSubscriber, tracing_subscriber::EnvFilter), InklogError>
+```
+
+**返回值**
+- `Ok((LoggerManager, LoggerSubscriber, EnvFilter))` - 构建的管理器、订阅者和过滤器
+- `Err(InklogError)` - 构建失败
+
+**示例**
+```rust
+use inklog::{InklogConfig, LoggerManager};
+
+let config = InklogConfig::default();
+let (manager, subscriber, filter) = LoggerManager::build_detached(config).await?;
+// 可以手动设置订阅者
+```
+
+---
+
+##### `with_watch`
+
+使用配置文件监视器创建 LoggerManager（需要 `confers` 功能）。
+
+**签名**
+```rust
+#[cfg(feature = "confers")]
+pub async fn with_watch() -> Result<Self, InklogError>
+```
+
+**返回值**
+- `Ok(LoggerManager)` - 管理器实例，配置变更会自动重新加载
+- `Err(InklogError)` - 初始化失败
+
+**示例**
+```rust
+#[cfg(feature = "confers")]
+{
+    let logger = LoggerManager::with_watch().await?;
+    // 配置文件变更时会自动重新加载
+}
+```
+
+---
+
+##### `from_file`
+
+从指定路径加载配置文件（需要 `confers` 功能）。
+
+**签名**
+```rust
+#[cfg(feature = "confers")]
+pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, InklogError>
+```
+
+**参数**
+- `path` - 配置文件路径
+
+**返回值**
+- `Ok(InklogConfig)` - 加载的配置
+- `Err(InklogError)` - 加载失败
+
+**示例**
+```rust
+#[cfg(feature = "confers")]
+{
+    let config = InklogConfig::from_file("inklog_config.toml")?;
+    let logger = LoggerManager::with_config(config).await?;
+}
+```
+
+---
+
+##### `load`
+
+从默认位置加载配置文件（需要 `confers` 功能）。
+
+**签名**
+```rust
+#[cfg(feature = "confers")]
+pub fn load() -> Result<Self, InklogError>
+```
+
+**返回值**
+- `Ok(InklogConfig)` - 加载的配置
+- `Err(InklogError)` - 加载失败
+
+**默认查找位置**
+- `/etc/inklog/config.toml`
+- `./inklog_config.toml`
+- `./config/inklog.toml`
+
+**示例**
+```rust
+#[cfg(feature = "confers")]
+{
+    let config = InklogConfig::load()?;
+    let logger = LoggerManager::with_config(config).await?;
+}
+```
+
+---
+
 ### LoggerBuilder
 
 流式构建器，用于创建 `LoggerManager` 配置。
@@ -606,7 +715,7 @@ pub struct InklogConfig {
     pub console_sink: Option<ConsoleSinkConfig>,
     pub file_sink: Option<FileSinkConfig>,
     pub database_sink: Option<DatabaseSinkConfig>,
-    pub s3_archive: Option<S3ArchiveConfig>,
+    pub s3_archive: Option<crate::archive::S3ArchiveConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
 }
@@ -619,10 +728,12 @@ pub struct InklogConfig {
 | `global` | `GlobalConfig` | `default()` | 全局配置 |
 | `console_sink` | `Option<ConsoleSinkConfig>` | `Some(default())` | 控制台 Sink 配置 |
 | `file_sink` | `Option<FileSinkConfig>` | `None` | 文件 Sink 配置 |
-| `database_sink` | `Option<DatabaseSinkConfig>` | `None` | 数据库 Sink 配置 |
-| `s3_archive` | `Option<S3ArchiveConfig>` | `None` | S3 归档配置 |
+| `database_sink` | `Option<DatabaseSinkConfig>` | `None` | 数据库 Sink 配置（包含 ParquetConfig） |
+| `s3_archive` | `Option<S3ArchiveConfig>` | `None` | S3 归档配置（包含 ParquetConfig） |
 | `performance` | `PerformanceConfig` | `default()` | 性能配置 |
 | `http_server` | `Option<HttpServerConfig>` | `None` | HTTP 服务器配置 |
+
+**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseSinkConfig` 和 `S3ArchiveConfig` 的内部字段。
 
 #### 方法
 
@@ -917,24 +1028,25 @@ pub struct S3ArchiveConfig {
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|----------|------|
 | `enabled` | `bool` | `false` | 是否启用 S3 归档 |
-| `bucket` | `String` | - | S3 存储桶名称 |
-| `region` | `String` | - | AWS 区域 |
+| `bucket` | `String` | `"logs-archive"` | S3 存储桶名称 |
+| `region` | `String` | `"us-east-1"` | AWS 区域 |
 | `archive_interval_days` | `u32` | `7` | 归档间隔天数 |
+| `schedule_expression` | `Option<String>` | `None` | Cron 表达式用于定时归档 |
 | `local_retention_days` | `u32` | `30` | 本地保留天数 |
-| `local_retention_path` | `PathBuf` | `"logs"` | 本地日志路径 |
+| `local_retention_path` | `PathBuf` | `"logs/archive_failures"` | 本地保留路径 |
 | `prefix` | `String` | `"logs/"` | S3 对象键前缀 |
 | `compression` | `CompressionType` | `Zstd` | 压缩类型 |
 | `storage_class` | `StorageClass` | `Standard` | S3 存储类 |
 | `max_file_size_mb` | `u32` | `100` | 单个归档文件最大大小（MB） |
-| `schedule_expression` | `Option<String>` | `None` | Cron 表达式用于定时归档 |
 | `force_path_style` | `bool` | `false` | 是否强制路径风格 |
 | `skip_bucket_validation` | `bool` | `false` | 是否跳过存储桶验证 |
-| `access_key_id` | `SecretString` | - | AWS 访问密钥 ID |
-| `secret_access_key` | `SecretString` | - | AWS 密钥访问密钥 |
-| `session_token` | `Option<SecretString>` | `None` | AWS 会话令牌 |
+| `access_key_id` | `SecretString` | `default()` | AWS 访问密钥 ID |
+| `secret_access_key` | `SecretString` | `default()` | AWS 密钥访问密钥 |
+| `session_token` | `SecretString` | `default()` | AWS 会话令牌 |
 | `endpoint_url` | `Option<String>` | `None` | 自定义 S3 端点 URL |
 | `encryption` | `Option<EncryptionConfig>` | `None` | 服务器端加密配置 |
-| `archive_format` | `String` | `"json"` | 归档文件格式 |
+| `archive_format` | `String` | `"json"` | 归档文件格式（`json` 或 `parquet`） |
+| `parquet_config` | `ParquetConfig` | `default()` | Parquet 导出配置 |
 
 **示例**
 ```rust

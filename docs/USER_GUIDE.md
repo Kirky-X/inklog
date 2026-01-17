@@ -402,23 +402,25 @@ let _logger = LoggerManager::with_config(config).await?;
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|----------|------|
 | `enabled` | `bool` | `false` | 是否启用 S3 归档 |
-| `bucket` | `String` | - | S3 存储桶名称 |
-| `region` | `String` | - | AWS 区域（如：`"us-east-1"`、`"us-west-2"`） |
+| `bucket` | `String` | `"logs-archive"` | S3 存储桶名称 |
+| `region` | `String` | `"us-east-1"` | AWS 区域（如：`"us-east-1"`、`"us-west-2"`） |
 | `archive_interval_days` | `u32` | `7` | 归档间隔天数 |
+| `schedule_expression` | `Option<String>` | `None` | Cron 表达式用于定时归档 |
 | `local_retention_days` | `u32` | `30` | 本地保留天数 |
-| `local_retention_path` | `PathBuf` | `"logs"` | 本地日志路径 |
+| `local_retention_path` | `PathBuf` | `"logs/archive_failures"` | 本地保留路径 |
 | `prefix` | `String` | `"logs/"` | S3 对象键前缀 |
 | `compression` | `CompressionType` | `Zstd` | 压缩类型：`None`、`Gzip`、`Zstd`、`Lz4`、`Brotli` |
 | `storage_class` | `StorageClass` | `Standard` | S3 存储类 |
 | `max_file_size_mb` | `u32` | `100` | 单个归档文件最大大小（MB） |
-| `schedule_expression` | `Option<String>` | `None` | Cron 表达式用于定时归档 |
 | `force_path_style` | `bool` | `false` | 是否强制路径风格 |
 | `skip_bucket_validation` | `bool` | `false` | 是否跳过存储桶验证 |
-| `access_key_id` | `SecretString` | - | AWS 访问密钥 ID |
-| `secret_access_key` | `SecretString` | - | AWS 密钥访问密钥 |
-| `session_token` | `Option<SecretString>` | `None` | AWS 会话令牌 |
+| `access_key_id` | `SecretString` | `default()` | AWS 访问密钥 ID |
+| `secret_access_key` | `SecretString` | `default()` | AWS 密钥访问密钥 |
+| `session_token` | `SecretString` | `default()` | AWS 会话令牌 |
 | `endpoint_url` | `Option<String>` | `None` | 自定义 S3 端点 URL |
-| `archive_format` | `String` | `"json"` | 归档文件格式 |
+| `encryption` | `Option<EncryptionConfig>` | `None` | 服务器端加密配置 |
+| `archive_format` | `String` | `"json"` | 归档文件格式（`json` 或 `parquet`） |
+| `parquet_config` | `ParquetConfig` | `default()` | Parquet 导出配置 |
 
 #### 压缩类型（CompressionType）
 
@@ -1072,6 +1074,14 @@ Inklog 支持通过环境变量覆盖配置。
 | `INKLOG_FORMAT` | 日志格式 | `INKLOG_FORMAT="{timestamp} {message}"` |
 | `INKLOG_MASKING_ENABLED` | 启用数据脱敏 | `INKLOG_MASKING_ENABLED=true` |
 
+### 控制台 Sink 配置变量
+
+| 环境变量 | 描述 | 示例 |
+|----------|------|--------|
+| `INKLOG_CONSOLE_ENABLED` | 启用控制台 Sink | `INKLOG_CONSOLE_ENABLED=true` |
+| `INKLOG_CONSOLE_COLORED` | 启用彩色输出 | `INKLOG_CONSOLE_COLORED=true` |
+| `INKLOG_CONSOLE_STDERR_LEVELS` | 输出到 stderr 的日志级别 | `INKLOG_CONSOLE_STDERR_LEVELS=error,warn` |
+
 ### 文件 Sink 配置变量
 
 | 环境变量 | 描述 | 示例 |
@@ -1102,6 +1112,10 @@ Inklog 支持通过环境变量覆盖配置。
 | `INKLOG_DB_FLUSH_INTERVAL_MS` | 刷新间隔 | `INKLOG_DB_FLUSH_INTERVAL_MS=1000` |
 | `INKLOG_DB_ARCHIVE_TO_S3` | 启用 S3 归档 | `INKLOG_DB_ARCHIVE_TO_S3=true` |
 | `INKLOG_DB_ARCHIVE_AFTER_DAYS` | 归档前保留天数 | `INKLOG_DB_ARCHIVE_AFTER_DAYS=30` |
+| `INKLOG_DB_PARQUET_COMPRESSION_LEVEL` | Parquet 压缩级别 | `INKLOG_DB_PARQUET_COMPRESSION_LEVEL=3` |
+| `INKLOG_DB_PARQUET_ENCODING` | Parquet 编码方式 | `INKLOG_DB_PARQUET_ENCODING=PLAIN` |
+| `INKLOG_DB_PARQUET_MAX_ROW_GROUP_SIZE` | Parquet Row Group 大小 | `INKLOG_DB_PARQUET_MAX_ROW_GROUP_SIZE=10000` |
+| `INKLOG_DB_PARQUET_MAX_PAGE_SIZE` | Parquet 页面大小 | `INKLOG_DB_PARQUET_MAX_PAGE_SIZE=1048576` |
 
 ### S3 归档配置变量
 
@@ -1111,6 +1125,7 @@ Inklog 支持通过环境变量覆盖配置。
 | `INKLOG_S3_BUCKET` | S3 存储桶名称 | `INKLOG_S3_BUCKET=my-log-bucket` |
 | `INKLOG_S3_REGION` | AWS 区域 | `INKLOG_S3_REGION=us-west-2` |
 | `INKLOG_S3_ARCHIVE_INTERVAL_DAYS` | 归档间隔 | `INKLOG_S3_ARCHIVE_INTERVAL_DAYS=7` |
+| `INKLOG_S3_SCHEDULE_EXPRESSION` | Cron 表达式 | `INKLOG_S3_SCHEDULE_EXPRESSION="0 2 * * *"` |
 | `INKLOG_S3_LOCAL_RETENTION_DAYS` | 本地保留天数 | `INKLOG_S3_LOCAL_RETENTION_DAYS=30` |
 | `INKLOG_S3_LOCAL_RETENTION_PATH` | 本地日志路径 | `INKLOG_S3_LOCAL_RETENTION_PATH=logs` |
 | `INKLOG_S3_PREFIX` | S3 对象键前缀 | `INKLOG_S3_PREFIX=logs/` |
@@ -1119,6 +1134,13 @@ Inklog 支持通过环境变量覆盖配置。
 | `INKLOG_S3_MAX_FILE_SIZE_MB` | 最大文件大小 | `INKLOG_S3_MAX_FILE_SIZE_MB=100` |
 | `INKLOG_S3_ENDPOINT_URL` | 自定义端点 | `INKLOG_S3_ENDPOINT_URL=https://s3.example.com` |
 | `INKLOG_S3_FORCE_PATH_STYLE` | 强制路径风格 | `INKLOG_S3_FORCE_PATH_STYLE=true` |
+| `INKLOG_S3_SKIP_BUCKET_VALIDATION` | 跳过存储桶验证 | `INKLOG_S3_SKIP_BUCKET_VALIDATION=true` |
+| `INKLOG_S3_ACCESS_KEY_ID` | AWS 访问密钥 ID | `INKLOG_S3_ACCESS_KEY_ID=AKIAIOS...` |
+| `INKLOG_S3_SECRET_ACCESS_KEY` | AWS 密钥访问密钥 | `INKLOG_S3_SECRET_ACCESS_KEY=...` |
+| `INKLOG_S3_SESSION_TOKEN` | AWS 会话令牌 | `INKLOG_S3_SESSION_TOKEN=...` |
+| `INKLOG_S3_ENCRYPTION_ALGORITHM` | 加密算法 | `INKLOG_S3_ENCRYPTION_ALGORITHM=AES256` |
+| `INKLOG_S3_ENCRYPTION_KMS_KEY_ID` | KMS 密钥 ID | `INKLOG_S3_ENCRYPTION_KMS_KEY_ID=arn:aws:kms:...` |
+| `INKLOG_ARCHIVE_FORMAT` | 归档格式 | `INKLOG_ARCHIVE_FORMAT=json` |
 
 ### HTTP 服务器配置变量
 

@@ -70,12 +70,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         ..Default::default()
     };
-    
+
     let _logger = LoggerManager::with_config(config).await?;
-    
+
     log::info!("应用启动成功");
     log::error!("发生错误，详情如下");
-    
+
     Ok(())
 }
 ```
@@ -202,7 +202,7 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     log::info!("日志系统已初始化");
     Ok(())
 }
@@ -219,13 +219,13 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     log::trace!("追踪消息");
     log::debug!("调试消息");
     log::info!("信息消息");
     log::warn!("警告消息");
     log::error!("错误消息");
-    
+
     Ok(())
 }
 ```
@@ -400,7 +400,7 @@ inklog = { version = "0.1", features = [
 | **aws** | aws-sdk-s3, aws-config, aws-types | AWS S3 云归档 |
 | **http** | axum | HTTP 健康检查端点 |
 | **cli** | clap, glob, toml | 命令行工具 |
-| **confers** | confers, toml | 外部 TOML 配置 |
+| **confers** | confers, toml | 外部 TOML 配置支持 |
 | **test-local** | - | 本地测试模式 |
 | **debug** | - | 安全审计日志 |
 
@@ -472,10 +472,10 @@ use inklog::LoggerManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
-    
+
     log::info!("应用已启动");
     log::error!("发生错误: {}", err);
-    
+
     Ok(())
 }
 ```

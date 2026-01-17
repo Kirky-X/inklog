@@ -191,11 +191,11 @@ pub trait LogSink: Send + Sync {
     fn flush(&mut self) -> Result<(), InklogError>;
     fn is_healthy(&self) -> bool { true }
     fn shutdown(&mut self) -> Result<(), InklogError>;
-    
+
     // 可选: 轮转支持
     fn start_rotation_timer(&mut self) {}
     fn stop_rotation_timer(&mut self) {}
-    
+
     // 可选: 磁盘空间检查
     fn check_disk_space(&self) -> Result<bool, InklogError> { Ok(true) }
 }
@@ -213,7 +213,7 @@ pub trait LogSink: Send + Sync {
 
 **工作流程**:
 ```
-LogRecord 
+LogRecord
   ↓
 检查是否为 stderr 级别
   ↓ [是]          [否]
@@ -226,7 +226,7 @@ stderr           stdout
 
 ### File Sink
 
-最复杂的 sink (1350+ 行),提供完整的文件日志解决方案:
+最复杂的 sink (1500+ 行),提供完整的文件日志解决方案:
 
 **核心功能**:
 
@@ -330,14 +330,14 @@ fn flush_buffer(&mut self) -> Result<(), InklogError> {
     } else {
         self.config.batch_size  // 默认 100
     };
-    
+
     // 检查触发条件
-    if self.buffer.len() >= current_batch_size 
+    if self.buffer.len() >= current_batch_size
        || self.last_flush.elapsed() >= flush_interval {
-        
+
         // 执行批量 INSERT
         Entity::insert_many(logs).exec(&db).await?;
-        
+
         self.circuit_breaker.record_success();
         self.buffer.clear();
     }
@@ -358,13 +358,13 @@ fn convert_logs_to_parquet(logs: &[Model], config: &ParquetConfig) -> Result<Vec
         Field::new("level", DataType::Utf8, false),
         // ...
     ]);
-    
+
     let writer = ArrowWriter::try_new(
         cursor,
         schema,
         Some(writer_props)  // ZSTD 压缩, PLAIN/DICTIONARY 编码
     )?;
-    
+
     writer.write(&batch)?;
     writer.close()?;
 }
@@ -389,7 +389,7 @@ impl LogSink for CustomSink {
         }
         Ok(())
     }
-    
+
     fn flush(&mut self) -> Result<(), InklogError> {
         // 发送到远程 API
         let payload = serde_json::to_vec(&self.buffer)?;
@@ -752,7 +752,7 @@ where
     let mut retries = 0;
     let max_retries = 3;
     let base_delay = Duration::from_secs(1);
-    
+
     loop {
         match attempt().await {
             Ok(result) => return Ok(result),
@@ -874,7 +874,7 @@ file.set_permissions(perms)?;
 
 ### 批量处理
 
-**FileSink**: 
+**FileSink**:
 - 行级写入 (每条日志立即写入)
 - 使用 `BufWriter` 减少系统调用
 
@@ -962,7 +962,7 @@ impl LogSink for SlackSink {
         }
         Ok(())
     }
-    
+
     fn flush(&mut self) -> Result<(), InklogError> {
         let payload = serde_json::json!({
             "text": self.buffer.iter()
@@ -971,21 +971,21 @@ impl LogSink for SlackSink {
                 .collect::<Vec<_>>()
                 .join("\n")
         });
-        
+
         reqwest::Client::new()
             .post(&self.webhook_url)
             .json(&payload)
             .send()
             .await?;
-        
+
         self.buffer.clear();
         Ok(())
     }
-    
+
     fn is_healthy(&self) -> bool {
         self.webhook_url.len() > 0
     }
-    
+
     fn shutdown(&mut self) -> Result<(), InklogError> {
         self.flush()
     }
@@ -1098,5 +1098,5 @@ pub struct InklogConfig {
 ---
 
 **文档版本**: 1.0  
-**最后更新**: 2026-01-17  
+**最后更新**: 2026-01-18  
 **代码基准**: commit b7c5e6e
