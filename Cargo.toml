@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Kirky.X"]
 description = "Enterprise-grade Rust logging infrastructure"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Kirky-X/inklog"
 
 [package.metadata.docs.rs]
 features = ["default", "aws", "http", "cli", "confers"]
