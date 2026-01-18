@@ -7,7 +7,6 @@ use crate::archive::SecretString;
 use crate::config_validator::validate_url;
 use crate::error::InklogError;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
 
 /// HTTP 服务器错误处理模式
@@ -334,7 +333,7 @@ impl Default for PerformanceConfig {
 impl InklogConfig {
     #[cfg(feature = "confers")]
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, InklogError> {
-        let content = fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path)?;
         let mut config: InklogConfig = toml::from_str(&content)?;
         config.apply_env_overrides();
         config.validate()?;
