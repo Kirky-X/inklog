@@ -12,7 +12,6 @@
 
 # Build
 target/
-Cargo.lock
 
 # Logs
 logs/
