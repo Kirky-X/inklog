@@ -19,17 +19,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackpressureStrategy {
+    #[default]
     Block,
     DropOldest,
     DropNewest,
-}
-
-impl Default for BackpressureStrategy {
-    fn default() -> Self {
-        BackpressureStrategy::Block
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +49,7 @@ impl Default for ChannelBufferedConfig {
 }
 
 pub struct ChannelBufferedFileSink {
+    #[allow(dead_code)]
     config: ChannelBufferedConfig,
     template: LogTemplate,
     sender: crossbeam_channel::Sender<String>,
@@ -107,14 +103,14 @@ impl ChannelBufferedFileSink {
     fn open_file(path: &PathBuf) -> Result<File, InklogError> {
         if let Some(parent) = path.parent() {
             if !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(|e| InklogError::IoError(e))?;
+                std::fs::create_dir_all(parent).map_err(InklogError::IoError)?;
             }
         }
         OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
-            .map_err(|e| InklogError::IoError(e))
+            .map_err(InklogError::IoError)
     }
 
     fn start_io_thread(&mut self) {
@@ -126,6 +122,7 @@ impl ChannelBufferedFileSink {
         let batch_size = self.config.flush_batch_size;
 
         let handle = thread::spawn(move || {
+            #[allow(clippy::await_holding_lock)]
             let mut batch = Vec::with_capacity(batch_size);
 
             loop {
@@ -170,16 +167,11 @@ impl ChannelBufferedFileSink {
             }
 
             // Drain remaining messages
-            loop {
-                match receiver.recv_timeout(StdDuration::from_millis(100)) {
-                    Ok(entry) => {
-                        if let Ok(mut file_guard) = file.lock() {
-                            if let Some(writer) = file_guard.as_mut() {
-                                let _ = writer.write_all(entry.as_bytes());
-                            }
-                        }
+            while let Ok(entry) = receiver.recv_timeout(StdDuration::from_millis(100)) {
+                if let Ok(mut file_guard) = file.lock() {
+                    if let Some(writer) = file_guard.as_mut() {
+                        let _ = writer.write_all(entry.as_bytes());
                     }
-                    Err(_) => break,
                 }
             }
 

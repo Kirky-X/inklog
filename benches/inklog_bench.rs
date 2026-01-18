@@ -114,7 +114,7 @@ fn bench_log_creation(c: &mut Criterion) {
 }
 
 fn bench_console_sink_latency(c: &mut Criterion) {
-    let rt = create_benchmark_runtime();
+    let _rt = create_benchmark_runtime();
     let mut group = c.benchmark_group("console_sink_latency");
     group.measurement_time(Duration::from_secs(5));
 

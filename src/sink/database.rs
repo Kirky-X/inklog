@@ -245,7 +245,7 @@ fn validate_date_format(date_str: &str) -> Result<(), InklogError> {
         ));
     }
     let month_num: u32 = month.parse().unwrap_or(0);
-    if month_num < 1 || month_num > 12 {
+    if !(1..=12).contains(&month_num) {
         return Err(InklogError::DatabaseError(format!(
             "Invalid month: {}",
             month_num

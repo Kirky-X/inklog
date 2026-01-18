@@ -65,7 +65,7 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
     }
 
     // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
-    if raw_bytes.len() > 0 && raw_bytes.len() < 128 {
+    if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
         return derive_key_from_password(env_value.as_str());
     }
 

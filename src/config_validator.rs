@@ -12,6 +12,7 @@ use crate::error::InklogError;
 /// 配置验证 trait
 ///
 /// 所有需要验证的配置结构体都应该实现这个 trait
+#[allow(dead_code)]
 pub trait ConfigValidator {
     /// 验证配置是否有效
     ///

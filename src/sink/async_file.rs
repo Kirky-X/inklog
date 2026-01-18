@@ -21,20 +21,16 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CompressionStrategy {
+    #[default]
     None,
     Single,
     Batch,
 }
 
-impl Default for CompressionStrategy {
-    fn default() -> Self {
-        CompressionStrategy::Batch
-    }
-}
-
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct AsyncFileSink {
     config: AsyncFileConfig,
     template: LogTemplate,
@@ -88,7 +84,7 @@ impl AsyncFileSink {
                 .append(true)
                 .open(&file_path)
                 .await
-                .map_err(|e| InklogError::IoError(e.into()))?;
+                .map_err(InklogError::IoError)?;
             Ok::<File, InklogError>(f)
         })?;
 
@@ -138,6 +134,7 @@ impl AsyncFileSink {
             let mut batch = Vec::with_capacity(batch_size);
 
             rt.block_on(async move {
+                #[allow(clippy::await_holding_lock)]
                 loop {
                     if shutdown_flag.load(Ordering::Relaxed) {
                         break;
@@ -183,15 +180,11 @@ impl AsyncFileSink {
                     }
                 }
 
-                loop {
-                    match receiver.recv_timeout(StdDuration::from_millis(100)) {
-                        Ok(entry) => {
-                            let _ = Self::write_single(&entry, &file, &bytes_written).await;
-                        }
-                        Err(_) => break,
-                    }
+                while let Ok(entry) = receiver.recv_timeout(StdDuration::from_millis(100)) {
+                    let _ = Self::write_single(&entry, &file, &bytes_written).await;
                 }
 
+                #[allow(clippy::await_holding_lock)]
                 if let Ok(mut file_guard) = file.lock() {
                     if let Some(f) = file_guard.as_mut() {
                         let _ = f.flush().await;
@@ -203,6 +196,7 @@ impl AsyncFileSink {
         self.io_thread = Some(handle);
     }
 
+    #[allow(clippy::await_holding_lock)]
     async fn write_batch(
         batch: &[Bytes],
         file: &Arc<Mutex<Option<File>>>,
@@ -220,6 +214,7 @@ impl AsyncFileSink {
         Ok(())
     }
 
+    #[allow(clippy::await_holding_lock)]
     async fn write_single(
         entry: &Bytes,
         file: &Arc<Mutex<Option<File>>>,
@@ -235,6 +230,7 @@ impl AsyncFileSink {
         Ok(())
     }
 
+    #[allow(clippy::await_holding_lock)]
     async fn batch_compress_and_write(
         batch: &[Bytes],
         level: i32,
@@ -251,7 +247,7 @@ impl AsyncFileSink {
         }
 
         let compressed = compression::compress_data(combined.as_bytes(), level)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         if let Ok(mut file_guard) = file.lock() {
             if let Some(f) = file_guard.as_mut() {
