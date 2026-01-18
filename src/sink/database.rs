@@ -246,9 +246,10 @@ fn validate_date_format(date_str: &str) -> Result<(), InklogError> {
     }
     let month_num: u32 = month.parse().unwrap_or(0);
     if month_num < 1 || month_num > 12 {
-        return Err(InklogError::DatabaseError(
-            format!("Invalid month: {}", month_num),
-        ));
+        return Err(InklogError::DatabaseError(format!(
+            "Invalid month: {}",
+            month_num
+        )));
     }
 
     // 检查日期部分
@@ -260,12 +261,8 @@ fn validate_date_format(date_str: &str) -> Result<(), InklogError> {
     }
 
     // 使用 chrono 验证日期的有效性
-    chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| {
-        InklogError::DatabaseError(format!(
-            "Invalid date: {}",
-            date_str
-        ))
-    })?;
+    chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+        .map_err(|_| InklogError::DatabaseError(format!("Invalid date: {}", date_str)))?;
 
     Ok(())
 }

@@ -357,7 +357,9 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
 use inklog::config::DatabaseDriver as BatchDatabaseDriver;
 use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
 use inklog::sink::LogSink as BatchLogSink;
-use inklog::{log_record::LogRecord as BatchLogRecord, DatabaseSinkConfig as BatchDatabaseSinkConfig};
+use inklog::{
+    log_record::LogRecord as BatchLogRecord, DatabaseSinkConfig as BatchDatabaseSinkConfig,
+};
 use std::time::Duration as BatchDuration;
 use tempfile::TempDir as BatchTempDir;
 use tracing::Level as BatchLevel;
@@ -409,7 +411,11 @@ fn test_database_batch_write() {
 
     // Write 3 records (buffer=3, not enough to trigger batch flush)
     for i in 0..3 {
-        let record = BatchLogRecord::new(BatchLevel::INFO, "batch_test".into(), format!("Message {}", i));
+        let record = BatchLogRecord::new(
+            BatchLevel::INFO,
+            "batch_test".into(),
+            format!("Message {}", i),
+        );
         sink.write(&record).expect("Failed to write log record");
     }
 
@@ -417,7 +423,11 @@ fn test_database_batch_write() {
     std::thread::sleep(BatchDuration::from_millis(1100));
 
     // Write 4th record - this triggers time-based flush (3 records flushed)
-    let record = BatchLogRecord::new(BatchLevel::INFO, "batch_test".into(), "Trigger flush".into());
+    let record = BatchLogRecord::new(
+        BatchLevel::INFO,
+        "batch_test".into(),
+        "Trigger flush".into(),
+    );
     sink.write(&record).expect("Failed to write log record");
 
     // Wait for flush to complete
@@ -429,7 +439,11 @@ fn test_database_batch_write() {
 
     // Write 5 more records to trigger batch-based flush (batch_size=5)
     for i in 4..9 {
-        let record = BatchLogRecord::new(BatchLevel::INFO, "batch_test".into(), format!("Message {}", i));
+        let record = BatchLogRecord::new(
+            BatchLevel::INFO,
+            "batch_test".into(),
+            format!("Message {}", i),
+        );
         sink.write(&record).expect("Failed to write log record");
     }
 
@@ -451,13 +465,21 @@ fn test_database_batch_write() {
 fn test_database_timeout_flush() {
     let (_temp_dir, mut sink, url) = create_test_database_sink(100, 300);
 
-    let record1 = BatchLogRecord::new(BatchLevel::INFO, "timeout_test".into(), "First message".into());
+    let record1 = BatchLogRecord::new(
+        BatchLevel::INFO,
+        "timeout_test".into(),
+        "First message".into(),
+    );
     sink.write(&record1)
         .expect("Failed to write first log record");
 
     std::thread::sleep(BatchDuration::from_millis(500));
 
-    let record2 = BatchLogRecord::new(BatchLevel::INFO, "timeout_test".into(), "Second message".into());
+    let record2 = BatchLogRecord::new(
+        BatchLevel::INFO,
+        "timeout_test".into(),
+        "Second message".into(),
+    );
     sink.write(&record2)
         .expect("Failed to write second log record");
 
@@ -1041,7 +1063,10 @@ async fn test_long_running_stability() {
 use inklog::config::DatabaseDriver as VerifyDatabaseDriver;
 use inklog::sink::database::DatabaseSink as VerifyDatabaseSink;
 use inklog::sink::file::FileSink as VerifyFileSink;
-use inklog::{log_record::LogRecord as VerifyLogRecord, DatabaseSinkConfig as VerifyDatabaseSinkConfig, FileSinkConfig as VerifyFileSinkConfig};
+use inklog::{
+    log_record::LogRecord as VerifyLogRecord, DatabaseSinkConfig as VerifyDatabaseSinkConfig,
+    FileSinkConfig as VerifyFileSinkConfig,
+};
 use std::fs::File as VerifyFile;
 use std::io::Read as VerifyRead;
 use std::path::PathBuf;

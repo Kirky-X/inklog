@@ -4,9 +4,10 @@
 // See LICENSE file in the project root for full license information.
 
 use crate::archive::SecretString;
-use crate::config_validator::{validate_log_level, validate_non_empty, validate_path, validate_positive, validate_url};
+use crate::config_validator::validate_url;
 use crate::error::InklogError;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::PathBuf;
 
 /// HTTP 服务器错误处理模式
@@ -442,7 +443,9 @@ impl InklogConfig {
     }
 
     pub fn validate(&self) -> Result<(), InklogError> {
-        use crate::config_validator::{validate_log_level, validate_non_empty, validate_path, validate_positive};
+        use crate::config_validator::{
+            validate_log_level, validate_non_empty, validate_path, validate_positive,
+        };
 
         // 验证全局配置
         validate_log_level(&self.global.level)?;

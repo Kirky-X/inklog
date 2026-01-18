@@ -45,7 +45,11 @@ pub fn validate_path(path: &std::path::Path) -> Result<(), InklogError> {
     if let Some(parent) = path.parent() {
         if !parent.exists() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                InklogError::ConfigError(format!("Cannot create directory {}: {}", parent.display(), e))
+                InklogError::ConfigError(format!(
+                    "Cannot create directory {}: {}",
+                    parent.display(),
+                    e
+                ))
             })?;
         }
     }
@@ -56,7 +60,10 @@ pub fn validate_path(path: &std::path::Path) -> Result<(), InklogError> {
 /// URL 验证器
 pub fn validate_url(url: &str, field_name: &str) -> Result<(), InklogError> {
     if url.is_empty() {
-        return Err(InklogError::ConfigError(format!("{} cannot be empty", field_name)));
+        return Err(InklogError::ConfigError(format!(
+            "{} cannot be empty",
+            field_name
+        )));
     }
     Ok(())
 }
@@ -86,7 +93,10 @@ where
 /// 验证字符串是否非空
 pub fn validate_non_empty(value: &str, field_name: &str) -> Result<(), InklogError> {
     if value.is_empty() {
-        return Err(InklogError::ConfigError(format!("{} cannot be empty", field_name)));
+        return Err(InklogError::ConfigError(format!(
+            "{} cannot be empty",
+            field_name
+        )));
     }
     Ok(())
 }

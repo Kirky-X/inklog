@@ -8,7 +8,7 @@ use crate::error::InklogError;
 use crate::log_record::LogRecord;
 use crate::sink::{compression, console::ConsoleSink, encryption, CircuitBreaker, LogSink};
 use crate::template::LogTemplate;
-use base64::{engine::general_purpose, Engine};
+use base64::Engine;
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
@@ -990,7 +990,10 @@ mod tests {
         // Test password-based key derivation (short keys now succeed via PBKDF2)
         std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD", "short_key");
         let result = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
-        assert!(result.is_ok(), "Short key should succeed via PBKDF2 derivation");
+        assert!(
+            result.is_ok(),
+            "Short key should succeed via PBKDF2 derivation"
+        );
         std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
 
         // Test raw string with exact 32 bytes

@@ -355,10 +355,11 @@ impl Metrics {
         let status = if healthy {
             SinkStatus::Healthy
         } else {
-            let error_msg = error.as_ref().unwrap_or(&"Unknown error".to_string()).clone();
-            SinkStatus::Unhealthy {
-                error: error_msg,
-            }
+            let error_msg = error
+                .as_ref()
+                .unwrap_or(&"Unknown error".to_string())
+                .clone();
+            SinkStatus::Unhealthy { error: error_msg }
         };
 
         let (new_failures, new_error) = if healthy {
@@ -375,7 +376,9 @@ impl Metrics {
 
         // 现在快速更新
         if let Ok(mut map) = self.sink_health.lock() {
-            let entry = map.entry(name.to_string()).or_insert_with(SinkHealth::healthy);
+            let entry = map
+                .entry(name.to_string())
+                .or_insert_with(SinkHealth::healthy);
             entry.status = status;
             entry.consecutive_failures = new_failures;
             entry.last_error = new_error;
