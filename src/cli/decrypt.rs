@@ -268,9 +268,7 @@ pub fn decrypt_file_compatible(
         .with_context(|| format!("Failed to get encryption key from env var: {}", key_env))?;
 
     let algo = u16::from_le_bytes([header[10], header[11]]);
-    let plaintext: Vec<u8>;
-
-    if algo == 1 {
+    let plaintext = if algo == 1 {
         if read_count < 24 {
             return Err(anyhow!("File too small for V1 format"));
         }
@@ -282,9 +280,9 @@ pub fn decrypt_file_compatible(
             .with_context(|| "Failed to read ciphertext")?;
 
         let cipher = Aes256Gcm::new((&key).into());
-        plaintext = cipher
+        cipher
             .decrypt(nonce, ciphertext.as_ref())
-            .map_err(|e| anyhow!("Decryption failed: {}", e))?;
+            .map_err(|e| anyhow!("Decryption failed: {}", e))?
     } else {
         // Assume Legacy format (MAGIC + VER + NONCE + CIPHERTEXT)
         // Legacy header is 22 bytes (8 MAGIC + 2 VER + 12 NONCE)
@@ -305,10 +303,10 @@ pub fn decrypt_file_compatible(
             .with_context(|| "Failed to read ciphertext")?;
 
         let cipher = Aes256Gcm::new((&key).into());
-        plaintext = cipher
+        cipher
             .decrypt(nonce, ciphertext.as_ref())
-            .map_err(|e| anyhow!("Decryption failed: {}", e))?;
-    }
+            .map_err(|e| anyhow!("Decryption failed: {}", e))?
+    };
 
     let mut output_file = File::create(output_path)
         .with_context(|| format!("Failed to create output file: {}", output_path.display()))?;

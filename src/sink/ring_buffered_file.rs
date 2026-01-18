@@ -55,6 +55,7 @@ pub struct ChannelBufferedFileSink {
     sender: crossbeam_channel::Sender<String>,
     receiver: crossbeam_channel::Receiver<String>,
     file: Arc<Mutex<Option<BufWriter<File>>>>,
+    #[allow(dead_code)]
     file_path: PathBuf,
     io_thread: Option<thread::JoinHandle<()>>,
     flush_thread: Option<thread::JoinHandle<()>>,
@@ -62,6 +63,7 @@ pub struct ChannelBufferedFileSink {
     bytes_written: Arc<AtomicUsize>,
     flush_count: Arc<AtomicUsize>,
     dropped_count: Arc<AtomicUsize>,
+    #[allow(dead_code)]
     last_flush: Instant,
 }
 

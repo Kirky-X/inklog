@@ -980,7 +980,8 @@ mod tests {
         std::env::remove_var("LOG_KEY");
 
         // Test base64 decoding of 32-byte key
-        let base64_key = base64::engine::general_purpose::STANDARD.encode(&[1u8; 32]);
+        let base64_key =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [1u8; 32]);
         std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_BASE64", &base64_key);
         let key = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_BASE64").unwrap();
         assert_eq!(key, [1u8; 32]);

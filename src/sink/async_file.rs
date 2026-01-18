@@ -118,6 +118,7 @@ impl AsyncFileSink {
         Ok(sink)
     }
 
+    #[allow(clippy::await_holding_lock)]
     fn start_io_thread(&mut self, runtime: Runtime) {
         let receiver = self.receiver.clone();
         let file = self.file.clone();
