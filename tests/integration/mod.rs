@@ -16,9 +16,11 @@
 //! - 验证测试
 
 mod archive;
+mod additional_tests;
 mod batch;
 mod config;
 mod http;
+mod log;
 mod parquet;
 mod recovery;
 mod stability;

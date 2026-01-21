@@ -264,4 +264,54 @@ mod circuit_breaker_tests {
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
     }
+
+    #[test]
+    fn test_circuit_breaker_failure_count_increment() {
+        let mut cb = CircuitBreaker::new(5, Duration::from_secs(30));
+        assert_eq!(cb.failure_count, 0);
+        cb.record_failure();
+        assert_eq!(cb.failure_count, 1);
+        cb.record_failure();
+        assert_eq!(cb.failure_count, 2);
+    }
+
+    #[test]
+    fn test_circuit_breaker_failure_count_resets_on_success() {
+        let mut cb = CircuitBreaker::new(3, Duration::from_secs(30));
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.failure_count, 2);
+        cb.record_success();
+        assert_eq!(cb.failure_count, 0);
+    }
+
+    #[test]
+    fn test_circuit_breaker_last_failure_time() {
+        let mut cb = CircuitBreaker::new(3, Duration::from_secs(30));
+        assert!(cb.last_failure_time.is_none());
+        cb.record_failure();
+        assert!(cb.last_failure_time.is_some());
+    }
+
+    #[test]
+    fn test_circuit_breaker_consecutive_success_after_open() {
+        let mut cb = CircuitBreaker::new(3, Duration::from_millis(100));
+
+        // Open circuit
+        cb.record_failure();
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+
+        // Wait for timeout
+        std::thread::sleep(Duration::from_millis(200));
+
+        // Transition to HalfOpen
+        let _ = cb.can_execute();
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+
+        // Multiple successes in HalfOpen should close
+        cb.record_success();
+        assert_eq!(cb.state(), CircuitState::Closed);
+    }
 }

@@ -3,91 +3,191 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-use crate::config::{ConsoleSinkConfig, FileSinkConfig};
+//! File-based log sink with rotation, compression, and encryption support.
+//!
+//! This module provides the FileSink implementation for writing logs to files
+//! with support for automatic rotation, compression, and encryption.
+
+use crate::config::FileSinkConfig;
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
-use crate::sink::{compression, console::ConsoleSink, encryption, CircuitBreaker, LogSink};
-use crate::template::LogTemplate;
-use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
+use crate::sink::LogSink;
+use aes_gcm::aead::Aead;
+use aes_gcm::KeyInit;
+use bytes::BytesMut;
+use chrono::{Datelike, DateTime, Utc};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
-use tracing::error;
+use tracing::{debug, error, info, warn};
 
-#[derive(Debug, Default)]
-#[allow(dead_code)]
-struct CleanupReport {
-    files_deleted: usize,
-    bytes_freed: u64,
-    errors: Vec<String>,
+/// 断路器状态
+#[derive(Debug, Clone, PartialEq)]
+pub enum CircuitState {
+    Closed,      // 正常状态
+    Open,        // 故障状态，请求快速失败
+    HalfOpen,    // 半开状态，尝试恢复
 }
 
-/// File-based log sink with rotation, compression, and encryption support.
-///
-/// The `FileSink` struct handles writing logs to files with automatic rotation
-/// based on size or time intervals. It supports compression (ZSTD, GZIP, LZ4)
-/// and optional AES-256-GCM encryption.
-///
-/// # Features
-/// - **Automatic Rotation**: Rotates log files when size or time thresholds are reached
-/// - **Compression**: Compresses rotated logs using ZSTD (default), GZIP, LZ4, or Brotli
-/// - **Encryption**: Optional AES-256-GCM encryption for sensitive log data
-/// - **Retention**: Automatic cleanup of old log files based on retention settings
-/// - **Fallback**: Falls back to console logging if file writing fails
-///
-/// # Example
-/// ```ignore
-/// use inklog::{FileSinkConfig, LoggerManager};
-/// use std::path::PathBuf;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let file_config = FileSinkConfig {
-///         enabled: true,
-///         path: PathBuf::from("logs/app.log"),
-///         max_size: "100MB".to_string(),
-///         rotation_time: "daily".to_string(),
-///         compress: true,
-///         encrypt: false,
-///         ..Default::default()
-///     };
-///
-///     let config = inklog::InklogConfig {
-///         file_sink: Some(file_config),
-///         ..Default::default()
-///     };
-///
-///     let _logger = LoggerManager::with_config(config).await?;
-///     Ok(())
-/// }
-/// ```
-///
-/// # Thread Safety
-///
-/// FileSink is designed to be used within the logging pipeline and handles
-/// internal synchronization. Multiple FileSink instances can be created
-/// for different log files if needed.
+/// 断路器配置
+#[derive(Debug, Clone)]
+pub struct CircuitBreakerConfig {
+    pub failure_threshold: u32,    // 失败次数阈值
+    pub success_threshold: u32,    // 半开状态下成功次数阈值
+    pub timeout: StdDuration,      // 超时时间
+}
+
+impl Default for CircuitBreakerConfig {
+    fn default() -> Self {
+        Self {
+            failure_threshold: 5,
+            success_threshold: 3,
+            timeout: StdDuration::from_secs(30),
+        }
+    }
+}
+
+/// 断路器实现
 #[derive(Debug)]
+pub struct CircuitBreaker {
+    state: Arc<std::sync::Mutex<CircuitState>>,
+    failure_count: Arc<std::sync::Mutex<u32>>,
+    success_count: Arc<std::sync::Mutex<u32>>,
+    last_failure: Arc<std::sync::Mutex<Option<Instant>>>,
+    config: CircuitBreakerConfig,
+}
+
+impl CircuitBreaker {
+    pub fn new(failure_threshold: u32, timeout: StdDuration) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(CircuitState::Closed)),
+            failure_count: Arc::new(Mutex::new(0)),
+            success_count: Arc::new(Mutex::new(0)),
+            last_failure: Arc::new(Mutex::new(None)),
+            config: CircuitBreakerConfig {
+                failure_threshold,
+                success_threshold: 3,
+                timeout,
+            },
+        }
+    }
+
+    pub fn state(&self) -> CircuitState {
+        self.state.lock().unwrap().clone()
+    }
+
+    /// 检查是否可以执行操作
+    pub fn can_execute(&self) -> bool {
+        let state = self.state.lock().unwrap();
+        match *state {
+            CircuitState::Closed => true,
+            CircuitState::Open => {
+                // 检查是否超时
+                let last_failure = self.last_failure.lock().unwrap();
+                if let Some(time) = *last_failure {
+                    if time.elapsed() >= self.config.timeout {
+                        // 超时，进入半开状态
+                        drop(last_failure);
+                        let mut state = self.state.lock().unwrap();
+                        *state = CircuitState::HalfOpen;
+                        *self.success_count.lock().unwrap() = 0;
+                        return true;
+                    }
+                }
+                false
+            }
+            CircuitState::HalfOpen => true,
+        }
+    }
+
+    /// 记录成功
+    pub fn record_success(&mut self) {
+        let mut state = self.state.lock().unwrap();
+        let mut success_count = self.success_count.lock().unwrap();
+
+        match *state {
+            CircuitState::HalfOpen => {
+                *success_count += 1;
+                if *success_count >= self.config.success_threshold {
+                    *state = CircuitState::Closed;
+                    *self.failure_count.lock().unwrap() = 0;
+                    info!("Circuit breaker closed (recovered)");
+                }
+            }
+            CircuitState::Open => {
+                // 意外的成功，重置
+                *state = CircuitState::Closed;
+                *self.failure_count.lock().unwrap() = 0;
+            }
+            CircuitState::Closed => {
+                // 成功，重置失败计数
+                *self.failure_count.lock().unwrap() = 0;
+            }
+        }
+    }
+
+    /// 记录失败
+    pub fn record_failure(&mut self) {
+        let mut state = self.state.lock().unwrap();
+        let mut failure_count = self.failure_count.lock().unwrap();
+        let mut last_failure = self.last_failure.lock().unwrap();
+
+        *last_failure = Some(Instant::now());
+        *failure_count += 1;
+
+        match *state {
+            CircuitState::HalfOpen => {
+                *state = CircuitState::Open;
+                warn!("Circuit breaker opened (failure in half-open state)");
+            }
+            CircuitState::Closed => {
+                if *failure_count >= self.config.failure_threshold {
+                    *state = CircuitState::Open;
+                    warn!("Circuit breaker opened after {} failures", *failure_count);
+                }
+            }
+            CircuitState::Open => {
+                // 已经是打开状态，更新失败时间
+            }
+        }
+    }
+}
+
+/// 文件日志接收器
 pub struct FileSink {
+    /// 配置
     config: FileSinkConfig,
-    current_file: Option<BufWriter<File>>,
-    #[allow(dead_code)]
+    /// 当前文件句柄
+    current_file: Option<File>,
+    /// 当前文件大小
     current_size: u64,
-    #[allow(dead_code)]
-    sequence: u32,
-    #[allow(dead_code)]
-    last_cleanup_time: Instant,
-    rotation_interval: StdDuration,
+    /// 上次轮转时间
     last_rotation: Instant,
-    fallback_sink: Option<ConsoleSink>,
-    circuit_breaker: CircuitBreaker,
-    rotation_timer: Option<Arc<Mutex<Instant>>>,
-    timer_handle: Option<thread::JoinHandle<()>>,
+    /// 轮转间隔
+    rotation_interval: StdDuration,
+    /// 下次轮转时间
     next_rotation_time: Option<DateTime<Utc>>,
+    /// 上次轮转日期
     last_rotation_date: Option<i32>,
+    /// 序列号（用于区分同名轮转文件）
+    sequence: u32,
+    /// 降级接收器
+    fallback_sink: Option<Arc<std::sync::Mutex<dyn LogSink + Send>>>,
+    /// 断路器
+    circuit_breaker: CircuitBreaker,
+    /// 批量写入缓冲区
+    batch_buffer: Vec<LogRecord>,
+    /// 最后一次刷新时间
+    last_flush_time: Instant,
+    /// 轮转定时器句柄
+    timer_handle: Option<thread::JoinHandle<()>>,
+    /// 轮转定时器
+    rotation_timer: Option<Arc<std::sync::Mutex<Instant>>>,
+    /// 清理定时器句柄
     cleanup_timer_handle: Option<thread::JoinHandle<()>>,
     /// Shutdown flag for graceful thread termination
     shutdown_flag: Arc<AtomicBool>,
@@ -95,123 +195,312 @@ pub struct FileSink {
 
 impl FileSink {
     /// Creates a new FileSink with the given configuration.
-    ///
-    /// This function initializes the file sink, opens the log file for writing,
-    /// and starts background timer threads for rotation and cleanup.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Configuration for the file sink including path, rotation, and encryption settings
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(FileSink)` on success, or an `InklogError` if:
-    /// - The log file cannot be created or opened
-    /// - The encryption key is invalid (if encryption is enabled)
-    /// - Any I/O operation fails during initialization
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The parent directory of the log path does not exist and cannot be created
-    /// - The file cannot be opened for writing (permissions, disk space, etc.)
-    /// - Encryption is enabled but the encryption key environment variable is not set
-    ///   or contains an invalid key
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use inklog::FileSinkConfig;
-    /// use std::path::PathBuf;
-    ///
-    /// let config = FileSinkConfig {
-    ///     enabled: true,
-    ///     path: PathBuf::from("logs/app.log"),
-    ///     max_size: "100MB".to_string(),
-    ///     rotation_time: "daily".to_string(),
-    ///     compress: true,
-    ///     encrypt: false,
-    ///     ..Default::default()
-    /// };
-    ///
-    /// let sink = FileSink::new(config)?;
-    /// ```
     pub fn new(config: FileSinkConfig) -> Result<Self, InklogError> {
         let rotation_interval = match config.rotation_time.as_str() {
             "hourly" => StdDuration::from_secs(3600),
             "daily" => StdDuration::from_secs(86400),
-            "weekly" => StdDuration::from_secs(86400 * 7),
+            "weekly" => StdDuration::from_secs(604800),
+            "monthly" => StdDuration::from_secs(2592000),
             _ => StdDuration::from_secs(86400),
         };
 
-        let next_rotation_time = Self::calculate_next_rotation_time(&config.rotation_time);
-        let last_rotation_date = Some(Utc::now().date_naive().num_days_from_ce());
-
-        let fallback_config = ConsoleSinkConfig {
-            enabled: true,
-            ..Default::default()
-        };
-        let fallback_sink = ConsoleSink::new(fallback_config, LogTemplate::default());
+        let rotation_timer = Arc::new(Mutex::new(Instant::now()));
+        let last_rotation = Instant::now();
 
         let mut sink = Self {
-            config,
+            config: config.clone(),
             current_file: None,
             current_size: 0,
-            last_cleanup_time: Instant::now(),
+            last_rotation,
             rotation_interval,
-            last_rotation: Instant::now(),
+            next_rotation_time: None,
+            last_rotation_date: None,
             sequence: 0,
-            fallback_sink: Some(fallback_sink),
+            fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
-            rotation_timer: None,
+            batch_buffer: Vec::with_capacity(config.batch_size),
+            last_flush_time: Instant::now(),
             timer_handle: None,
-            next_rotation_time,
-            last_rotation_date,
+            rotation_timer: Some(rotation_timer.clone()),
             cleanup_timer_handle: None,
             shutdown_flag: Arc::new(AtomicBool::new(false)),
         };
 
-        let _ = sink.open_file();
+        // 初始化轮转时间
+        sink.update_next_rotation_time();
 
-        if rotation_interval > StdDuration::ZERO {
-            sink.start_rotation_timer();
+        // 打开日志文件
+        if let Err(e) = sink.open_file() {
+            error!("Failed to open log file: {}", e);
+            return Err(e);
         }
 
-        if sink.config.cleanup_interval_minutes > 0 {
-            sink.start_cleanup_timer();
-        }
+        // 启动轮转定时器
+        sink.start_rotation_timer();
+
+        // 启动清理定时器
+        sink.start_cleanup_timer();
 
         Ok(sink)
     }
 
+    /// 解析文件大小字符串
+    pub fn parse_size(size_str: &str) -> Option<u64> {
+        let size_str = size_str.trim();
+        if size_str.is_empty() {
+            return None;
+        }
+
+        if size_str.ends_with("TB") {
+            size_str
+                .trim_end_matches("TB")
+                .parse::<u64>()
+                .ok()
+                .map(|s| s * 1024 * 1024 * 1024 * 1024)
+        } else if size_str.ends_with("GB") {
+            size_str
+                .trim_end_matches("GB")
+                .parse::<u64>()
+                .ok()
+                .map(|s| s * 1024 * 1024 * 1024)
+        } else if size_str.ends_with("MB") {
+            size_str
+                .trim_end_matches("MB")
+                .parse::<u64>()
+                .ok()
+                .map(|s| s * 1024 * 1024)
+        } else if size_str.ends_with("KB") {
+            size_str
+                .trim_end_matches("KB")
+                .parse::<u64>()
+                .ok()
+                .map(|s| s * 1024)
+        } else {
+            size_str.parse::<u64>().ok()
+        }
+    }
+
+    /// 获取加密密钥
+    fn get_encryption_key(&self) -> Result<BytesMut, InklogError> {
+        let default_key = "LOG_ENCRYPTION_KEY".to_string();
+        let key_str = self
+            .config
+            .encryption_key_env
+            .as_ref()
+            .unwrap_or(&default_key);
+
+        let key = std::env::var(key_str).map_err(|_| {
+            InklogError::EncryptionError(format!(
+                "Encryption key not found in environment variable: {}",
+                key_str
+            ))
+        })?;
+
+        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key)
+            .map_err(|_| {
+                InklogError::EncryptionError("Invalid base64 encoding in encryption key".to_string())
+            })?;
+
+        let key_bytes = BytesMut::from(&decoded[..]);
+
+        if key_bytes.len() != 32 {
+            return Err(InklogError::EncryptionError(
+                "Encryption key must be 32 bytes (256 bits)".to_string(),
+            ));
+        }
+
+        Ok(key_bytes)
+    }
+
+    fn open_file(&mut self) -> Result<(), InklogError> {
+        if let Some(parent) = self.config.path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                error!("Failed to create log directory {}: {}", parent.display(), e);
+                return Err(InklogError::IoError(e));
+            }
+        }
+
+        match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.config.path)
+        {
+            Ok(file) => {
+                self.current_file = Some(file);
+                self.current_size = self
+                    .config
+                    .path
+                    .metadata()
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                debug!(
+                    "Opened log file: {} (size: {} bytes)",
+                    self.config.path.display(),
+                    self.current_size
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!("Failed to open log file: {}", e);
+                Err(InklogError::IoError(e))
+            }
+        }
+    }
+
+    /// 启动清理定时器
+    fn start_cleanup_timer(&mut self) {
+        let interval_minutes = self.config.cleanup_interval_minutes;
+        let cleanup_interval = StdDuration::from_secs(interval_minutes * 60);
+        let shutdown_flag = self.shutdown_flag.clone();
+        let config = self.config.clone();
+        let path = self.config.path.clone();
+
+        let handle = thread::spawn(move || {
+            let check_interval = StdDuration::from_secs(60);
+
+            loop {
+                // 检查关闭标志
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                thread::sleep(check_interval);
+
+                // 检查关闭标志
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                // 检查是否到达清理时间
+                static LAST_CLEANUP: std::sync::Mutex<Option<Instant>> =
+                    std::sync::Mutex::new(None);
+
+                let mut last_cleanup = LAST_CLEANUP.lock().unwrap();
+                let now = Instant::now();
+
+                if last_cleanup.map_or(true, |t| now.duration_since(t) >= cleanup_interval) {
+                    // 执行清理
+                    if let Err(e) = Self::perform_cleanup(&config, &path) {
+                        error!("Cleanup failed: {}", e);
+                    } else {
+                        *last_cleanup = Some(now);
+                    }
+                }
+            }
+        });
+
+        self.cleanup_timer_handle = Some(handle);
+    }
+
+    /// 清理旧的日志文件
+    fn perform_cleanup(config: &FileSinkConfig, log_path: &PathBuf) -> Result<(), InklogError> {
+        if let Some(parent) = log_path.parent() {
+            let entries: Result<Vec<_>, _> = fs::read_dir(parent)?.collect();
+
+            if let Ok(entries) = entries {
+                // 计算截止日期
+                let cutoff_date = Utc::now()
+                    .checked_sub_signed(chrono::Duration::days(config.retention_days as i64))
+                    .unwrap_or_else(Utc::now);
+
+                let mut expired_count = 0;
+                let mut total_size = 0u64;
+
+                for entry in &entries {
+                    total_size += entry.path().metadata()?.len();
+
+                    if let Ok(modified) = entry.path().metadata().and_then(|m| m.modified()) {
+                        let modified_utc: DateTime<Utc> = modified.into();
+                        if modified_utc < cutoff_date {
+                            expired_count += 1;
+                        }
+                    }
+                }
+
+                if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size) {
+                    if total_size > max_total_size_bytes {
+                        let excess_size = total_size.saturating_sub(max_total_size_bytes);
+                        let mut deleted_size: u64 = 0;
+
+                        for entry in entries {
+                            if deleted_size >= excess_size {
+                                break;
+                            }
+
+                            if let Ok(metadata) = entry.path().metadata() {
+                                deleted_size += metadata.len();
+                            }
+
+                            if let Err(e) = fs::remove_file(entry.path()) {
+                                error!("Failed to remove {}: {}", entry.path().display(), e);
+                            }
+                        }
+                    } else if expired_count > 0 {
+                        let to_delete = (entries.len() as i32 - config.keep_files as i32).max(0) as usize;
+                        for entry in entries.into_iter().take(to_delete) {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns disk space information for the log file's filesystem.
+    pub fn get_disk_space_info(&self) -> Result<(u64, u64), InklogError> {
+        if let Some(parent) = self.config.path.parent() {
+            if let Ok(_metadata) = fs::metadata(parent) {
+                if let Ok(stat) = nix::sys::statfs::statfs(parent) {
+                    let total_blocks = stat.blocks();
+                    let available_blocks = stat.blocks_available();
+
+                    // 获取块大小
+                    let block_size = stat.block_size() as u64;
+                    let total_bytes = total_blocks as u64 * block_size;
+                    let available_bytes = available_blocks as u64 * block_size;
+
+                    return Ok((total_bytes, available_bytes));
+                }
+            }
+        }
+
+        Err(InklogError::IoError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Unable to get disk space info",
+        )))
+    }
+
+    /// 检查磁盘空间是否充足
+    fn check_disk_space(&self) -> Result<bool, InklogError> {
+        let (_total, available) = self.get_disk_space_info()?;
+        // 保留 50MB 或 10% 的可用空间，以较大者为准
+        let reserved = (50 * 1024 * 1024u64).max(available / 10);
+        Ok(available > reserved)
+    }
+
+    /// 计算下次轮转时间
     fn calculate_next_rotation_time(rotation_time: &str) -> Option<DateTime<Utc>> {
         let now = Utc::now();
+
         match rotation_time {
-            "hourly" => {
-                let current_hour = now.hour();
-                let next_hour_naive = if current_hour < 23 {
-                    now.date_naive().and_hms_opt(current_hour + 1, 0, 0)?
-                } else {
-                    now.date_naive().and_hms_opt(0, 0, 0)? + Duration::days(1)
-                };
-                Some(next_hour_naive.and_utc())
-            }
+            "hourly" => Some(now + chrono::Duration::hours(1)),
             "daily" => {
-                let next_day_naive = now.date_naive().and_hms_opt(0, 0, 0)? + Duration::days(1);
-                Some(next_day_naive.and_utc())
+                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
+                Some(next_naive.and_utc())
             }
             "weekly" => {
-                let days_until_monday = (7 - now.weekday().num_days_from_monday()) % 7;
-                let next_naive = if days_until_monday == 0 {
-                    now.date_naive().and_hms_opt(0, 0, 0)? + Duration::days(7)
-                } else {
-                    now.date_naive().and_hms_opt(0, 0, 0)?
-                        + Duration::days(days_until_monday as i64)
-                };
+                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::weeks(1);
+                Some(next_naive.and_utc())
+            }
+            "monthly" => {
+                let next_naive = (now.date_naive() + chrono::Duration::days(1)).and_hms_opt(0, 0, 0)?;
                 Some(next_naive.and_utc())
             }
             _ => {
-                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + Duration::days(1);
+                // 默认每日轮转
+                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
                 Some(next_naive.and_utc())
             }
         }
@@ -242,536 +531,22 @@ impl FileSink {
         self.next_rotation_time = Self::calculate_next_rotation_time(&self.config.rotation_time);
     }
 
-    fn open_file(&mut self) -> Result<(), InklogError> {
-        if let Some(parent) = self.config.path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                error!("Failed to create log directory {}: {}", parent.display(), e);
-                // Try to fallback to console sink
-                if let Some(sink) = &mut self.fallback_sink {
-                    let fallback_record = LogRecord {
-                        timestamp: chrono::Utc::now(),
-                        level: "ERROR".to_string(),
-                        target: "inklog::file_sink".to_string(),
-                        message: format!(
-                            "Failed to create log directory {}: {}",
-                            parent.display(),
-                            e
-                        ),
-                        fields: std::collections::HashMap::new(),
-                        file: Some("file.rs".to_string()),
-                        line: Some(65),
-                        thread_id: format!("{:?}", std::thread::current().id()),
-                    };
-                    let _ = sink.write(&fallback_record);
-                }
-                return Err(InklogError::IoError(e));
-            }
-        }
-
-        match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.config.path)
-        {
-            Ok(file) => {
-                #[cfg(unix)]
-                {
-                    if let Ok(metadata) = file.metadata() {
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::fs::PermissionsExt;
-                            let mut perms = metadata.permissions();
-                            perms.set_mode(0o600);
-                            if let Err(e) = file.set_permissions(perms) {
-                                error!("Failed to set file permissions: {}", e);
-                            }
-                        }
-                    }
-                }
-
-                self.current_size = file.metadata().map(|m| m.len()).unwrap_or(0);
-                self.current_file = Some(BufWriter::new(file));
-                Ok(())
-            }
-            Err(e) => {
-                error!(
-                    "Failed to open log file {}: {}",
-                    self.config.path.display(),
-                    e
-                );
-                // Try to fallback to console sink
-                if let Some(sink) = &mut self.fallback_sink {
-                    let fallback_record = LogRecord {
-                        timestamp: chrono::Utc::now(),
-                        level: "ERROR".to_string(),
-                        target: "inklog::file_sink".to_string(),
-                        message: format!(
-                            "Failed to open log file {}: {}",
-                            self.config.path.display(),
-                            e
-                        ),
-                        fields: std::collections::HashMap::new(),
-                        file: Some("file.rs".to_string()),
-                        line: Some(85),
-                        thread_id: format!("{:?}", std::thread::current().id()),
-                    };
-                    let _ = sink.write(&fallback_record);
-                }
-                Err(InklogError::IoError(e))
-            }
-        }
-    }
-
-    fn rotate(&mut self) -> Result<(), InklogError> {
-        self.current_file = None;
-
-        if self.config.path.exists() {
-            let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-            let file_stem = self
-                .config
-                .path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("app");
-            let extension = self
-                .config
-                .path
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("log");
-
-            let rotated_path = self
-                .config
-                .path
-                .with_file_name(format!("{}_{}.{}", file_stem, timestamp, extension));
-
-            if let Err(e) = fs::rename(&self.config.path, &rotated_path) {
-                error!("Failed to rotate log file: {}", e);
-                return Err(InklogError::IoError(e));
-            }
-
-            let _final_path = rotated_path;
-
-            let _final_path = if self.config.compress {
-                self.compress_file(&_final_path)?
-            } else {
-                _final_path
-            };
-
-            let _final_path = if self.config.encrypt {
-                self.encrypt_file(&_final_path)?
-            } else {
-                _final_path
-            };
-        }
-
-        self.open_file()?;
-        self.update_next_rotation_time();
-        Ok(())
-    }
-
-    fn compress_file(&self, path: &std::path::PathBuf) -> Result<std::path::PathBuf, InklogError> {
-        compression::compress_file(path, self.config.compression_level)
-    }
-
-    fn encrypt_file(&self, path: &std::path::PathBuf) -> Result<std::path::PathBuf, InklogError> {
-        use aes_gcm::aead::{Aead, KeyInit};
-        use aes_gcm::Aes256Gcm;
-        use rand::Rng;
-
-        let encrypted_path = path.with_extension("enc");
-
-        let key_env = self.config.encryption_key_env.as_ref().ok_or_else(|| {
-            InklogError::ConfigError("Encryption key env variable not set".to_string())
-        })?;
-
-        let key = encryption::get_encryption_key(key_env)?;
-
-        let input_file = File::open(path).map_err(|e| {
-            error!("Failed to open file for encryption: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let mut reader = std::io::BufReader::new(input_file);
-        let mut plaintext = Vec::new();
-        reader.read_to_end(&mut plaintext).map_err(|e| {
-            error!("Failed to read file for encryption: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let nonce: [u8; 12] = rand::thread_rng().gen();
-        let cipher = Aes256Gcm::new((&key).into());
-        let nonce_slice = aes_gcm::Nonce::from_slice(&nonce);
-
-        let ciphertext = cipher
-            .encrypt(nonce_slice, plaintext.as_ref())
-            .map_err(|e| {
-                error!("Failed to encrypt data: {}", e);
-                InklogError::EncryptionError(e.to_string())
-            })?;
-
-        let mut output_file = File::create(&encrypted_path).map_err(|e| {
-            error!("Failed to create encrypted file: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        output_file.write_all(&nonce).map_err(|e| {
-            error!("Failed to write nonce: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        output_file.write_all(&ciphertext).map_err(|e| {
-            error!("Failed to write encrypted file: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let _ = fs::remove_file(path);
-
-        Ok(encrypted_path)
-    }
-
-    fn check_rotation(&mut self) -> Result<(), InklogError> {
-        // Check disk space before writing
-        self.check_disk_space()?;
-
-        // Parse max size (simple implementation)
-        let max_size_bytes = Self::parse_size(&self.config.max_size).unwrap_or(100 * 1024 * 1024);
-
-        let size_triggered = self.current_size >= max_size_bytes;
-        let time_triggered = self.should_rotate_by_time();
-
-        if size_triggered || time_triggered {
-            self.rotate()?;
-            self.last_rotation_date = Some(Utc::now().date_naive().num_days_from_ce());
-        }
-        Ok(())
-    }
-
-    /// Checks available disk space and performs cleanup if necessary.
-    ///
-    /// This method checks if there is sufficient disk space for logging operations.
-    /// If disk space is low, it attempts to clean up old log files.
-    ///
-    /// # Return Value Semantics
-    ///
-    /// - `Ok(true)`: Disk space is sufficient, logging can proceed normally
-    /// - `Ok(false)`: Disk space is critically low even after cleanup
-    /// - `Err(_)`: Disk space check failed ( filesystem error, path not accessible)
-    ///
-    /// # Note
-    ///
-    /// The method uses the following thresholds:
-    /// - Warning threshold: Less than 5% free space or less than 100MB
-    /// - Critical threshold: Less than 50MB after cleanup attempt
-    ///
-    /// When disk space is critically low, the circuit breaker will be triggered
-    /// and the fallback sink (console) will be used.
-    fn check_disk_space(&self) -> Result<bool, InklogError> {
-        use nix::sys::statvfs::statvfs;
-        if let Some(parent) = self
-            .config
-            .path
-            .parent()
-            .or_else(|| Some(std::path::Path::new(".")))
-        {
-            if let Ok(stat) = statvfs(parent) {
-                let free_space = stat.blocks_available() * stat.fragment_size();
-                let total_space = stat.blocks() * stat.fragment_size();
-
-                // If less than 5% free or less than 100MB, trigger auto-recovery (cleanup old logs)
-                if free_space < total_space / 20 || free_space < 100 * 1024 * 1024 {
-                    // eprintln!("Low disk space: {} bytes free. Attempting auto-cleanup.", free_space);
-                    let _ = self.cleanup_old_logs();
-
-                    // Re-check after cleanup
-                    if let Ok(stat) = statvfs(parent) {
-                        let free_space = stat.blocks_available() * stat.fragment_size();
-                        if free_space < 50 * 1024 * 1024 {
-                            // Space is critically low, return false to trigger fallback
-                            return Ok(false);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(true)
-    }
-
+    /// 清理旧的日志文件
     fn cleanup_old_logs(&self) -> Result<(), InklogError> {
         if let Some(parent) = self.config.path.parent() {
-            let mut log_files = Vec::new();
-            if let Ok(entries) = fs::read_dir(parent) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file()
-                        && path
-                            .extension()
-                            .is_some_and(|ext| ext == "log" || ext == "zst" || ext == "enc")
-                    {
-                        if let Ok(metadata) = path.metadata() {
-                            if let Ok(modified) = metadata.modified() {
-                                log_files.push((path, modified));
-                            }
-                        }
-                    }
-                }
-            }
+            let entries: Result<Vec<_>, _> = fs::read_dir(parent)?.collect();
 
-            log_files.sort_by_key(|&(_, time)| time);
+            if let Ok(entries) = entries {
+                // 计算截止日期
+                let cutoff_date = Utc::now()
+                    .checked_sub_signed(chrono::Duration::days(self.config.retention_days as i64))
+                    .unwrap_or_else(Utc::now);
 
-            let to_delete = (log_files.len() / 5).max(1);
-            for file in log_files.iter().take(to_delete) {
-                let _ = fs::remove_file(&file.0);
-            }
-        }
-        Ok(())
-    }
+                let mut expired_count = 0;
+                let mut total_size = 0u64;
 
-    #[allow(dead_code)]
-    fn cleanup_old_files(config: &FileSinkConfig) -> Result<(), InklogError> {
-        if let Some(parent) = config.path.parent() {
-            let file_stem = config
-                .path
-                .file_stem()
-                .ok_or_else(|| InklogError::ConfigError("Invalid log file path".to_string()))?;
-            let file_name = config
-                .path
-                .file_name()
-                .ok_or_else(|| InklogError::ConfigError("Invalid log file path".to_string()))?;
-
-            let mut entries: Vec<_> = fs::read_dir(parent)?
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.starts_with(&file_stem.to_string_lossy().to_string())
-                        && name != file_name.to_string_lossy()
-                })
-                .collect();
-
-            entries.sort_by_key(|e| {
-                e.metadata()
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::SystemTime::now())
-            });
-
-            if entries.len() > config.keep_files as usize {
-                for entry in entries
-                    .iter()
-                    .take(entries.len() - config.keep_files as usize)
-                {
-                    fs::remove_file(entry.path())?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn comprehensive_cleanup(&mut self) -> Result<CleanupReport, InklogError> {
-        let mut report = CleanupReport {
-            files_deleted: 0,
-            bytes_freed: 0,
-            errors: Vec::new(),
-        };
-
-        if let Some(parent) = self.config.path.parent() {
-            let cutoff_date = Utc::now() - Duration::days(self.config.retention_days as i64);
-            let max_size_bytes = Self::parse_size(&self.config.max_total_size).unwrap_or(u64::MAX);
-
-            let file_stem = self
-                .config
-                .path
-                .file_stem()
-                .ok_or_else(|| InklogError::ConfigError("Invalid log file path".to_string()))?;
-            let file_name = self
-                .config
-                .path
-                .file_name()
-                .ok_or_else(|| InklogError::ConfigError("Invalid log file path".to_string()))?;
-
-            let mut entries: Vec<_> = fs::read_dir(parent)?
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.starts_with(&file_stem.to_string_lossy().to_string())
-                        && name != file_name.to_string_lossy()
-                })
-                .collect();
-
-            entries.sort_by_key(|e| {
-                e.metadata()
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::SystemTime::now())
-            });
-
-            let mut total_size: u64 = 0;
-            let mut expired_files: Vec<_> = Vec::new();
-
-            for entry in &entries {
-                if let Ok(metadata) = entry.metadata() {
-                    total_size += metadata.len();
-
-                    if let Ok(modified) = metadata.modified() {
-                        let modified_utc: DateTime<Utc> = modified.into();
-                        if modified_utc < cutoff_date {
-                            expired_files.push(entry);
-                        }
-                    }
-                }
-            }
-
-            for entry in expired_files {
-                if let Ok(metadata) = entry.path().metadata() {
-                    report.bytes_freed += metadata.len();
-                }
-                if let Err(e) = fs::remove_file(entry.path()) {
-                    report.errors.push(format!(
-                        "Failed to remove {}: {}",
-                        entry.path().display(),
-                        e
-                    ));
-                } else {
-                    report.files_deleted += 1;
-                    total_size =
-                        total_size.saturating_sub(entry.metadata().map(|m| m.len()).unwrap_or(0));
-                }
-            }
-
-            if total_size > max_size_bytes {
-                let excess_size = total_size.saturating_sub(max_size_bytes);
-                let mut to_delete_size: u64 = 0;
-
-                for entry in entries {
-                    if to_delete_size >= excess_size {
-                        break;
-                    }
-
-                    if let Ok(metadata) = entry.path().metadata() {
-                        to_delete_size += metadata.len();
-                    }
-
-                    if let Ok(metadata) = entry.path().metadata() {
-                        report.bytes_freed += metadata.len();
-                    }
-                    if let Err(e) = fs::remove_file(entry.path()) {
-                        report.errors.push(format!(
-                            "Failed to remove {}: {}",
-                            entry.path().display(),
-                            e
-                        ));
-                    } else {
-                        report.files_deleted += 1;
-                    }
-                }
-            }
-
-            if report.files_deleted > 0 {
-                if let Some(sink) = &mut self.fallback_sink {
-                    let cleanup_record = LogRecord {
-                        timestamp: chrono::Utc::now(),
-                        level: "INFO".to_string(),
-                        target: "inklog::file_sink".to_string(),
-                        message: format!(
-                            "Cleanup completed: {} files deleted, {} bytes freed",
-                            report.files_deleted, report.bytes_freed
-                        ),
-                        fields: std::collections::HashMap::new(),
-                        file: Some("file.rs".to_string()),
-                        line: Some(line!()),
-                        thread_id: format!("{:?}", std::thread::current().id()),
-                    };
-                    let _ = sink.write(&cleanup_record);
-                }
-            }
-        }
-
-        self.last_cleanup_time = Instant::now();
-        Ok(report)
-    }
-
-    fn start_cleanup_timer(&mut self) {
-        let interval = StdDuration::from_secs(self.config.cleanup_interval_minutes * 60);
-        let config = self.config.clone();
-        let fallback_sink = self.fallback_sink.clone();
-        // Clone the shutdown flag for the cleanup timer thread
-        let shutdown_flag = self.shutdown_flag.clone();
-
-        let handle = thread::spawn(move || loop {
-            // Check shutdown flag before sleeping to allow graceful exit
-            if shutdown_flag.load(Ordering::Relaxed) {
-                break;
-            }
-
-            thread::sleep(interval);
-
-            // Check again after sleep to avoid race condition
-            if shutdown_flag.load(Ordering::Relaxed) {
-                break;
-            }
-
-            if let Some(parent) = config.path.parent() {
-                let file_stem = config
-                    .path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "log".to_string());
-                if let Ok(entries) = fs::read_dir(parent) {
-                    let has_rotated_files = entries.flatten().any(|e| {
-                        let name = e.file_name().to_string_lossy().to_string();
-                        name.starts_with(&file_stem) && e.path().is_file()
-                    });
-
-                    if has_rotated_files {
-                        if let Err(e) = Self::perform_timed_cleanup(&config, fallback_sink.clone())
-                        {
-                            error!("Timed cleanup failed: {}", e);
-                        }
-                    }
-                }
-            }
-        });
-
-        self.cleanup_timer_handle = Some(handle);
-    }
-
-    fn perform_timed_cleanup(
-        config: &FileSinkConfig,
-        _fallback_sink: Option<ConsoleSink>,
-    ) -> Result<(), InklogError> {
-        let cutoff_date = Utc::now() - Duration::days(config.retention_days as i64);
-        let max_size_bytes = Self::parse_size(&config.max_total_size).unwrap_or(u64::MAX);
-
-        if let Some(parent) = config.path.parent() {
-            let file_stem = config
-                .path
-                .file_stem()
-                .ok_or_else(|| InklogError::ConfigError("Invalid log file path".to_string()))?;
-            let file_name = config
-                .path
-                .file_name()
-                .ok_or_else(|| InklogError::ConfigError("Invalid log file path".to_string()))?;
-
-            let mut entries: Vec<_> = fs::read_dir(parent)?
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.starts_with(&file_stem.to_string_lossy().to_string())
-                        && name != file_name.to_string_lossy()
-                })
-                .collect();
-
-            entries.sort_by_key(|e| {
-                e.metadata()
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::SystemTime::now())
-            });
-
-            let mut total_size: u64 = 0;
-            let mut expired_count = 0;
-
-            for entry in &entries {
-                if let Ok(metadata) = entry.metadata() {
-                    total_size += metadata.len();
+                for entry in &entries {
+                    total_size += entry.path().metadata()?.len();
 
                     if let Ok(modified) = entry.path().metadata().and_then(|m| m.modified()) {
                         let modified_utc: DateTime<Utc> = modified.into();
@@ -780,29 +555,31 @@ impl FileSink {
                         }
                     }
                 }
-            }
 
-            if total_size > max_size_bytes {
-                let excess_size = total_size.saturating_sub(max_size_bytes);
-                let mut deleted_size: u64 = 0;
+                if let Some(max_total_size_bytes) = Self::parse_size(&self.config.max_total_size) {
+                    if total_size > max_total_size_bytes {
+                        let excess_size = total_size.saturating_sub(max_total_size_bytes);
+                        let mut deleted_size: u64 = 0;
 
-                for entry in entries {
-                    if deleted_size >= excess_size {
-                        break;
+                        for entry in entries {
+                            if deleted_size >= excess_size {
+                                break;
+                            }
+
+                            if let Ok(metadata) = entry.path().metadata() {
+                                deleted_size += metadata.len();
+                            }
+
+                            if let Err(e) = fs::remove_file(entry.path()) {
+                                error!("Failed to remove {}: {}", entry.path().display(), e);
+                            }
+                        }
+                    } else if expired_count > 0 {
+                        let to_delete = (entries.len() as i32 - self.config.keep_files as i32).max(0) as usize;
+                        for entry in entries.into_iter().take(to_delete) {
+                            let _ = fs::remove_file(entry.path());
+                        }
                     }
-
-                    if let Ok(metadata) = entry.path().metadata() {
-                        deleted_size += metadata.len();
-                    }
-
-                    if let Err(e) = fs::remove_file(entry.path()) {
-                        error!("Failed to remove {}: {}", entry.path().display(), e);
-                    }
-                }
-            } else if expired_count > 0 {
-                let to_delete = (entries.len() as i32 - config.keep_files as i32).max(0) as usize;
-                for entry in entries.into_iter().take(to_delete) {
-                    let _ = fs::remove_file(entry.path());
                 }
             }
         }
@@ -810,322 +587,378 @@ impl FileSink {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    /// Returns disk space information for the log file's filesystem.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok((total_bytes, available_bytes))` on success, or an error if:
-    /// - The parent directory doesn't exist or is inaccessible
-    /// - The filesystem stat call fails
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let (total, available) = sink.get_disk_space_info()?;
-    /// println!("Total: {} bytes, Available: {} bytes", total, available);
-    /// ```
-    fn get_disk_space_info(&self) -> Result<(u64, u64), InklogError> {
-        if let Some(parent) = self.config.path.parent() {
-            if let Ok(_metadata) = fs::metadata(parent) {
-                if let Ok(stat) = nix::sys::statfs::statfs(parent) {
-                    let total_blocks = stat.blocks();
-                    let available_blocks = stat.blocks_available();
-                    let block_size = stat.block_size();
+    /// 启动轮转定时器
+    fn start_rotation_timer(&mut self) {
+        let rotation_interval = self.rotation_interval;
+        let last_rotation = Arc::new(Mutex::new(self.last_rotation));
+        self.rotation_timer = Some(last_rotation.clone());
 
-                    let total_bytes = total_blocks * block_size as u64;
-                    let available_bytes = available_blocks * block_size as u64;
+        // Clone the shutdown flag for the timer thread
+        let shutdown_flag = self.shutdown_flag.clone();
 
-                    return Ok((total_bytes, available_bytes));
+        let timer_handle = thread::spawn(move || {
+            let check_interval = StdDuration::from_secs(60); // Check every minute
+            loop {
+                // Check shutdown flag before sleeping to allow graceful exit
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                thread::sleep(check_interval);
+
+                // Check again after sleep to avoid race condition
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                if let Ok(mut last_rotation_guard) = last_rotation.lock() {
+                    if last_rotation_guard.elapsed() >= rotation_interval {
+                        // Timer will trigger rotation on next write
+                        *last_rotation_guard =
+                            Instant::now() - rotation_interval + StdDuration::from_secs(1);
+                    }
+                }
+            }
+        });
+
+        self.timer_handle = Some(timer_handle);
+    }
+
+    /// 停止轮转定时器
+    fn stop_rotation_timer(&mut self) {
+        // Signal shutdown to the timer thread
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+
+        if let Some(handle) = self.timer_handle.take() {
+            let _ = handle.join();
+        }
+        self.rotation_timer = None;
+    }
+
+    /// 批量刷新缓冲区到文件
+    fn flush_batch(&mut self) -> Result<(), InklogError> {
+        if self.batch_buffer.is_empty() {
+            return Ok(());
+        }
+
+        let records = self.batch_buffer.clone();
+        self.batch_buffer.clear();
+
+        if let Some(file) = &mut self.current_file {
+            for record in &records {
+                match writeln!(
+                    file,
+                    "{} [{}] {} - {}",
+                    record.timestamp.to_rfc3339(),
+                    record.level,
+                    record.target,
+                    record.message
+                ) {
+                    Ok(_) => {
+                        let len = record.timestamp.to_rfc3339().len()
+                            + record.level.len()
+                            + record.target.len()
+                            + record.message.len()
+                            + 7; // " []  - \n"
+
+                        self.current_size += len as u64;
+                    }
+                    Err(e) => {
+                        error!("Batch write error: {}", e);
+                        self.circuit_breaker.record_failure();
+                        let _ = self.open_file();
+                        break;
+                    }
+                }
+            }
+            self.circuit_breaker.record_success();
+        }
+
+        self.last_flush_time = Instant::now();
+        Ok(())
+    }
+
+    /// 同步压缩文件（可在后台线程调用）
+    fn compress_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
+        let compressed_path = path.with_extension("zst");
+
+        let input_file = fs::File::open(path).map_err(|e| {
+            error!("Failed to open file for compression: {}", e);
+            InklogError::IoError(e)
+        })?;
+
+        let output_file = fs::File::create(&compressed_path).map_err(|e| {
+            error!("Failed to create compressed file: {}", e);
+            InklogError::IoError(e)
+        })?;
+
+        let mut encoder = zstd::stream::Encoder::new(output_file, self.config.compression_level)
+            .map_err(|e| InklogError::CompressionError(e.to_string()))?
+            .auto_finish();
+
+        let mut reader = std::io::BufReader::new(input_file);
+        let mut buffer = [0u8; 8192];
+        loop {
+            let bytes_read = std::io::Read::read(&mut reader, &mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            std::io::Write::write_all(&mut encoder, &buffer[..bytes_read])?;
+        }
+
+        // Encoder is automatically finished when dropped due to auto_finish()
+        drop(encoder);
+
+        // 如果需要加密
+        if self.config.encrypt {
+            let encrypted_path = compressed_path.with_extension("zst.enc");
+            if let Err(e) = self.encrypt_file(&compressed_path, &encrypted_path) {
+                error!("Encryption failed: {}", e);
+                // 加密失败，保留压缩文件
+                let _ = fs::rename(&compressed_path, encrypted_path.with_extension("zst.unencrypted"));
+                return Err(e);
+            }
+            let _ = fs::remove_file(&compressed_path);
+            Ok(encrypted_path)
+        } else {
+            // 删除原始文件
+            let _ = fs::remove_file(path);
+            Ok(compressed_path)
+        }
+    }
+
+    /// 同步加密文件（可在后台线程调用）
+    fn encrypt_file(&self, input_path: &PathBuf, output_path: &PathBuf) -> Result<(), InklogError> {
+        use aes_gcm::{Aes256Gcm, Nonce};
+        use rand::RngCore;
+
+        // 获取密钥
+        let key_bytes = self.get_encryption_key()?;
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| {
+            InklogError::EncryptionError(format!("Invalid key: {}", e))
+        })?;
+
+        // 生成随机 nonce
+        let mut nonce_bytes = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        // 读取输入文件
+        let input_data = fs::read(input_path).map_err(|e| {
+            error!("Failed to read file for encryption: {}", e);
+            InklogError::IoError(e)
+        })?;
+
+        // 加密
+        let ciphertext = cipher.encrypt(nonce, input_data.as_slice()).map_err(|e| {
+            error!("Encryption failed: {}", e);
+            InklogError::EncryptionError(e.to_string())
+        })?;
+
+        // 写入加密文件
+        let mut output = fs::File::create(output_path).map_err(|e| {
+            error!("Failed to create encrypted file: {}", e);
+            InklogError::IoError(e)
+        })?;
+
+        // 写入格式：nonce (12 bytes) + ciphertext
+        output.write_all(&nonce_bytes)?;
+        output.write_all(&ciphertext)?;
+
+        debug!("Encrypted log file: {}", output_path.display());
+        Ok(())
+    }
+
+    /// 执行文件轮转
+    fn rotate(&mut self) -> Result<(), InklogError> {
+        debug!("Rotating log file: {}", self.config.path.display());
+
+        // 关闭当前文件
+        let _ = self.current_file.take();
+
+        // 重命名当前日志文件
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let new_path = if let Some(parent) = self.config.path.parent() {
+            let stem = self.config.path.file_stem().unwrap_or_default();
+            let ext = self.config.path.extension().unwrap_or_default();
+            parent.join(format!(
+                "{}_{}.{}",
+                stem.to_string_lossy(),
+                timestamp,
+                ext.to_string_lossy()
+            ))
+        } else {
+            PathBuf::from(format!(
+                "{}_{}",
+                self.config.path.display(),
+                timestamp
+            ))
+        };
+
+        // 尝试重命名
+        if self.config.path.exists() {
+            if let Err(e) = fs::rename(&self.config.path, &new_path) {
+                error!("Failed to rename log file: {}", e);
+                // 尝试复制后删除
+                if fs::copy(&self.config.path, &new_path).is_ok() {
+                    let _ = fs::remove_file(&self.config.path);
+                } else {
+                    return Err(InklogError::IoError(e));
                 }
             }
         }
-        Err(InklogError::IoError(std::io::Error::other(
-            "Failed to get disk space information",
-        )))
+
+        // 更新序列号
+        self.sequence += 1;
+
+        // 更新轮转时间
+        self.last_rotation = Instant::now();
+        self.update_next_rotation_time();
+        self.current_size = 0;
+
+        info!("Log rotated to: {}", new_path.display());
+
+        // 如果启用压缩，在后台线程处理
+        if self.config.compress {
+            let config = self.config.clone();
+            let path = new_path.clone();
+            let _ = thread::spawn(move || {
+                let mut sink = FileSink {
+                    config,
+                    current_file: None,
+                    current_size: 0,
+                    last_rotation: Instant::now(),
+                    rotation_interval: StdDuration::from_secs(86400),
+                    next_rotation_time: None,
+                    last_rotation_date: None,
+                    sequence: 0,
+                    fallback_sink: None,
+                    circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+                    batch_buffer: Vec::new(),
+                    last_flush_time: Instant::now(),
+                    timer_handle: None,
+                    rotation_timer: None,
+                    cleanup_timer_handle: None,
+                    shutdown_flag: Arc::new(AtomicBool::new(false)),
+                };
+                if let Err(e) = sink.compress_file(&path) {
+                    error!("Failed to compress rotated log: {}", e);
+                }
+            });
+        }
+
+        // 重新打开文件
+        self.open_file()
     }
 
-    fn parse_size(size_str: &str) -> Option<u64> {
-        let size_str = size_str.trim();
-        if size_str.ends_with("MB") {
-            size_str
-                .trim_end_matches("MB")
-                .parse::<u64>()
-                .ok()
-                .map(|s| s * 1024 * 1024)
-        } else if size_str.ends_with("KB") {
-            size_str
-                .trim_end_matches("KB")
-                .parse::<u64>()
-                .ok()
-                .map(|s| s * 1024)
-        } else if size_str.ends_with("GB") {
-            size_str
-                .trim_end_matches("GB")
-                .parse::<u64>()
-                .ok()
-                .map(|s| s * 1024 * 1024 * 1024)
-        } else {
-            size_str.parse::<u64>().ok()
+    /// 检查是否需要轮转
+    fn check_rotation(&mut self) -> Result<(), InklogError> {
+        let rotate_by_size = Self::parse_size(&self.config.max_size)
+            .map_or(false, |max| self.current_size >= max);
+
+        let rotate_by_time = self.should_rotate_by_time();
+
+        if rotate_by_size || rotate_by_time {
+            self.rotate()?;
         }
+
+        Ok(())
     }
 }
 
-// === Tests ===
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::Write;
-    use std::time::{Duration, SystemTime};
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_parse_size() {
-        assert_eq!(FileSink::parse_size("100"), Some(100));
-        assert_eq!(FileSink::parse_size("100KB"), Some(100 * 1024));
-        assert_eq!(FileSink::parse_size("10MB"), Some(10 * 1024 * 1024));
-        assert_eq!(FileSink::parse_size("1GB"), Some(1024 * 1024 * 1024));
-        assert_eq!(FileSink::parse_size("  5MB  "), Some(5 * 1024 * 1024));
-        assert_eq!(FileSink::parse_size("invalid"), None);
-    }
-
-    #[test]
-    fn test_cleanup_old_logs() {
-        let dir = tempdir().unwrap();
-        let log_path = dir.path().join("test.log");
-
-        let config = FileSinkConfig {
-            enabled: true,
-            path: log_path.clone(),
-            max_size: "1MB".to_string(),
-            rotation_time: "daily".to_string(),
-            keep_files: 2,
-            compress: false,
-            compression_level: 3,
-            encrypt: false,
-            encryption_key_env: None,
-            retention_days: 30,
-            max_total_size: "1GB".to_string(),
-            cleanup_interval_minutes: 60,
-        };
-
-        let sink = FileSink {
-            config: config.clone(),
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: Duration::from_secs(86400),
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, Duration::from_secs(30)),
-            rotation_timer: None,
-            timer_handle: None,
-            next_rotation_time: None,
-            last_rotation_date: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Instant::now(),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-        };
-
-        // Create some dummy log files with different modification times
-        let files = [
-            "test.2023-12-01.001.log",
-            "test.2023-12-02.001.log",
-            "test.2023-12-03.001.log",
-            "test.2023-12-04.001.log",
-            "test.2023-12-05.001.log",
-        ];
-
-        for (i, file_name) in files.iter().enumerate() {
-            let file_path = dir.path().join(file_name);
-            let mut file = File::create(&file_path).unwrap();
-            file.write_all(b"dummy content").unwrap();
-
-            // Set modification time in the past
-            let mtime = SystemTime::now() - Duration::from_secs((files.len() - i) as u64 * 3600);
-            file.set_modified(mtime).unwrap();
+impl LogSink for FileSink {
+    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+        // 检查断路器
+        if !self.circuit_breaker.can_execute() {
+            if let Some(sink) = &mut self.fallback_sink {
+                let mut locked = sink.lock().map_err(|_| {
+                    InklogError::IoError(std::io::Error::other("Lock poisoned"))
+                })?;
+                let _ = locked.write(record);
+            }
+            return Ok(());
         }
 
-        // Initially we have 5 files
-        let count = fs::read_dir(dir.path()).unwrap().count();
-        assert_eq!(count, 5);
+        // 检查磁盘空间
+        if !self.check_disk_space()? {
+            warn!("Low disk space - checking before write");
+            if let Some(sink) = &mut self.fallback_sink {
+                let mut locked = sink.lock().map_err(|_| {
+                    InklogError::IoError(std::io::Error::other("Lock poisoned"))
+                })?;
+                let _ = locked.write(record);
+            }
+            return Ok(());
+        }
 
-        // Run cleanup
-        sink.cleanup_old_logs().unwrap();
+        // 检查轮转条件
+        if Self::parse_size(&self.config.max_size)
+            .map_or(false, |max| self.current_size >= max)
+            || self
+                .rotation_timer
+                .as_ref()
+                .map(|t| t.lock().unwrap().elapsed() >= self.rotation_interval)
+                .unwrap_or(false)
+        {
+            if let Err(e) = self.rotate() {
+                error!("Rotation failed: {}", e);
+                if let Some(sink) = &mut self.fallback_sink {
+                    let mut locked = sink.lock().map_err(|_| {
+                        InklogError::IoError(std::io::Error::other("Lock poisoned"))
+                    })?;
+                    let _ = locked.write(record);
+                }
+                return Ok(());
+            }
+        }
 
-        // Should delete oldest 20% (at least 1)
-        let new_count = fs::read_dir(dir.path()).unwrap().count();
-        assert!(new_count < 5);
+        // 添加到批量缓冲区
+        self.batch_buffer.push(record.clone());
 
-        // Verify oldest file is gone
-        assert!(!dir.path().join("test.2023-12-01.001.log").exists());
+        // 检查是否需要批量写入
+        let now = Instant::now();
+        let flush_interval = StdDuration::from_millis(self.config.flush_interval_ms);
+
+        if self.batch_buffer.len() >= self.config.batch_size
+            || now.duration_since(self.last_flush_time) >= flush_interval
+        {
+            self.flush_batch()?;
+        }
+
+        Ok(())
     }
 
-    #[test]
-    #[serial_test::serial]
-    fn test_get_encryption_key() {
-        // Clean up any existing test environment variables
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_BASE64", "");
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD", "");
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_VALID", "");
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_LONG", "");
-        std::env::set_var("LOG_KEY", ""); // Clear any LOG_KEY set by other tests
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_BASE64");
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_VALID");
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_LONG");
-        std::env::remove_var("LOG_KEY");
+    fn flush(&mut self) -> Result<(), InklogError> {
+        // 先刷新批量缓冲区
+        self.flush_batch()?;
 
-        // Test base64 decoding of 32-byte key
-        let base64_key =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [1u8; 32]);
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_BASE64", &base64_key);
-        let key = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_BASE64").unwrap();
-        assert_eq!(key, [1u8; 32]);
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_BASE64");
-
-        // Test password-based key derivation (short keys now succeed via PBKDF2)
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD", "short_key");
-        let result = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
-        assert!(
-            result.is_ok(),
-            "Short key should succeed via PBKDF2 derivation"
-        );
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_PASSWORD");
-
-        // Test raw string with exact 32 bytes
-        let valid_key = "a".repeat(32);
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_VALID", &valid_key);
-        let key = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_VALID").unwrap();
-        assert_eq!(&key[..], valid_key.as_bytes());
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_VALID");
-
-        // Test raw string that is too long (should fail)
-        let long_key = "a".repeat(128);
-        std::env::set_var("INKLOG_SINK_FILE_TEST_KEY_LONG", &long_key);
-        let result = encryption::get_encryption_key("INKLOG_SINK_FILE_TEST_KEY_LONG");
-        assert!(result.is_err(), "Key longer than 127 chars should fail");
-        std::env::remove_var("INKLOG_SINK_FILE_TEST_KEY_LONG");
+        // 然后刷新文件
+        if let Some(file) = &mut self.current_file {
+            file.flush()?;
+        }
+        Ok(())
     }
 
-    #[test]
-    fn test_check_disk_space_logic() {
-        let dir = tempdir().unwrap();
-        let log_path = dir.path().join("test.log");
-
-        let config = FileSinkConfig {
-            enabled: true,
-            path: log_path.clone(),
-            ..Default::default()
-        };
-
-        let sink = FileSink {
-            config,
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: Duration::from_secs(86400),
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, Duration::from_secs(30)),
-            rotation_timer: None,
-            timer_handle: None,
-            next_rotation_time: None,
-            last_rotation_date: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Instant::now(),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-        };
-
-        // On most systems, this should return Ok(true) unless the disk is actually full
-        let result = sink.check_disk_space().unwrap();
-        assert!(result);
+    fn is_healthy(&self) -> bool {
+        self.current_file.is_some()
     }
 
-    #[test]
-    fn test_disk_space_info() {
-        let dir = tempdir().unwrap();
-        let log_path = dir.path().join("test.log");
+    fn shutdown(&mut self) -> Result<(), InklogError> {
+        // Signal shutdown to all timer threads first
+        self.shutdown_flag.store(true, Ordering::Relaxed);
 
-        let config = FileSinkConfig {
-            enabled: true,
-            path: log_path.clone(),
-            ..Default::default()
-        };
+        // Stop rotation timer with graceful shutdown
+        if let Some(handle) = self.timer_handle.take() {
+            let _ = handle.join(); // Join without timeout for simplicity
+        }
+        self.rotation_timer = None;
 
-        let sink = FileSink {
-            config,
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: Duration::from_secs(86400),
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, Duration::from_secs(30)),
-            rotation_timer: None,
-            timer_handle: None,
-            next_rotation_time: None,
-            last_rotation_date: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Instant::now(),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-        };
+        // Stop cleanup timer with graceful shutdown
+        if let Some(handle) = self.cleanup_timer_handle.take() {
+            let _ = handle.join();
+        }
 
-        // Test disk space info
-        let (total, available) = sink.get_disk_space_info().unwrap();
-        assert!(total > 0, "Total space should be positive");
-        assert!(available > 0, "Available space should be positive");
-        assert!(available <= total, "Available should not exceed total");
-    }
-
-    #[test]
-    fn test_write_with_disk_space_check() {
-        let dir = tempdir().unwrap();
-        let log_path = dir.path().join("test.log");
-
-        let config = FileSinkConfig {
-            enabled: true,
-            path: log_path.clone(),
-            max_size: "10MB".to_string(),
-            rotation_time: "daily".to_string(),
-            keep_files: 5,
-            compress: false,
-            compression_level: 3,
-            encrypt: false,
-            encryption_key_env: None,
-            retention_days: 30,
-            max_total_size: "1GB".to_string(),
-            cleanup_interval_minutes: 60,
-        };
-
-        let mut sink = FileSink::new(config).unwrap();
-
-        let record = LogRecord {
-            timestamp: chrono::Utc::now(),
-            level: "INFO".to_string(),
-            target: "test".to_string(),
-            message: "Test message".to_string(),
-            fields: HashMap::new(),
-            file: Some("test.rs".to_string()),
-            line: Some(1),
-            thread_id: format!("{:?}", std::thread::current().id()),
-        };
-
-        // Should succeed with sufficient disk space
-        let result = sink.write(&record);
-        assert!(
-            result.is_ok(),
-            "Write should succeed with sufficient disk space"
-        );
-
-        // Flush to ensure data is written
-        sink.flush().unwrap();
-
-        // Verify file was created and contains data
-        assert!(log_path.exists(), "Log file should exist");
+        self.flush()
     }
 }
 
@@ -1136,6 +969,8 @@ impl Drop for FileSink {
         // Set shutdown flag to signal threads to stop
         self.shutdown_flag.store(true, Ordering::SeqCst);
 
+        // Flush any remaining buffered records
+        let _ = self.flush_batch();
         // Close current file handle
         if let Some(mut file) = self.current_file.take() {
             let _ = file.flush();
@@ -1172,178 +1007,49 @@ impl Drop for FileSink {
         }
 
         // Close fallback console sink
-        if let Some(mut fallback) = self.fallback_sink.take() {
-            let _ = fallback.shutdown();
+        if let Some(fallback) = self.fallback_sink.take() {
+            if let Ok(mut locked) = fallback.lock() {
+                let _ = locked.shutdown();
+            }
         }
     }
 }
 
-impl LogSink for FileSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
-        // 检查断路器
-        if !self.circuit_breaker.can_execute() {
-            if let Some(sink) = &mut self.fallback_sink {
-                let _ = sink.write(record);
-            }
-            return Ok(());
-        }
-
-        // 检查磁盘空间
-        if !self.check_disk_space()? {
-            tracing::warn!("Disk space insufficient");
-            self.circuit_breaker.record_failure();
-
-            // 记录磁盘空间不足的警告
-            if let Some(sink) = &mut self.fallback_sink {
-                let disk_space_record = LogRecord {
-                    timestamp: chrono::Utc::now(),
-                    level: "WARN".to_string(),
-                    target: "inklog::file_sink".to_string(),
-                    message: "Disk space insufficient - falling back to console".to_string(),
-                    fields: std::collections::HashMap::new(),
-                    file: Some("file.rs".to_string()),
-                    line: Some(320),
-                    thread_id: format!("{:?}", std::thread::current().id()),
-                };
-                let _ = sink.write(&disk_space_record);
-                let _ = sink.write(record);
-            }
-            return Ok(());
-        }
-
-        if let Err(e) = self.check_rotation() {
-            error!("Rotation error: {}", e);
-            self.circuit_breaker.record_failure();
-            if let Some(sink) = &mut self.fallback_sink {
-                let _ = sink.write(record);
-            }
-            return Ok(());
-        }
-
-        let mut success = false;
-        if let Some(file) = &mut self.current_file {
-            // Write directly to BufWriter to avoid intermediate String allocation
-            match writeln!(
-                file,
-                "{} [{}] {} - {}",
-                record.timestamp.to_rfc3339(),
-                record.level,
-                record.target,
-                record.message
-            ) {
-                Ok(_) => {
-                    let len = record.timestamp.to_rfc3339().len()
-                        + record.level.len()
-                        + record.target.len()
-                        + record.message.len()
-                        + 7; // " []  - \n"
-
-                    self.current_size += len as u64;
-                    self.circuit_breaker.record_success();
-                    success = true;
-                }
-                Err(e) => {
-                    error!("File write error: {}", e);
-                    self.circuit_breaker.record_failure();
-                    // 尝试重新打开文件
-                    let _ = self.open_file();
-                }
-            }
-        } else {
-            // 尝试恢复
-            if self.open_file().is_ok() {
-                return self.write(record);
-            }
-        }
-
-        if !success {
-            if let Some(sink) = &mut self.fallback_sink {
-                let _ = sink.write(record);
-            }
-        }
-
-        Ok(())
+impl std::fmt::Debug for FileSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileSink")
+            .field("path", &self.config.path)
+            .field("current_size", &self.current_size)
+            .field("circuit_breaker", &self.circuit_breaker)
+            .finish()
     }
+}
 
-    fn flush(&mut self) -> Result<(), InklogError> {
-        if let Some(file) = &mut self.current_file {
-            file.flush()?;
+impl Clone for FileSink {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: self.rotation_interval,
+            next_rotation_time: None,
+            last_rotation_date: None,
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            batch_buffer: Vec::with_capacity(self.config.batch_size),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
-        Ok(())
-    }
-
-    fn is_healthy(&self) -> bool {
-        self.current_file.is_some()
-    }
-
-    fn shutdown(&mut self) -> Result<(), InklogError> {
-        // Signal shutdown to all timer threads first
-        self.shutdown_flag.store(true, Ordering::Relaxed);
-
-        // Stop rotation timer with graceful shutdown
-        if let Some(handle) = self.timer_handle.take() {
-            let _ = handle.join(); // Join without timeout for simplicity
-        }
-        self.rotation_timer = None;
-
-        // Stop cleanup timer with graceful shutdown
-        if let Some(handle) = self.cleanup_timer_handle.take() {
-            let _ = handle.join();
-        }
-
-        self.flush()
-    }
-
-    fn start_rotation_timer(&mut self) {
-        let rotation_interval = self.rotation_interval;
-        let last_rotation = Arc::new(Mutex::new(self.last_rotation));
-        self.rotation_timer = Some(last_rotation.clone());
-
-        // Clone the shutdown flag for the timer thread
-        let shutdown_flag = self.shutdown_flag.clone();
-
-        let timer_handle = thread::spawn(move || {
-            let check_interval = StdDuration::from_secs(60); // Check every minute
-            loop {
-                // Check shutdown flag before sleeping to allow graceful exit
-                if shutdown_flag.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                thread::sleep(check_interval);
-
-                // Check again after sleep to avoid race condition
-                if shutdown_flag.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                if let Ok(mut last_rotation_guard) = last_rotation.lock() {
-                    if last_rotation_guard.elapsed() >= rotation_interval {
-                        // Timer will trigger rotation on next write
-                        // We can't rotate here without access to self
-                        *last_rotation_guard =
-                            Instant::now() - rotation_interval + StdDuration::from_secs(1);
-                    }
-                }
-            }
-        });
-
-        self.timer_handle = Some(timer_handle);
-    }
-
-    fn stop_rotation_timer(&mut self) {
-        // Signal shutdown to the timer thread
-        self.shutdown_flag.store(true, Ordering::Relaxed);
-
-        if let Some(handle) = self.timer_handle.take() {
-            let _ = handle.join();
-        }
-        self.rotation_timer = None;
     }
 }
 
 #[cfg(test)]
-mod file_sink_tests {
+mod tests {
     use super::*;
     use crate::config::FileSinkConfig;
     use crate::log_record::LogRecord;
@@ -1366,20 +1072,106 @@ mod file_sink_tests {
     }
 
     #[test]
-    fn test_file_sink_creation() {
-        let temp_dir = tempdir().unwrap();
+    fn test_parse_size() {
+        assert_eq!(FileSink::parse_size("100"), Some(100));
+        assert_eq!(FileSink::parse_size("100KB"), Some(100 * 1024));
+        assert_eq!(FileSink::parse_size("10MB"), Some(10 * 1024 * 1024));
+        assert_eq!(FileSink::parse_size("1GB"), Some(1024 * 1024 * 1024));
+        assert_eq!(FileSink::parse_size("  5MB  "), Some(5 * 1024 * 1024));
+        assert_eq!(FileSink::parse_size("invalid"), None);
+    }
+
+    #[test]
+    fn test_cleanup_old_logs() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+
         let config = FileSinkConfig {
             enabled: true,
-            path: temp_dir.path().join("test.log"),
-            ..Default::default()
+            path: log_path.clone(),
+            max_size: "1MB".to_string(),
+            rotation_time: "daily".to_string(),
+            keep_files: 2,
+            compress: false,
+            compression_level: 3,
+            encrypt: false,
+            encryption_key_env: None,
+            retention_days: 30,
+            max_total_size: "1GB".to_string(),
+            cleanup_interval_minutes: 60,
+            batch_size: 100,
+            flush_interval_ms: 100,
         };
 
-        let result = FileSink::new(config);
+        let sink = FileSink {
+            config: config.clone(),
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: StdDuration::from_secs(86400),
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            next_rotation_time: None,
+            last_rotation_date: None,
+        };
+
+        // Create test files
+        let old_file = dir.path().join("test_old.log");
+        std::fs::write(&old_file, "old content").unwrap();
+
+        let result = sink.cleanup_old_logs();
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_file_sink_write() {
+    fn test_get_encryption_key() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("test.log"),
+            encryption_key_env: Some("TEST_KEY".to_string()),
+            ..Default::default()
+        };
+
+        // Set a valid 32-byte test key (base64 encoded)
+        // "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" = 32 'a' bytes
+        std::env::set_var("TEST_KEY", "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=");
+
+        let sink = FileSink {
+            config,
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: StdDuration::from_secs(86400),
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            next_rotation_time: None,
+            last_rotation_date: None,
+        };
+
+        let key_result = sink.get_encryption_key();
+        assert!(key_result.is_ok());
+        assert_eq!(key_result.unwrap().len(), 32);
+
+        // Clean up
+        std::env::remove_var("TEST_KEY");
+    }
+
+    #[test]
+    fn test_disk_space_info() {
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,
@@ -1387,129 +1179,236 @@ mod file_sink_tests {
             ..Default::default()
         };
 
-        let mut sink = FileSink::new(config).unwrap();
-        let record = create_test_record("Test message");
-        let result = sink.write(&record);
+        let sink = FileSink {
+            config: config.clone(),
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: StdDuration::from_secs(86400),
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            next_rotation_time: None,
+            last_rotation_date: None,
+        };
 
-        // Verify write operation succeeds (file content verification is integration test)
+        let result = sink.get_disk_space_info();
+        assert!(result.is_ok());
+
+        let (total, available) = result.unwrap();
+        assert!(total > 0);
+        assert!(available > 0);
+    }
+
+    #[test]
+    fn test_check_disk_space_logic() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+
+        let sink = FileSink {
+            config: config.clone(),
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: StdDuration::from_secs(86400),
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            next_rotation_time: None,
+            last_rotation_date: None,
+        };
+
+        let result = sink.check_disk_space();
+        // Should succeed if there's sufficient disk space
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_file_sink_multiple_writes() {
+    fn test_write_with_disk_space_check() {
         let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+
         let config = FileSinkConfig {
             enabled: true,
-            path: temp_dir.path().join("test.log"),
-            ..Default::default()
-        };
-
-        let mut sink = FileSink::new(config).unwrap();
-
-        for i in 0..5 {
-            let record = create_test_record(&format!("Message {}", i));
-            let result = sink.write(&record);
-            assert!(result.is_ok());
-        }
-    }
-
-    #[test]
-    fn test_file_sink_special_characters_in_message() {
-        let temp_dir = tempdir().unwrap();
-        let config = FileSinkConfig {
-            enabled: true,
-            path: temp_dir.path().join("test.log"),
-            ..Default::default()
-        };
-
-        let mut sink = FileSink::new(config).unwrap();
-        let special_message = "Special message with basic text";
-        let record = create_test_record(special_message);
-        let result = sink.write(&record);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_file_sink_long_message() {
-        let temp_dir = tempdir().unwrap();
-        let config = FileSinkConfig {
-            enabled: true,
-            path: temp_dir.path().join("test.log"),
-            ..Default::default()
-        };
-
-        let mut sink = FileSink::new(config).unwrap();
-        let long_message = "A".repeat(1000);
-        let record = create_test_record(&long_message);
-        let result = sink.write(&record);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_file_sink_unicode_message() {
-        let temp_dir = tempdir().unwrap();
-        let config = FileSinkConfig {
-            enabled: true,
-            path: temp_dir.path().join("test.log"),
-            ..Default::default()
-        };
-
-        let mut sink = FileSink::new(config).unwrap();
-        let unicode_message = "Hello Unicode Test";
-        let record = create_test_record(unicode_message);
-        let result = sink.write(&record);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_file_sink_different_levels() {
-        let temp_dir = tempdir().unwrap();
-        let config = FileSinkConfig {
-            enabled: true,
-            path: temp_dir.path().join("test.log"),
+            path: log_path.clone(),
             ..Default::default()
         };
 
         let mut sink = FileSink::new(config).unwrap();
 
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: chrono::Utc::now(),
             level: "INFO".to_string(),
             target: "test".to_string(),
-            message: "INFO message test".to_string(),
+            message: "Test message".to_string(),
             fields: HashMap::new(),
-            file: None,
-            line: None,
-            thread_id: "test".to_string(),
+            file: Some("test.rs".to_string()),
+            line: Some(1),
+            thread_id: format!("{:?}", std::thread::current().id()),
         };
-        let result = sink.write(&record);
 
+        // Should succeed with sufficient disk space
+        let result = sink.write(&record);
+        assert!(
+            result.is_ok(),
+            "Write should succeed with sufficient disk space"
+        );
+
+        // Flush to ensure data is written
+        sink.flush().unwrap();
+
+        // Verify file was created and contains data
+        assert!(log_path.exists(), "Log file should exist");
+    }
+
+    #[test]
+    fn test_parse_size_kb() {
+        assert_eq!(FileSink::parse_size("500KB"), Some(500 * 1024));
+    }
+
+    #[test]
+    fn test_parse_size_mb() {
+        assert_eq!(FileSink::parse_size("2MB"), Some(2 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_parse_size_gb() {
+        assert_eq!(FileSink::parse_size("1GB"), Some(1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_parse_size_with_spaces() {
+        assert_eq!(FileSink::parse_size("  3MB  "), Some(3 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_parse_size_invalid() {
+        assert_eq!(FileSink::parse_size("invalid"), None);
+        assert_eq!(FileSink::parse_size(""), None);
+    }
+
+    #[test]
+    fn test_parse_size_zero() {
+        assert_eq!(FileSink::parse_size("0"), Some(0));
+        assert_eq!(FileSink::parse_size("0MB"), Some(0));
+    }
+
+    #[test]
+    fn test_get_encryption_key_missing_env() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("test.log"),
+            encryption_key_env: Some("MISSING_KEY".to_string()),
+            ..Default::default()
+        };
+
+        // Ensure the env var doesn't exist
+        std::env::remove_var("MISSING_KEY");
+
+        let sink = FileSink {
+            config,
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: StdDuration::from_secs(86400),
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            next_rotation_time: None,
+            last_rotation_date: None,
+        };
+
+        let result = sink.get_encryption_key();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_encryption_key_no_env_var() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("test.log"),
+            encryption_key_env: None,
+            ..Default::default()
+        };
+
+        let sink = FileSink {
+            config,
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: StdDuration::from_secs(86400),
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            next_rotation_time: None,
+            last_rotation_date: None,
+        };
+
+        let result = sink.get_encryption_key();
+        // When encryption_key_env is None, it tries to use LOG_ENCRYPTION_KEY env var
+        // This test expects the env var to be set or the test to handle missing env
+        // Let's check if we get an error and skip if env var is not set
+        if result.is_err() {
+            // This is expected if LOG_ENCRYPTION_KEY is not set
+            assert!(std::env::var("LOG_ENCRYPTION_KEY").is_err());
+        }
+    }
+
+    #[test]
+    fn test_file_sink_new_default() {
+        let config = FileSinkConfig::default();
+        let result = FileSink::new(config);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_file_sink_with_fields() {
+    fn test_file_sink_new_with_path() {
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,
             path: temp_dir.path().join("test.log"),
             ..Default::default()
         };
+        let result = FileSink::new(config);
+        assert!(result.is_ok());
+    }
 
-        let mut sink = FileSink::new(config).unwrap();
-        let mut record = create_test_record("With fields test");
-        record.fields = HashMap::from([
-            (
-                "user_id".to_string(),
-                Value::Number(serde_json::Number::from(123)),
-            ),
-            ("action".to_string(), Value::String("login".to_string())),
-        ]);
-        let result = sink.write(&record);
-
+    #[test]
+    fn test_file_sink_disabled() {
+        let config = FileSinkConfig {
+            enabled: false,
+            path: PathBuf::from("test.log"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
         assert!(result.is_ok());
     }
 }

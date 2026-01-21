@@ -356,4 +356,96 @@ mod tests {
         assert!(output.contains("user=123"));
         assert!(output.contains("action=login"));
     }
+
+    #[test]
+    fn test_deeply_nested_fields() {
+        let template = LogTemplate::new("{message} {fields}");
+        let mut record = create_test_record();
+        let inner = serde_json::json!({"level3": "deep"});
+        let middle = serde_json::json!({"level2": inner});
+        record.fields = HashMap::from([("level1".to_string(), middle)]);
+        let output = template.render(&record);
+        assert!(output.contains("level3"));
+    }
+
+    #[test]
+    fn test_array_in_fields() {
+        let template = LogTemplate::new("{message} {fields}");
+        let mut record = create_test_record();
+        record.fields = HashMap::from([
+            ("items".to_string(), Value::Array(vec![
+                Value::String("a".to_string()),
+                Value::String("b".to_string()),
+                Value::String("c".to_string()),
+            ])),
+        ]);
+        let output = template.render(&record);
+        assert!(output.contains("items"));
+        assert!(output.contains("a"));
+        assert!(output.contains("b"));
+        assert!(output.contains("c"));
+    }
+
+    #[test]
+    fn test_template_from_str() {
+        let template = LogTemplate::new("{timestamp} [{level}] {message}");
+        assert!(!template.template.is_empty());
+    }
+
+    #[test]
+    fn test_target_with_underscores() {
+        let template = LogTemplate::new("{target} - {message}");
+        let mut record = create_test_record();
+        record.target = "my_module.sub_module".to_string();
+        let output = template.render(&record);
+        assert!(output.contains("my_module.sub_module"));
+    }
+
+    #[test]
+    fn test_message_with_newlines() {
+        let template = LogTemplate::new("{message}");
+        let mut record = create_test_record();
+        record.message = "Line1\nLine2\nLine3".to_string();
+        let output = template.render(&record);
+        assert!(output.contains("Line1"));
+        assert!(output.contains("Line2"));
+        assert!(output.contains("Line3"));
+    }
+
+    #[test]
+    fn test_timestamp_format() {
+        let template = LogTemplate::new("{timestamp}");
+        let record = create_test_record();
+        let output = template.render(&record);
+        // Timestamp should contain numbers
+        assert!(output.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_level_display() {
+        let template = LogTemplate::new("[{level}] {message}");
+        let mut record = create_test_record();
+        record.level = "ERROR".to_string();
+        let output = template.render(&record);
+        assert!(output.contains("[ERROR]"));
+    }
+
+    #[test]
+    fn test_message_with_unicode() {
+        let template = LogTemplate::new("{message}");
+        let mut record = create_test_record();
+        record.message = "你好世界 🌍 مرحبا".to_string();
+        let output = template.render(&record);
+        assert!(output.contains("你好世界"));
+        assert!(output.contains("مرحبا"));
+    }
+
+    #[test]
+    fn test_message_with_template_syntax() {
+        let template = LogTemplate::new("{message}");
+        let mut record = create_test_record();
+        record.message = "Value is {variable}".to_string();
+        let output = template.render(&record);
+        assert!(output.contains("{variable}"));
+    }
 }

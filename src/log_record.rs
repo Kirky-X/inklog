@@ -309,4 +309,280 @@ mod tests {
             &Value::String("***MASKED***".to_string())
         );
     }
+
+    // === LogRecord Basic Tests ===
+
+    #[test]
+    fn test_log_record_default() {
+        let record = LogRecord::default();
+        assert_eq!(record.level, "INFO");
+        assert!(record.target.is_empty());
+        assert!(record.message.is_empty());
+        assert!(record.fields.is_empty());
+        assert!(record.file.is_none());
+        assert!(record.line.is_none());
+    }
+
+    #[test]
+    fn test_log_record_new() {
+        let record = LogRecord::new(Level::DEBUG, "my_target".to_string(), "test message".to_string());
+        assert_eq!(record.level, "DEBUG");
+        assert_eq!(record.target, "my_target");
+        assert_eq!(record.message, "test message");
+        assert!(record.fields.is_empty());
+        assert!(record.file.is_none());
+        assert!(record.line.is_none());
+        assert!(!record.thread_id.is_empty());
+    }
+
+    #[test]
+    fn test_log_record_reset() {
+        let mut record = LogRecord::new(Level::INFO, "target".to_string(), "message".to_string());
+        record.fields.insert("key".to_string(), Value::String("value".to_string()));
+        record.file = Some("test.rs".to_string());
+        record.line = Some(42);
+
+        record.reset();
+
+        assert_eq!(record.level, "INFO");
+        assert!(record.target.is_empty());
+        assert!(record.message.is_empty());
+        assert!(record.fields.is_empty());
+        assert!(record.file.is_none());
+        assert!(record.line.is_none());
+    }
+
+    #[test]
+    fn test_log_record_clone() {
+        let record = LogRecord::new(Level::WARN, "clone_test".to_string(), "original".to_string());
+        let cloned = record.clone();
+
+        assert_eq!(cloned.level, record.level);
+        assert_eq!(cloned.target, record.target);
+        assert_eq!(cloned.message, record.message);
+        assert_eq!(cloned.timestamp, record.timestamp);
+    }
+
+    #[test]
+    fn test_log_record_timestamp() {
+        use chrono::Utc;
+
+        let before = Utc::now();
+        let record = LogRecord::new(Level::INFO, "test".to_string(), "test".to_string());
+        let after = Utc::now();
+
+        assert!(record.timestamp >= before);
+        assert!(record.timestamp <= after);
+    }
+
+    #[test]
+    fn test_log_record_thread_id_format() {
+        let record = LogRecord::new(Level::INFO, "test".to_string(), "test".to_string());
+        // ThreadId format varies by platform but should not be empty
+        assert!(!record.thread_id.is_empty());
+    }
+
+    // === LogRecord Field Tests ===
+
+    #[test]
+    fn test_log_record_with_string_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record.fields.insert("username".to_string(), Value::String("john".to_string()));
+        assert_eq!(record.fields["username"], Value::String("john".to_string()));
+    }
+
+    #[test]
+    fn test_log_record_with_number_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record.fields.insert("count".to_string(), Value::Number(serde_json::Number::from(42)));
+        assert_eq!(record.fields["count"], Value::Number(serde_json::Number::from(42)));
+    }
+
+    #[test]
+    fn test_log_record_with_boolean_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record.fields.insert("active".to_string(), Value::Bool(true));
+        assert_eq!(record.fields["active"], Value::Bool(true));
+    }
+
+    #[test]
+    fn test_log_record_with_null_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record.fields.insert("optional".to_string(), Value::Null);
+        assert_eq!(record.fields["optional"], Value::Null);
+    }
+
+    #[test]
+    fn test_log_record_with_object_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        let obj = Value::Object(serde_json::from_str(r#"{"key":"value"}"#).unwrap());
+        record.fields.insert("data".to_string(), obj);
+        assert_eq!(record.fields["data"]["key"], Value::String("value".to_string()));
+    }
+
+    // === Masking Edge Cases ===
+
+    #[test]
+    fn test_mask_empty_message() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "".to_string());
+        record.mask_sensitive_fields();
+        assert_eq!(record.message, "");
+    }
+
+    #[test]
+    fn test_mask_no_sensitive_data() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "Hello world".to_string());
+        record.fields.insert("name".to_string(), Value::String("Alice".to_string()));
+        record.mask_sensitive_fields();
+        assert_eq!(record.message, "Hello world");
+        assert_eq!(record.fields["name"], Value::String("Alice".to_string()));
+    }
+
+    #[test]
+    fn test_mask_case_insensitive_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record.fields.insert("PASSWORD".to_string(), Value::String("secret".to_string()));
+        record.fields.insert("Password".to_string(), Value::String("secret".to_string()));
+        record.fields.insert("pAsSwOrD".to_string(), Value::String("secret".to_string()));
+
+        record.mask_sensitive_fields();
+
+        assert_eq!(
+            record.fields.get("PASSWORD").unwrap(),
+            &Value::String("***MASKED***".to_string())
+        );
+        assert_eq!(
+            record.fields.get("Password").unwrap(),
+            &Value::String("***MASKED***".to_string())
+        );
+        assert_eq!(
+            record.fields.get("pAsSwOrD").unwrap(),
+            &Value::String("***MASKED***".to_string())
+        );
+    }
+
+    #[test]
+    fn test_mask_email_in_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record.fields.insert("email".to_string(), Value::String("user@example.org".to_string()));
+        record.mask_sensitive_fields();
+        assert_eq!(
+            record.fields.get("email").unwrap(),
+            &Value::String("**@**.***".to_string())
+        );
+    }
+
+    #[test]
+    fn test_mask_phone_in_field() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record.fields.insert("phone".to_string(), Value::String("13812345678".to_string()));
+        record.mask_sensitive_fields();
+        // Phone in field is masked by DataMasker.mask_value
+        let masked = record.fields.get("phone").unwrap().as_str().unwrap();
+        assert!(masked.contains("*") || masked.contains("***"), "Phone should be masked: {}", masked);
+    }
+
+    #[test]
+    fn test_mask_deeply_nested() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        let nested = serde_json::json!({
+            "level1": {
+                "level2": {
+                    "email": "deep@example.com"
+                }
+            }
+        });
+        record.fields.insert("data".to_string(), nested);
+
+        record.mask_sensitive_fields();
+
+        // Verify the nested structure still exists
+        assert!(record.fields.contains_key("data"));
+    }
+
+    #[test]
+    fn test_mask_array_of_objects() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        let users = serde_json::json!([
+            {"name": "Alice", "email": "alice@test.com"},
+            {"name": "Bob", "email": "bob@test.com"}
+        ]);
+        record.fields.insert("users".to_string(), users);
+
+        record.mask_sensitive_fields();
+
+        let users = record.fields.get("users").unwrap().as_array().unwrap();
+        assert_eq!(users[0]["email"], Value::String("**@**.***".to_string()));
+        assert_eq!(users[1]["email"], Value::String("**@**.***".to_string()));
+    }
+
+    #[test]
+    fn test_mask_multiple_phone_formats() {
+        // Test standard 11-digit Chinese mobile numbers
+        let test_cases = vec![
+            ("13812345678", "***-****-****"),
+            ("15987654321", "***-****-****"),
+        ];
+
+        for (input, expected) in test_cases {
+            let mut record = LogRecord::new(Level::INFO, "test".to_string(), input.to_string());
+            record.mask_sensitive_fields();
+            assert_eq!(record.message, expected, "Failed for input: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_mask_multiple_email_formats() {
+        let test_cases = vec![
+            ("user@example.com", "**@**.***"),
+            ("user.name@example.com", "**@**.***"),
+            ("admin@sub.domain.example.org", "**@**.***"),
+        ];
+
+        for (input, expected) in test_cases {
+            let mut record = LogRecord::new(Level::INFO, "test".to_string(), format!("Contact: {}", input));
+            record.mask_sensitive_fields();
+            assert!(record.message.contains(expected), "Failed for input: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_mask_id_card_formats() {
+        let test_cases = vec![
+            ("110101199001011234", "******1234"),
+            ("310105199001012345", "******2345"),
+        ];
+
+        for (input, expected) in test_cases {
+            let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+            record.fields.insert("id_card".to_string(), Value::String(input.to_string()));
+            record.mask_sensitive_fields();
+            assert_eq!(
+                record.fields.get("id_card").unwrap(),
+                &Value::String(expected.to_string()),
+                "Failed for input: {}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn test_mask_bank_card_formats() {
+        let test_cases = vec![
+            ("6222021234567890123", "****-****-****-0123"),
+            ("6222021234567890", "****-****-****-7890"),
+        ];
+
+        for (input, expected) in test_cases {
+            let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+            record.fields.insert("card".to_string(), Value::String(input.to_string()));
+            record.mask_sensitive_fields();
+            assert_eq!(
+                record.fields.get("card").unwrap(),
+                &Value::String(expected.to_string()),
+                "Failed for input: {}",
+                input
+            );
+        }
+    }
 }
