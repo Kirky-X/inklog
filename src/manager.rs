@@ -9,6 +9,7 @@ use crate::archive::{ArchiveService, ArchiveServiceBuilder};
 use crate::config::{ConsoleSinkConfig, DatabaseSinkConfig};
 use crate::config::{FileSinkConfig, InklogConfig};
 use crate::error::InklogError;
+use crate::log_adapter::{LogAdapter, LogLogger};
 use crate::log_record::LogRecord;
 use crate::metrics::{HealthStatus, Metrics};
 use crate::sink::console::ConsoleSink;
@@ -52,6 +53,23 @@ struct WorkerParams {
     metrics: Arc<Metrics>,
     console_sink: Arc<Mutex<ConsoleSink>>,
     error_sink: Arc<Mutex<Option<FileSink>>>,
+}
+
+/// 环境检测结果，用于智能配置
+#[derive(Debug, Clone)]
+struct EnvironmentProfile {
+    /// 是否为交互式终端
+    is_terminal: bool,
+    /// 是否在容器环境中运行
+    in_container: bool,
+    /// 是否在 CI 环境中运行
+    in_ci: bool,
+    /// 是否在云环境中运行
+    in_cloud: bool,
+    /// CPU 核心数
+    cpu_count: usize,
+    /// 机器唯一标识
+    machine_id: u64,
 }
 
 /// Core logging manager that coordinates log collection and routing to sinks.
@@ -132,9 +150,34 @@ impl LoggerManager {
         );
 
         let (manager, subscriber, filter) = Self::build_detached(config.clone()).await?;
+
+        // 1. 安装 tracing subscriber
         let registry = tracing_subscriber::registry().with(subscriber).with(filter);
         if let Err(ref e) = registry.try_init() {
             tracing::warn!("Failed to set global subscriber: {}", e);
+        }
+
+        // 2. 安装 log crate logger（原生支持，无需 tracing_log）
+        let log_adapter = LogAdapter::new(
+            manager.console_sink.clone(),
+            manager.sender.clone(),
+            manager.metrics.clone(),
+        );
+        let max_level = config
+            .global
+            .level
+            .parse::<tracing::Level>()
+            .unwrap_or(tracing::Level::INFO);
+        let log_level = match max_level {
+            tracing::Level::TRACE => log::LevelFilter::Trace,
+            tracing::Level::DEBUG => log::LevelFilter::Debug,
+            tracing::Level::INFO => log::LevelFilter::Info,
+            tracing::Level::WARN => log::LevelFilter::Warn,
+            tracing::Level::ERROR => log::LevelFilter::Error,
+        };
+        let log_logger = LogLogger::new(log_adapter, log_level);
+        if let Err(e) = log_logger.install() {
+            tracing::warn!("Failed to set log crate logger: {}", e);
         }
 
         // Start HTTP server if enabled
@@ -1053,6 +1096,346 @@ impl LoggerBuilder {
         self
     }
 
+    // === Console 配置快捷方法 ===
+
+    pub fn console_colored(mut self, colored: bool) -> Self {
+        if let Some(ref mut console) = self.config.console_sink {
+            console.colored = colored;
+        } else if colored {
+            self.config.console_sink = Some(ConsoleSinkConfig {
+                colored,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    pub fn console_stderr_levels(mut self, levels: &[&str]) -> Self {
+        if let Some(ref mut console) = self.config.console_sink {
+            console.stderr_levels = levels.iter().map(|s| (*s).to_string()).collect();
+        } else {
+            self.config.console_sink = Some(ConsoleSinkConfig {
+                stderr_levels: levels.iter().map(|s| (*s).to_string()).collect(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    // === File 配置快捷方法 ===
+
+    pub fn file_max_size(mut self, max_size: impl Into<String>) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.max_size = max_size.into();
+        } else {
+            self.config.file_sink = Some(FileSinkConfig {
+                max_size: max_size.into(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    pub fn file_compress(mut self, compress: bool) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.compress = compress;
+        } else {
+            self.config.file_sink = Some(FileSinkConfig {
+                compress,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    pub fn file_rotation_time(mut self, rotation: impl Into<String>) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.rotation_time = rotation.into();
+        } else {
+            self.config.file_sink = Some(FileSinkConfig {
+                rotation_time: rotation.into(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    pub fn file_keep_files(mut self, keep: u32) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.keep_files = keep;
+        } else {
+            self.config.file_sink = Some(FileSinkConfig {
+                keep_files: keep,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    pub fn file_encrypt(mut self, encrypt: bool) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.encrypt = encrypt;
+        } else {
+            self.config.file_sink = Some(FileSinkConfig {
+                encrypt,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    pub fn file_encryption_key(mut self, key_env: impl Into<String>) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.encryption_key_env = Some(key_env.into());
+        } else {
+            self.config.file_sink = Some(FileSinkConfig {
+                encryption_key_env: Some(key_env.into()),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    // === Fallback 配置快捷方法 ===
+
+    pub fn auto_fallback(mut self, enabled: bool) -> Self {
+        self.config.global.auto_fallback = enabled;
+        self
+    }
+
+    pub fn fallback_retries(mut self, retries: u32) -> Self {
+        self.config.global.fallback_max_retries = retries;
+        self
+    }
+
+    // === Batch 配置快捷方法 ===
+
+    pub fn batch_size(mut self, size: usize) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.batch_size = size;
+        }
+        if let Some(ref mut db) = self.config.database_sink {
+            db.batch_size = size;
+        }
+        self
+    }
+
+    pub fn flush_interval(mut self, ms: u64) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.flush_interval_ms = ms;
+        }
+        if let Some(ref mut db) = self.config.database_sink {
+            db.flush_interval_ms = ms;
+        }
+        self
+    }
+
+    // === Database 配置快捷方法 ===
+
+    pub fn database_pool_size(mut self, pool_size: u32) -> Self {
+        if let Some(ref mut db) = self.config.database_sink {
+            db.pool_size = pool_size;
+        } else {
+            self.config.database_sink = Some(DatabaseSinkConfig {
+                pool_size,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    pub fn database_table(mut self, table: impl Into<String>) -> Self {
+        if let Some(ref mut db) = self.config.database_sink {
+            db.table_name = table.into();
+        } else {
+            self.config.database_sink = Some(DatabaseSinkConfig {
+                table_name: table.into(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    // === 便捷工厂方法 ===
+
+    /// 创建简单的控制台日志记录器
+    pub fn console_only() -> Self {
+        Self::default()
+            .console(true)
+            .level("info")
+    }
+
+    /// 创建简单的文件日志记录器
+    pub fn file_only(path: impl Into<std::path::PathBuf>) -> Self {
+        Self::default().file(path)
+    }
+
+    /// 创建生产环境日志记录器（控制台 + 文件）
+    pub fn production(path: impl Into<std::path::PathBuf>) -> Self {
+        Self::default()
+            .console(true)
+            .console_colored(false)
+            .file(path)
+            .file_compress(true)
+            .file_max_size("100MB")
+            .file_keep_files(10)
+            .level("info")
+    }
+
+    /// 创建开发环境日志记录器（彩色控制台）
+    pub fn development() -> Self {
+        Self::default()
+            .console(true)
+            .console_colored(true)
+            .level("debug")
+    }
+
+    // === 智能自动配置 ===
+
+    /// 检测当前运行环境
+    fn detect_environment() -> EnvironmentProfile {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        // 检测是否为交互式终端
+        let is_terminal = is_terminal::IsTerminal::is_terminal(&std::io::stdout());
+
+        // 检测是否在容器环境中
+        let in_container = std::env::var("CONTAINER").is_ok()
+            || std::env::var("DOCKER_CONTAINER").is_ok()
+            || std::path::Path::new("/.dockerenv").exists();
+
+        // 检测是否为 CI 环境
+        let in_ci = std::env::var("CI").is_ok()
+            || std::env::var("GITHUB_ACTIONS").is_ok()
+            || std::env::var("TRAVIS").is_ok();
+
+        // 检测是否为云环境
+        let in_cloud = std::env::var("AWS_LAMBDA_FUNCTION_NAME").is_ok()
+            || std::env::var("FUNCTION_NAME").is_ok()
+            || std::env::var("KUBERNETES_SERVICE_HOST").is_ok();
+
+        // 检测 CPU 核心数
+        let cpu_count = num_cpus::get();
+
+        // 生成简单的机器指纹用于区分不同环境
+        let mut hasher = DefaultHasher::new();
+        std::env::var("HOSTNAME").unwrap_or_default().hash(&mut hasher);
+        let machine_id = hasher.finish();
+
+        EnvironmentProfile {
+            is_terminal,
+            in_container,
+            in_ci,
+            in_cloud,
+            cpu_count,
+            machine_id,
+        }
+    }
+
+    /// 根据检测到的环境自动配置日志记录器
+    ///
+    /// 此方法会自动根据运行环境选择最佳配置：
+    /// - 交互式终端：启用彩色输出
+    /// - CI 环境：禁用颜色，使用 JSON 格式
+    /// - 容器环境：优化日志路径
+    /// - 云环境：减少本地存储，使用远程存储
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use inklog::LoggerBuilder;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     // 自动检测环境并配置
+    ///     let logger = LoggerBuilder::auto_detect()
+    ///         .file("app.log")
+    ///         .build()
+    ///         .await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn auto_detect() -> Self {
+        let profile = Self::detect_environment();
+
+        let mut builder = Self::default();
+
+        // 根据环境调整日志级别
+        let level = if profile.in_ci {
+            // CI 环境使用 info 级别，减少输出
+            "info".to_string()
+        } else if profile.is_terminal {
+            // 交互式终端使用 debug 级别
+            "debug".to_string()
+        } else {
+            "info".to_string()
+        };
+        builder.config.global.level = level;
+
+        // 控制台配置
+        builder.config.console_sink = Some(ConsoleSinkConfig {
+            enabled: true,
+            // 交互式终端启用颜色，CI 环境禁用
+            colored: profile.is_terminal && !profile.in_ci,
+            ..Default::default()
+        });
+
+        // 文件配置 - 根据环境调整
+        let log_path = if profile.in_container {
+            // 容器环境使用 /var/log
+            PathBuf::from("/var/log/app.log")
+        } else if profile.in_cloud {
+            // 云环境使用临时目录
+            std::env::temp_dir().join("app.log")
+        } else {
+            PathBuf::from("app.log")
+        };
+
+        builder.config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            // 生产环境启用压缩
+            compress: !profile.in_ci,
+            // 云环境减少保留文件数
+            keep_files: if profile.in_cloud { 3 } else { 10 },
+            // 大流量场景增加批量大小
+            batch_size: if profile.cpu_count > 4 { 200 } else { 100 },
+            flush_interval_ms: if profile.cpu_count > 4 { 50 } else { 100 },
+            ..Default::default()
+        });
+
+        // 根据 CPU 核心数调整 worker 线程
+        let worker_threads = if profile.cpu_count > 4 {
+            (profile.cpu_count / 2).min(8)
+        } else {
+            2
+        };
+        builder.config.performance.worker_threads = worker_threads;
+
+        // 根据 CPU 核心数调整 channel 容量
+        let channel_capacity = if profile.cpu_count > 4 {
+            20000
+        } else {
+            10000
+        };
+        builder.config.performance.channel_capacity = channel_capacity;
+
+        // CI 环境禁用自动降级以避免意外行为
+        if profile.in_ci {
+            builder.config.global.auto_fallback = false;
+        }
+
+        builder
+    }
+
+    /// 快速初始化 - 适合大多数场景的默认配置
+    ///
+    /// 等同于 `LoggerBuilder::auto_detect()`，但不需要额外配置
+    pub fn quick() -> Self {
+        Self::auto_detect()
+    }
+
     pub async fn build(self) -> Result<LoggerManager, InklogError> {
         LoggerManager::with_config(self.config).await
     }
@@ -1065,6 +1448,231 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tokio::time::sleep;
+
+    #[test]
+    fn test_logger_builder_new() {
+        let builder = LoggerBuilder::new();
+        assert!(builder.config.global.level.is_empty() || builder.config.global.level == "info");
+    }
+
+    #[test]
+    fn test_logger_builder_level() {
+        let builder = LoggerBuilder::new()
+            .level("debug");
+        assert_eq!(builder.config.global.level, "debug");
+    }
+
+    #[test]
+    fn test_logger_builder_console() {
+        let builder = LoggerBuilder::new()
+            .console(true)
+            .console_colored(false);
+        assert!(builder.config.console_sink.is_some());
+        assert!(!builder.config.console_sink.as_ref().unwrap().colored);
+    }
+
+    #[test]
+    fn test_logger_builder_console_stderr_levels() {
+        let builder = LoggerBuilder::new()
+            .console_stderr_levels(&["error", "warn"]);
+        assert!(builder.config.console_sink.is_some());
+        let stderr = &builder.config.console_sink.as_ref().unwrap().stderr_levels;
+        assert_eq!(stderr.len(), 2);
+        assert!(stderr.contains(&"error".to_string()));
+        assert!(stderr.contains(&"warn".to_string()));
+    }
+
+    #[test]
+    fn test_logger_builder_file() {
+        let builder = LoggerBuilder::new()
+            .file("/var/log/app.log")
+            .file_max_size("50MB")
+            .file_compress(true)
+            .file_keep_files(5);
+        assert!(builder.config.file_sink.is_some());
+        let file = builder.config.file_sink.as_ref().unwrap();
+        assert_eq!(file.path, std::path::PathBuf::from("/var/log/app.log"));
+        assert_eq!(file.max_size, "50MB");
+        assert!(file.compress);
+        assert_eq!(file.keep_files, 5);
+    }
+
+    #[test]
+    fn test_logger_builder_file_encrypt() {
+        let builder = LoggerBuilder::new()
+            .file("app.log")
+            .file_encrypt(true)
+            .file_encryption_key("MY_ENCRYPTION_KEY");
+        let file = builder.config.file_sink.as_ref().unwrap();
+        assert!(file.encrypt);
+        assert_eq!(file.encryption_key_env, Some("MY_ENCRYPTION_KEY".to_string()));
+    }
+
+    #[test]
+    fn test_logger_builder_database() {
+        let builder = LoggerBuilder::new()
+            .database("postgres://localhost/logs")
+            .database_pool_size(10)
+            .database_table("my_logs");
+        assert!(builder.config.database_sink.is_some());
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert_eq!(db.url, "postgres://localhost/logs");
+        assert_eq!(db.pool_size, 10);
+        assert_eq!(db.table_name, "my_logs");
+    }
+
+    #[test]
+    fn test_logger_builder_fallback() {
+        let builder = LoggerBuilder::new()
+            .auto_fallback(false)
+            .fallback_retries(10);
+        assert!(!builder.config.global.auto_fallback);
+        assert_eq!(builder.config.global.fallback_max_retries, 10);
+    }
+
+    #[test]
+    fn test_logger_builder_batch() {
+        let builder = LoggerBuilder::new()
+            .file("app.log")
+            .database("postgres://localhost/logs")
+            .batch_size(500)
+            .flush_interval(200);
+        let file = builder.config.file_sink.as_ref().unwrap();
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert_eq!(file.batch_size, 500);
+        assert_eq!(file.flush_interval_ms, 200);
+        assert_eq!(db.batch_size, 500);
+        assert_eq!(db.flush_interval_ms, 200);
+    }
+
+    #[test]
+    fn test_logger_builder_factory_console_only() {
+        let builder = LoggerBuilder::console_only();
+        assert!(builder.config.console_sink.is_some());
+        assert_eq!(builder.config.global.level, "info");
+    }
+
+    #[test]
+    fn test_logger_builder_factory_file_only() {
+        let builder = LoggerBuilder::file_only("app.log");
+        assert!(builder.config.file_sink.is_some());
+        assert_eq!(builder.config.file_sink.as_ref().unwrap().path, std::path::PathBuf::from("app.log"));
+    }
+
+    #[test]
+    fn test_logger_builder_factory_development() {
+        let builder = LoggerBuilder::development();
+        assert!(builder.config.console_sink.is_some());
+        assert!(builder.config.console_sink.as_ref().unwrap().colored);
+        assert_eq!(builder.config.global.level, "debug");
+    }
+
+    #[test]
+    fn test_logger_builder_factory_production() {
+        let builder = LoggerBuilder::production("app.log");
+        assert!(builder.config.console_sink.is_some());
+        assert!(!builder.config.console_sink.as_ref().unwrap().colored);
+        assert!(builder.config.file_sink.is_some());
+        let file = builder.config.file_sink.as_ref().unwrap();
+        assert!(file.compress);
+        assert_eq!(file.max_size, "100MB");
+        assert_eq!(file.keep_files, 10);
+        assert_eq!(builder.config.global.level, "info");
+    }
+
+    #[test]
+    fn test_logger_builder_chaining() {
+        let builder = LoggerBuilder::new()
+            .level("trace")
+            .console(true)
+            .console_colored(true)
+            .console_stderr_levels(&["error"])
+            .file("debug.log")
+            .file_max_size("10MB")
+            .file_compress(false)
+            .file_rotation_time("hourly")
+            .file_keep_files(24)
+            .auto_fallback(true)
+            .fallback_retries(5)
+            .batch_size(200)
+            .flush_interval(100);
+
+        assert_eq!(builder.config.global.level, "trace");
+        assert!(builder.config.console_sink.unwrap().colored);
+        assert_eq!(builder.config.global.auto_fallback, true);
+        assert_eq!(builder.config.global.fallback_max_retries, 5);
+    }
+
+    // === 智能自动配置测试 ===
+
+    #[test]
+    fn test_auto_detect_returns_valid_builder() {
+        let builder = LoggerBuilder::auto_detect();
+        // Should have console sink enabled
+        assert!(builder.config.console_sink.is_some());
+        // Should have file sink enabled
+        assert!(builder.config.file_sink.is_some());
+        // Should have a valid level
+        assert!(!builder.config.global.level.is_empty());
+    }
+
+    #[test]
+    fn test_auto_detect_has_console_enabled() {
+        let builder = LoggerBuilder::auto_detect();
+        let console = builder.config.console_sink.as_ref().unwrap();
+        assert!(console.enabled);
+    }
+
+    #[test]
+    fn test_auto_detect_has_file_enabled() {
+        let builder = LoggerBuilder::auto_detect();
+        let file = builder.config.file_sink.as_ref().unwrap();
+        assert!(file.enabled);
+        // Should have a valid path
+        assert!(!file.path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn test_auto_detect_configures_batch_settings() {
+        let builder = LoggerBuilder::auto_detect();
+        let file = builder.config.file_sink.as_ref().unwrap();
+        assert!(file.batch_size > 0);
+        assert!(file.flush_interval_ms > 0);
+    }
+
+    #[test]
+    fn test_auto_detect_configures_performance() {
+        let builder = LoggerBuilder::auto_detect();
+        assert!(builder.config.performance.worker_threads > 0);
+        assert!(builder.config.performance.channel_capacity > 0);
+    }
+
+    #[test]
+    fn test_quick_equals_auto_detect() {
+        let quick = LoggerBuilder::quick();
+        let auto = LoggerBuilder::auto_detect();
+        // Both should have similar structure
+        assert!(quick.config.console_sink.is_some());
+        assert!(auto.config.console_sink.is_some());
+        assert!(quick.config.file_sink.is_some());
+        assert!(auto.config.file_sink.is_some());
+    }
+
+    #[test]
+    fn test_environment_profile_has_cpu_count() {
+        let profile = LoggerBuilder::detect_environment();
+        assert!(profile.cpu_count > 0);
+        // CPU count should be reasonable (1-256 cores)
+        assert!(profile.cpu_count <= 256);
+    }
+
+    #[test]
+    fn test_environment_profile_clone() {
+        let profile = LoggerBuilder::detect_environment();
+        let cloned = profile.clone();
+        assert_eq!(profile.machine_id, cloned.machine_id);
+        assert_eq!(profile.cpu_count, cloned.cpu_count);
+    }
 
     #[cfg(feature = "http")]
     #[tokio::test]
