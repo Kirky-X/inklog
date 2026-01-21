@@ -19,8 +19,7 @@ repos:
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: [--baseline, .secrets.baseline, --exclude-files, tests/]
-        exclude: .secrets.baseline
+        args: [--exclude-files, tests/]
 
 ci:
   autoupdate_commit_msg: "chore: update pre-commit hooks"
