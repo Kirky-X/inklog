@@ -59,22 +59,33 @@ impl LogAdapter {
 
     /// 将 `log::Record` 转换为 `LogRecord`
     fn record_to_log_record(&self, record: &Record) -> LogRecord {
-        // 使用对象池复用 LogRecord
-        // TODO: 可以考虑使用类似 tracing 的对象池优化
+        use crate::pool::{LOG_RECORD_POOL, STRING_POOL};
 
-        LogRecord {
-            timestamp: Utc::now(),
-            level: Self::level_to_string(record.level()).to_string(),
-            target: record.target().to_string(),
-            message: record.args().to_string(),
-            fields: Default::default(),
-            file: record.file().map(|s| s.to_string()),
-            line: record.line(),
-            thread_id: std::thread::current()
-                .name()
-                .unwrap_or("unknown")
-                .to_string(),
-        }
+        // 从对象池获取 LogRecord
+        let mut log_record = LOG_RECORD_POOL.get();
+        log_record.reset();
+
+        // 从对象池获取字符串用于 message
+        let mut message = STRING_POOL.get();
+        message.clear();
+        message.push_str(&record.args().to_string());
+
+        log_record.timestamp = Utc::now();
+        log_record.level.clear();
+        log_record
+            .level
+            .push_str(Self::level_to_string(record.level()));
+        log_record.target.clear();
+        log_record.target.push_str(record.target());
+        log_record.message = message;
+        log_record.file = record.file().map(|s| s.to_string());
+        log_record.line = record.line();
+        log_record.thread_id.clear();
+        log_record
+            .thread_id
+            .push_str(std::thread::current().name().unwrap_or("unknown"));
+
+        log_record
     }
 }
 
@@ -91,6 +102,8 @@ impl log::Log for LogAdapter {
         if !self.enabled(record.metadata()) {
             return;
         }
+
+        use crate::pool::LOG_RECORD_POOL;
 
         let log_record = self.record_to_log_record(record);
 
@@ -114,6 +127,9 @@ impl log::Log for LogAdapter {
                 self.metrics.inc_logs_dropped();
             }
         }
+
+        // Console sink 已使用完毕，回收 LogRecord 到对象池
+        LOG_RECORD_POOL.put(log_record);
     }
 
     /// 刷新缓冲区（no-op，因为使用 channel）

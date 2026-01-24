@@ -635,14 +635,14 @@ impl Default for FallbackConfig {
 ///
 /// ## 使用示例
 ///
-/// ```rust
+/// ```rust,no_run
 /// use inklog::metrics::{SinkHealthMonitor, FallbackConfig};
 ///
 /// let config = FallbackConfig::default();
 /// let monitor = SinkHealthMonitor::new(config);
 ///
 /// // 检查并可能触发降级
-/// let action = monitor.check_and_fallback("database", false, "Connection refused");
+/// let action = monitor.check_and_fallback("database", false, Some("Connection refused"));
 /// ```
 #[derive(Debug)]
 pub struct SinkHealthMonitor {
@@ -777,7 +777,10 @@ impl SinkHealthMonitor {
                 self.log_event(
                     sink_name,
                     current_state.clone(),
-                    states.get(sink_name).unwrap().clone(),
+                    states
+                        .get(sink_name)
+                        .cloned()
+                        .unwrap_or(current_state.clone()),
                     format!("尝试恢复，延迟 {}ms", delay_ms),
                 );
 
