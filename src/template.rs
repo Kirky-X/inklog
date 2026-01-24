@@ -372,13 +372,14 @@ mod tests {
     fn test_array_in_fields() {
         let template = LogTemplate::new("{message} {fields}");
         let mut record = create_test_record();
-        record.fields = HashMap::from([
-            ("items".to_string(), Value::Array(vec![
+        record.fields = HashMap::from([(
+            "items".to_string(),
+            Value::Array(vec![
                 Value::String("a".to_string()),
                 Value::String("b".to_string()),
                 Value::String("c".to_string()),
-            ])),
-        ]);
+            ]),
+        )]);
         let output = template.render(&record);
         assert!(output.contains("items"));
         assert!(output.contains("a"));

@@ -690,8 +690,14 @@ mod tests {
     fn test_mask_hashmap() {
         let masker = DataMasker::new();
         let mut map: HashMap<String, Value> = HashMap::new();
-        map.insert("email".to_string(), Value::String("user@example.com".to_string()));
-        map.insert("password".to_string(), Value::String("secret123".to_string()));
+        map.insert(
+            "email".to_string(),
+            Value::String("user@example.com".to_string()),
+        );
+        map.insert(
+            "password".to_string(),
+            Value::String("secret123".to_string()),
+        );
         map.insert("name".to_string(), Value::String("John".to_string()));
 
         masker.mask_hashmap(&mut map);
