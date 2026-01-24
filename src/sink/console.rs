@@ -155,7 +155,8 @@ impl Clone for ConsoleSink {
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),
-            writer: Arc::new(Mutex::new(Box::new(io::stdout()))),
+            // Clone shares the same writer (Arc ensures reference counting)
+            writer: Arc::clone(&self.writer),
             template: self.template.clone(),
         }
     }
@@ -192,6 +193,8 @@ mod tests {
     #[serial]
     fn test_force_color_env() {
         let sink = get_sink();
+        // Remove NO_COLOR to ensure deterministic test result
+        env::remove_var("NO_COLOR");
         env::set_var("CLICOLOR_FORCE", "1");
         assert!(sink.should_colorize(false));
         env::remove_var("CLICOLOR_FORCE");
@@ -201,6 +204,8 @@ mod tests {
     #[serial]
     fn test_term_dumb() {
         let sink = get_sink();
+        // Remove NO_COLOR to ensure deterministic test result
+        env::remove_var("NO_COLOR");
         env::set_var("TERM", "dumb");
         // Ensure no other conflicting envs
         env::remove_var("CLICOLOR_FORCE");
@@ -212,6 +217,8 @@ mod tests {
     #[serial]
     fn test_config_disabled() {
         let mut sink = get_sink();
+        // Remove NO_COLOR to ensure deterministic test result
+        env::remove_var("NO_COLOR");
         sink.config.colored = false;
         env::set_var("CLICOLOR_FORCE", "1"); // Config should override force?
                                              // My logic: if !config.colored return false.
@@ -245,6 +252,8 @@ mod tests {
 
     #[test]
     fn test_should_colorize_defaults() {
+        // Set NO_COLOR to ensure deterministic test result
+        std::env::set_var("NO_COLOR", "1");
         let config = ConsoleSinkConfig {
             enabled: true,
             colored: true,
@@ -253,15 +262,16 @@ mod tests {
         let template = LogTemplate::default();
         let sink = ConsoleSink::new(config, template);
         // Test should_colorize with is_stderr = false
-        // When config.colored is true and NO_COLOR is not set, should return true
+        // When NO_COLOR is set, should NOT colorize
         let result = sink.should_colorize(false);
-        // If colored config is true and not in dumb terminal, should colorize
-        // This is a basic test that the method works
-        assert!(!result || std::env::var("TERM").ok().as_ref().map(|s| s == "dumb").unwrap_or(false) || std::env::var("NO_COLOR").is_ok());
+        assert!(
+            !result,
+            "should_colorize should return false when NO_COLOR is set"
+        );
     }
 
     #[test]
-    fn test_apply_color_error() {
+    fn test_should_colorize_when_allowed() {
         let sink = get_sink();
         let colored = sink.apply_color("test message", "ERROR");
         assert!(colored.contains("test message"));

@@ -22,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             level: "debug".into(),
             format: format_string.to_string(),
             masking_enabled: true,
+            ..Default::default()
         },
         ..Default::default()
     };

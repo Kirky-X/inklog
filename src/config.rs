@@ -287,6 +287,37 @@ impl std::fmt::Display for DatabaseDriver {
     }
 }
 
+/// 分区策略
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PartitionStrategy {
+    /// 按月分区
+    #[default]
+    Monthly,
+    /// 按年分区
+    Yearly,
+}
+
+impl std::str::FromStr for PartitionStrategy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "monthly" | "month" => Ok(PartitionStrategy::Monthly),
+            "yearly" | "year" => Ok(PartitionStrategy::Yearly),
+            _ => Err(format!("Unknown partition strategy: {}", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for PartitionStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PartitionStrategy::Monthly => write!(f, "monthly"),
+            PartitionStrategy::Yearly => write!(f, "yearly"),
+        }
+    }
+}
+
 /// Parquet导出配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -323,6 +354,7 @@ impl Default for ParquetConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseSinkConfig {
+    pub name: String,
     pub enabled: bool,
     #[serde(default)]
     pub driver: DatabaseDriver,
@@ -330,6 +362,8 @@ pub struct DatabaseSinkConfig {
     pub pool_size: u32,
     pub batch_size: usize,
     pub flush_interval_ms: u64,
+    #[serde(default)]
+    pub partition: PartitionStrategy,
     pub archive_to_s3: bool,
     pub archive_after_days: u32,
     pub s3_bucket: Option<String>,
@@ -350,12 +384,14 @@ fn default_archive_format() -> String {
 impl Default for DatabaseSinkConfig {
     fn default() -> Self {
         Self {
+            name: "default".to_string(),
             enabled: false,
             driver: DatabaseDriver::PostgreSQL,
             url: "postgres://localhost/logs".to_string(),
             pool_size: 10,
             batch_size: 100,
             flush_interval_ms: 500,
+            partition: PartitionStrategy::Monthly,
             archive_to_s3: false,
             archive_after_days: 30,
             s3_bucket: None,
@@ -1098,9 +1134,11 @@ mod tests {
 
     #[test]
     fn test_global_config_setters() {
-        let mut global = GlobalConfig::default();
-        global.level = "debug".to_string();
-        global.auto_fallback = false;
+        let global = GlobalConfig {
+            level: "debug".to_string(),
+            auto_fallback: false,
+            ..Default::default()
+        };
 
         assert_eq!(global.level, "debug");
         assert!(!global.auto_fallback);
@@ -1124,7 +1162,7 @@ mod tests {
             ..Default::default()
         };
         match perf.channel_strategy {
-            ChannelStrategy::Fixed => {},
+            ChannelStrategy::Fixed => {}
             ChannelStrategy::Adaptive => panic!("Expected Fixed strategy"),
         }
         assert_eq!(perf.channel_capacity, 5000);
@@ -1143,7 +1181,7 @@ mod tests {
             ..Default::default()
         };
         match perf.channel_strategy {
-            ChannelStrategy::Adaptive => {},
+            ChannelStrategy::Adaptive => {}
             ChannelStrategy::Fixed => panic!("Expected Adaptive strategy"),
         }
         assert_eq!(perf.expand_threshold_percent, 70);
@@ -1178,15 +1216,20 @@ mod tests {
 
     #[test]
     fn test_console_config_stderr_levels() {
-        let mut config = ConsoleSinkConfig::default();
-        config.stderr_levels = vec!["error".to_string()];
-        assert_eq!(config.stderr_levels.len(), 1);
-
-        config.stderr_levels.push("warn".to_string());
+        // 测试默认值包含 "error" 和 "warn"
+        let config = ConsoleSinkConfig::default();
         assert_eq!(config.stderr_levels.len(), 2);
+        assert!(config.stderr_levels.contains(&"error".to_string()));
+        assert!(config.stderr_levels.contains(&"warn".to_string()));
 
+        // 创建新的配置来测试修改
+        let mut config = ConsoleSinkConfig::default();
         config.stderr_levels.clear();
         assert!(config.stderr_levels.is_empty());
+
+        config.stderr_levels.push("info".to_string());
+        assert_eq!(config.stderr_levels.len(), 1);
+        assert!(config.stderr_levels.contains(&"info".to_string()));
     }
 
     // === File Config Tests ===
@@ -1240,7 +1283,10 @@ mod tests {
             ..Default::default()
         };
         assert!(config.encrypt);
-        assert_eq!(config.encryption_key_env, Some("CUSTOM_KEY_VAR".to_string()));
+        assert_eq!(
+            config.encryption_key_env,
+            Some("CUSTOM_KEY_VAR".to_string())
+        );
     }
 
     // === Database Config Tests ===
@@ -1276,14 +1322,18 @@ mod tests {
         assert_eq!(config.flush_interval_ms, 500);
     }
 
-
     #[test]
     fn test_file_config_path_operations() {
-        let mut config = FileSinkConfig::default();
-        config.path = PathBuf::from("/var/log/app.log");
+        let config = FileSinkConfig {
+            path: PathBuf::from("/var/log/app.log"),
+            ..Default::default()
+        };
 
         assert!(config.path.is_absolute());
-        assert_eq!(config.path.file_name().unwrap().to_string_lossy(), "app.log");
+        assert_eq!(
+            config.path.file_name().unwrap().to_string_lossy(),
+            "app.log"
+        );
         assert!(config.path.parent().unwrap().is_dir());
     }
 }

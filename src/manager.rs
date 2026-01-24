@@ -57,6 +57,7 @@ struct WorkerParams {
 
 /// 环境检测结果，用于智能配置
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct EnvironmentProfile {
     /// 是否为交互式终端
     is_terminal: bool,
@@ -341,6 +342,7 @@ impl LoggerManager {
                 info!("Initializing S3 archive service");
 
                 // Get database connection if available
+                #[cfg(not(feature = "dbnexus"))]
                 let db_conn = if let Some(ref db_cfg) = config.database_sink {
                     if db_cfg.enabled {
                         use sea_orm::Database;
@@ -352,11 +354,29 @@ impl LoggerManager {
                     None
                 };
 
+                #[cfg(feature = "dbnexus")]
+                let db_conn = if let Some(ref db_cfg) = config.database_sink {
+                    if db_cfg.enabled {
+                        use dbnexus::pool::DbPool;
+                        Some(DbPool::new(&db_cfg.url).await.ok())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 let mut archive_service_builder =
                     ArchiveServiceBuilder::new().config(archive_config.clone());
 
-                if let Some(db_conn) = db_conn {
-                    archive_service_builder = archive_service_builder.database_connection(db_conn);
+                #[cfg(feature = "dbnexus")]
+                #[allow(clippy::collapsible_match, clippy::match_result_ok)]
+                if let Some(ref pool) = db_conn {
+                    if let Some(ref p) = pool {
+                        if let Some(s) = p.get_session("").await.ok() {
+                            archive_service_builder = archive_service_builder.database_session(s);
+                        }
+                    }
                 }
 
                 match archive_service_builder.build().await {
@@ -993,12 +1013,22 @@ impl LoggerManager {
     pub fn shutdown(&self) -> Result<(), InklogError> {
         let _ = self.shutdown_tx.send(());
 
-        // Wait for workers
-        if let Ok(mut handles) = self.worker_handles.lock() {
-            while let Some(handle) = handles.pop() {
-                let _ = handle.join();
+        // Take all handles from the struct
+        let handles = std::mem::take(&mut *self.worker_handles.lock().unwrap());
+
+        // Use a timeout-based join to avoid deadlocks
+        // Each handle gets up to 5 seconds to complete
+        for handle in handles {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(5) {
+                if handle.is_finished() {
+                    let _ = handle.join();
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
+
         Ok(())
     }
 }
@@ -1260,9 +1290,7 @@ impl LoggerBuilder {
 
     /// 创建简单的控制台日志记录器
     pub fn console_only() -> Self {
-        Self::default()
-            .console(true)
-            .level("info")
+        Self::default().console(true).level("info")
     }
 
     /// 创建简单的文件日志记录器
@@ -1320,7 +1348,9 @@ impl LoggerBuilder {
 
         // 生成简单的机器指纹用于区分不同环境
         let mut hasher = DefaultHasher::new();
-        std::env::var("HOSTNAME").unwrap_or_default().hash(&mut hasher);
+        std::env::var("HOSTNAME")
+            .unwrap_or_default()
+            .hash(&mut hasher);
         let machine_id = hasher.finish();
 
         EnvironmentProfile {
@@ -1414,11 +1444,7 @@ impl LoggerBuilder {
         builder.config.performance.worker_threads = worker_threads;
 
         // 根据 CPU 核心数调整 channel 容量
-        let channel_capacity = if profile.cpu_count > 4 {
-            20000
-        } else {
-            10000
-        };
+        let channel_capacity = if profile.cpu_count > 4 { 20000 } else { 10000 };
         builder.config.performance.channel_capacity = channel_capacity;
 
         // CI 环境禁用自动降级以避免意外行为
@@ -1457,24 +1483,20 @@ mod tests {
 
     #[test]
     fn test_logger_builder_level() {
-        let builder = LoggerBuilder::new()
-            .level("debug");
+        let builder = LoggerBuilder::new().level("debug");
         assert_eq!(builder.config.global.level, "debug");
     }
 
     #[test]
     fn test_logger_builder_console() {
-        let builder = LoggerBuilder::new()
-            .console(true)
-            .console_colored(false);
+        let builder = LoggerBuilder::new().console(true).console_colored(false);
         assert!(builder.config.console_sink.is_some());
         assert!(!builder.config.console_sink.as_ref().unwrap().colored);
     }
 
     #[test]
     fn test_logger_builder_console_stderr_levels() {
-        let builder = LoggerBuilder::new()
-            .console_stderr_levels(&["error", "warn"]);
+        let builder = LoggerBuilder::new().console_stderr_levels(&["error", "warn"]);
         assert!(builder.config.console_sink.is_some());
         let stderr = &builder.config.console_sink.as_ref().unwrap().stderr_levels;
         assert_eq!(stderr.len(), 2);
@@ -1505,7 +1527,10 @@ mod tests {
             .file_encryption_key("MY_ENCRYPTION_KEY");
         let file = builder.config.file_sink.as_ref().unwrap();
         assert!(file.encrypt);
-        assert_eq!(file.encryption_key_env, Some("MY_ENCRYPTION_KEY".to_string()));
+        assert_eq!(
+            file.encryption_key_env,
+            Some("MY_ENCRYPTION_KEY".to_string())
+        );
     }
 
     #[test]
@@ -1556,7 +1581,10 @@ mod tests {
     fn test_logger_builder_factory_file_only() {
         let builder = LoggerBuilder::file_only("app.log");
         assert!(builder.config.file_sink.is_some());
-        assert_eq!(builder.config.file_sink.as_ref().unwrap().path, std::path::PathBuf::from("app.log"));
+        assert_eq!(
+            builder.config.file_sink.as_ref().unwrap().path,
+            std::path::PathBuf::from("app.log")
+        );
     }
 
     #[test]

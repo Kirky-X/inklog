@@ -670,7 +670,7 @@ fn test_parse_size_various_formats() {
 fn test_circuit_breaker_states() {
     use std::time::Duration;
 
-    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30));
+    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
     assert_eq!(cb.state(), inklog::CircuitState::Closed);
     assert!(cb.can_execute());
 
@@ -687,7 +687,7 @@ fn test_circuit_breaker_states() {
 fn test_circuit_breaker_success_resets() {
     use std::time::Duration;
 
-    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30));
+    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
     cb.record_failure();
     cb.record_failure();
     cb.record_success();
@@ -698,7 +698,7 @@ fn test_circuit_breaker_success_resets() {
 fn test_circuit_breaker_reset() {
     use std::time::Duration;
 
-    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30));
+    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
     cb.record_failure();
     cb.record_failure();
     cb.record_failure();

@@ -187,6 +187,19 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     Ok(())
 }
 
+/// Decrypt a file using the legacy encryption format.
+///
+/// This function is kept for backward compatibility and testing purposes.
+/// New code should use `decrypt_file_compatible` which handles both formats.
+///
+/// # Deprecation
+///
+/// This function is deprecated and will be removed in a future version.
+/// Use `decrypt_file_compatible` instead.
+///
+/// This function is kept for backward compatibility and testing.
+/// It is only used by tests to verify legacy format support.
+#[deprecated(since = "0.1.0", note = "Use decrypt_file_compatible instead")]
 #[allow(dead_code)]
 pub fn decrypt_file_legacy(
     input_path: &PathBuf,
@@ -711,6 +724,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_decrypt_file_legacy_format() {
         let temp_dir = tempfile::tempdir().unwrap();
         let input_file = temp_dir.path().join("test_legacy.enc");

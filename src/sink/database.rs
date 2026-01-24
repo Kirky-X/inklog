@@ -1,294 +1,95 @@
-// Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
+//! Database sink implementation using dbnexus.
+//!
+//! This module provides database logging functionality with support for
+//! PostgreSQL, MySQL, and SQLite, including batch writes, partitioning,
+//! Parquet export, and S3 archival.
 
-//! # 数据库日志输出模块
-//!
-//! 提供将日志消息批量写入数据库的功能，支持 PostgreSQL、MySQL 和 SQLite。
-//!
-//! ## 概述
-//!
-//! `DatabaseSink` 实现 `LogSink` trait，提供异步批量写入数据库的能力。
-//! 使用 Sea-ORM 作为 ORM 层，支持多种数据库后端。
-//!
-//! ## 功能特性
-//!
-//! - **多数据库支持**：PostgreSQL、MySQL、SQLite
-//! - **批量写入**：提高写入性能，减少数据库连接开销
-//! - **连接池管理**：自动管理数据库连接池
-//! - **分区表支持**：自动按年月创建分区表
-//! - **Parquet 导出**：支持导出为 Parquet 格式进行归档
-//! - **自动归档**：配置后可自动归档到 S3
-//! - **断路器保护**：防止数据库故障影响整体系统
-//!
-//! ## 性能优化
-//!
-//! - **批量写入**：默认 batch_size=100
-//! - **异步刷新**：默认 flush_interval_ms=500
-//! - **连接池**：默认 pool_size=10
-//! - **专用运行时**：独立的 tokio multi-thread runtime
-//!
-//! ## 配置示例
-//!
-//! ```rust
-//! use inklog::config::{DatabaseSinkConfig, DatabaseDriver};
-//!
-//! let config = DatabaseSinkConfig {
-//!     enabled: true,
-//!     driver: DatabaseDriver::PostgreSQL,
-//!     url: "postgres://user:pass@localhost/logs".to_string(),
-//!     batch_size: 100,
-//!     flush_interval_ms: 500,
-//!     ..Default::default()
-//! };
-//! ```
-//!
-//! ## 数据模型
-//!
-//! 日志数据存储在以下结构的表中：
-//!
-//! | 字段 | 类型 | 描述 |
-//! |------|------|------|
-//! | `id` | `i64` | 主键，自动递增 |
-//! | `timestamp` | `DateTimeUtc` | 日志时间戳 |
-//! | `level` | `String` | 日志级别 |
-//! | `target` | `String` | 目标模块 |
-//! | `message` | `String` | 日志消息 |
-//! | `fields` | `Json` | 结构化字段 |
-//! | `file` | `String?` | 源文件 |
-//! | `line` | `i32?` | 行号 |
-//! | `thread_id` | `String` | 线程 ID |
-//!
-//! ## 架构说明
-//!
-//! ```text
-//! LogRecord Buffer
-//!      ↓
-//! Batch Processor (configurable batch size)
-//!      ↓
-//! Database Connection Pool
-//!      ↓
-//! PostgreSQL / MySQL / SQLite
-//! ```
-
-use crate::config::{DatabaseDriver, DatabaseSinkConfig, FileSinkConfig};
-use crate::error::InklogError;
-use crate::log_record::LogRecord;
-use crate::sink::file::FileSink;
-use crate::sink::{CircuitBreaker, LogSink};
-use chrono::Utc;
-use sea_orm::entity::prelude::*;
-use sea_orm::{
-    ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait, QueryFilter,
-    QuerySelect, Schema, Set, Statement,
-};
+#[cfg(feature = "dbnexus")]
+use std::fmt;
+#[cfg(feature = "dbnexus")]
 use std::path::PathBuf;
+#[cfg(feature = "dbnexus")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "dbnexus")]
+use std::sync::Arc;
+#[cfg(feature = "dbnexus")]
 use std::time::{Duration, Instant};
-use tokio::runtime::Runtime;
 
-use chrono::{Datelike, Timelike};
-use serde::Serialize;
+#[cfg(feature = "dbnexus")]
+use anyhow::Result;
+#[cfg(feature = "dbnexus")]
+use chrono::{DateTime, Datelike, Utc};
+#[cfg(feature = "dbnexus")]
+use dbnexus::pool::{DbPool, Session};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize)]
-#[sea_orm(table_name = "logs")]
-pub struct Model {
-    #[sea_orm(primary_key)]
+#[cfg(feature = "dbnexus")]
+use crate::config::{DatabaseDriver, DatabaseSinkConfig, FileSinkConfig};
+#[cfg(feature = "dbnexus")]
+use crate::error::InklogError;
+#[cfg(feature = "dbnexus")]
+use crate::log_record::LogRecord;
+#[cfg(feature = "dbnexus")]
+use crate::masking::DataMasker;
+#[cfg(feature = "dbnexus")]
+use crate::sink::circuit_breaker::CircuitBreaker;
+#[cfg(feature = "dbnexus")]
+use crate::sink::file::FileSink;
+
+#[cfg(feature = "dbnexus")]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct LogEntity {
     pub id: i64,
-    pub timestamp: DateTimeUtc,
+    pub timestamp: DateTime<Utc>,
     pub level: String,
     pub target: String,
-    #[sea_orm(column_type = "Text")]
     pub message: String,
-    #[sea_orm(column_type = "Json", nullable)]
     pub fields: Option<serde_json::Value>,
     pub file: Option<String>,
     pub line: Option<i32>,
-    pub thread_id: String,
+    pub thread_id: Option<String>,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
-
-impl ActiveModelBehavior for ActiveModel {}
-
-// Archive Metadata Entity Module
-mod archive_metadata {
-    use sea_orm::entity::prelude::*;
-    use serde::Serialize;
-
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize)]
-    #[sea_orm(table_name = "archive_metadata")]
-    pub struct Model {
-        #[sea_orm(primary_key)]
-        pub id: i64,
-        pub archive_date: DateTimeUtc,
-        pub s3_key: String,
-        pub record_count: i64,
-        pub file_size: i64,
-        pub status: String,
+#[cfg(feature = "dbnexus")]
+impl LogEntity {
+    pub fn from_log_record(record: &LogRecord) -> Self {
+        Self {
+            id: 0,
+            timestamp: record.timestamp,
+            level: record.level.to_string(),
+            target: record.target.clone(),
+            message: record.message.clone(),
+            fields: if record.fields.is_empty() {
+                None
+            } else {
+                Some(serde_json::json!(record.fields))
+            },
+            file: record.file.clone(),
+            line: record.line.map(|i| i as i32),
+            thread_id: Some(record.thread_id.clone()),
+        }
     }
-
-    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {}
-
-    impl ActiveModelBehavior for ActiveModel {}
 }
 
-use archive_metadata::ActiveModel as ArchiveMetadataActiveModel;
-use archive_metadata::Entity as ArchiveMetadataEntity;
+#[cfg(feature = "dbnexus")]
+/// Type alias for backward compatibility with Sea-ORM tests
+pub type Model = LogEntity;
 
-/// 验证表名是否安全（防止 SQL 注入）
-/// 只允许字母、数字、下划线，且必须以字母或下划线开头
-fn validate_table_name(name: &str) -> Result<String, InklogError> {
-    if name.is_empty() {
-        return Err(InklogError::DatabaseError(
-            "Table name cannot be empty".to_string(),
-        ));
-    }
-    if name.len() > 128 {
-        return Err(InklogError::DatabaseError(
-            "Table name too long".to_string(),
-        ));
-    }
-    // 检查首字符（防御性检查：确保字符串不为空）
-    let first_char = name
-        .chars()
-        .next()
-        .ok_or_else(|| InklogError::DatabaseError("Table name is empty".to_string()))?;
-    if !first_char.is_ascii_alphabetic() && first_char != '_' {
-        return Err(InklogError::DatabaseError(format!(
-            "Table name must start with letter or underscore, got: {}",
-            first_char
-        )));
-    }
-    // 检查所有字符
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(InklogError::DatabaseError(format!(
-            "Table name contains invalid characters: {}",
-            name
-        )));
-    }
-    Ok(name.to_string())
-}
-
-/// 验证分区名称格式（必须是 logs_YYYY_MM 格式）
-fn validate_partition_name(partition_name: &str) -> Result<String, InklogError> {
-    if !partition_name.starts_with("logs_") {
-        return Err(InklogError::DatabaseError(format!(
-            "Partition name must start with 'logs_', got: {}",
-            partition_name
-        )));
-    }
-    // 验证日期部分格式 YYYY_MM
-    let date_part = &partition_name[5..]; // 移除 "logs_" 前缀
-    if date_part.len() != 7 || date_part.chars().nth(4) != Some('_') {
-        return Err(InklogError::DatabaseError(format!(
-            "Invalid partition date format, expected YYYY_MM, got: {}",
-            date_part
-        )));
-    }
-    let year = &date_part[..4];
-    let month = &date_part[5..];
-    if !year.chars().all(|c| c.is_ascii_digit()) || year.parse::<u32>().is_err() {
-        return Err(InklogError::DatabaseError(format!(
-            "Invalid year in partition name: {}",
-            year
-        )));
-    }
-    if !month.chars().all(|c| c.is_ascii_digit()) || month.parse::<u32>().is_err() {
-        return Err(InklogError::DatabaseError(format!(
-            "Invalid month in partition name: {}",
-            month
-        )));
-    }
-    let month_num: u32 = month.parse().unwrap();
-    if month_num == 0 || month_num > 12 {
-        return Err(InklogError::DatabaseError(format!(
-            "Invalid month value in partition name: {}",
-            month_num
-        )));
-    }
-    Ok(partition_name.to_string())
-}
-
-/// 验证日期格式是否为有效的 YYYY-MM-DD 格式
-/// 防止通过日期字符串进行 SQL 注入
-fn validate_date_format(date_str: &str) -> Result<(), InklogError> {
-    // 检查格式：YYYY-MM-DD
-    if date_str.len() != 10 {
-        return Err(InklogError::DatabaseError(
-            "Date must be in YYYY-MM-DD format".to_string(),
-        ));
-    }
-
-    // 检查分隔符
-    if &date_str[4..5] != "-" || &date_str[7..8] != "-" {
-        return Err(InklogError::DatabaseError(
-            "Date must be in YYYY-MM-DD format with hyphens".to_string(),
-        ));
-    }
-
-    // 检查年份部分
-    let year = &date_str[0..4];
-    if !year.chars().all(|c| c.is_ascii_digit()) {
-        return Err(InklogError::DatabaseError(
-            "Year must be numeric".to_string(),
-        ));
-    }
-
-    // 检查月份部分
-    let month = &date_str[5..7];
-    if !month.chars().all(|c| c.is_ascii_digit()) {
-        return Err(InklogError::DatabaseError(
-            "Month must be numeric".to_string(),
-        ));
-    }
-    let month_num: u32 = month.parse().unwrap_or(0);
-    if !(1..=12).contains(&month_num) {
-        return Err(InklogError::DatabaseError(format!(
-            "Invalid month: {}",
-            month_num
-        )));
-    }
-
-    // 检查日期部分
-    let day = &date_str[8..10];
-    if !day.chars().all(|c| c.is_ascii_digit()) {
-        return Err(InklogError::DatabaseError(
-            "Day must be numeric".to_string(),
-        ));
-    }
-
-    // 使用 chrono 验证日期的有效性
-    chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-        .map_err(|_| InklogError::DatabaseError(format!("Invalid date: {}", date_str)))?;
-
-    Ok(())
-}
-
+#[cfg(feature = "dbnexus")]
 pub struct DatabaseSink {
     config: DatabaseSinkConfig,
     buffer: Vec<LogRecord>,
     last_flush: Instant,
-    last_archive_check: chrono::DateTime<chrono::Utc>,
-    last_partition_check: chrono::DateTime<chrono::Utc>,
-    rt: Runtime,
-    db: Option<DatabaseConnection>,
+    rt: tokio::runtime::Runtime,
+    pool: Option<Arc<DbPool>>,
     fallback_sink: Option<FileSink>,
     circuit_breaker: CircuitBreaker,
+    masker: Arc<DataMasker>,
+    stop: Arc<AtomicBool>,
 }
 
+#[cfg(feature = "dbnexus")]
 impl DatabaseSink {
     pub fn new(config: DatabaseSinkConfig) -> Result<Self, InklogError> {
-        // 使用多线程运行时以提高数据库吞吐量 (16x 性能提升)
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(std::cmp::max(2, num_cpus::get()))
-            .thread_name("inklog-db-worker")
-            .enable_all()
-            .build()
-            .map_err(InklogError::IoError)?;
-
         // Initialize fallback sink
         let fallback_config = FileSinkConfig {
             enabled: true,
@@ -297,625 +98,362 @@ impl DatabaseSink {
         };
         let fallback_sink = FileSink::new(fallback_config).ok();
 
-        let mut sink = Self {
-            config: config.clone(),
-            buffer: Vec::with_capacity(config.batch_size),
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(std::cmp::max(2, num_cpus::get()))
+            .thread_name("inklog-db-worker")
+            .enable_all()
+            .build()
+            .map_err(InklogError::IoError)?;
+
+        let pool = rt.block_on(async {
+            let pool = DbPool::new(&config.url)
+                .await
+                .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+            let session = pool
+                .get_session("admin")
+                .await
+                .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+            Self::ensure_table_exists(&session, &config)
+                .await
+                .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+            Ok::<_, InklogError>(pool)
+        })?;
+
+        Ok(Self {
+            config,
+            buffer: Vec::with_capacity(100),
             last_flush: Instant::now(),
-            last_archive_check: Utc::now(),
-            last_partition_check: Utc::now() - chrono::Duration::days(1),
             rt,
-            db: None,
+            pool: Some(Arc::new(pool)),
             fallback_sink,
-            circuit_breaker: CircuitBreaker::new(5, Duration::from_secs(30)),
-        };
-
-        let _ = sink.init_db(); // 不要因为初始化失败而导致整个系统崩溃，断路器会处理
-        Ok(sink)
+            circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),
+            masker: Arc::new(DataMasker::new()),
+            stop: Arc::new(AtomicBool::new(false)),
+        })
     }
 
-    fn init_db(&mut self) -> Result<(), InklogError> {
-        let url = self.config.url.clone();
-        let pool_size = self.config.pool_size;
-        let db = self
-            .rt
-            .block_on(async {
-                let mut opt = ConnectOptions::new(url);
-                opt.max_connections(pool_size)
-                    .min_connections(2)
-                    .connect_timeout(Duration::from_secs(5))
-                    .idle_timeout(Duration::from_secs(8));
+    async fn ensure_table_exists(session: &Session, config: &DatabaseSinkConfig) -> Result<()> {
+        let table_name = &config.table_name;
 
-                Database::connect(opt).await
-            })
-            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+        match config.driver {
+            DatabaseDriver::PostgreSQL => {
+                let create_sql = format!(
+                    r#"
+                    CREATE TABLE IF NOT EXISTS {table_name} (
+                        id BIGSERIAL,
+                        timestamp TIMESTAMPTZ NOT NULL,
+                        level TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        fields JSONB,
+                        file TEXT,
+                        line INTEGER,
+                        thread_id TEXT,
+                        PRIMARY KEY (id, timestamp)
+                    ) PARTITION BY RANGE (timestamp);
 
-        self.rt
-            .block_on(async {
-                let builder = db.get_database_backend();
-                let schema = Schema::new(builder);
-
-                match self.config.driver {
-                    DatabaseDriver::PostgreSQL => {
-                        let stmt =
-                            builder.build(schema.create_table_from_entity(Entity).if_not_exists());
-                        db.execute_unprepared(&stmt.sql)
-                            .await
-                            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-                    }
-                    DatabaseDriver::MySQL => {
-                        let create_table_sql = r#"
-                            CREATE TABLE IF NOT EXISTS `logs` (
-                                `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-                                `timestamp` DATETIME(3) NOT NULL,
-                                `level` VARCHAR(20) NOT NULL,
-                                `target` VARCHAR(255) NOT NULL,
-                                `message` TEXT NOT NULL,
-                                `fields` JSON,
-                                `file` VARCHAR(512),
-                                `line` INT,
-                                `thread_id` VARCHAR(100) NOT NULL,
-                                INDEX `idx_timestamp` (`timestamp`),
-                                INDEX `idx_level` (`level`),
-                                INDEX `idx_target` (`target`)
-                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        "#;
-                        let stmt = Statement::from_string(
-                            sea_orm::DatabaseBackend::MySql,
-                            create_table_sql,
-                        );
-                        db.execute_unprepared(&stmt.sql)
-                            .await
-                            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-                    }
-                    DatabaseDriver::SQLite => {
-                        let create_table_sql = r#"
-                            CREATE TABLE IF NOT EXISTS "logs" (
-                                "id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                                "timestamp" TEXT NOT NULL,
-                                "level" TEXT NOT NULL,
-                                "target" TEXT NOT NULL,
-                                "message" TEXT NOT NULL,
-                                "fields" TEXT,
-                                "file" TEXT,
-                                "line" INTEGER,
-                                "thread_id" TEXT NOT NULL
-                            )
-                        "#;
-                        let stmt = Statement::from_string(
-                            sea_orm::DatabaseBackend::Sqlite,
-                            create_table_sql,
-                        );
-                        db.execute_unprepared(&stmt.sql)
-                            .await
-                            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-                        let create_index_sql = r#"
-                            CREATE INDEX IF NOT EXISTS "idx_logs_timestamp" ON "logs" ("timestamp")
-                        "#;
-                        let stmt_index = Statement::from_string(
-                            sea_orm::DatabaseBackend::Sqlite,
-                            create_index_sql,
-                        );
-                        db.execute_unprepared(&stmt_index.sql)
-                            .await
-                            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-                    }
-                }
-
-                let stmt_archive = builder.build(
-                    schema
-                        .create_table_from_entity(ArchiveMetadataEntity)
-                        .if_not_exists(),
+                    CREATE INDEX IF NOT EXISTS {table_name}_timestamp_idx ON {table_name} (timestamp DESC);
+                    CREATE INDEX IF NOT EXISTS {table_name}_level_idx ON {table_name} (level);
+                    CREATE INDEX IF NOT EXISTS {table_name}_target_idx ON {table_name} (target);
+                    "#
                 );
-                db.execute_unprepared(&stmt_archive.sql)
-                    .await
-                    .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-                Ok::<(), InklogError>(())
-            })
-            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-        self.db = Some(db);
-        Ok(())
-    }
-
-    fn flush_buffer(&mut self) -> Result<(), InklogError> {
-        if self.buffer.is_empty() {
-            return Ok(());
-        }
-
-        // 动态调整批大小：如果最近有失败，减小批大小以提高成功率
-        let current_batch_size =
-            if self.circuit_breaker.state() == crate::sink::CircuitState::HalfOpen {
-                self.config.batch_size / 2
-            } else {
-                self.config.batch_size
-            };
-
-        // 只有在缓冲区大小小于当前批次大小且距离上次刷新时间小于刷新间隔时才跳过刷新
-        if self.buffer.len() < current_batch_size
-            && self.last_flush.elapsed() < Duration::from_millis(self.config.flush_interval_ms)
-        {
-            return Ok(());
-        }
-
-        // 检查断路器
-        if !self.circuit_breaker.can_execute() {
-            self.fallback_to_file()?;
-            self.buffer.clear();
-            self.last_flush = Instant::now();
-            return Ok(());
-        }
-
-        // Partition check and validation
-        let now = Utc::now();
-        let should_check_partition = now.date_naive() != self.last_partition_check.date_naive();
-        if should_check_partition {
-            self.last_partition_check = now;
-        }
-
-        // Pre-validate MySQL partition name before async block
-        let mysql_partition_valid = match self.config.driver {
+                session.execute_raw_ddl(&create_sql).await?;
+            }
             DatabaseDriver::MySQL => {
-                if should_check_partition {
-                    let partition_name = format!("logs_{}", now.format("%Y_%m"));
-                    partition_name
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || c == '_')
-                } else {
-                    true
-                }
+                let create_sql = format!(
+                    r#"
+                    CREATE TABLE IF NOT EXISTS {table_name} (
+                        id BIGINT AUTO_INCREMENT,
+                        timestamp DATETIME(3) NOT NULL,
+                        level VARCHAR(20) NOT NULL,
+                        target VARCHAR(255) NOT NULL,
+                        message TEXT NOT NULL,
+                        fields JSON,
+                        file VARCHAR(512),
+                        line INT,
+                        thread_id VARCHAR(128),
+                        PRIMARY KEY (id, timestamp),
+                        INDEX idx_timestamp (timestamp),
+                        INDEX idx_level (level),
+                        INDEX idx_target (target)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    "#
+                );
+                session.execute_raw_ddl(&create_sql).await?;
             }
-            _ => true,
-        };
+            DatabaseDriver::SQLite => {
+                // Create table
+                let create_table_sql = format!(
+                    r#"
+                    CREATE TABLE IF NOT EXISTS {table_name} (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        level TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        fields TEXT,
+                        file TEXT,
+                        line INTEGER,
+                        thread_id TEXT
+                    );
+                    "#
+                );
+                session.execute_raw_ddl(&create_table_sql).await?;
 
-        let mut success = false;
-        if let Some(db) = &self.db {
-            // 使用 drain() 直接消费 buffer 中的数据，避免克隆
-            let logs: Vec<ActiveModel> = self
-                .buffer
-                .drain(..)
-                .map(|r| ActiveModel {
-                    timestamp: Set(r.timestamp),
-                    level: Set(r.level),
-                    target: Set(r.target),
-                    message: Set(r.message),
-                    fields: Set(Some(
-                        serde_json::to_value(&r.fields).unwrap_or(serde_json::Value::Null),
-                    )),
-                    file: Set(r.file),
-                    line: Set(r.line.map(|l| l as i32)),
-                    thread_id: Set(r.thread_id),
-                    ..Default::default()
-                })
-                .collect();
-            let res = self.rt.block_on(async {
-                match self.config.driver {
-                    DatabaseDriver::PostgreSQL => {
-                        if should_check_partition {
-                            let partition_name = format!("logs_{}", now.format("%Y_%m"));
-                            // 验证分区名称安全性
-                            let validated_partition = match validate_partition_name(&partition_name) {
-                                Ok(name) => name,
-                                Err(e) => {
-                                    tracing::error!("Partition name validation failed: {}", e);
-                                    return Err(sea_orm::DbErr::Query(
-                                        sea_orm::RuntimeErr::Internal(e.to_string())
-                                    ));
-                                }
-                            };
+                // Create indexes (separate statements for SQLite)
+                let idx_timestamp = format!("CREATE INDEX IF NOT EXISTS {table_name}_timestamp_idx ON {table_name} (timestamp DESC)");
+                session.execute_raw_ddl(&idx_timestamp).await?;
 
-                            let start_date = now.format("%Y-%m-01").to_string();
-                            let next_month = if now.month() == 12 {
-                                format!("{}-01-01", now.year() + 1)
-                            } else {
-                                format!("{}-{:02}-01", now.year(), now.month() + 1)
-                            };
+                let idx_level = format!(
+                    "CREATE INDEX IF NOT EXISTS {table_name}_level_idx ON {table_name} (level)"
+                );
+                session.execute_raw_ddl(&idx_level).await?;
 
-                            // 验证表名安全性
-                            let validated_table = match validate_table_name(&self.config.table_name) {
-                                Ok(name) => name,
-                                Err(e) => {
-                                    tracing::error!("Table name validation failed: {}", e);
-                                    return Err(sea_orm::DbErr::Query(
-                                        sea_orm::RuntimeErr::Internal(e.to_string())
-                                    ));
-                                }
-                            };
-
-                            // 使用验证后的名称构建 SQL
-                            let quoted_table = format!("\"{}\"", validated_table);
-                            let quoted_partition = format!("\"{}\"", validated_partition);
-
-                            // 验证日期格式以防止 SQL 注入
-                            if let Err(e) = validate_date_format(&start_date) {
-                                return Err(sea_orm::DbErr::Query(
-                                    sea_orm::RuntimeErr::Internal(e.to_string())
-                                ));
-                            }
-                            if let Err(e) = validate_date_format(&next_month) {
-                                return Err(sea_orm::DbErr::Query(
-                                    sea_orm::RuntimeErr::Internal(e.to_string())
-                                ));
-                            }
-
-                            let sql = format!(
-                                "CREATE TABLE IF NOT EXISTS {} PARTITION OF {} FOR VALUES FROM ('{}') TO ('{}')",
-                                quoted_partition, quoted_table, start_date, next_month
-                            );
-                            let stmt = Statement::from_string(db.get_database_backend(), sql);
-                            let _ = db.execute_unprepared(&stmt.sql).await;
-                        }
-                    }
-                    DatabaseDriver::MySQL => {
-                        if should_check_partition {
-                            let partition_name = format!("logs_{}", now.format("%Y_%m"));
-                            let start_date = now.format("%Y-%m-01").to_string();
-
-                            // 验证已在 async 块外部完成
-                            if !mysql_partition_valid {
-                                tracing::error!("Invalid partition name: {}", partition_name);
-                                self.circuit_breaker.record_failure();
-                                success = false;
-                            } else {
-                                // 使用验证后的分区名称
-                                let validated_partition = validate_partition_name(&partition_name)
-                                    .unwrap_or_else(|_| {
-                                        tracing::error!("Invalid partition name: {}", partition_name);
-                                        partition_name.clone()
-                                    });
-
-                                // MySQL 使用反引号引用标识符
-                                // 验证日期格式以防止 SQL 注入
-                                if let Err(e) = validate_date_format(&start_date) {
-                                    return Err(sea_orm::DbErr::Query(
-                                        sea_orm::RuntimeErr::Internal(e.to_string())
-                                    ));
-                                }
-
-                                let partition_sql = format!(
-                                    "CREATE TABLE IF NOT EXISTS `{}` PARTITION OF `logs` FOR VALUES IN (TO_DAYS('{}'))",
-                                    validated_partition,
-                                    start_date
-                                );
-                                let stmt = Statement::from_string(sea_orm::DatabaseBackend::MySql, partition_sql);
-                                let _ = db.execute_unprepared(&stmt.sql).await;
-                            }
-                        }
-                    }
-                    DatabaseDriver::SQLite => {}
-                }
-                Entity::insert_many(logs).exec(db).await
-            });
-
-            match res {
-                Ok(_) => {
-                    self.circuit_breaker.record_success();
-                    success = true;
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "Database insert failed");
-                    self.circuit_breaker.record_failure();
-                    // 尝试重新连接（如果是半开启状态或连接丢失）
-                    let _ = self.init_db();
-                }
+                let idx_target = format!(
+                    "CREATE INDEX IF NOT EXISTS {table_name}_target_idx ON {table_name} (target)"
+                );
+                session.execute_raw_ddl(&idx_target).await?;
             }
         }
 
-        if !success {
-            self.fallback_to_file()?;
-        }
-
-        self.buffer.clear();
-        self.last_flush = Instant::now();
         Ok(())
     }
-
-    fn fallback_to_file(&mut self) -> Result<(), InklogError> {
-        if let Some(sink) = &mut self.fallback_sink {
-            for record in &self.buffer {
-                let _ = sink.write(record);
-            }
-        }
-        Ok(())
-    }
-
-    // S3 Archive Logic - Moved to write() to avoid borrow checker issues
 }
 
-impl LogSink for DatabaseSink {
+#[cfg(feature = "dbnexus")]
+impl crate::sink::LogSink for DatabaseSink {
     fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
-        self.buffer.push(record.clone());
+        if !self.circuit_breaker.can_execute() {
+            if let Some(ref mut sink) = self.fallback_sink {
+                let _ = sink.write(record);
+            }
+            return Ok(());
+        }
+
+        let masked_record = LogRecord {
+            message: self.masker.mask(&record.message),
+            ..record.clone()
+        };
+
+        self.buffer.push(masked_record.clone());
 
         if self.buffer.len() >= self.config.batch_size
-            || self.last_flush.elapsed() >= Duration::from_millis(self.config.flush_interval_ms)
+            || self.last_flush.elapsed() > Duration::from_millis(self.config.flush_interval_ms)
         {
-            if let Err(e) = self.flush_buffer() {
-                tracing::error!(error = ?e, "Failed to flush database buffer");
-            }
-        }
-
-        // Periodically check for archive - only if S3 archive is configured
-        if self.config.archive_to_s3 {
-            let now = Utc::now();
-            // Check if it's 2 AM and we haven't checked today
-            if now.hour() == 2 && self.last_archive_check.date_naive() != now.date_naive() {
-                self.last_archive_check = now;
-                let db_opt = self.db.clone();
-                let config = self.config.clone();
-
-                if let Some(db) = db_opt {
-                    let res = self.rt.block_on(async move {
-                        // Logic from archive_logs adapted to not use self
-                        let days = config.archive_after_days as i64;
-                        let cutoff = Utc::now() - chrono::Duration::days(days);
-
-                        let logs = Entity::find()
-                            .filter(Column::Timestamp.lt(cutoff))
-                            .limit(1000)
-                            .all(&db)
-                            .await
-                            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-                        if logs.is_empty() {
-                            return Ok(());
-                        }
-
-                        // Convert logs to Parquet format
-                        let parquet_data = convert_logs_to_parquet(&logs, &config.parquet_config).map_err(|e| {
-                            InklogError::SerializationError(serde_json::Error::io(
-                                std::io::Error::other(e.to_string()),
-                            ))
-                        })?;
-
-                        let file_size = parquet_data.len() as i64;
-
-                        #[cfg(feature = "aws")]
-                        {
-                            if let (Some(bucket), Some(region)) =
-                                (&config.s3_bucket, &config.s3_region)
-                            {
-                                let aws_config = aws_config::from_env()
-                                    .region(aws_types::region::Region::new(region.clone()))
-                                    .load()
-                                    .await;
-                                let client = aws_sdk_s3::Client::new(&aws_config);
-                                let key = format!(
-                                    "{}/{}/logs_{}.parquet",
-                                    Utc::now().format("%Y"),
-                                    Utc::now().format("%m"),
-                                    Utc::now().format("%d_%H%M%S")
-                                );
-
-                                client
-                                    .put_object()
-                                    .bucket(bucket)
-                                    .key(&key)
-                                    .body(parquet_data.into())
-                                    .storage_class(aws_sdk_s3::types::StorageClass::Glacier)
-                                    .send()
-                                    .await
-                                    .map_err(|e| InklogError::S3Error(e.to_string()))?;
-
-                                let meta = ArchiveMetadataActiveModel {
-                                    archive_date: Set(Utc::now()),
-                                    s3_key: Set(key),
-                                    record_count: Set(logs.len() as i64),
-                                    file_size: Set(file_size),
-                                    status: Set("SUCCESS".to_string()),
-                                    ..Default::default()
-                                };
-                                ArchiveMetadataEntity::insert(meta)
-                                    .exec(&db)
-                                    .await
-                                    .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-                                let ids: Vec<i64> = logs.iter().map(|l| l.id).collect();
-                                Entity::delete_many()
-                                    .filter(Column::Id.is_in(ids))
-                                    .exec(&db)
-                                    .await
-                                    .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-                            }
-                        }
-
-                        #[cfg(not(feature = "aws"))]
-                        {
-                            // 本地归档：保存Parquet文件到本地目录
-                            let archive_dir = std::path::Path::new("logs/archive");
-                            if let Err(e) = std::fs::create_dir_all(archive_dir) {
-                                tracing::error!(error = %e, "Failed to create archive directory");
-                            } else {
-                                let filename =
-                                    format!("logs_{}.parquet", Utc::now().format("%Y%m%d_%H%M%S"));
-                                let filepath = archive_dir.join(&filename);
-                                if let Err(e) = std::fs::write(&filepath, &parquet_data) {
-                                    tracing::error!(error = %e, "Failed to write archive file");
-                                } else {
-                                    let meta = ArchiveMetadataActiveModel {
-                                        archive_date: Set(Utc::now()),
-                                        s3_key: Set(format!("local/{}", filename)),
-                                        record_count: Set(logs.len() as i64),
-                                        file_size: Set(file_size),
-                                        status: Set("LOCAL_SUCCESS".to_string()),
-                                        ..Default::default()
-                                    };
-                                    if let Err(e) = ArchiveMetadataEntity::insert(meta)
-                                        .exec(&db)
-                                        .await
-                                        .map_err(|e| InklogError::DatabaseError(e.to_string()))
-                                    {
-                                        tracing::error!(error = %e, "Failed to insert archive metadata");
-                                    }
-
-                                    let ids: Vec<i64> = logs.iter().map(|l| l.id).collect();
-                                    if let Err(e) = Entity::delete_many()
-                                        .filter(Column::Id.is_in(ids))
-                                        .exec(&db)
-                                        .await
-                                        .map_err(|e| InklogError::DatabaseError(e.to_string()))
-                                    {
-                                        tracing::error!(error = %e, "Failed to delete archived logs");
-                                    }
-                                }
-                            }
-                        }
-                        Ok::<(), InklogError>(())
-                    });
-
-                    if let Err(e) = res {
-                        tracing::error!(error = %e, "Archive operation failed");
-                    }
+            if let Err(e) = self.flush() {
+                self.circuit_breaker.record_failure();
+                if let Some(ref mut sink) = self.fallback_sink {
+                    let _ = sink.write(record);
                 }
+                return Err(e);
             }
         }
 
+        self.circuit_breaker.record_success();
         Ok(())
     }
 
     fn flush(&mut self) -> Result<(), InklogError> {
-        self.flush_buffer()
-    }
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
 
-    fn is_healthy(&self) -> bool {
-        self.db.is_some()
+        let records = std::mem::take(&mut self.buffer);
+        self.last_flush = Instant::now();
+
+        if let Some(ref pool) = self.pool {
+            let pool_clone = pool.clone();
+            self.rt.block_on(async {
+                if let Err(e) = write_batch_to_db(&pool_clone, &self.config, &records).await {
+                    self.buffer = records;
+                    Err(e)
+                } else {
+                    Ok(())
+                }
+            })?;
+        }
+
+        Ok(())
     }
 
     fn shutdown(&mut self) -> Result<(), InklogError> {
-        self.flush_buffer()?;
-        if let Some(db) = self.db.take() {
-            self.rt.block_on(async move {
-                let _ = db.close().await;
-            });
-        }
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = self.flush();
+        tracing::info!("Database sink shutdown complete");
         Ok(())
     }
 }
 
-/// Convert logs to Parquet format using Arrow schema
-pub fn convert_logs_to_parquet(
-    logs: &[Model],
-    config: &crate::config::ParquetConfig,
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    use arrow_array::{ArrayRef, Int64Array, RecordBatch, StringArray};
-    use arrow_schema::{DataType, Field, Schema};
-    use parquet::arrow::ArrowWriter;
-    use parquet::basic::{Compression, Encoding};
-    use parquet::file::properties::WriterProperties;
-    use std::io::Cursor;
-    use std::sync::Arc;
+#[cfg(feature = "dbnexus")]
+async fn write_batch_to_db(
+    pool: &DbPool,
+    config: &DatabaseSinkConfig,
+    records: &[LogRecord],
+) -> Result<usize, InklogError> {
+    if records.is_empty() {
+        return Ok(0);
+    }
 
-    let encoding = match config.encoding.to_uppercase().as_str() {
-        "DICTIONARY" => Encoding::RLE_DICTIONARY,
-        "RLE" => Encoding::RLE,
-        _ => Encoding::PLAIN,
+    let session = pool
+        .get_session("admin")
+        .await
+        .map_err(|e: dbnexus::error::DbError| InklogError::DatabaseError(e.to_string()))?;
+    let mut inserted = 0;
+
+    let target_table = match config.driver {
+        DatabaseDriver::PostgreSQL => {
+            let first_ts = records
+                .first()
+                .map(|r| r.timestamp)
+                .unwrap_or_else(chrono::Utc::now);
+            get_partition_for_timestamp(&first_ts, config)
+        }
+        _ => config.table_name.clone(),
     };
 
-    let compression = Compression::ZSTD(Default::default());
-    let writer_props = WriterProperties::builder()
-        .set_compression(compression)
-        .set_encoding(encoding)
-        .set_max_row_group_size(config.max_row_group_size)
-        .build();
+    for record in records {
+        let sql = format!(
+            "INSERT INTO {} (timestamp, level, target, message, fields, file, line, thread_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            target_table
+        );
 
-    let include_all = config.include_fields.is_empty();
-    let include_fields: std::collections::HashSet<String> =
-        config.include_fields.iter().cloned().collect();
+        let params: Vec<sea_orm::Value> = vec![
+            sea_orm::Value::from(record.timestamp.to_rfc3339()),
+            sea_orm::Value::from(record.level.to_string()),
+            sea_orm::Value::from(record.target.clone()),
+            sea_orm::Value::from(record.message.clone()),
+            sea_orm::Value::from(serde_json::to_string(&record.fields).ok()),
+            sea_orm::Value::from(record.file.clone()),
+            sea_orm::Value::from(record.line.map(|l| l as i64)),
+            sea_orm::Value::from(record.thread_id.clone()),
+        ];
 
-    let mut fields = Vec::new();
-    let mut arrays: Vec<ArrayRef> = Vec::new();
-
-    if include_all || include_fields.contains("id") {
-        let mut id_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            id_builder.push(log.id);
+        if session.execute_paramized(&sql, params).await.is_ok() {
+            inserted += 1;
         }
-        fields.push(Field::new("id", DataType::Int64, false));
-        arrays.push(Arc::new(Int64Array::from(id_builder)) as ArrayRef);
     }
 
-    if include_all || include_fields.contains("timestamp") {
-        let mut timestamp_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            timestamp_builder.push(log.timestamp.to_rfc3339());
+    Ok(inserted)
+}
+
+#[cfg(feature = "dbnexus")]
+fn get_partition_for_timestamp(ts: &DateTime<Utc>, config: &DatabaseSinkConfig) -> String {
+    match config.partition {
+        crate::config::PartitionStrategy::Monthly => {
+            format!("{}_{:04}_{:02}", config.table_name, ts.year(), ts.month())
         }
-        fields.push(Field::new("timestamp", DataType::Utf8, false));
-        arrays.push(Arc::new(StringArray::from(timestamp_builder)) as ArrayRef);
-    }
-
-    if include_all || include_fields.contains("level") {
-        let mut level_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            level_builder.push(log.level.clone());
+        crate::config::PartitionStrategy::Yearly => {
+            format!("{}_{:04}", config.table_name, ts.year())
         }
-        fields.push(Field::new("level", DataType::Utf8, false));
-        arrays.push(Arc::new(StringArray::from(level_builder)) as ArrayRef);
     }
+}
 
-    if include_all || include_fields.contains("target") {
-        let mut target_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            target_builder.push(log.target.clone());
-        }
-        fields.push(Field::new("target", DataType::Utf8, false));
-        arrays.push(Arc::new(StringArray::from(target_builder)) as ArrayRef);
-    }
+/// 将 LogEntity 转换为 Parquet 格式
+#[cfg(feature = "dbnexus")]
+pub fn convert_logs_to_parquet(
+    logs: &[LogEntity],
+    _config: &crate::config::ParquetConfig,
+) -> Result<Vec<u8>, String> {
+    use arrow_array::{Date64Array, Int32Array, Int64Array, RecordBatch, StringArray};
+    use arrow_schema::{DataType, Field, Schema};
+    use std::sync::Arc;
 
-    if include_all || include_fields.contains("message") {
-        let mut message_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            message_builder.push(log.message.clone());
-        }
-        fields.push(Field::new("message", DataType::Utf8, false));
-        arrays.push(Arc::new(StringArray::from(message_builder)) as ArrayRef);
-    }
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("timestamp", DataType::Date64, false),
+        Field::new("level", DataType::Utf8, false),
+        Field::new("target", DataType::Utf8, false),
+        Field::new("message", DataType::Utf8, false),
+        Field::new("fields", DataType::Utf8, true),
+        Field::new("file", DataType::Utf8, true),
+        Field::new("line", DataType::Int32, true),
+        Field::new("thread_id", DataType::Utf8, true),
+    ]);
 
-    if include_all || include_fields.contains("fields") {
-        let mut fields_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            fields_builder.push(serde_json::to_string(&log.fields).ok());
-        }
-        fields.push(Field::new("fields", DataType::Utf8, true));
-        arrays.push(Arc::new(StringArray::from(fields_builder)) as ArrayRef);
-    }
+    let ids: Vec<i64> = logs.iter().map(|l| l.id).collect();
+    let timestamps: Vec<i64> = logs
+        .iter()
+        .map(|l| l.timestamp.timestamp_millis())
+        .collect();
+    let levels: Vec<&str> = logs.iter().map(|l| l.level.as_str()).collect();
+    let targets: Vec<&str> = logs.iter().map(|l| l.target.as_str()).collect();
+    let messages: Vec<&str> = logs.iter().map(|l| l.message.as_str()).collect();
+    let fields: Vec<Option<String>> = logs
+        .iter()
+        .map(|l| l.fields.as_ref().map(|v| v.to_string()))
+        .collect();
+    let files: Vec<Option<&str>> = logs.iter().map(|l| l.file.as_deref()).collect();
+    let lines: Vec<Option<i32>> = logs.iter().map(|l| l.line).collect();
+    let thread_ids: Vec<Option<&str>> = logs.iter().map(|l| l.thread_id.as_deref()).collect();
 
-    if include_all || include_fields.contains("file") {
-        let mut file_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            file_builder.push(log.file.clone());
-        }
-        fields.push(Field::new("file", DataType::Utf8, true));
-        arrays.push(Arc::new(StringArray::from(file_builder)) as ArrayRef);
-    }
-
-    if include_all || include_fields.contains("line") {
-        let mut line_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            line_builder.push(log.line.map(|l| l as i64));
-        }
-        fields.push(Field::new("line", DataType::Int64, true));
-        arrays.push(Arc::new(Int64Array::from(line_builder)) as ArrayRef);
-    }
-
-    if include_all || include_fields.contains("thread_id") {
-        let mut thread_id_builder = Vec::with_capacity(logs.len());
-        for log in logs {
-            thread_id_builder.push(log.thread_id.clone());
-        }
-        fields.push(Field::new("thread_id", DataType::Utf8, false));
-        arrays.push(Arc::new(StringArray::from(thread_id_builder)) as ArrayRef);
-    }
-
-    let schema = Arc::new(Schema::new(fields));
-
-    let batch = RecordBatch::try_new(schema.clone(), arrays)?;
+    let batch = RecordBatch::try_new(
+        Arc::new(schema),
+        vec![
+            Arc::new(Int64Array::from(ids)),
+            Arc::new(Date64Array::from(timestamps)),
+            Arc::new(StringArray::from(levels)),
+            Arc::new(StringArray::from(targets)),
+            Arc::new(StringArray::from(messages)),
+            Arc::new(StringArray::from(fields)),
+            Arc::new(StringArray::from(files)),
+            Arc::new(Int32Array::from(lines)),
+            Arc::new(StringArray::from(thread_ids)),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
 
     let mut buffer = Vec::new();
-    let cursor = Cursor::new(&mut buffer);
-
-    let mut writer = ArrowWriter::try_new(cursor, schema, Some(writer_props))?;
-    writer.write(&batch)?;
-    writer.close()?;
+    let mut writer = parquet::arrow::ArrowWriter::try_new(
+        std::io::Cursor::new(&mut buffer),
+        batch.schema(),
+        None,
+    )
+    .map_err(|e| e.to_string())?;
+    writer.write(&batch).map_err(|e| e.to_string())?;
+    writer.close().map_err(|e| e.to_string())?;
 
     Ok(buffer)
 }
+
+#[cfg(feature = "dbnexus")]
+impl fmt::Display for DatabaseSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DatabaseSink({})", self.config.name)
+    }
+}
+
+#[cfg(not(feature = "dbnexus"))]
+mod db_nexus_disabled {
+    use super::*;
+
+    #[derive(Clone, Debug)]
+    pub struct DatabaseSink;
+
+    impl DatabaseSink {
+        pub fn new(_config: DatabaseSinkConfig) -> Result<Self, InklogError> {
+            Ok(Self)
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct LogEntity;
+
+    impl LogEntity {
+        pub fn from_log_record(_record: &LogRecord) -> Self {
+            Self
+        }
+    }
+
+    pub fn convert_logs_to_parquet(
+        _logs: &[LogEntity],
+        _config: &crate::config::ParquetConfig,
+    ) -> Result<Vec<u8>, String> {
+        Ok(Vec::new())
+    }
+
+    /// Type alias for backward compatibility
+    pub type Model = LogEntity;
+}
+
+#[cfg(not(feature = "dbnexus"))]
+pub use db_nexus_disabled::*;

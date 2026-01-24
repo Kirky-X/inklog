@@ -6,20 +6,28 @@
 //! S3 Archive with Database Integration Example
 //!
 //! Demonstrates integrating S3 archive with database logging.
+//! Note: dbnexus is built on top of Sea-ORM, so both APIs are available.
+//! This example uses dbnexus API (recommended), but Sea-ORM can also be used
+//! when dbnexus feature is disabled.
+
+use std::error::Error;
 
 use inklog::config::DatabaseDriver;
 use inklog::{archive::ArchiveServiceBuilder, InklogConfig, LoggerManager};
-use sea_orm::Database;
-use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("S3 Archive with Database Integration Example");
+    println!("(Using dbnexus - which wraps Sea-ORM internally)\n");
 
     // Create in-memory database for demo
     let database_url = "sqlite::memory:";
-    let db_connection = Database::connect(database_url).await?;
-    println!("  Database: connected");
+
+    // 使用 dbnexus 连接池（底层基于 Sea-ORM）
+    // dbnexus is built on Sea-ORM, so sea-orm types are also available
+    let db_pool = dbnexus::pool::DbPool::new(database_url).await?;
+    let session = db_pool.get_session("admin").await?;
+    println!("Database: connected via dbnexus (Sea-ORM powered)");
 
     let config = InklogConfig {
         global: inklog::config::GlobalConfig {
@@ -56,24 +64,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let manager = LoggerManager::with_config(config).await?;
-    println!("  LoggerManager: initialized");
+    println!("LoggerManager: initialized");
 
     // Start archive service
     manager.start_archive_service().await?;
-    println!("  Archive service: started");
+    println!("Archive service: started\n");
 
     // Record sample logs to database
-    println!("\nRecording sample logs:");
+    println!("Recording sample logs:");
     for i in 0..10 {
         log::info!("Sample log message #{i}");
     }
-    println!("  Sample logs recorded");
+    println!("Sample logs recorded\n");
 
     // Wait for logs to flush to database
     tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
 
-    // Direct ArchiveService with Database
-    println!("\nDirect ArchiveService with Database:");
+    // Direct ArchiveService with dbnexus Session
+    println!("Direct ArchiveService with Database:");
     let archive_config = inklog::S3ArchiveConfig {
         enabled: true,
         bucket: "demo-archive-bucket".to_string(),
@@ -89,15 +97,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let archive_service = ArchiveServiceBuilder::new()
         .config(archive_config)
-        .database_connection(db_connection)
+        .database_session(session)
         .build()
         .await?;
 
-    println!("    Bucket: {}", archive_service.bucket());
-    println!("    Region: {}", archive_service.region());
+    println!("  Bucket: {}", archive_service.bucket());
+    println!("  Region: {}\n", archive_service.region());
 
     // Manual archive demonstration
-    println!("\nManual archive demonstration:");
+    println!("Manual archive demonstration:");
     match manager.trigger_archive().await {
         Ok(archive_key) => println!("  Archive: {archive_key}"),
         Err(e) => println!("  Archive skipped (expected): {e}"),
@@ -112,7 +120,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Stop archive service
     manager.stop_archive_service().await?;
-    println!("\nS3 archive with database example completed");
+    println!("\nS3 archive with database example completed!");
+    println!("Note: S3 operations require valid AWS credentials and bucket configuration");
 
     Ok(())
 }

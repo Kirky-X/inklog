@@ -11,13 +11,14 @@
 use crate::config::FileSinkConfig;
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
-use crate::sink::LogSink;
+use crate::sink::{circuit_breaker, LogSink};
 use aes_gcm::aead::Aead;
 use aes_gcm::KeyInit;
 use bytes::BytesMut;
-use chrono::{Datelike, DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,139 +26,19 @@ use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 use tracing::{debug, error, info, warn};
 
-/// 断路器状态
-#[derive(Debug, Clone, PartialEq)]
-pub enum CircuitState {
-    Closed,      // 正常状态
-    Open,        // 故障状态，请求快速失败
-    HalfOpen,    // 半开状态，尝试恢复
-}
-
-/// 断路器配置
-#[derive(Debug, Clone)]
-pub struct CircuitBreakerConfig {
-    pub failure_threshold: u32,    // 失败次数阈值
-    pub success_threshold: u32,    // 半开状态下成功次数阈值
-    pub timeout: StdDuration,      // 超时时间
-}
-
-impl Default for CircuitBreakerConfig {
-    fn default() -> Self {
-        Self {
-            failure_threshold: 5,
-            success_threshold: 3,
-            timeout: StdDuration::from_secs(30),
-        }
-    }
-}
-
-/// 断路器实现
-#[derive(Debug)]
-pub struct CircuitBreaker {
-    state: Arc<std::sync::Mutex<CircuitState>>,
-    failure_count: Arc<std::sync::Mutex<u32>>,
-    success_count: Arc<std::sync::Mutex<u32>>,
-    last_failure: Arc<std::sync::Mutex<Option<Instant>>>,
-    config: CircuitBreakerConfig,
-}
-
-impl CircuitBreaker {
-    pub fn new(failure_threshold: u32, timeout: StdDuration) -> Self {
-        Self {
-            state: Arc::new(Mutex::new(CircuitState::Closed)),
-            failure_count: Arc::new(Mutex::new(0)),
-            success_count: Arc::new(Mutex::new(0)),
-            last_failure: Arc::new(Mutex::new(None)),
-            config: CircuitBreakerConfig {
-                failure_threshold,
-                success_threshold: 3,
-                timeout,
-            },
-        }
-    }
-
-    pub fn state(&self) -> CircuitState {
-        self.state.lock().unwrap().clone()
-    }
-
-    /// 检查是否可以执行操作
-    pub fn can_execute(&self) -> bool {
-        let state = self.state.lock().unwrap();
-        match *state {
-            CircuitState::Closed => true,
-            CircuitState::Open => {
-                // 检查是否超时
-                let last_failure = self.last_failure.lock().unwrap();
-                if let Some(time) = *last_failure {
-                    if time.elapsed() >= self.config.timeout {
-                        // 超时，进入半开状态
-                        drop(last_failure);
-                        let mut state = self.state.lock().unwrap();
-                        *state = CircuitState::HalfOpen;
-                        *self.success_count.lock().unwrap() = 0;
-                        return true;
-                    }
-                }
-                false
-            }
-            CircuitState::HalfOpen => true,
-        }
-    }
-
-    /// 记录成功
-    pub fn record_success(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        let mut success_count = self.success_count.lock().unwrap();
-
-        match *state {
-            CircuitState::HalfOpen => {
-                *success_count += 1;
-                if *success_count >= self.config.success_threshold {
-                    *state = CircuitState::Closed;
-                    *self.failure_count.lock().unwrap() = 0;
-                    info!("Circuit breaker closed (recovered)");
-                }
-            }
-            CircuitState::Open => {
-                // 意外的成功，重置
-                *state = CircuitState::Closed;
-                *self.failure_count.lock().unwrap() = 0;
-            }
-            CircuitState::Closed => {
-                // 成功，重置失败计数
-                *self.failure_count.lock().unwrap() = 0;
-            }
-        }
-    }
-
-    /// 记录失败
-    pub fn record_failure(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        let mut failure_count = self.failure_count.lock().unwrap();
-        let mut last_failure = self.last_failure.lock().unwrap();
-
-        *last_failure = Some(Instant::now());
-        *failure_count += 1;
-
-        match *state {
-            CircuitState::HalfOpen => {
-                *state = CircuitState::Open;
-                warn!("Circuit breaker opened (failure in half-open state)");
-            }
-            CircuitState::Closed => {
-                if *failure_count >= self.config.failure_threshold {
-                    *state = CircuitState::Open;
-                    warn!("Circuit breaker opened after {} failures", *failure_count);
-                }
-            }
-            CircuitState::Open => {
-                // 已经是打开状态，更新失败时间
-            }
-        }
-    }
-}
+// 类型别名，保持向后兼容
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 
 /// 文件日志接收器
+///
+/// 提供基于文件的日志输出功能，支持：
+/// - 自动日志轮转（按大小和时间）
+/// - 日志文件压缩（支持 ZSTD、GZIP、Brotli）
+/// - AES-256-GCM 加密
+/// - 作为 DatabaseSink 的回退 sink（fallback）
+///
+/// FileSink 是 Inklog 的核心 sink 之一，用于将日志持久化到文件系统。
+/// 当数据库不可用时，DatabaseSink 会自动降级使用 FileSink 作为备用方案。
 pub struct FileSink {
     /// 配置
     config: FileSinkConfig,
@@ -193,6 +74,7 @@ pub struct FileSink {
     shutdown_flag: Arc<AtomicBool>,
 }
 
+/// FileSink 的实现，包含所有文件日志操作的核心逻辑
 impl FileSink {
     /// Creates a new FileSink with the given configuration.
     pub fn new(config: FileSinkConfig) -> Result<Self, InklogError> {
@@ -217,7 +99,7 @@ impl FileSink {
             last_rotation_date: None,
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::with_capacity(config.batch_size),
             last_flush_time: Instant::now(),
             timer_handle: None,
@@ -298,7 +180,9 @@ impl FileSink {
 
         let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key)
             .map_err(|_| {
-                InklogError::EncryptionError("Invalid base64 encoding in encryption key".to_string())
+                InklogError::EncryptionError(
+                    "Invalid base64 encoding in encryption key".to_string(),
+                )
             })?;
 
         let key_bytes = BytesMut::from(&decoded[..]);
@@ -327,12 +211,7 @@ impl FileSink {
         {
             Ok(file) => {
                 self.current_file = Some(file);
-                self.current_size = self
-                    .config
-                    .path
-                    .metadata()
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                self.current_size = self.config.path.metadata().map(|m| m.len()).unwrap_or(0);
                 debug!(
                     "Opened log file: {} (size: {} bytes)",
                     self.config.path.display(),
@@ -378,7 +257,7 @@ impl FileSink {
                 let mut last_cleanup = LAST_CLEANUP.lock().unwrap();
                 let now = Instant::now();
 
-                if last_cleanup.map_or(true, |t| now.duration_since(t) >= cleanup_interval) {
+                if last_cleanup.is_none_or(|t| now.duration_since(t) >= cleanup_interval) {
                     // 执行清理
                     if let Err(e) = Self::perform_cleanup(&config, &path) {
                         error!("Cleanup failed: {}", e);
@@ -393,7 +272,15 @@ impl FileSink {
     }
 
     /// 清理旧的日志文件
-    fn perform_cleanup(config: &FileSinkConfig, log_path: &PathBuf) -> Result<(), InklogError> {
+    ///
+    /// 根据 retention_days 和 max_total_size 配置自动清理过期日志。
+    /// 此方法在后台定期调用，也可手动触发。
+    ///
+    /// # Errors
+    ///
+    /// 返回文件系统操作可能产生的错误
+    #[allow(dead_code)]
+    fn perform_cleanup(config: &FileSinkConfig, log_path: &Path) -> Result<(), InklogError> {
         if let Some(parent) = log_path.parent() {
             let entries: Result<Vec<_>, _> = fs::read_dir(parent)?.collect();
 
@@ -436,7 +323,8 @@ impl FileSink {
                             }
                         }
                     } else if expired_count > 0 {
-                        let to_delete = (entries.len() as i32 - config.keep_files as i32).max(0) as usize;
+                        let to_delete =
+                            (entries.len() as i32 - config.keep_files as i32).max(0) as usize;
                         for entry in entries.into_iter().take(to_delete) {
                             let _ = fs::remove_file(entry.path());
                         }
@@ -458,8 +346,8 @@ impl FileSink {
 
                     // 获取块大小
                     let block_size = stat.block_size() as u64;
-                    let total_bytes = total_blocks as u64 * block_size;
-                    let available_bytes = available_blocks as u64 * block_size;
+                    let total_bytes = total_blocks * block_size;
+                    let available_bytes = available_blocks * block_size;
 
                     return Ok((total_bytes, available_bytes));
                 }
@@ -491,11 +379,13 @@ impl FileSink {
                 Some(next_naive.and_utc())
             }
             "weekly" => {
-                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::weeks(1);
+                let next_naive =
+                    now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::weeks(1);
                 Some(next_naive.and_utc())
             }
             "monthly" => {
-                let next_naive = (now.date_naive() + chrono::Duration::days(1)).and_hms_opt(0, 0, 0)?;
+                let next_naive =
+                    (now.date_naive() + chrono::Duration::days(1)).and_hms_opt(0, 0, 0)?;
                 Some(next_naive.and_utc())
             }
             _ => {
@@ -532,6 +422,14 @@ impl FileSink {
     }
 
     /// 清理旧的日志文件
+    ///
+    /// 根据 retention_days 和 max_total_size 配置自动清理过期日志。
+    /// 此方法在后台定期调用，也可手动触发。
+    ///
+    /// # Errors
+    ///
+    /// 返回文件系统操作可能产生的错误
+    #[allow(dead_code)]
     fn cleanup_old_logs(&self) -> Result<(), InklogError> {
         if let Some(parent) = self.config.path.parent() {
             let entries: Result<Vec<_>, _> = fs::read_dir(parent)?.collect();
@@ -575,7 +473,8 @@ impl FileSink {
                             }
                         }
                     } else if expired_count > 0 {
-                        let to_delete = (entries.len() as i32 - self.config.keep_files as i32).max(0) as usize;
+                        let to_delete =
+                            (entries.len() as i32 - self.config.keep_files as i32).max(0) as usize;
                         for entry in entries.into_iter().take(to_delete) {
                             let _ = fs::remove_file(entry.path());
                         }
@@ -625,6 +524,16 @@ impl FileSink {
     }
 
     /// 停止轮转定时器
+    ///
+    /// 在 sink 关闭时调用，确保定时器线程正确停止。
+    /// 此方法是优雅关闭流程的一部分。
+    ///
+    /// # Notes
+    ///
+    /// - 设置 shutdown_flag 以信号通知线程停止
+    /// - 等待 timer_handle 线程完成
+    /// - 清理 rotation_timer 状态
+    #[allow(dead_code)]
     fn stop_rotation_timer(&mut self) {
         // Signal shutdown to the timer thread
         self.shutdown_flag.store(true, Ordering::Relaxed);
@@ -675,6 +584,10 @@ impl FileSink {
         }
 
         self.last_flush_time = Instant::now();
+
+        // 批量写入后检查是否需要旋转
+        self.check_rotation()?;
+
         Ok(())
     }
 
@@ -715,7 +628,10 @@ impl FileSink {
             if let Err(e) = self.encrypt_file(&compressed_path, &encrypted_path) {
                 error!("Encryption failed: {}", e);
                 // 加密失败，保留压缩文件
-                let _ = fs::rename(&compressed_path, encrypted_path.with_extension("zst.unencrypted"));
+                let _ = fs::rename(
+                    &compressed_path,
+                    encrypted_path.with_extension("zst.unencrypted"),
+                );
                 return Err(e);
             }
             let _ = fs::remove_file(&compressed_path);
@@ -734,9 +650,8 @@ impl FileSink {
 
         // 获取密钥
         let key_bytes = self.get_encryption_key()?;
-        let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| {
-            InklogError::EncryptionError(format!("Invalid key: {}", e))
-        })?;
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+            .map_err(|e| InklogError::EncryptionError(format!("Invalid key: {}", e)))?;
 
         // 生成随机 nonce
         let mut nonce_bytes = [0u8; 12];
@@ -788,11 +703,7 @@ impl FileSink {
                 ext.to_string_lossy()
             ))
         } else {
-            PathBuf::from(format!(
-                "{}_{}",
-                self.config.path.display(),
-                timestamp
-            ))
+            PathBuf::from(format!("{}_{}", self.config.path.display(), timestamp))
         };
 
         // 尝试重命名
@@ -823,7 +734,7 @@ impl FileSink {
             let config = self.config.clone();
             let path = new_path.clone();
             let _ = thread::spawn(move || {
-                let mut sink = FileSink {
+                let sink = FileSink {
                     config,
                     current_file: None,
                     current_size: 0,
@@ -833,7 +744,7 @@ impl FileSink {
                     last_rotation_date: None,
                     sequence: 0,
                     fallback_sink: None,
-                    circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+                    circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
                     batch_buffer: Vec::new(),
                     last_flush_time: Instant::now(),
                     timer_handle: None,
@@ -845,6 +756,36 @@ impl FileSink {
                     error!("Failed to compress rotated log: {}", e);
                 }
             });
+        } else if self.config.encrypt {
+            // 如果只启用加密（不压缩），直接在后台线程加密
+            let config = self.config.clone();
+            let path = new_path.clone();
+            let _ = thread::spawn(move || {
+                let sink = FileSink {
+                    config,
+                    current_file: None,
+                    current_size: 0,
+                    last_rotation: Instant::now(),
+                    rotation_interval: StdDuration::from_secs(86400),
+                    next_rotation_time: None,
+                    last_rotation_date: None,
+                    sequence: 0,
+                    fallback_sink: None,
+                    circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
+                    batch_buffer: Vec::new(),
+                    last_flush_time: Instant::now(),
+                    timer_handle: None,
+                    rotation_timer: None,
+                    cleanup_timer_handle: None,
+                    shutdown_flag: Arc::new(AtomicBool::new(false)),
+                };
+                let encrypted_path = path.with_extension("enc");
+                if let Err(e) = sink.encrypt_file(&path, &encrypted_path) {
+                    error!("Failed to encrypt rotated log: {}", e);
+                } else {
+                    let _ = fs::remove_file(&path);
+                }
+            });
         }
 
         // 重新打开文件
@@ -853,8 +794,8 @@ impl FileSink {
 
     /// 检查是否需要轮转
     fn check_rotation(&mut self) -> Result<(), InklogError> {
-        let rotate_by_size = Self::parse_size(&self.config.max_size)
-            .map_or(false, |max| self.current_size >= max);
+        let rotate_by_size =
+            Self::parse_size(&self.config.max_size).is_some_and(|max| self.current_size >= max);
 
         let rotate_by_time = self.should_rotate_by_time();
 
@@ -871,9 +812,9 @@ impl LogSink for FileSink {
         // 检查断路器
         if !self.circuit_breaker.can_execute() {
             if let Some(sink) = &mut self.fallback_sink {
-                let mut locked = sink.lock().map_err(|_| {
-                    InklogError::IoError(std::io::Error::other("Lock poisoned"))
-                })?;
+                let mut locked = sink
+                    .lock()
+                    .map_err(|_| InklogError::IoError(std::io::Error::other("Lock poisoned")))?;
                 let _ = locked.write(record);
             }
             return Ok(());
@@ -883,17 +824,26 @@ impl LogSink for FileSink {
         if !self.check_disk_space()? {
             warn!("Low disk space - checking before write");
             if let Some(sink) = &mut self.fallback_sink {
-                let mut locked = sink.lock().map_err(|_| {
-                    InklogError::IoError(std::io::Error::other("Lock poisoned"))
-                })?;
+                let mut locked = sink
+                    .lock()
+                    .map_err(|_| InklogError::IoError(std::io::Error::other("Lock poisoned")))?;
                 let _ = locked.write(record);
             }
             return Ok(());
         }
 
-        // 检查轮转条件
-        if Self::parse_size(&self.config.max_size)
-            .map_or(false, |max| self.current_size >= max)
+        // 添加到批量缓冲区
+        // Update current_size before adding to buffer
+        let record_len = record.timestamp.to_rfc3339().len()
+            + record.level.len()
+            + record.target.len()
+            + record.message.len()
+            + 7;
+        self.current_size += record_len as u64;
+        self.batch_buffer.push(record.clone());
+
+        // 检查轮转条件（在更新 current_size 之后）
+        if Self::parse_size(&self.config.max_size).is_some_and(|max| self.current_size >= max)
             || self
                 .rotation_timer
                 .as_ref()
@@ -911,9 +861,6 @@ impl LogSink for FileSink {
                 return Ok(());
             }
         }
-
-        // 添加到批量缓冲区
-        self.batch_buffer.push(record.clone());
 
         // 检查是否需要批量写入
         let now = Instant::now();
@@ -1037,7 +984,7 @@ impl Clone for FileSink {
             last_rotation_date: None,
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::with_capacity(self.config.batch_size),
             last_flush_time: Instant::now(),
             timer_handle: None,
@@ -1054,10 +1001,10 @@ mod tests {
     use crate::config::FileSinkConfig;
     use crate::log_record::LogRecord;
     use chrono::Utc;
-    use serde_json::Value;
     use std::collections::HashMap;
     use tempfile::tempdir;
 
+    #[allow(dead_code)]
     fn create_test_record(message: &str) -> LogRecord {
         LogRecord {
             timestamp: Utc::now(),
@@ -1111,7 +1058,7 @@ mod tests {
             rotation_interval: StdDuration::from_secs(86400),
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::new(),
             last_flush_time: Instant::now(),
             timer_handle: None,
@@ -1151,7 +1098,7 @@ mod tests {
             rotation_interval: StdDuration::from_secs(86400),
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::new(),
             last_flush_time: Instant::now(),
             timer_handle: None,
@@ -1187,7 +1134,7 @@ mod tests {
             rotation_interval: StdDuration::from_secs(86400),
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::new(),
             last_flush_time: Instant::now(),
             timer_handle: None,
@@ -1223,7 +1170,7 @@ mod tests {
             rotation_interval: StdDuration::from_secs(86400),
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::new(),
             last_flush_time: Instant::now(),
             timer_handle: None,
@@ -1329,7 +1276,7 @@ mod tests {
             rotation_interval: StdDuration::from_secs(86400),
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::new(),
             last_flush_time: Instant::now(),
             timer_handle: None,
@@ -1361,7 +1308,7 @@ mod tests {
             rotation_interval: StdDuration::from_secs(86400),
             sequence: 0,
             fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30)),
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
             batch_buffer: Vec::new(),
             last_flush_time: Instant::now(),
             timer_handle: None,

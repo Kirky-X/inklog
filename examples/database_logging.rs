@@ -36,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         table_name: "logs".to_string(),
         archive_format: "json".to_string(),
         parquet_config: inklog::config::ParquetConfig::default(),
+        ..Default::default()
     };
 
     let config = InklogConfig {
@@ -63,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Query the total number of logs stored in the database
+#[cfg(not(feature = "dbnexus"))]
 async fn query_log_count(url: &str) -> i64 {
     use inklog::sink::database::Entity;
     use sea_orm::{Database, EntityTrait};
@@ -75,4 +77,10 @@ async fn query_log_count(url: &str) -> i64 {
         Ok(logs) => logs.len() as i64,
         Err(_) => 0,
     }
+}
+
+#[cfg(feature = "dbnexus")]
+async fn query_log_count(_url: &str) -> i64 {
+    // dbnexus doesn't expose query results
+    0
 }
