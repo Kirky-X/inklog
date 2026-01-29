@@ -7,9 +7,19 @@
 //!
 //! This example demonstrates how to configure database logging
 //! with SQLite and automatic batch writes.
+//!
+//! # Two Configuration Options
+//!
+//! ## Option 1: DatabaseConfig (recommended)
+//! This is the current recommended approach.
 
-use inklog::config::DatabaseDriver;
-use inklog::{DatabaseSinkConfig, InklogConfig, LoggerManager};
+//! ## Option 2: Legacy DatabaseSinkConfig (removed)
+//! ```rust,ignore
+//! use inklog::config::DatabaseSinkConfig;  // Old API, now removed
+//! let config = DatabaseSinkConfig::with_url("sqlite://logs.db")?;
+//! ```
+
+use inklog::{DatabaseConfig, InklogConfig, LoggerManager};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,26 +31,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path: PathBuf = DB_PATH.into();
     let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
-    // Configure database sink
-    let db_config = DatabaseSinkConfig {
+    // Configure database sink using new DatabaseConfig (recommended)
+    #[cfg(feature = "dbnexus")]
+    {
+        // Using new dbnexus-based configuration
+        println!("Using new DatabaseConfig with dbnexus integration");
+    }
+
+    // Configure database sink using new DatabaseConfig (recommended)
+    let db_config = DatabaseConfig {
         enabled: true,
-        driver: DatabaseDriver::SQLite,
         url: db_url.clone(),
         pool_size: 5,
         batch_size: 100,
         flush_interval_ms: 1000,
-        archive_to_s3: false,
-        archive_after_days: 30,
-        s3_bucket: None,
-        s3_region: Some("us-east-1".to_string()),
-        table_name: "logs".to_string(),
-        archive_format: "json".to_string(),
-        parquet_config: inklog::config::ParquetConfig::default(),
-        ..Default::default()
     };
 
     let config = InklogConfig {
-        database_sink: Some(db_config),
+        db_config: Some(db_config),
         ..Default::default()
     };
 
@@ -81,6 +89,7 @@ async fn query_log_count(url: &str) -> i64 {
 
 #[cfg(feature = "dbnexus")]
 async fn query_log_count(_url: &str) -> i64 {
-    // dbnexus doesn't expose query results
+    // With dbnexus, query results require additional API usage
+    // See dbnexus documentation for query patterns
     0
 }
