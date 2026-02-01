@@ -132,61 +132,55 @@ fn test_file_sink_with_fields() {
 
 // === DatabaseSink 额外测试 ===
 
+fn make_test_db_config(name: &str, enabled: bool) -> inklog::config::DatabaseSinkConfig {
+    inklog::config::DatabaseSinkConfig {
+        name: name.to_string(),
+        enabled,
+        driver: inklog::config::DatabaseDriver::SQLite,
+        url: "sqlite::memory:".to_string(),
+        pool_size: 10,
+        batch_size: 100,
+        flush_interval_ms: 500,
+        partition: inklog::config::PartitionStrategy::default(),
+        archive_to_s3: false,
+        archive_after_days: 30,
+        s3_bucket: None,
+        s3_region: None,
+        table_name: "logs".to_string(),
+        archive_format: "json".to_string(),
+        parquet_config: inklog::config::ParquetConfig::default(),
+    }
+}
+
 #[tokio::test]
 async fn test_database_sink_disabled() {
-    let config = inklog::DatabaseSinkConfig {
-        enabled: false,
-        driver: inklog::DatabaseDriver::SQLite,
-        url: "sqlite::memory:".to_string(),
-        ..Default::default()
-    };
+    let config = make_test_db_config("test", false);
 
-    let sink = inklog::DatabaseSink::new(config).await.unwrap();
+    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
     assert!(!sink.config.enabled);
 }
 
 #[tokio::test]
 async fn test_database_sink_message_count() {
-    let config = inklog::DatabaseSinkConfig {
-        enabled: true,
-        driver: inklog::DatabaseDriver::SQLite,
-        url: "sqlite::memory:".to_string(),
-        batch_size: 100,
-        flush_interval_ms: 1000,
-        pool_size: 5,
-        ..Default::default()
-    };
+    let config = make_test_db_config("test", true);
 
-    let sink = inklog::DatabaseSink::new(config).await.unwrap();
+    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
     assert_eq!(sink.message_count(), 0);
 }
 
 #[tokio::test]
 async fn test_database_sink_is_healthy() {
-    let config = inklog::DatabaseSinkConfig {
-        enabled: true,
-        driver: inklog::DatabaseDriver::SQLite,
-        url: "sqlite::memory:".to_string(),
-        ..Default::default()
-    };
+    let config = make_test_db_config("test", true);
 
-    let sink = inklog::DatabaseSink::new(config).await.unwrap();
+    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
     assert!(sink.is_healthy());
 }
 
 #[tokio::test]
 async fn test_database_sink_write_single() {
-    let config = inklog::DatabaseSinkConfig {
-        enabled: true,
-        driver: inklog::DatabaseDriver::SQLite,
-        url: "sqlite::memory:".to_string(),
-        batch_size: 100,
-        flush_interval_ms: 1000,
-        pool_size: 5,
-        ..Default::default()
-    };
+    let config = make_test_db_config("test", true);
 
-    let sink = inklog::DatabaseSink::new(config).await.unwrap();
+    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
     let record = inklog::LogRecord {
         timestamp: chrono::Utc::now(),
         level: "INFO".to_string(),
@@ -649,7 +643,7 @@ fn test_file_sink_default() {
 
 #[test]
 fn test_database_sink_default() {
-    let config = inklog::DatabaseSinkConfig::default();
+    let config = inklog::config::DatabaseSinkConfig::default();
     assert!(config.batch_size > 0);
     assert!(config.pool_size > 0);
 }

@@ -7,6 +7,9 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
+#[cfg(feature = "confers")]
+use confers::ConfigError;
+
 pub fn validate_config(config_path: &PathBuf) -> Result<()> {
     println!("Validating configuration file: {}", config_path.display());
 
@@ -17,6 +20,34 @@ pub fn validate_config(config_path: &PathBuf) -> Result<()> {
         ));
     }
 
+    #[cfg(feature = "confers")]
+    {
+        // Use confers for validation when feature is enabled
+        return validate_with_confers(config_path);
+    }
+
+    #[cfg(not(feature = "confers"))]
+    {
+        // Fallback to manual TOML parsing
+        let content = std::fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
+
+        validate_toml_content(&content, config_path)?;
+
+        println!("✓ Configuration file is valid");
+        Ok(())
+    }
+}
+
+#[cfg(feature = "confers")]
+fn validate_with_confers(config_path: &PathBuf) -> Result<()> {
+    use confers::ConfersCli;
+
+    // Use confers to validate the config file
+    ConfersCli::validate(config_path.to_str().unwrap_or("inklog_config.toml"), "full")
+        .map_err(|e| anyhow::anyhow!("Validation failed: {}", e))?;
+
+    // Additional inklog-specific validation
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 
@@ -31,15 +62,18 @@ fn validate_toml_content(content: &str, config_path: &PathBuf) -> Result<()> {
         .parse()
         .with_context(|| "Failed to parse TOML content")?;
 
-    if let Some(global) = config.get("global").and_then(|t| t.as_table()) {
-        validate_global_config(global)?;
+    // Helper function to get table with flexible section naming (e.g., "console" or "console_sink")
+    fn get_table<'a>(config: &'a toml::Table, name: &str) -> Option<&'a toml::Table> {
+        config.get(name).and_then(|t| t.as_table())
     }
 
-    if let Some(console) = config.get("console_sink").and_then(|t| t.as_table()) {
+    // Handle both "console" and "console_sink" naming conventions
+    if let Some(console) = get_table(&config, "console").or(get_table(&config, "console_sink")) {
         validate_console_sink(console)?;
     }
 
-    if let Some(file) = config.get("file_sink").and_then(|t| t.as_table()) {
+    // Handle both "file" and "file_sink" naming conventions
+    if let Some(file) = get_table(&config, "file").or(get_table(&config, "file_sink")) {
         validate_file_sink(file)?;
     }
 
@@ -47,15 +81,18 @@ fn validate_toml_content(content: &str, config_path: &PathBuf) -> Result<()> {
         validate_performance(perf)?;
     }
 
-    if let Some(db) = config.get("database_sink").and_then(|t| t.as_table()) {
+    // Handle both "database" and "db_config" naming conventions
+    if let Some(db) = get_table(&config, "database").or(get_table(&config, "db_config")) {
         validate_database_sink(db)?;
     }
 
-    if let Some(http) = config.get("http_server").and_then(|t| t.as_table()) {
+    // Handle both "http" and "http_server" naming conventions
+    if let Some(http) = get_table(&config, "http").or(get_table(&config, "http_server")) {
         validate_http_server(http)?;
     }
 
-    if let Some(s3) = config.get("s3_archive").and_then(|t| t.as_table()) {
+    // Handle both "s3" and "s3_archive" naming conventions
+    if let Some(s3) = get_table(&config, "s3").or(get_table(&config, "s3_archive")) {
         validate_s3_archive(s3)?;
     }
 
@@ -235,7 +272,7 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
 fn validate_database_sink(db: &toml::Table) -> Result<()> {
     if let Some(enabled) = db.get("enabled") {
         if !enabled.is_bool() {
-            return Err(anyhow::anyhow!("database_sink.enabled must be a boolean"));
+            return Err(anyhow::anyhow!("db_config.enabled must be a boolean"));
         }
         println!("  ✓ Database sink enabled: {}", enabled);
     }
@@ -257,7 +294,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
     if let Some(url) = db.get("url") {
         if let Some(url_str) = url.as_str() {
             if url_str.is_empty() {
-                return Err(anyhow::anyhow!("database_sink.url cannot be empty"));
+                return Err(anyhow::anyhow!("db_config.url cannot be empty"));
             }
             validate_database_url(url_str)?;
             println!("  ✓ Database URL: {} bytes", url_str.len());
@@ -268,7 +305,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         if let Some(n) = pool_size.as_integer() {
             if !(1..=100).contains(&n) {
                 return Err(anyhow::anyhow!(
-                    "database_sink.pool_size must be between 1 and 100"
+                    "db_config.pool_size must be between 1 and 100"
                 ));
             }
         }
@@ -277,7 +314,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
     if let Some(batch_size) = db.get("batch_size") {
         if let Some(n) = batch_size.as_integer() {
             if n < 1 {
-                return Err(anyhow::anyhow!("database_sink.batch_size must be >= 1"));
+                return Err(anyhow::anyhow!("db_config.batch_size must be >= 1"));
             }
         }
     }
@@ -285,11 +322,11 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
     if let Some(table_name) = db.get("table_name") {
         if let Some(name) = table_name.as_str() {
             if name.is_empty() {
-                return Err(anyhow::anyhow!("database_sink.table_name cannot be empty"));
+                return Err(anyhow::anyhow!("db_config.table_name cannot be empty"));
             }
             if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                 return Err(anyhow::anyhow!(
-                    "database_sink.table_name must contain only alphanumeric characters and underscores"
+                    "db_config.table_name must contain only alphanumeric characters and underscores"
                 ));
             }
         }
@@ -395,13 +432,25 @@ fn validate_s3_archive(s3: &toml::Table) -> Result<()> {
 }
 
 fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()> {
+    // Valid sections (both naming conventions accepted)
     let valid_sections = [
         "global",
+        // Console variations
+        "console",
         "console_sink",
+        // File variations
+        "file",
         "file_sink",
-        "database_sink",
+        // Database variations
+        "database",
+        "db_config",
+        // S3 variations
+        "s3",
         "s3_archive",
+        // Performance
         "performance",
+        // HTTP variations
+        "http",
         "http_server",
     ];
 
@@ -411,11 +460,21 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
         }
     }
 
-    if config.contains_key("file_sink") && config.contains_key("database_sink") {
-        if let Some(file) = config.get("file_sink").and_then(|t| t.as_table()) {
+    // Check for dual sink configuration (both file and database)
+    let has_file = config.contains_key("file") || config.contains_key("file_sink");
+    let has_database = config.contains_key("database") || config.contains_key("db_config");
+
+    if has_file && has_database {
+        if let Some(file) = config
+            .get("file")
+            .or(config.get("file_sink"))
+            .and_then(|t| t.as_table())
+        {
             if let Some(enabled) = file.get("enabled").and_then(|v| v.as_bool()) {
                 if !enabled {
-                    eprintln!("  ⚠ Both file_sink and database_sink enabled - logs will be written to both");
+                    eprintln!(
+                        "  ⚠ Both file and database sinks enabled - logs will be written to both"
+                    );
                 }
             }
         }

@@ -7,8 +7,11 @@ pub mod async_file;
 pub mod circuit_breaker;
 pub mod compression;
 pub mod console;
+#[cfg(feature = "dbnexus")]
 pub mod database;
 pub mod encryption;
+#[cfg(feature = "dbnexus")]
+pub mod entity;
 pub mod file;
 pub mod ring_buffered_file;
 

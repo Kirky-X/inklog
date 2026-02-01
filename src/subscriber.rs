@@ -5,6 +5,7 @@
 
 use crate::log_record::LogRecord;
 use crate::metrics::Metrics;
+use crate::object_pool::{LOG_RECORD_POOL, STRING_POOL};
 use crate::sink::console::ConsoleSink;
 use crate::sink::LogSink;
 use crossbeam_channel::Sender;
@@ -38,7 +39,6 @@ where
     S: Subscriber,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        use crate::pool::{LOG_RECORD_POOL, STRING_POOL};
         let record = LogRecord::from_event(event);
 
         // Fast path: Console
@@ -49,8 +49,6 @@ where
         }
 
         // Slow path: Async
-        // We try send first to avoid blocking if possible, but for "zero loss" we might block
-        // PRD says "Bounded Channel + Backpressure Block"
         match self.async_sender.try_send(record.clone()) {
             Ok(_) => {}
             Err(crossbeam_channel::TrySendError::Full(r)) => {
@@ -64,7 +62,6 @@ where
             }
         }
 
-        // Return resources to pools
         let mut r = record;
         let msg = std::mem::take(&mut r.message);
         STRING_POOL.put(msg);

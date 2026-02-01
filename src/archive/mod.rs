@@ -103,13 +103,6 @@ impl SecretString {
         self.as_deref()
     }
 
-    /// Internal take method for use within the crate.
-    /// Does not include audit logging.
-    #[allow(dead_code)]
-    pub(crate) fn take_internal(&mut self) -> Option<String> {
-        self.take()
-    }
-
     /// Takes the value with audit logging (debug builds only).
     /// Records a warning when sensitive data is accessed.
     #[cfg(feature = "debug")]

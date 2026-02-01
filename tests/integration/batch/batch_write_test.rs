@@ -6,7 +6,7 @@
 use inklog::config::DatabaseDriver;
 use inklog::sink::database::DatabaseSink;
 use inklog::sink::LogSink;
-use inklog::{log_record::LogRecord, DatabaseSinkConfig};
+use inklog::{log_record::LogRecord, config::DatabaseSinkConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -24,15 +24,24 @@ fn create_test_database_sink(
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
     let config = DatabaseSinkConfig {
+        name: "test".to_string(),
         enabled: true,
         driver: DatabaseDriver::SQLite,
         url: url.clone(),
         batch_size,
         flush_interval_ms,
-        ..Default::default()
+        pool_size: 5,
+        partition: inklog::config::PartitionStrategy::default(),
+        archive_to_s3: false,
+        archive_after_days: 30,
+        s3_bucket: None,
+        s3_region: None,
+        table_name: "logs".to_string(),
+        archive_format: "json".to_string(),
+        parquet_config: inklog::config::ParquetConfig::default(),
     };
 
-    let sink = DatabaseSink::new(config).expect("Failed to create DatabaseSink");
+    let sink = DatabaseSink::new(&config).expect("Failed to create DatabaseSink");
     (temp_dir, sink, url)
 }
 

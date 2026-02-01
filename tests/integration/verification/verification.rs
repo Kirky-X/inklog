@@ -7,7 +7,7 @@ use inklog::config::DatabaseDriver;
 use inklog::sink::database::DatabaseSink;
 use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
-use inklog::{log_record::LogRecord, DatabaseSinkConfig, FileSinkConfig};
+use inklog::{log_record::LogRecord, config::DatabaseSinkConfig, FileSinkConfig};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -139,15 +139,24 @@ fn verify_database_sink_sqlite() {
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
     let config = DatabaseSinkConfig {
+        name: "test".to_string(),
         enabled: true,
         driver: DatabaseDriver::SQLite,
         url: url.clone(),
         batch_size: 1,
         flush_interval_ms: 100,
-        ..Default::default()
+        pool_size: 5,
+        partition: inklog::config::PartitionStrategy::default(),
+        archive_to_s3: false,
+        archive_after_days: 30,
+        s3_bucket: None,
+        s3_region: None,
+        table_name: "logs".to_string(),
+        archive_format: "json".to_string(),
+        parquet_config: inklog::config::ParquetConfig::default(),
     };
 
-    let mut sink = DatabaseSink::new(config).expect("Failed to create DatabaseSink");
+    let mut sink = DatabaseSink::new(&config).expect("Failed to create DatabaseSink");
 
     let record = LogRecord::new(Level::INFO, "db_test".into(), "message to db".into());
     sink.write(&record)

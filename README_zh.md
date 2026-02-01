@@ -262,17 +262,15 @@ let _logger = LoggerManager::with_config(config).await?;
 **第四步：数据库日志**
 
 ```rust
-use inklog::{DatabaseSinkConfig, InklogConfig, config::DatabaseDriver};
+use inklog::{DatabaseConfig, InklogConfig};
 
 let config = InklogConfig {
-    database_sink: Some(DatabaseSinkConfig {
+    db_config: Some(DatabaseConfig {
         enabled: true,
-        driver: DatabaseDriver::SQLite,
         url: "sqlite://logs/app.db".to_string(),
         pool_size: 5,
         batch_size: 100,
         flush_interval_ms: 1000,
-        ..Default::default()
     }),
     ..Default::default()
 };
@@ -536,17 +534,15 @@ let _logger = LoggerManager::with_config(config).await?;
 #### 🗄️ 数据库日志
 
 ```rust
-use inklog::{DatabaseSinkConfig, InklogConfig, config::DatabaseDriver};
+use inklog::{DatabaseConfig, InklogConfig};
 
 let config = InklogConfig {
-    database_sink: Some(DatabaseSinkConfig {
+    db_config: Some(DatabaseConfig {
         enabled: true,
-        driver: DatabaseDriver::PostgreSQL,
         url: "postgresql://localhost/logs".to_string(),
         pool_size: 10,
         batch_size: 100,
         flush_interval_ms: 1000,
-        ..Default::default()
     }),
     ..Default::default()
 };

@@ -216,11 +216,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 use inklog::config::DatabaseDriver;
-use inklog::{DatabaseSinkConfig, InklogConfig, LoggerManager};
+use inklog::{DatabaseConfig, InklogConfig, LoggerManager};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db_config = DatabaseSinkConfig {
+    let db_config = DatabaseConfig {
         enabled: true,
         driver: DatabaseDriver::SQLite,
         url: "sqlite://logs/app.db".to_string(),
@@ -237,7 +237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let config = InklogConfig {
-        database_sink: Some(db_config),
+        db_config: Some(db_config),
         ..Default::default()
     };
 
@@ -268,7 +268,7 @@ let config = InklogConfig {
     },
     console_sink: Some(inklog::config::ConsoleSinkConfig::default()),
     file_sink: None,
-    database_sink: None,
+    db_config: None,
     s3_archive: None,
     performance: inklog::config::PerformanceConfig::default(),
     http_server: None,
@@ -343,7 +343,7 @@ app.log.gz        # 压缩后的轮转文件（如果启用压缩）
 
 ### 数据库输出配置
 
-#### DatabaseSinkConfig 字段说明
+#### DatabaseConfig 字段说明
 
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|----------|------|
@@ -373,9 +373,9 @@ app.log.gz        # 压缩后的轮转文件（如果启用压缩）
 
 ```rust
 use inklog::config::DatabaseDriver;
-use inklog::{DatabaseSinkConfig, InklogConfig, LoggerManager};
+use inklog::{DatabaseConfig, InklogConfig, LoggerManager};
 
-let db_config = DatabaseSinkConfig {
+let db_config = DatabaseConfig {
     enabled: true,
     driver: DatabaseDriver::PostgreSQL,
     url: "postgresql://user:password@localhost:5432/logs".to_string(),
@@ -386,7 +386,7 @@ let db_config = DatabaseSinkConfig {
 };
 
 let config = InklogConfig {
-    database_sink: Some(db_config),
+    db_config: Some(db_config),
     ..Default::default()
 };
 
@@ -792,13 +792,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 use inklog::config::DatabaseDriver;
-use inklog::{DatabaseSinkConfig, InklogConfig, LoggerManager};
+use inklog::{DatabaseConfig, InklogConfig, LoggerManager};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all("logs")?;
 
-    let db_config = DatabaseSinkConfig {
+    let db_config = DatabaseConfig {
         enabled: true,
         driver: DatabaseDriver::SQLite,
         url: "sqlite://logs/app.db".to_string(),
@@ -810,7 +810,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let config = InklogConfig {
-        database_sink: Some(db_config),
+        db_config: Some(db_config),
         ..Default::default()
     };
 
@@ -962,7 +962,7 @@ Inklog 基于 Tokio 异步运行时构建，提供高性能日志记录。
 数据库 Sink 自动批量写入日志，减少数据库操作次数：
 
 ```rust
-let db_config = DatabaseSinkConfig {
+let db_config = DatabaseConfig {
     enabled: true,
     batch_size: 1000,          // 增大批量大小
     flush_interval_ms: 5000,    // 延长刷新间隔
@@ -999,7 +999,7 @@ let config = InklogConfig {
         path: "logs/app.log".into(),
         ..Default::default()
     }),
-    database_sink: Some(inklog::DatabaseSinkConfig {
+    db_config: Some(inklog::DatabaseConfig {
         enabled: true,
         url: "sqlite://logs/app.db".to_string(),
         ..Default::default()
@@ -1017,7 +1017,7 @@ let config = InklogConfig {
 // 1. 达到 batch_size 条数
 // 2. 经过 flush_interval_ms 时间
 
-let db_config = DatabaseSinkConfig {
+let db_config = DatabaseConfig {
     enabled: true,
     batch_size: 500,          // 每 500 条写入
     flush_interval_ms: 2000,    // 或每 2 秒写入
@@ -1331,7 +1331,7 @@ let file_config = FileSinkConfig {
 **解决方案**：
 ```rust
 // 检查连接 URL
-let db_config = DatabaseSinkConfig {
+let db_config = DatabaseConfig {
     enabled: true,
     url: "sqlite://logs/app.db".to_string(),  // 使用本地数据库测试
     pool_size: 5,

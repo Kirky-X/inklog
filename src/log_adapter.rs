@@ -10,6 +10,7 @@
 
 use crate::log_record::LogRecord;
 use crate::metrics::Metrics;
+use crate::object_pool::{LOG_RECORD_POOL, STRING_POOL};
 use crate::sink::console::ConsoleSink;
 use crate::sink::LogSink;
 use chrono::Utc;
@@ -59,13 +60,9 @@ impl LogAdapter {
 
     /// 将 `log::Record` 转换为 `LogRecord`
     fn record_to_log_record(&self, record: &Record) -> LogRecord {
-        use crate::pool::{LOG_RECORD_POOL, STRING_POOL};
-
-        // 从对象池获取 LogRecord
         let mut log_record = LOG_RECORD_POOL.get();
         log_record.reset();
 
-        // 从对象池获取字符串用于 message
         let mut message = STRING_POOL.get();
         message.clear();
         message.push_str(&record.args().to_string());
@@ -98,12 +95,9 @@ impl log::Log for LogAdapter {
 
     /// 处理日志记录
     fn log(&self, record: &Record) {
-        // 检查是否启用
         if !self.enabled(record.metadata()) {
             return;
         }
-
-        use crate::pool::LOG_RECORD_POOL;
 
         let log_record = self.record_to_log_record(record);
 
@@ -128,7 +122,6 @@ impl log::Log for LogAdapter {
             }
         }
 
-        // Console sink 已使用完毕，回收 LogRecord 到对象池
         LOG_RECORD_POOL.put(log_record);
     }
 

@@ -15,7 +15,7 @@
   - [GlobalConfig](#globalconfig)
   - [ConsoleSinkConfig](#consolesinkconfig)
   - [FileSinkConfig](#filesinkconfig)
-  - [DatabaseSinkConfig](#databasesinkconfig)
+  - [DatabaseConfig](#databaseconfig)
   - [S3ArchiveConfig](#s3archiveconfig)
   - [HttpServerConfig](#httpserverconfig)
   - [PerformanceConfig](#performanceconfig)
@@ -41,7 +41,7 @@ Inklog 提供了以下公共 API 类型：
 
 ### 导入公共 API
 
-```rust
+``rust
 use inklog::{
     // 核心类型
     LoggerManager,
@@ -53,7 +53,7 @@ use inklog::{
         GlobalConfig,
         ConsoleSinkConfig,
         FileSinkConfig,
-        DatabaseSinkConfig,
+
         HttpServerConfig,
         PerformanceConfig,
         ParquetConfig,
@@ -714,7 +714,7 @@ pub struct InklogConfig {
     pub global: GlobalConfig,
     pub console_sink: Option<ConsoleSinkConfig>,
     pub file_sink: Option<FileSinkConfig>,
-    pub database_sink: Option<DatabaseSinkConfig>,
+    pub db_config: Option<DatabaseConfig>,
     pub s3_archive: Option<crate::archive::S3ArchiveConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
@@ -728,12 +728,12 @@ pub struct InklogConfig {
 | `global` | `GlobalConfig` | `default()` | 全局配置 |
 | `console_sink` | `Option<ConsoleSinkConfig>` | `Some(default())` | 控制台 Sink 配置 |
 | `file_sink` | `Option<FileSinkConfig>` | `None` | 文件 Sink 配置 |
-| `database_sink` | `Option<DatabaseSinkConfig>` | `None` | 数据库 Sink 配置（包含 ParquetConfig） |
+| `db_config` | `Option<DatabaseConfig>` | `None` | 数据库配置 |
 | `s3_archive` | `Option<S3ArchiveConfig>` | `None` | S3 归档配置（包含 ParquetConfig） |
 | `performance` | `PerformanceConfig` | `default()` | 性能配置 |
 | `http_server` | `Option<HttpServerConfig>` | `None` | HTTP 服务器配置 |
 
-**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseSinkConfig` 和 `S3ArchiveConfig` 的内部字段。
+**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseConfig` 和 `S3ArchiveConfig` 的内部字段。
 
 #### 方法
 
@@ -776,6 +776,50 @@ config.apply_env_overrides();
 ---
 
 ## 配置结构体
+
+### DatabaseConfig
+
+数据库配置结构体，用于配置数据库日志后端。
+
+#### 定义
+
+```rust
+#[cfg(feature = "dbnexus")]
+pub struct DatabaseConfig {
+    pub enabled: bool,
+    pub url: String,
+    pub batch_size: usize,
+    pub flush_interval_ms: u64,
+    pub pool_size: u32,
+}
+```
+
+#### 字段说明
+
+| 字段 | 类型 | 默认值 | 描述 |
+|------|------|----------|------|
+| `enabled` | `bool` | `false` | 是否启用数据库日志输出 |
+| `url` | `String` | `""` | 数据库连接 URL |
+| `batch_size` | `usize` | `100` | 批量写入大小 |
+| `flush_interval_ms` | `u64` | `500` | 批量刷新间隔（毫秒） |
+| `pool_size` | `u32` | `10` | 数据库连接池大小 |
+
+**注意**: `DatabaseConfig` 需要 `dbnexus` 功能标志才能启用。
+
+#### 示例
+```rust
+use inklog::config::DatabaseConfig;
+
+let db_config = DatabaseConfig {
+    enabled: true,
+    url: "sqlite://logs.db".to_string(),
+    batch_size: 100,
+    flush_interval_ms: 500,
+    pool_size: 5,
+};
+```
+
+---
 
 ### GlobalConfig
 
@@ -926,71 +970,7 @@ let file_config = FileSinkConfig {
 
 ---
 
-### DatabaseSinkConfig
 
-数据库 Sink 配置。
-
-#### 定义
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseSinkConfig {
-    pub enabled: bool,
-    pub driver: DatabaseDriver,
-    pub url: String,
-    pub pool_size: u32,
-    pub batch_size: usize,
-    pub flush_interval_ms: u64,
-    pub archive_to_s3: bool,
-    pub archive_after_days: u32,
-    pub s3_bucket: Option<String>,
-    pub s3_region: Option<String>,
-    pub table_name: String,
-    pub archive_format: String,
-    pub parquet_config: ParquetConfig,
-}
-```
-
-#### 字段说明
-
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `enabled` | `bool` | `false` | 是否启用数据库 Sink |
-| `driver` | `DatabaseDriver` | `PostgreSQL` | 数据库驱动 |
-| `url` | `String` | `"postgres://localhost/logs"` | 数据库连接 URL |
-| `pool_size` | `u32` | `10` | 连接池大小 |
-| `batch_size` | `usize` | `100` | 批量写入的日志数量 |
-| `flush_interval_ms` | `u64` | `500` | 刷新间隔（毫秒） |
-| `archive_to_s3` | `bool` | `false` | 是否归档到 S3 |
-| `archive_after_days` | `u32` | `30` | 归档前的保留天数 |
-| `s3_bucket` | `Option<String>` | `None` | S3 存储桶名称 |
-| `s3_region` | `Option<String>` | `Some("us-east-1")` | S3 区域 |
-| `table_name` | `String` | `"logs"` | 日志表名 |
-| `archive_format` | `String` | `"json"` | 归档格式：`json` 或 `parquet` |
-| `parquet_config` | `ParquetConfig` | `default()` | Parquet 导出配置 |
-
-**示例**
-```rust
-use inklog::config::{DatabaseSinkConfig, DatabaseDriver};
-
-let db_config = DatabaseSinkConfig {
-    enabled: true,
-    driver: DatabaseDriver::SQLite,
-    url: "sqlite://logs/app.db".to_string(),
-    pool_size: 5,
-    batch_size: 100,
-    flush_interval_ms: 1000,
-    archive_to_s3: false,
-    archive_after_days: 30,
-    s3_bucket: None,
-    s3_region: Some("us-east-1".to_string()),
-    table_name: "logs".to_string(),
-    archive_format: "json".to_string(),
-    parquet_config: inklog::config::ParquetConfig::default(),
-};
-```
-
----
 
 ### S3ArchiveConfig
 

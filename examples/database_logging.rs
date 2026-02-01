@@ -8,18 +8,11 @@
 //! This example demonstrates how to configure database logging
 //! with SQLite and automatic batch writes.
 //!
-//! # Two Configuration Options
+//! # Database Configuration
 //!
-//! ## Option 1: DatabaseConfig (recommended)
-//! This is the current recommended approach.
+//! Use DatabaseSinkConfig to configure the database sink.
 
-//! ## Option 2: Legacy DatabaseSinkConfig (removed)
-//! ```rust,ignore
-//! use inklog::config::DatabaseSinkConfig;  // Old API, now removed
-//! let config = DatabaseSinkConfig::with_url("sqlite://logs.db")?;
-//! ```
-
-use inklog::{DatabaseConfig, InklogConfig, LoggerManager};
+use inklog::{DatabaseSinkConfig, InklogConfig, LoggerManager};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -31,24 +24,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path: PathBuf = DB_PATH.into();
     let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
-    // Configure database sink using new DatabaseConfig (recommended)
-    #[cfg(feature = "dbnexus")]
-    {
-        // Using new dbnexus-based configuration
-        println!("Using new DatabaseConfig with dbnexus integration");
-    }
+    println!("Using DatabaseSinkConfig with dbnexus integration");
 
-    // Configure database sink using new DatabaseConfig (recommended)
-    let db_config = DatabaseConfig {
+    // Configure database sink using DatabaseSinkConfig
+    let db_config = DatabaseSinkConfig {
+        name: "default".to_string(),
         enabled: true,
+        driver: inklog::config::DatabaseDriver::SQLite,
         url: db_url.clone(),
         pool_size: 5,
         batch_size: 100,
         flush_interval_ms: 1000,
+        partition: inklog::config::PartitionStrategy::default(),
+        archive_to_s3: false,
+        archive_after_days: 30,
+        s3_bucket: None,
+        s3_region: None,
+        table_name: "logs".to_string(),
+        archive_format: "json".to_string(),
+        parquet_config: inklog::config::ParquetConfig::default(),
     };
 
     let config = InklogConfig {
-        db_config: Some(db_config),
+        database_sink: Some(db_config),
         ..Default::default()
     };
 

@@ -109,3 +109,7 @@ openspec/
 *.pid
 *.seed
 *.pid.lock
+
+#iflow and qoder
+.iflow/
+.qoder/

@@ -31,7 +31,6 @@ pub struct ArchiveService {
     #[cfg(feature = "aws")]
     archive_manager: Arc<S3ArchiveManager>,
     #[cfg(not(feature = "aws"))]
-    #[allow(dead_code)]
     archive_manager: Arc<()>, // 占位符
     #[cfg(feature = "dbnexus")]
     database_session: Option<Arc<Session>>,
@@ -43,6 +42,7 @@ pub struct ArchiveService {
     /// 调度状态跟踪（用于并发控制和持久化）
     schedule_state: std::sync::Mutex<super::ScheduleState>,
     /// Parquet配置（用于归档格式）
+    #[allow(dead_code)]
     parquet_config: crate::config::ParquetConfig,
 }
 
@@ -79,6 +79,43 @@ impl ArchiveService {
             config: config.clone(),
             archive_manager,
             database_session: database_session.map(Arc::new),
+            local_retention_path,
+            scheduler,
+            shutdown_tx,
+            shutdown_rx: Some(shutdown_rx),
+            schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+            parquet_config: config.parquet_config.clone(),
+        })
+    }
+
+    /// 创建新的归档服务（非 dbnexus 版本）
+    #[cfg(not(feature = "dbnexus"))]
+    pub async fn new(config: S3ArchiveConfig) -> Result<Self, InklogError> {
+        #[cfg(feature = "aws")]
+        let archive_manager = Arc::new(S3ArchiveManager::new(config.clone()).await?);
+        #[cfg(not(feature = "aws"))]
+        let archive_manager = Arc::new(());
+
+        let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+
+        let local_retention_path = config.local_retention_path.clone();
+        fs::create_dir_all(&local_retention_path)
+            .await
+            .map_err(|e| {
+                InklogError::IoError(std::io::Error::other(format!(
+                    "Failed to create local retention directory: {}",
+                    e
+                )))
+            })?;
+
+        let scheduler = JobScheduler::new().await.map_err(|e| {
+            InklogError::ConfigError(format!("Failed to create job scheduler: {}", e))
+        })?;
+
+        Ok(Self {
+            config: config.clone(),
+            archive_manager,
+            database_session: None,
             local_retention_path,
             scheduler,
             shutdown_tx,
@@ -237,9 +274,10 @@ impl ArchiveService {
             let end_date = Utc::now();
 
             // Query logs using dbnexus
-            let logs: Vec<crate::sink::database::LogEntity> = if let Some(session) = &db_session {
+            let log_records: Vec<crate::log_record::LogRecord> = if let Some(session) = &db_session
+            {
                 let sql = r#"
-                    SELECT id, timestamp, level, target, message, fields, file, line, thread_id
+                    SELECT timestamp, level, target, message, file, line
                     FROM logs
                     WHERE timestamp >= $1 AND timestamp < $2
                     ORDER BY timestamp ASC
@@ -260,7 +298,7 @@ impl ArchiveService {
                 Vec::new()
             };
 
-            if logs.is_empty() {
+            if log_records.is_empty() {
                 debug!("No logs to archive");
                 let mut state = schedule_state.lock().map_err(|e| {
                     InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
@@ -273,7 +311,7 @@ impl ArchiveService {
             let log_data = if config.archive_format.to_lowercase() == "parquet" {
                 // 带重试的 Parquet 转换
                 Self::retry_with_backoff(|| async {
-                    convert_logs_to_parquet(&logs, &config.parquet_config).map_err(|e| {
+                    convert_logs_to_parquet(&log_records, &config.parquet_config).map_err(|e| {
                         InklogError::SerializationError(serde_json::Error::io(
                             std::io::Error::other(e.to_string()),
                         ))
@@ -281,7 +319,7 @@ impl ArchiveService {
                 })
                 .await?
             } else {
-                serde_json::to_vec(&logs).map_err(|e| {
+                serde_json::to_vec(&log_records).map_err(|e| {
                     InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
                         e.to_string(),
                     )))
@@ -312,7 +350,7 @@ impl ArchiveService {
             match result {
                 Ok(_) => {
                     state.mark_success();
-                    info!("Archived {} logs to S3", logs.len());
+                    info!("Archived {} logs to S3", log_records.len());
                 }
                 Err(e) => {
                     state.mark_failed();
@@ -421,95 +459,6 @@ impl ArchiveService {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    /// 执行归档任务
-    async fn perform_archive(&self) -> Result<(), InklogError> {
-        #[cfg(not(feature = "aws"))]
-        {
-            warn!("S3 archive is disabled (feature 'aws' not enabled)");
-            Ok(())
-        }
-
-        #[cfg(feature = "aws")]
-        {
-            info!("Starting archive task");
-
-            let end_date = Utc::now();
-            let start_date = end_date - Duration::days(self.config.archive_interval_days as i64);
-
-            // 获取需要归档的日志数据
-            let log_data = self.fetch_log_data(start_date, end_date).await?;
-
-            if log_data.is_empty() {
-                debug!(
-                    "No log data to archive for period {} to {}",
-                    start_date, end_date
-                );
-                return Ok(());
-            }
-
-            info!("Archiving {} bytes of log data", log_data.len());
-
-            // 创建归档元数据
-            let metadata = ArchiveMetadata::new(
-                self.estimate_record_count(&log_data),
-                log_data.len() as i64,
-                "database_logs",
-            )
-            .with_tag("automated")
-            .with_tag("daily");
-
-            // 执行归档
-            match self
-                .archive_manager
-                .archive_logs(log_data.clone(), start_date, end_date, metadata)
-                .await
-            {
-                Ok(archive_key) => {
-                    info!("Successfully archived logs to S3: {}", archive_key);
-                    Ok(())
-                }
-                Err(e) => {
-                    error!("S3 archive failed: {}. Saving to local retention", e);
-
-                    // Save to local retention directory
-                    if let Err(local_err) = self
-                        .save_to_local_retention(log_data, start_date, end_date)
-                        .await
-                    {
-                        error!(
-                            "Failed to save to local retention: {}. Original S3 error: {}",
-                            local_err, e
-                        );
-                        Err(e) // Return original S3 error
-                    } else {
-                        info!("Successfully saved archive to local retention");
-                        Ok(()) // Consider this a success since we have local retention
-                    }
-                }
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    /// 执行本地数据清理
-    async fn perform_cleanup(&self) -> Result<(), InklogError> {
-        info!("Starting cleanup task");
-
-        let cutoff_date = Utc::now() - Duration::days(self.config.local_retention_days as i64);
-
-        #[cfg(feature = "dbnexus")]
-        if let Some(ref session) = self.database_session {
-            self.cleanup_old_database_logs(session, cutoff_date).await?;
-        }
-
-        // 清理本地文件（如果配置了文件归档）
-        self.cleanup_old_files(cutoff_date).await?;
-
-        info!("Cleanup task completed");
-        Ok(())
-    }
-
     /// 获取日志数据
     #[cfg(feature = "aws")]
     async fn fetch_log_data(
@@ -530,33 +479,14 @@ impl ArchiveService {
 
     /// 从数据库获取日志数据
     #[allow(dead_code)]
-    #[allow(dead_code)]
-    /// 从数据库获取日志数据 (dbnexus 模式下不可用)
-    ///
-    /// 注意：dbnexus 当前版本不支持 SELECT 查询返回结果行。
-    /// 此功能在 dbnexus 模式下不可用，返回空结果。
-    #[cfg(feature = "dbnexus")]
-    async fn fetch_database_logs(
-        &self,
-        _session: &Session,
-        _start_date: DateTime<Utc>,
-        _end_date: DateTime<Utc>,
-    ) -> Result<Vec<u8>, InklogError> {
-        // dbnexus execute_raw/execute_paramized 不返回 SELECT 查询结果行
-        // 这是一个已知的限制，需要等待 dbnexus 更新支持查询结果返回
-        tracing::warn!("dbnexus does not support SELECT query results yet. Returning empty data.");
-        Ok(Vec::new())
-    }
-
-    #[allow(dead_code)]
     /// 从数据库获取日志数据 (Sea-ORM 模式下可用)
     ///
     /// 注意：此方法在 dbnexus feature 禁用时不可用。
     /// 数据库归档功能需要 dbnexus feature 才能正常工作。
-    #[cfg(not(feature = "dbnexus"))]
+    #[cfg(feature = "dbnexus")]
     async fn fetch_database_logs(
         &self,
-        _session: &sea_orm::DatabaseConnection,
+        _session: &Session,
         _start_date: DateTime<Utc>,
         _end_date: DateTime<Utc>,
     ) -> Result<Vec<u8>, InklogError> {
@@ -569,20 +499,6 @@ impl ArchiveService {
         Err(InklogError::ConfigError(
             "Database log archiving requires 'dbnexus' feature to be enabled".to_string(),
         ))
-    }
-
-    /// 将日志模型转换为 Parquet 格式 - 已弃用，使用 sink::database::convert_logs_to_parquet
-    #[allow(dead_code)]
-    fn convert_to_parquet(
-        &self,
-        logs: &[crate::sink::database::LogEntity],
-    ) -> Result<Vec<u8>, InklogError> {
-        use crate::sink::database::convert_logs_to_parquet;
-        convert_logs_to_parquet(logs, &self.parquet_config).map_err(|e| {
-            InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
-                e.to_string(),
-            )))
-        })
     }
 
     /// 从文件系统获取日志数据 (异步版本)
@@ -633,7 +549,6 @@ impl ArchiveService {
         Ok(all_data)
     }
 
-    #[allow(dead_code)]
     /// 清理旧的数据库日志
     #[cfg(feature = "dbnexus")]
     async fn cleanup_old_database_logs(
@@ -652,7 +567,6 @@ impl ArchiveService {
         Ok(())
     }
 
-    #[allow(dead_code)]
     /// 清理旧的日志文件（异步版本）
     async fn cleanup_old_files(&self, cutoff_date: DateTime<Utc>) -> Result<(), InklogError> {
         let log_dir = &self.local_retention_path;
@@ -700,7 +614,6 @@ impl ArchiveService {
         (data.len() / 100) as i64
     }
 
-    #[allow(dead_code)]
     /// 保存归档数据到本地保留目录（异步版本）
     async fn save_to_local_retention(
         &self,
@@ -898,11 +811,14 @@ impl ArchiveServiceBuilder {
             .ok_or_else(|| InklogError::ConfigError("S3 archive config is required".to_string()))?;
 
         #[cfg(feature = "dbnexus")]
-        let session = self.database_session;
+        {
+            let session = self.database_session;
+            ArchiveService::new(config, session).await
+        }
         #[cfg(not(feature = "dbnexus"))]
-        let session: Option<Session> = None;
-
-        ArchiveService::new(config, session).await
+        {
+            ArchiveService::new(config).await
+        }
     }
 
     /// 构建用于测试的归档服务（不初始化 S3 管理器）
@@ -949,7 +865,6 @@ mod tests {
     #[tokio::test]
     #[cfg(all(not(feature = "aws"), feature = "dbnexus"))]
     async fn test_fetch_database_logs() {
-        use crate::sink::database::LogEntity;
         use chrono::{Duration, Utc};
         use dbnexus::pool::DbPool;
 

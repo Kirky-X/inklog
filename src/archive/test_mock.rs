@@ -11,7 +11,6 @@ use crate::error::InklogError;
 
 #[cfg(feature = "aws")]
 #[derive(Default)]
-#[allow(dead_code)]
 pub struct MockS3ArchiveManager {
     config: S3ArchiveConfig,
 }

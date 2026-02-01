@@ -76,6 +76,14 @@ impl Default for InklogConfig {
     }
 }
 
+impl std::str::FromStr for InklogConfig {
+    type Err = toml::de::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        toml::from_str(s)
+    }
+}
+
 impl InklogConfig {
     /// Returns a list of enabled sink names for audit logging purposes.
     /// Sensitive configuration values are not included in the output.
@@ -502,116 +510,6 @@ impl Default for PerformanceConfig {
 }
 
 impl InklogConfig {
-    #[cfg(feature = "confers")]
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, InklogError> {
-        let content = std::fs::read_to_string(path)?;
-        let mut config: InklogConfig = toml::from_str(&content)?;
-        config.apply_env_overrides();
-        config.validate()?;
-        Ok(config)
-    }
-
-    #[cfg(feature = "confers")]
-    pub fn load() -> Result<Self, InklogError> {
-        // Try common locations
-        let locations = [
-            "/etc/inklog/config.toml",
-            "~/.config/inklog/config.toml",
-            "./inklog_config.toml",
-            "./config.toml",
-        ];
-
-        for loc in locations.iter() {
-            // Basic path expansion (simplistic for now)
-            let path = if loc.starts_with("~") {
-                if let Ok(home) = std::env::var("HOME") {
-                    PathBuf::from(loc.replace("~", &home))
-                } else {
-                    PathBuf::from(loc)
-                }
-            } else {
-                PathBuf::from(loc)
-            };
-
-            if path.exists() {
-                return Self::from_file(path);
-            }
-        }
-
-        // If no file found, load from default
-        let mut config = Self::default();
-        config.apply_env_overrides();
-        config.validate()?;
-        Ok(config)
-    }
-
-    #[cfg(feature = "confers")]
-    pub fn load_with_watch(
-    ) -> Result<(Self, PathBuf, tokio::sync::mpsc::Receiver<PathBuf>), InklogError> {
-        use tokio::sync::mpsc;
-
-        let locations = [
-            "/etc/inklog/config.toml",
-            "~/.config/inklog/config.toml",
-            "./inklog_config.toml",
-            "./config.toml",
-        ];
-
-        let mut config_path: Option<PathBuf> = None;
-
-        for loc in locations.iter() {
-            let path = if loc.starts_with("~") {
-                if let Ok(home) = std::env::var("HOME") {
-                    PathBuf::from(loc.replace("~", &home))
-                } else {
-                    PathBuf::from(loc)
-                }
-            } else {
-                PathBuf::from(loc)
-            };
-
-            if path.exists() {
-                config_path = Some(path);
-                break;
-            }
-        }
-
-        let config_path = match config_path {
-            Some(path) => path,
-            None => {
-                return Err(InklogError::ConfigError(
-                    "No config file found for watching".to_string(),
-                ));
-            }
-        };
-
-        let config = Self::from_file(&config_path)?;
-
-        let (tx, rx) = mpsc::channel(1);
-        let watch_path = config_path.clone();
-
-        tokio::spawn(async move {
-            let mut last_modified = std::fs::metadata(&watch_path)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-                if let Ok(metadata) = std::fs::metadata(&watch_path) {
-                    if let Ok(modified) = metadata.modified() {
-                        if modified > last_modified {
-                            last_modified = modified;
-                            let _ = tx.send(watch_path.clone()).await;
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok((config, config_path, rx))
-    }
-
     pub fn validate(&self) -> Result<(), InklogError> {
         use crate::config_validator::{
             validate_log_level, validate_non_empty, validate_path, validate_positive,

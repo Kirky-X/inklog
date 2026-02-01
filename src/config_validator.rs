@@ -9,19 +9,6 @@
 
 use crate::error::InklogError;
 
-/// 配置验证 trait
-///
-/// 所有需要验证的配置结构体都应该实现这个 trait
-#[allow(dead_code)]
-pub trait ConfigValidator {
-    /// 验证配置是否有效
-    ///
-    /// # 返回值
-    ///
-    /// 返回 `Ok(())` 如果配置有效，否则返回 `Err(InklogError)`
-    fn validate(&self) -> Result<(), InklogError>;
-}
-
 /// 日志级别验证器
 pub fn validate_log_level(level: &str) -> Result<(), InklogError> {
     let valid_levels = ["trace", "debug", "info", "warn", "error"];

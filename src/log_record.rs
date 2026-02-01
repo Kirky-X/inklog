@@ -4,6 +4,7 @@
 // See LICENSE file in the project root for full license information.
 
 use crate::masking::DataMasker;
+use crate::object_pool::{LOG_RECORD_POOL, STRING_POOL};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -63,8 +64,6 @@ impl LogRecord {
     }
 
     pub fn from_event(event: &Event) -> Self {
-        use crate::pool::{LOG_RECORD_POOL, STRING_POOL};
-
         let mut record = LOG_RECORD_POOL.get();
         record.reset();
 

@@ -40,13 +40,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ..Default::default()
         }),
         database_sink: Some(inklog::config::DatabaseSinkConfig {
+            name: "default".to_string(),
             enabled: true,
-            driver: DatabaseDriver::SQLite,
+            driver: inklog::config::DatabaseDriver::SQLite,
             url: database_url.to_string(),
+            pool_size: 5,
+            batch_size: 100,
             flush_interval_ms: 5000,
-            archive_to_s3: true,
-            archive_after_days: 7,
-            ..Default::default()
+            partition: inklog::config::PartitionStrategy::default(),
+            archive_to_s3: false,
+            archive_after_days: 30,
+            s3_bucket: None,
+            s3_region: None,
+            table_name: "logs".to_string(),
+            archive_format: "json".to_string(),
+            parquet_config: inklog::config::ParquetConfig::default(),
         }),
         s3_archive: Some(inklog::S3ArchiveConfig {
             enabled: true,

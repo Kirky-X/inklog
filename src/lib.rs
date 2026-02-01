@@ -4,15 +4,17 @@
 // See LICENSE file in the project root for full license information.
 
 pub mod archive;
+pub mod cache;
 pub mod config;
 mod config_validator;
 mod error;
+pub mod infrastructure;
 pub mod log_adapter;
 pub mod log_record;
 mod manager;
 pub mod masking;
 pub mod metrics;
-mod pool;
+mod object_pool;
 pub mod sink;
 pub mod subscriber;
 pub mod template;
@@ -21,6 +23,7 @@ pub use config::{
     ChannelStrategy, ConsoleSinkConfig, DatabaseSinkConfig, FileSinkConfig, InklogConfig,
     PerformanceConfig,
 };
+
 pub use error::InklogError;
 pub use log_adapter::{LogAdapter, LogLogger};
 pub use manager::{LoggerBuilder, LoggerManager};

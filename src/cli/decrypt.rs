@@ -116,29 +116,6 @@ fn validate_glob_pattern(pattern: &str) -> Result<()> {
 
 const MAGIC_HEADER: &[u8] = b"ENCLOG1\0";
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)]
-pub enum EncryptionVersion {
-    V1WithAlgo,
-    V1Legacy,
-    Unknown,
-}
-
-#[allow(dead_code)]
-pub fn detect_version(header: &[u8]) -> EncryptionVersion {
-    if header.len() < 10 {
-        return EncryptionVersion::Unknown;
-    }
-
-    if &header[..8] == MAGIC_HEADER {
-        let version = u16::from_le_bytes([header[8], header[9]]);
-        if version == 1 {
-            return EncryptionVersion::V1Legacy;
-        }
-    }
-    EncryptionVersion::Unknown
-}
-
 #[allow(dead_code)]
 pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) -> Result<()> {
     let mut file = File::open(input_path)
@@ -331,19 +308,6 @@ pub fn decrypt_file_compatible(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn decrypt_file_to_string(input_path: &PathBuf, key_env: &str) -> Result<String> {
-    let temp_output = input_path.with_extension("decrypted");
-    decrypt_file(input_path, &temp_output, key_env)?;
-
-    let mut content = String::new();
-    File::open(&temp_output)?.read_to_string(&mut content)?;
-
-    std::fs::remove_file(&temp_output)?;
-
-    Ok(content)
-}
-
 fn get_encryption_key(env_var: &str) -> Result<[u8; 32]> {
     let key_str = std::env::var(env_var)
         .map_err(|_| anyhow!("Encryption key environment variable not set. Please ensure INKLOG_DECRYPT_KEY or INKLOG_ENCRYPTION_KEY is defined."))?;
@@ -376,81 +340,6 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32]> {
             bytes.len()
         ))
     }
-}
-
-#[allow(dead_code)]
-pub fn decrypt_directory(
-    input_dir: &PathBuf,
-    output_dir: &PathBuf,
-    key_env: &str,
-    recursive: bool,
-) -> Result<()> {
-    if !input_dir.exists() {
-        return Err(anyhow!(
-            "Input directory does not exist: {}",
-            input_dir.display()
-        ));
-    }
-
-    std::fs::create_dir_all(output_dir).with_context(|| {
-        format!(
-            "Failed to create output directory: {}",
-            output_dir.display()
-        )
-    })?;
-
-    let entries = std::fs::read_dir(input_dir)
-        .with_context(|| format!("Failed to read input directory: {}", input_dir.display()))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "enc" {
-                    let file_name = path.file_name().unwrap();
-                    let output_path = output_dir.join(file_name).with_extension("log");
-
-                    // 验证输出路径是否在允许的目录内
-                    if let Err(e) = validate_file_path(&output_path, output_dir) {
-                        eprintln!(
-                            "Path validation failed for {}: {}",
-                            output_path.display(),
-                            e
-                        );
-                        continue;
-                    }
-
-                    println!(
-                        "Decrypting: {} -> {}",
-                        path.display(),
-                        output_path.display()
-                    );
-
-                    if let Err(e) = decrypt_file(&path, &output_path, key_env) {
-                        eprintln!("Failed to decrypt {}: {}", path.display(), e);
-                    }
-                }
-            }
-        } else if recursive && path.is_dir() {
-            let file_name = path.file_name().unwrap();
-            let sub_output_dir = output_dir.join(file_name);
-
-            // 验证子目录路径是否在允许的目录内
-            if let Err(e) = validate_file_path(&sub_output_dir, output_dir) {
-                eprintln!(
-                    "Path validation failed for {}: {}",
-                    sub_output_dir.display(),
-                    e
-                );
-                continue;
-            }
-
-            decrypt_directory(&path, &sub_output_dir, key_env, recursive)?;
-        }
-    }
-
-    Ok(())
 }
 
 pub fn decrypt_directory_compatible(

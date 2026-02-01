@@ -160,7 +160,7 @@ pub struct InklogConfig {
     pub global: GlobalConfig,                    // 全局设置
     pub console_sink: Option<ConsoleSinkConfig>,
     pub file_sink: Option<FileSinkConfig>,
-    pub database_sink: Option<DatabaseSinkConfig>,
+    pub db_config: Option<DatabaseConfig>,
     pub s3_archive: Option<S3ArchiveConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,

@@ -120,15 +120,15 @@ echo ""
 # 1. Code Formatting Check
 print_header "1. Code Formatting"
 run_check_with_output "Format Check" \
-    "cargo fmt --all -- --check" \
-    "Code formatting issues found. Run 'cargo fmt --all' to fix."
+    "cargo fmt -- --check" \
+    "Code formatting issues found. Run 'cargo fmt' to fix."
 
 echo ""
 
 # 2. Clippy Linting
 print_header "2. Clippy Linting"
 run_check "Clippy Check" \
-    "cargo clippy --lib --all-features -- -D warnings" \
+    "cargo clippy --all-features -- -D warnings" \
     "Clippy found issues. Review the output above."
 
 echo ""
@@ -173,8 +173,8 @@ else
     echo -e "${YELLOW}Please fix the issues above before committing.${NC}"
     echo ""
     echo -e "${BLUE}Quick fix commands:${NC}"
-    echo -e "  ${BLUE}Formatting:${NC}    cargo fmt --all"
-    echo -e "  ${BLUE}Clippy:${NC}       cargo clippy --lib --all-features -- -D warnings"
+    echo -e "  ${BLUE}Formatting:${NC}    cargo fmt"
+    echo -e "  ${BLUE}Clippy:${NC}       cargo clippy --all-features -- -D warnings"
     echo -e "  ${BLUE}Build:${NC}        cargo check --all-features"
     echo -e "  ${BLUE}Tests:${NC}        cargo test --lib --all-features"
     echo ""
