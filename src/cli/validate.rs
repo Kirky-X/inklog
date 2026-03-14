@@ -7,9 +7,6 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
-#[cfg(feature = "confers")]
-use confers::ConfigError;
-
 pub fn validate_config(config_path: &PathBuf) -> Result<()> {
     println!("Validating configuration file: {}", config_path.display());
 
@@ -23,7 +20,7 @@ pub fn validate_config(config_path: &PathBuf) -> Result<()> {
     #[cfg(feature = "confers")]
     {
         // Use confers for validation when feature is enabled
-        return validate_with_confers(config_path);
+        validate_with_confers(config_path)
     }
 
     #[cfg(not(feature = "confers"))]
@@ -61,6 +58,10 @@ fn validate_toml_content(content: &str, config_path: &PathBuf) -> Result<()> {
     let config: toml::Table = content
         .parse()
         .with_context(|| "Failed to parse TOML content")?;
+
+    if let Some(global) = config.get("global").and_then(|t| t.as_table()) {
+        validate_global_config(global)?;
+    }
 
     // Helper function to get table with flexible section naming (e.g., "console" or "console_sink")
     fn get_table<'a>(config: &'a toml::Table, name: &str) -> Option<&'a toml::Table> {

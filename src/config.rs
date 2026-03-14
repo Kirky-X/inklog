@@ -7,7 +7,7 @@ use crate::archive::SecretString;
 use crate::config_validator::validate_url;
 use crate::error::InklogError;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// HTTP 服务器错误处理模式
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -104,6 +104,80 @@ impl InklogConfig {
             sinks.push("s3_archive");
         }
         sinks
+    }
+
+    /// 从指定文件路径加载配置
+    ///
+    /// # Arguments
+    /// * `path` - 配置文件路径（TOML格式）
+    ///
+    /// # Returns
+    /// 成功返回解析后的配置，失败返回错误
+    ///
+    /// # Example
+    /// ```ignore
+    /// use inklog::InklogConfig;
+    ///
+    /// let config = InklogConfig::from_file("config.toml")?;
+    /// ```
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
+        let path_ref = path.as_ref();
+        let content = std::fs::read_to_string(path_ref).map_err(|e| {
+            InklogError::ConfigError(format!(
+                "Failed to read config file '{}': {}",
+                path_ref.display(),
+                e
+            ))
+        })?;
+
+        let mut config: Self = toml::from_str(&content).map_err(|e| {
+            InklogError::ConfigError(format!(
+                "Failed to parse config file '{}': {}",
+                path_ref.display(),
+                e
+            ))
+        })?;
+
+        config.apply_env_overrides();
+        Ok(config)
+    }
+
+    /// 自动搜索并加载配置文件
+    ///
+    /// 搜索路径优先级：
+    /// 1. 环境变量 `INKLOG_CONFIG_PATH` 指定的路径
+    /// 2. 当前目录下的 `inklog_config.toml`
+    /// 3. 用户配置目录 `~/.config/inklog/config.toml`
+    /// 4. 系统配置目录 `/etc/inklog/config.toml`
+    ///
+    /// 如果未找到任何配置文件，返回默认配置并应用环境变量覆盖
+    ///
+    /// # Returns
+    /// 成功返回配置，失败返回错误
+    ///
+    /// # Example
+    /// ```ignore
+    /// use inklog::InklogConfig;
+    ///
+    /// let config = InklogConfig::load()?;
+    /// ```
+    pub fn load() -> Result<Self, InklogError> {
+        let search_paths: Vec<Option<PathBuf>> = vec![
+            std::env::var("INKLOG_CONFIG_PATH").ok().map(PathBuf::from),
+            Some(PathBuf::from("inklog_config.toml")),
+            dirs::config_dir().map(|p| p.join("inklog/config.toml")),
+            Some(PathBuf::from("/etc/inklog/config.toml")),
+        ];
+
+        for path in search_paths.into_iter().flatten() {
+            if path.exists() {
+                return Self::from_file(path);
+            }
+        }
+
+        let mut config = Self::default();
+        config.apply_env_overrides();
+        Ok(config)
     }
 }
 

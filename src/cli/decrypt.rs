@@ -164,70 +164,6 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     Ok(())
 }
 
-/// Decrypt a file using the legacy encryption format.
-///
-/// This function is kept for backward compatibility and testing purposes.
-/// New code should use `decrypt_file_compatible` which handles both formats.
-///
-/// # Deprecation
-///
-/// This function is deprecated and will be removed in a future version.
-/// Use `decrypt_file_compatible` instead.
-///
-/// This function is kept for backward compatibility and testing.
-/// It is only used by tests to verify legacy format support.
-#[deprecated(since = "0.1.0", note = "Use decrypt_file_compatible instead")]
-#[allow(dead_code)]
-pub fn decrypt_file_legacy(
-    input_path: &PathBuf,
-    output_path: &PathBuf,
-    key_env: &str,
-) -> Result<()> {
-    let key = get_encryption_key(key_env)
-        .with_context(|| format!("Failed to get encryption key from env var: {}", key_env))?;
-
-    let mut file = File::open(input_path)
-        .with_context(|| format!("Failed to open input file: {}", input_path.display()))?;
-
-    let mut header = [0u8; 10];
-    file.read_exact(&mut header)
-        .with_context(|| "Failed to read file header")?;
-
-    if &header[..8] != MAGIC_HEADER {
-        return Err(anyhow!("Invalid file header: not an encrypted inklog file"));
-    }
-
-    let version = u16::from_le_bytes([header[8], header[9]]);
-    if version != 1 {
-        return Err(anyhow!("Unsupported file version: {}", version));
-    }
-
-    let mut nonce_bytes = [0u8; 12];
-    file.read_exact(&mut nonce_bytes)
-        .with_context(|| "Failed to read nonce")?;
-
-    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
-
-    let mut ciphertext = Vec::new();
-    file.read_to_end(&mut ciphertext)
-        .with_context(|| "Failed to read ciphertext")?;
-
-    let cipher = Aes256Gcm::new((&key).into());
-
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
-
-    let mut output_file = File::create(output_path)
-        .with_context(|| format!("Failed to create output file: {}", output_path.display()))?;
-
-    output_file
-        .write_all(&plaintext)
-        .with_context(|| "Failed to write decrypted data")?;
-
-    Ok(())
-}
-
 pub fn decrypt_file_compatible(
     input_path: &PathBuf,
     output_path: &PathBuf,
@@ -500,7 +436,8 @@ mod tests {
         file.write_all(&1u16.to_le_bytes())?;
 
         let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill(&mut nonce_bytes);
+        let mut rng = rand::rng();
+        rng.fill(&mut nonce_bytes);
         file.write_all(&nonce_bytes)?;
 
         let cipher = Aes256Gcm::new(key.into());
@@ -525,7 +462,8 @@ mod tests {
         file.write_all(&1u16.to_le_bytes())?;
 
         let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill(&mut nonce_bytes);
+        let mut rng = rand::rng();
+        rng.fill(&mut nonce_bytes);
         file.write_all(&nonce_bytes)?;
 
         let cipher = Aes256Gcm::new(key.into());
@@ -610,28 +548,6 @@ mod tests {
         assert_eq!(decrypted_content, plaintext);
 
         std::env::remove_var("TEST_KEY_V1");
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_decrypt_file_legacy_format() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let input_file = temp_dir.path().join("test_legacy.enc");
-        let output_file = temp_dir.path().join("test_legacy.log");
-        let plaintext = b"Hello, World! Legacy format test.";
-        let test_key = generate_test_key();
-
-        create_encrypted_file_legacy(&input_file, plaintext, &test_key).unwrap();
-
-        let key_base64 = general_purpose::STANDARD.encode(test_key);
-        std::env::set_var("TEST_KEY_LEGACY", key_base64);
-
-        decrypt_file_legacy(&input_file, &output_file, "TEST_KEY_LEGACY").unwrap();
-
-        let decrypted_content = std::fs::read(&output_file).unwrap();
-        assert_eq!(decrypted_content, plaintext);
-
-        std::env::remove_var("TEST_KEY_LEGACY");
     }
 
     #[test]

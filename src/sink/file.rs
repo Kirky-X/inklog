@@ -254,7 +254,13 @@ impl FileSink {
                 static LAST_CLEANUP: std::sync::Mutex<Option<Instant>> =
                     std::sync::Mutex::new(None);
 
-                let mut last_cleanup = LAST_CLEANUP.lock().unwrap();
+                let mut last_cleanup = match LAST_CLEANUP.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        error!("Cleanup timer lock poisoned: {}", e);
+                        return;
+                    }
+                };
                 let now = Instant::now();
 
                 if last_cleanup.is_none_or(|t| now.duration_since(t) >= cleanup_interval) {
@@ -847,7 +853,11 @@ impl LogSink for FileSink {
             || self
                 .rotation_timer
                 .as_ref()
-                .map(|t| t.lock().unwrap().elapsed() >= self.rotation_interval)
+                .map(|t| {
+                    t.lock()
+                        .map(|guard| guard.elapsed() >= self.rotation_interval)
+                        .unwrap_or(false)
+                })
                 .unwrap_or(false)
         {
             if let Err(e) = self.rotate() {

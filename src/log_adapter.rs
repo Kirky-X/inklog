@@ -181,6 +181,7 @@ impl log::Log for LogLogger {
 mod tests {
     use super::*;
     use crossbeam_channel::bounded;
+    use log::Log;
 
     #[test]
     fn test_level_to_string() {
@@ -220,5 +221,35 @@ mod tests {
         assert_eq!(log_record.message, "Test message");
         assert_eq!(log_record.file, Some("test.rs".to_string()));
         assert_eq!(log_record.line, Some(42));
+    }
+
+    #[test]
+    fn test_log_adapter_log_sends_to_channel() {
+        let (sender, receiver) = bounded(10);
+        let console_config = crate::config::ConsoleSinkConfig::default();
+        let template = crate::template::LogTemplate::new("{message}");
+        let console_sink = Arc::new(Mutex::new(ConsoleSink::new(console_config, template)));
+        let metrics = Arc::new(Metrics::new());
+
+        let adapter = LogAdapter::new(console_sink, sender, metrics);
+
+        log::set_max_level(log::LevelFilter::Info);
+        let metadata = log::Metadata::builder()
+            .target("test::adapter")
+            .level(Level::Info)
+            .build();
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!("Adapter send"))
+            .file(Some("test.rs"))
+            .line(Some(7))
+            .build();
+
+        adapter.log(&record);
+
+        let received = receiver.recv().unwrap();
+        assert_eq!(received.level, "INFO");
+        assert_eq!(received.target, "test::adapter");
+        assert_eq!(received.message, "Adapter send");
     }
 }

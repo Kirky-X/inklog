@@ -248,7 +248,7 @@ impl AsyncFileSink {
         }
 
         let compressed = compression::compress_data(combined.as_bytes(), level)
-            .map_err(std::io::Error::other)?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         if let Ok(mut file_guard) = file.lock() {
             if let Some(f) = file_guard.as_mut() {

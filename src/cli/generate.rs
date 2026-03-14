@@ -13,20 +13,6 @@ use std::path::Path;
 /// This function uses confers::ConfersCli::generate() to generate configuration templates
 /// with four levels: minimal, full, database, and file
 pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
-    let level = match config_type {
-        "minimal" => "minimal",
-        "full" => "full",
-        "documentation" | "doc" => "documentation",
-        "database" => "full",
-        "file" => "full",
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unknown config type: {}. Use: minimal, full, documentation, database, file",
-                config_type
-            ))
-        }
-    };
-
     // Determine output path
     let output_file = if output_path.is_dir() {
         output_path.join("inklog_config.toml")
@@ -60,7 +46,7 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
             .with_context(|| "Failed to write config content")?;
 
         println!("Generated config file: {}", output_filename);
-        return Ok(());
+        Ok(())
     }
 
     // Fallback to hardcoded templates when confers is not available
@@ -81,7 +67,7 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
             .with_context(|| "Failed to write config content")?;
 
         println!("Generated config file: {}", output_file.display());
-        return Ok(());
+        Ok(())
     }
 }
 

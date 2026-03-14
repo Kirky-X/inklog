@@ -68,3 +68,32 @@ where
         LOG_RECORD_POOL.put(r);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::bounded;
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::prelude::*;
+
+    #[test]
+    fn test_on_event_sends_to_channel() {
+        let (tx, rx) = bounded(10);
+        let console_config = crate::config::ConsoleSinkConfig::default();
+        let template = crate::template::LogTemplate::new("{message}");
+        let console_sink = Arc::new(Mutex::new(ConsoleSink::new(console_config, template)));
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_sink, tx, metrics);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::subscriber", message = "hello", user_id = 1u64);
+        });
+
+        let received = rx.recv().unwrap();
+        assert_eq!(received.level, "INFO");
+        assert_eq!(received.target, "test::subscriber");
+        assert_eq!(received.message, "hello");
+    }
+}

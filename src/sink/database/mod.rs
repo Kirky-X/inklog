@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "dbnexus")]
 use anyhow::Result;
 #[cfg(feature = "dbnexus")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "dbnexus")]
 use dbnexus::pool::DbPool;
+#[cfg(feature = "dbnexus")]
+use sea_orm::{EntityTrait, Set};
 
 #[cfg(feature = "dbnexus")]
 use crate::config::FileSinkConfig;
@@ -29,6 +29,8 @@ use crate::error::InklogError;
 use crate::log_record::LogRecord;
 #[cfg(feature = "dbnexus")]
 use crate::masking::DataMasker;
+#[cfg(feature = "dbnexus")]
+use crate::metrics::Metrics;
 #[cfg(feature = "dbnexus")]
 use crate::sink::circuit_breaker::CircuitBreaker;
 #[cfg(feature = "dbnexus")]
@@ -47,6 +49,7 @@ pub struct DatabaseSink {
     circuit_breaker: CircuitBreaker,
     masker: Arc<DataMasker>,
     stop: Arc<AtomicBool>,
+    metrics: Option<Arc<Metrics>>,
 }
 
 #[cfg(feature = "dbnexus")]
@@ -87,7 +90,12 @@ impl DatabaseSink {
             circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),
             masker: Arc::new(DataMasker::new()),
             stop: Arc::new(AtomicBool::new(false)),
+            metrics: None,
         })
+    }
+
+    pub fn set_metrics(&mut self, metrics: Arc<Metrics>) {
+        self.metrics = Some(metrics);
     }
 }
 
@@ -113,7 +121,7 @@ impl crate::sink::LogSink for DatabaseSink {
             ..record.clone()
         };
 
-        self.buffer.push(masked_record.clone());
+        self.buffer.push(masked_record);
 
         if self.buffer.len() >= DEFAULT_BATCH_SIZE
             || self.last_flush.elapsed() > Duration::from_millis(DEFAULT_FLUSH_INTERVAL_MS)
@@ -138,15 +146,30 @@ impl crate::sink::LogSink for DatabaseSink {
 
         let records = std::mem::take(&mut self.buffer);
         self.last_flush = Instant::now();
+        let batch_size = records.len();
+        if let Some(metrics) = &self.metrics {
+            metrics.set_db_batch_size(batch_size);
+        }
 
         if let Some(ref pool) = self.pool {
             let pool_clone = pool.clone();
             self.rt.block_on(async {
-                if let Err(e) = write_batch_to_db(&pool_clone, &records).await {
-                    self.buffer = records;
-                    Err(e)
-                } else {
-                    Ok(())
+                match write_batch_to_db(&pool_clone, &records).await {
+                    Ok(written) => {
+                        if let Some(metrics) = &self.metrics {
+                            metrics.add_db_batch_records_total(written);
+                            metrics.update_sink_health("database", true, None);
+                        }
+                        Ok(())
+                    }
+                    Err(e) => {
+                        self.buffer = records;
+                        if let Some(metrics) = &self.metrics {
+                            metrics.inc_sink_error();
+                            metrics.update_sink_health("database", false, Some(e.to_string()));
+                        }
+                        Err(e)
+                    }
                 }
             })?;
         }
@@ -171,41 +194,35 @@ async fn write_batch_to_db(pool: &DbPool, records: &[LogRecord]) -> Result<usize
     let session = pool
         .get_session("admin")
         .await
-        .map_err(|e: dbnexus::error::DbError| InklogError::DatabaseError(e.to_string()))?;
-    let mut inserted = 0;
+        .map_err(|e: dbnexus::DbError| InklogError::DatabaseError(e.to_string()))?;
+    let conn = session
+        .connection()
+        .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
 
-    // Use default table name "logs" - dbnexus manages the actual table
-    let target_table = "logs";
-
+    let mut models = Vec::with_capacity(records.len());
     for record in records {
-        let sql = format!(
-            "INSERT INTO {} (timestamp, level, target, message, fields, file, line, thread_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            target_table
-        );
-
-        let params: Vec<sea_orm::Value> = vec![
-            sea_orm::Value::from(record.timestamp.to_rfc3339()),
-            sea_orm::Value::from(record.level.to_string()),
-            sea_orm::Value::from(record.target.clone()),
-            sea_orm::Value::from(record.message.clone()),
-            sea_orm::Value::from(serde_json::to_string(&record.fields).ok()),
-            sea_orm::Value::from(record.file.clone()),
-            sea_orm::Value::from(record.line.map(|l| l as i64)),
-            sea_orm::Value::from(record.thread_id.clone()),
-        ];
-
-        if session.execute_paramized(&sql, params).await.is_ok() {
-            inserted += 1;
-        }
+        let fields_value = serde_json::to_string(&record.fields).ok();
+        models.push(crate::sink::entity::ActiveModel {
+            timestamp: Set(record.timestamp.naive_utc()),
+            level: Set(record.level.clone()),
+            target: Set(record.target.clone()),
+            message: Set(record.message.clone()),
+            fields: Set(fields_value),
+            file: Set(record.file.clone()),
+            line: Set(record.line.map(|line| line as i32)),
+            thread_id: Set(record.thread_id.clone()),
+            module_path: Set(None),
+            metadata: Set(None),
+            ..Default::default()
+        });
     }
 
-    Ok(inserted)
-}
+    crate::sink::entity::Entity::insert_many(models)
+        .exec(conn)
+        .await
+        .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
 
-#[cfg(feature = "dbnexus")]
-fn get_partition_for_timestamp(_ts: &DateTime<Utc>) -> String {
-    // Partition management is handled by dbnexus
-    "logs".to_string()
+    Ok(records.len())
 }
 
 /// Convert LogRecord to Parquet format
@@ -233,7 +250,7 @@ pub fn convert_logs_to_parquet(
     let ids: Vec<i64> = (1..=logs.len() as i64).collect();
     let timestamps: Vec<i64> = logs
         .iter()
-        .map(|l| l.timestamp.timestamp_millis() as i64)
+        .map(|l| l.timestamp.timestamp_millis())
         .collect();
     let levels: Vec<&str> = logs.iter().map(|l| l.level.as_str()).collect();
     let targets: Vec<&str> = logs.iter().map(|l| l.target.as_str()).collect();
@@ -242,10 +259,7 @@ pub fn convert_logs_to_parquet(
         .iter()
         .map(|l| Some(serde_json::to_string(&l.fields).unwrap_or_default()))
         .collect();
-    let files: Vec<Option<&str>> = logs
-        .iter()
-        .map(|l| l.file.as_ref().map(|s| s.as_str()))
-        .collect();
+    let files: Vec<Option<&str>> = logs.iter().map(|l| l.file.as_deref()).collect();
     let lines: Vec<Option<i32>> = logs
         .iter()
         .map(|l| l.line.map(|line_num| line_num as i32))

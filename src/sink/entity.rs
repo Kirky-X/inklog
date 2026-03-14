@@ -15,8 +15,10 @@ pub struct Model {
     pub level: String,
     pub target: String,
     pub message: String,
+    pub fields: Option<String>,
     pub file: Option<String>,
     pub line: Option<i32>,
+    pub thread_id: String,
     pub module_path: Option<String>,
     pub metadata: Option<String>,
 }

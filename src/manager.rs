@@ -13,6 +13,7 @@ use crate::log_adapter::{LogAdapter, LogLogger};
 use crate::log_record::LogRecord;
 use crate::metrics::{HealthStatus, Metrics};
 use crate::sink::console::ConsoleSink;
+#[cfg(feature = "dbnexus")]
 use crate::sink::database::DatabaseSink;
 use crate::sink::file::FileSink;
 use crate::sink::LogSink;
@@ -23,6 +24,8 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::path::PathBuf;
+use std::string::ToString;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -37,6 +40,7 @@ use tracing_subscriber::prelude::*;
 // Control messages for sink recovery
 /// Messages used to control sink recovery and status queries.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum SinkControlMessage {
     RecoverSink(String), // sink name
     GetStatus,
@@ -52,10 +56,12 @@ struct WorkerParams {
     metrics: Arc<Metrics>,
     console_sink: Arc<Mutex<ConsoleSink>>,
     error_sink: Arc<Mutex<Option<FileSink>>>,
+    effective_capacity: Arc<AtomicUsize>,
 }
 
 /// 环境检测结果，用于智能配置
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct EnvironmentProfile {
     /// 是否为交互式终端
     is_terminal: bool,
@@ -94,6 +100,7 @@ struct EnvironmentProfile {
 /// }
 /// ```
 pub struct LoggerManager {
+    #[allow(dead_code)]
     config: InklogConfig,
     sender: Sender<LogRecord>,
     shutdown_tx: Sender<()>,
@@ -101,8 +108,11 @@ pub struct LoggerManager {
     metrics: Arc<Metrics>,
     worker_handles: Mutex<Vec<JoinHandle<()>>>,
     control_tx: Sender<SinkControlMessage>,
+    effective_capacity: Arc<AtomicUsize>,
     #[cfg(feature = "aws")]
     archive_service: Option<Arc<tokio::sync::Mutex<ArchiveService>>>,
+    #[cfg(feature = "http")]
+    http_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl LoggerManager {
@@ -173,10 +183,28 @@ impl LoggerManager {
             tracing::warn!("Failed to set log crate logger: {}", e);
         }
 
+        // 3. 启动HTTP监控服务器（如果配置启用）
+        #[cfg(feature = "http")]
+        if let Some(ref http_cfg) = config.http_server {
+            if http_cfg.enabled {
+                if let Err(e) = manager.start_http_server(http_cfg).await {
+                    match http_cfg.error_mode {
+                        crate::config::HttpErrorMode::Panic => {
+                            panic!("HTTP server startup failed: {}", e);
+                        }
+                        crate::config::HttpErrorMode::Warn => {
+                            tracing::warn!("HTTP server startup failed (continuing): {}", e);
+                        }
+                        crate::config::HttpErrorMode::Strict => {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(manager)
     }
-
-
 
     /// 构建LoggerManager但不安装全局订阅者。
     /// 这主要用于测试和基准测试。
@@ -196,6 +224,7 @@ impl LoggerManager {
         let (sender, receiver) = bounded(config.performance.channel_capacity);
         let (shutdown_tx, shutdown_rx) = bounded(1);
         let (control_tx, control_rx) = bounded(10); // Control channel for recovery commands
+        let effective_capacity = Arc::new(AtomicUsize::new(config.performance.channel_capacity));
 
         let console_sink = Arc::new(Mutex::new(ConsoleSink::new(
             config.console_sink.clone().unwrap_or_default(),
@@ -231,6 +260,7 @@ impl LoggerManager {
             metrics: metrics.clone(),
             console_sink: console_sink.clone(),
             error_sink: error_sink.clone(),
+            effective_capacity: effective_capacity.clone(),
         })?;
 
         // Initialize archive service if configured
@@ -239,36 +269,43 @@ impl LoggerManager {
             if archive_config.enabled {
                 info!("Initializing S3 archive service");
 
-                let db_conn = if let Some(ref db_cfg) = config.database_sink {
-                    use dbnexus::DbConfigBuilder;
-                    let config = DbConfigBuilder::new()
-                        .url(&db_cfg.url)
-                        .max_connections(db_cfg.pool_size as u32)
-                        .build()
-                        .map_err(|e| {
-                            tracing::warn!("Failed to build DbConfig: {}", e);
-                        })
-                        .ok();
-                    match config {
-                        Some(cfg) => match dbnexus::pool::DbPool::with_config(cfg).await {
-                            Ok(pool) => Some(pool),
-                            Err(e) => {
-                                tracing::warn!("Failed to create DbPool: {}", e);
-                                None
-                            }
-                        },
-                        None => None,
-                    }
-                } else {
-                    None
-                };
+                #[cfg(feature = "dbnexus")]
+                let db_conn: Option<dbnexus::pool::DbPool> =
+                    if let Some(ref db_cfg) = config.database_sink {
+                        use dbnexus::DbConfigBuilder;
+                        let db_config = DbConfigBuilder::new()
+                            .url(&db_cfg.url)
+                            .max_connections(db_cfg.pool_size)
+                            .build()
+                            .map_err(|e| {
+                                tracing::warn!("Failed to build DbConfig: {}", e);
+                            })
+                            .ok();
+                        match db_config {
+                            Some(cfg) => match dbnexus::pool::DbPool::with_config(cfg).await {
+                                Ok(pool) => Some(pool),
+                                Err(e) => {
+                                    tracing::warn!("Failed to create DbPool: {}", e);
+                                    None
+                                }
+                            },
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
 
+                #[cfg(feature = "dbnexus")]
                 let mut archive_service_builder =
                     ArchiveServiceBuilder::new().config(archive_config.clone());
+                #[cfg(not(feature = "dbnexus"))]
+                let archive_service_builder =
+                    ArchiveServiceBuilder::new().config(archive_config.clone());
 
+                #[cfg(feature = "dbnexus")]
                 #[allow(clippy::collapsible_match, clippy::match_result_ok)]
                 if let Some(pool) = db_conn {
-                    if let Some(s) = pool.get_session("").await.ok() {
+                    if let Some(s) = pool.get_session("admin").await.ok() {
                         archive_service_builder = archive_service_builder.database_session(s);
                     }
                 }
@@ -296,7 +333,10 @@ impl LoggerManager {
             metrics,
             worker_handles: Mutex::new(handles),
             control_tx,
+            effective_capacity: effective_capacity.clone(),
             archive_service,
+            #[cfg(feature = "http")]
+            http_server_handle: Mutex::new(None),
         };
 
         #[cfg(not(feature = "aws"))]
@@ -308,15 +348,133 @@ impl LoggerManager {
             metrics,
             worker_handles: Mutex::new(handles),
             control_tx,
+            effective_capacity: effective_capacity.clone(),
+            #[cfg(feature = "http")]
+            http_server_handle: Mutex::new(None),
         };
 
         Ok((manager, subscriber, filter))
     }
 
-
-
     pub fn builder() -> LoggerBuilder {
         LoggerBuilder::default()
+    }
+
+    /// 从配置文件初始化LoggerManager
+    ///
+    /// # Arguments
+    /// * `path` - 配置文件路径（TOML格式）
+    ///
+    /// # Returns
+    /// 成功返回LoggerManager实例，失败返回错误
+    ///
+    /// # Example
+    /// ```ignore
+    /// use inklog::LoggerManager;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let _logger = LoggerManager::from_file("config.toml").await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
+        let config = InklogConfig::from_file(path)?;
+        Self::with_config(config).await
+    }
+
+    /// 自动搜索并加载配置文件初始化LoggerManager
+    ///
+    /// 搜索路径优先级：
+    /// 1. 环境变量 `INKLOG_CONFIG_PATH` 指定的路径
+    /// 2. 当前目录下的 `inklog_config.toml`
+    /// 3. 用户配置目录 `~/.config/inklog/config.toml`
+    /// 4. 系统配置目录 `/etc/inklog/config.toml`
+    ///
+    /// # Returns
+    /// 成功返回LoggerManager实例，失败返回错误
+    ///
+    /// # Example
+    /// ```ignore
+    /// use inklog::LoggerManager;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let _logger = LoggerManager::load().await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn load() -> Result<Self, InklogError> {
+        let config = InklogConfig::load()?;
+        Self::with_config(config).await
+    }
+
+    /// 启动HTTP监控服务器
+    ///
+    /// 提供健康检查和Prometheus指标端点
+    #[cfg(feature = "http")]
+    async fn start_http_server(
+        &self,
+        config: &crate::config::HttpServerConfig,
+    ) -> Result<(), InklogError> {
+        use axum::{routing::get, Router};
+
+        let metrics = self.metrics.clone();
+        let health_path = config.health_path.clone();
+        let metrics_path = config.metrics_path.clone();
+
+        let health_status_getter = {
+            let sender = self.sender.clone();
+            let effective_capacity = self.effective_capacity.clone();
+            let metrics_clone = metrics.clone();
+            move || {
+                let channel_len = sender.len();
+                let channel_cap = effective_capacity.load(std::sync::atomic::Ordering::Relaxed);
+                metrics_clone.get_status(channel_len, channel_cap)
+            }
+        };
+
+        let app = Router::new()
+            .route(
+                &health_path,
+                get(|| async move {
+                    let status = health_status_getter();
+                    axum::Json(serde_json::to_value(&status).unwrap_or_default())
+                }),
+            )
+            .route(
+                &metrics_path,
+                get(move || async move { metrics.export_prometheus() }),
+            );
+
+        let addr: std::net::SocketAddr = format!("{}:{}", config.host, config.port)
+            .parse()
+            .map_err(|e| InklogError::ConfigError(format!("Invalid HTTP server address: {}", e)))?;
+
+        let handle = tokio::spawn(async move {
+            let listener = match tokio::net::TcpListener::bind(addr).await {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!("Failed to bind HTTP server to {}: {}", addr, e);
+                    return;
+                }
+            };
+            info!("HTTP server started on {}", addr);
+            match axum::serve(listener, app).await {
+                Ok(_) => info!("HTTP server stopped"),
+                Err(e) => tracing::error!("HTTP server error: {}", e),
+            }
+        });
+
+        match self.http_server_handle.lock() {
+            Ok(mut guard) => *guard = Some(handle),
+            Err(e) => {
+                tracing::error!("HTTP server handle lock poisoned: {}", e);
+            }
+        }
+
+        info!("HTTP monitoring server configured on {}", addr);
+        Ok(())
     }
 
     /// 启动S3归档服务
@@ -385,8 +543,10 @@ impl LoggerManager {
             metrics,
             console_sink,
             error_sink,
+            effective_capacity,
         } = params;
         let file_config = config.file_sink.clone();
+        #[allow(unused_variables)]
         let db_config = config.database_sink.clone();
 
         // Thread 1: File Sink
@@ -402,6 +562,7 @@ impl LoggerManager {
                     let cfg_clone = cfg.clone(); // Clone for recovery attempts
                     if let Ok(mut sink) = FileSink::new(cfg) {
                         let mut consecutive_failures = 0;
+                        #[allow(unused_assignments)]
                         let mut last_failure_time = None::<Instant>;
 
                         loop {
@@ -597,36 +758,48 @@ impl LoggerManager {
         });
 
         // Thread 2: DB Sink
+        #[cfg(feature = "dbnexus")]
         let rx_db = receiver.clone();
+        #[cfg(feature = "dbnexus")]
         let shutdown_db = shutdown_rx.clone();
+        #[cfg(feature = "dbnexus")]
         let metrics_db = metrics.clone();
+        #[cfg(feature = "dbnexus")]
         let console_sink_db = console_sink.clone();
+        #[cfg(feature = "dbnexus")]
         let control_rx_db = control_rx.clone();
-        let handle_db = thread::spawn(move || {
-            metrics_db.active_workers.inc();
-            if let Some(cfg) = db_config {
-                if cfg.enabled {
-                    let cfg_clone = cfg.clone(); // Clone for recovery attempts
-                    if let Ok(mut sink) = DatabaseSink::new(&cfg) {
-                        let mut consecutive_failures = 0;
-                        let mut last_failure_time = None::<Instant>;
+        #[cfg(feature = "dbnexus")]
+        let handle_db = thread::spawn(
+            #[allow(unused_assignments)]
+            move || {
+                metrics_db.active_workers.inc();
+                if let Some(cfg) = db_config {
+                    if cfg.enabled {
+                        let cfg_clone = cfg.clone(); // Clone for recovery attempts
+                        if let Ok(sink_result) = DatabaseSink::new(&cfg) {
+                            let mut sink: DatabaseSink = sink_result;
+                            sink.set_metrics(metrics_db.clone());
+                            let mut consecutive_failures = 0;
+                            #[allow(unused_assignments)]
+                            let mut last_failure_time = None::<Instant>;
 
-                        loop {
-                            if shutdown_db.try_recv().is_ok() {
-                                // Drain with 30s timeout
-                                let deadline = Instant::now() + Duration::from_secs(30);
-                                while let Ok(record) = rx_db.try_recv() {
-                                    let latency = Utc::now()
-                                        .signed_duration_since(record.timestamp)
-                                        .to_std()
-                                        .unwrap_or(Duration::ZERO);
-                                    metrics_db.record_latency(latency);
+                            loop {
+                                if shutdown_db.try_recv().is_ok() {
+                                    // Drain with 30s timeout
+                                    let deadline = Instant::now() + Duration::from_secs(30);
+                                    while let Ok(record) = rx_db.try_recv() {
+                                        let latency = Utc::now()
+                                            .signed_duration_since(record.timestamp)
+                                            .to_std()
+                                            .unwrap_or(Duration::ZERO);
+                                        metrics_db.record_latency(latency);
 
-                                    // Retry logic
-                                    let mut attempts = 0;
-                                    let mut write_succeeded = false;
-                                    while attempts < 3 {
-                                        match sink.write(&record) {
+                                        // Retry logic
+                                        let mut attempts = 0;
+                                        let mut write_succeeded = false;
+                                        let write_result: Result<(), InklogError> =
+                                            sink.write(&record);
+                                        match write_result {
                                             Ok(_) => {
                                                 metrics_db.inc_logs_written();
                                                 metrics_db
@@ -634,19 +807,20 @@ impl LoggerManager {
                                                 consecutive_failures = 0;
                                                 last_failure_time = None;
                                                 write_succeeded = true;
-                                                break;
                                             }
-                                            Err(e) => {
+                                            Err(ref e) => {
                                                 attempts += 1;
                                                 consecutive_failures += 1;
                                                 last_failure_time = Some(Instant::now());
 
                                                 if attempts == 3 {
                                                     metrics_db.inc_sink_error();
+                                                    let error_msg =
+                                                        crate::error::InklogError::to_string(e);
                                                     metrics_db.update_sink_health(
                                                         "database",
                                                         false,
-                                                        Some(e.to_string()),
+                                                        Some(error_msg),
                                                     );
                                                     // Fallback to console
                                                     if let Ok(mut cs) = console_sink_db.lock() {
@@ -659,94 +833,98 @@ impl LoggerManager {
                                                 }
                                             }
                                         }
-                                    }
 
-                                    // Auto-recovery trigger
-                                    if !write_succeeded && consecutive_failures > 5 {
-                                        if let Some(last_failure) = last_failure_time {
-                                            if last_failure.elapsed() > Duration::from_secs(60) {
-                                                eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
-                                                if let Ok(new_sink) =
-                                                    DatabaseSink::new(&cfg_clone.clone())
+                                        // Auto-recovery trigger
+                                        if !write_succeeded && consecutive_failures > 5 {
+                                            if let Some(last_failure) = last_failure_time {
+                                                if last_failure.elapsed() > Duration::from_secs(60)
                                                 {
-                                                    sink = new_sink;
-                                                    consecutive_failures = 0;
-                                                    last_failure_time = None;
-                                                    metrics_db
-                                                        .update_sink_health("database", true, None);
-                                                    eprintln!(
+                                                    eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
+                                                    if let Ok(new_sink) =
+                                                        DatabaseSink::new(&cfg_clone.clone())
+                                                    {
+                                                        sink = new_sink;
+                                                        sink.set_metrics(metrics_db.clone());
+                                                        consecutive_failures = 0;
+                                                        metrics_db.update_sink_health(
+                                                            "database", true, None,
+                                                        );
+                                                        eprintln!(
                                                         "Database sink: Auto-recovery successful"
                                                     );
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
 
-                                    if Instant::now() > deadline {
-                                        break;
-                                    }
-                                }
-                                let _ = sink.shutdown();
-                                break;
-                            }
-
-                            // Check for control messages
-                            if let Ok(control_msg) = control_rx_db.try_recv() {
-                                match control_msg {
-                                    SinkControlMessage::RecoverSink(sink_name)
-                                        if sink_name == "database" =>
-                                    {
-                                        eprintln!("Database sink: Received recovery command");
-                                        // Attempt to recreate the sink
-                                        if let Ok(new_sink) = DatabaseSink::new(&cfg_clone.clone())
-                                        {
-                                            sink = new_sink;
-                                            consecutive_failures = 0;
-                                            last_failure_time = None;
-                                            metrics_db.update_sink_health("database", true, None);
-                                            eprintln!("Database sink: Successfully recovered");
-                                        } else {
-                                            eprintln!("Database sink: Recovery failed");
+                                        if Instant::now() > deadline {
+                                            break;
                                         }
                                     }
-                                    SinkControlMessage::GetStatus => {
-                                        // Status is already tracked in metrics
-                                    }
-                                    _ => {} // Ignore messages for other sinks
+                                    let _ = sink.shutdown();
+                                    break;
                                 }
-                            }
 
-                            if let Ok(record) = rx_db.recv_timeout(Duration::from_millis(100)) {
-                                let latency = Utc::now()
-                                    .signed_duration_since(record.timestamp)
-                                    .to_std()
-                                    .unwrap_or(Duration::ZERO);
-                                metrics_db.record_latency(latency);
+                                // Check for control messages
+                                if let Ok(control_msg) = control_rx_db.try_recv() {
+                                    match control_msg {
+                                        SinkControlMessage::RecoverSink(sink_name)
+                                            if sink_name == "database" =>
+                                        {
+                                            eprintln!("Database sink: Received recovery command");
+                                            // Attempt to recreate the sink
+                                            if let Ok(new_sink) =
+                                                DatabaseSink::new(&cfg_clone.clone())
+                                            {
+                                                sink = new_sink;
+                                                sink.set_metrics(metrics_db.clone());
+                                                consecutive_failures = 0;
+                                                last_failure_time = None;
+                                                metrics_db
+                                                    .update_sink_health("database", true, None);
+                                                eprintln!("Database sink: Successfully recovered");
+                                            } else {
+                                                eprintln!("Database sink: Recovery failed");
+                                            }
+                                        }
+                                        SinkControlMessage::GetStatus => {
+                                            // Status is already tracked in metrics
+                                        }
+                                        _ => {} // Ignore messages for other sinks
+                                    }
+                                }
 
-                                // Retry logic
-                                let mut attempts = 0;
-                                let mut write_succeeded = false;
-                                while attempts < 3 {
-                                    match sink.write(&record) {
+                                if let Ok(record) = rx_db.recv_timeout(Duration::from_millis(100)) {
+                                    let latency = Utc::now()
+                                        .signed_duration_since(record.timestamp)
+                                        .to_std()
+                                        .unwrap_or(Duration::ZERO);
+                                    metrics_db.record_latency(latency);
+
+                                    // Retry logic
+                                    let mut attempts = 0;
+                                    let mut write_succeeded = false;
+                                    let write_result: Result<(), InklogError> = sink.write(&record);
+                                    match write_result {
                                         Ok(_) => {
                                             metrics_db.inc_logs_written();
                                             metrics_db.update_sink_health("database", true, None);
                                             consecutive_failures = 0;
                                             last_failure_time = None;
                                             write_succeeded = true;
-                                            break;
                                         }
-                                        Err(e) => {
+                                        Err(ref e) => {
                                             attempts += 1;
                                             consecutive_failures += 1;
                                             last_failure_time = Some(Instant::now());
 
                                             if attempts == 3 {
                                                 metrics_db.inc_sink_error();
+                                                let error_msg = format!("{e}");
                                                 metrics_db.update_sink_health(
                                                     "database",
                                                     false,
-                                                    Some(e.to_string()),
+                                                    Some(error_msg),
                                                 );
 
                                                 // Fallback chain: DB -> File -> Console
@@ -760,56 +938,99 @@ impl LoggerManager {
                                             }
                                         }
                                     }
-                                }
 
-                                // Auto-recovery trigger
-                                if !write_succeeded && consecutive_failures > 5 {
-                                    if let Some(last_failure) = last_failure_time {
-                                        if last_failure.elapsed() > Duration::from_secs(60) {
-                                            eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
-                                            if let Ok(new_sink) =
-                                                DatabaseSink::new(&cfg_clone.clone())
-                                            {
-                                                sink = new_sink;
-                                                consecutive_failures = 0;
-                                                last_failure_time = None;
-                                                metrics_db
-                                                    .update_sink_health("database", true, None);
-                                                eprintln!(
-                                                    "Database sink: Auto-recovery successful"
-                                                );
+                                    // Auto-recovery trigger
+                                    if !write_succeeded && consecutive_failures > 5 {
+                                        if let Some(last_failure) = last_failure_time {
+                                            if last_failure.elapsed() > Duration::from_secs(60) {
+                                                eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
+                                                if let Ok(new_sink) =
+                                                    DatabaseSink::new(&cfg_clone.clone())
+                                                {
+                                                    sink = new_sink;
+                                                    sink.set_metrics(metrics_db.clone());
+                                                    consecutive_failures = 0;
+                                                    metrics_db
+                                                        .update_sink_health("database", true, None);
+                                                    eprintln!(
+                                                        "Database sink: Auto-recovery successful"
+                                                    );
+                                                }
                                             }
                                         }
                                     }
+                                } else {
+                                    // Timeout, flush buffer
+                                    let _ = sink.flush();
                                 }
-                            } else {
-                                // Timeout, flush buffer
-                                let _ = sink.flush();
                             }
                         }
                     }
                 }
-            }
-            metrics_db.active_workers.dec();
-        });
+                metrics_db.active_workers.dec();
+            },
+        );
+
+        #[cfg(not(feature = "dbnexus"))]
+        let _handle_db = thread::spawn(|| {});
 
         // Health Check Thread
         let shutdown_health = shutdown_rx.clone();
         let metrics_health = metrics.clone();
+        let effective_capacity_health = effective_capacity.clone();
         let handle_health = thread::spawn(move || {
             let mut last_recovery_attempt = std::collections::HashMap::<String, Instant>::new();
+            let mut low_usage_since: Option<Instant> = None;
+            let check_interval = Duration::from_secs(1);
 
             loop {
-                if shutdown_health
-                    .recv_timeout(Duration::from_secs(10))
-                    .is_ok()
-                {
+                if shutdown_health.recv_timeout(check_interval).is_ok() {
                     break;
                 }
 
                 // Active recovery logic with control channel
-                let status =
-                    metrics_health.get_status(receiver.len(), config.performance.channel_capacity);
+                let current_eff = effective_capacity_health.load(Ordering::Relaxed);
+                let channel_len_now = receiver.len();
+                let status = metrics_health.get_status(channel_len_now, current_eff);
+
+                // Adaptive capacity strategy
+                if config.performance.channel_strategy == crate::config::ChannelStrategy::Adaptive {
+                    let usage = if current_eff > 0 {
+                        channel_len_now as f64 / current_eff as f64
+                    } else {
+                        0.0
+                    };
+                    let usage_percent = (usage * 100.0).round() as u8;
+
+                    // Expand when usage is high
+                    if usage_percent >= config.performance.expand_threshold_percent
+                        && current_eff < config.performance.max_capacity
+                    {
+                        let grow_to =
+                            (current_eff + current_eff / 2).min(config.performance.max_capacity);
+                        effective_capacity_health.store(grow_to, Ordering::Relaxed);
+                        low_usage_since = None;
+                    } else if usage_percent <= config.performance.shrink_threshold_percent
+                        && current_eff > config.performance.min_capacity
+                    {
+                        // Track low usage duration for shrink
+                        match low_usage_since {
+                            None => low_usage_since = Some(Instant::now()),
+                            Some(inst) => {
+                                if inst.elapsed()
+                                    >= Duration::from_secs(config.performance.shrink_wait_seconds)
+                                {
+                                    let shrink_to = (current_eff.saturating_mul(70) / 100)
+                                        .max(config.performance.min_capacity);
+                                    effective_capacity_health.store(shrink_to, Ordering::Relaxed);
+                                    low_usage_since = None;
+                                }
+                            }
+                        }
+                    } else {
+                        low_usage_since = None;
+                    }
+                }
                 for (name, sink_status) in status.sinks {
                     if !sink_status.status.is_operational() {
                         eprintln!(
@@ -861,12 +1082,17 @@ impl LoggerManager {
             }
         });
 
-        Ok(vec![handle_file, handle_db, handle_health])
+        #[cfg(feature = "dbnexus")]
+        let handles = vec![handle_file, handle_db, handle_health];
+        #[cfg(not(feature = "dbnexus"))]
+        let handles = vec![handle_file, handle_health];
+
+        Ok(handles)
     }
 
     pub fn get_health_status(&self) -> HealthStatus {
         let channel_len = self.sender.len();
-        let channel_cap = self.sender.capacity().unwrap_or(0);
+        let channel_cap = self.effective_capacity.load(Ordering::Relaxed);
         self.metrics.get_status(channel_len, channel_cap)
     }
 
@@ -876,6 +1102,14 @@ impl LoggerManager {
             .map_err(|e| {
                 InklogError::ChannelError(format!("Failed to send recovery command: {}", e))
             })
+    }
+
+    pub fn effective_channel_capacity(&self) -> usize {
+        self.effective_capacity.load(Ordering::Relaxed)
+    }
+
+    pub fn channel_len(&self) -> usize {
+        self.sender.len()
     }
 
     pub fn trigger_recovery_for_unhealthy_sinks(&self) -> Result<Vec<String>, InklogError> {
@@ -894,8 +1128,25 @@ impl LoggerManager {
     pub fn shutdown(&self) -> Result<(), InklogError> {
         let _ = self.shutdown_tx.send(());
 
+        // 关闭HTTP服务器
+        #[cfg(feature = "http")]
+        {
+            if let Ok(mut handle_guard) = self.http_server_handle.lock() {
+                if let Some(handle) = handle_guard.take() {
+                    handle.abort();
+                    info!("HTTP server shutdown signal sent");
+                }
+            }
+        }
+
         // Take all handles from the struct
-        let handles = std::mem::take(&mut *self.worker_handles.lock().unwrap());
+        let handles = match self.worker_handles.lock() {
+            Ok(mut guard) => std::mem::take(&mut *guard),
+            Err(e) => {
+                error!("Worker handles lock poisoned: {}", e);
+                Vec::new()
+            }
+        };
 
         // Use a timeout-based join to avoid deadlocks
         // Each handle gets up to 5 seconds to complete
@@ -958,6 +1209,7 @@ impl LoggerBuilder {
         self
     }
 
+    #[cfg(feature = "dbnexus")]
     pub fn database(mut self, url: impl Into<String>) -> Self {
         let url_str = url.into();
         let config = crate::config::DatabaseSinkConfig {
@@ -1074,6 +1326,121 @@ impl LoggerBuilder {
         } else {
             self.config.file_sink = Some(FileSinkConfig {
                 keep_files: keep,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    // === HTTP Server 配置快捷方法 ===
+
+    /// 启用或禁用HTTP监控服务器
+    ///
+    /// # Arguments
+    /// * `enabled` - 是否启用HTTP服务器
+    ///
+    /// # Example
+    /// ```ignore
+    /// let _logger = LoggerManager::builder()
+    ///     .enable_http_server(true)
+    ///     .build()
+    ///     .await?;
+    /// ```
+    #[cfg(feature = "http")]
+    pub fn enable_http_server(mut self, enabled: bool) -> Self {
+        if let Some(ref mut http) = self.config.http_server {
+            http.enabled = enabled;
+        } else if enabled {
+            self.config.http_server = Some(crate::config::HttpServerConfig::default());
+        }
+        self
+    }
+
+    /// 设置HTTP服务器监听主机
+    ///
+    /// # Arguments
+    /// * `host` - 监听主机地址（如 "127.0.0.1" 或 "0.0.0.0"）
+    #[cfg(feature = "http")]
+    pub fn http_host(mut self, host: impl Into<String>) -> Self {
+        if let Some(ref mut http) = self.config.http_server {
+            http.host = host.into();
+        } else {
+            self.config.http_server = Some(crate::config::HttpServerConfig {
+                host: host.into(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置HTTP服务器监听端口
+    ///
+    /// # Arguments
+    /// * `port` - 监听端口号
+    #[cfg(feature = "http")]
+    pub fn http_port(mut self, port: u16) -> Self {
+        if let Some(ref mut http) = self.config.http_server {
+            http.port = port;
+        } else {
+            self.config.http_server = Some(crate::config::HttpServerConfig {
+                port,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置HTTP服务器指标路径
+    ///
+    /// # Arguments
+    /// * `path` - Prometheus指标端点路径（默认 "/metrics"）
+    #[cfg(feature = "http")]
+    pub fn http_metrics_path(mut self, path: impl Into<String>) -> Self {
+        if let Some(ref mut http) = self.config.http_server {
+            http.metrics_path = path.into();
+        } else {
+            self.config.http_server = Some(crate::config::HttpServerConfig {
+                metrics_path: path.into(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置HTTP服务器健康检查路径
+    ///
+    /// # Arguments
+    /// * `path` - 健康检查端点路径（默认 "/health"）
+    #[cfg(feature = "http")]
+    pub fn http_health_path(mut self, path: impl Into<String>) -> Self {
+        if let Some(ref mut http) = self.config.http_server {
+            http.health_path = path.into();
+        } else {
+            self.config.http_server = Some(crate::config::HttpServerConfig {
+                health_path: path.into(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置HTTP服务器错误处理模式
+    ///
+    /// # Arguments
+    /// * `mode` - 错误处理模式（"panic"、"warn" 或 "strict"）
+    #[cfg(feature = "http")]
+    pub fn http_error_mode(mut self, mode: impl Into<String>) -> Self {
+        let error_mode = match mode.into().to_lowercase().as_str() {
+            "panic" => crate::config::HttpErrorMode::Panic,
+            "warn" => crate::config::HttpErrorMode::Warn,
+            "strict" => crate::config::HttpErrorMode::Strict,
+            _ => crate::config::HttpErrorMode::default(),
+        };
+        if let Some(ref mut http) = self.config.http_server {
+            http.error_mode = error_mode;
+        } else {
+            self.config.http_server = Some(crate::config::HttpServerConfig {
+                error_mode,
                 ..Default::default()
             });
         }

@@ -215,12 +215,41 @@ impl ChannelBufferedFileSink {
 
     fn try_write(&self, record: &LogRecord) -> bool {
         let entry = self.template.render(record);
-        match self.sender.send(entry) {
-            Ok(()) => true,
-            Err(_) => {
-                self.dropped_count.fetch_add(1, Ordering::Relaxed);
-                false
-            }
+        match self.config.backpressure_strategy {
+            BackpressureStrategy::Block => match self.sender.send(entry) {
+                Ok(()) => true,
+                Err(_) => {
+                    self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+            },
+            BackpressureStrategy::DropNewest => match self.sender.try_send(entry) {
+                Ok(()) => true,
+                Err(crossbeam_channel::TrySendError::Full(_))
+                | Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+            },
+            BackpressureStrategy::DropOldest => match self.sender.try_send(entry) {
+                Ok(()) => true,
+                Err(crossbeam_channel::TrySendError::Full(entry)) => {
+                    if self.receiver.try_recv().is_ok() {
+                        self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    match self.sender.try_send(entry) {
+                        Ok(()) => true,
+                        Err(_) => {
+                            self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                            false
+                        }
+                    }
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+            },
         }
     }
 
@@ -276,5 +305,147 @@ impl LogSink for ChannelBufferedFileSink {
 impl Drop for ChannelBufferedFileSink {
     fn drop(&mut self) {
         let _ = self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_record(msg: &str) -> crate::log_record::LogRecord {
+        crate::log_record::LogRecord::new(
+            tracing::Level::INFO,
+            "ring_test".to_string(),
+            msg.to_string(),
+        )
+    }
+
+    #[test]
+    fn test_write_flush_shutdown_flow() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 16,
+            flush_interval_ms: 50,
+        };
+        let tmpl = LogTemplate::default();
+        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+
+        for i in 0..20 {
+            let msg = format!("hello-{i}");
+            let rec = make_record(&msg);
+            sink.write(&rec).unwrap();
+        }
+
+        sink.flush().unwrap();
+        sink.shutdown().unwrap();
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(data.contains("hello-0"));
+        assert!(data.contains("hello-19"));
+    }
+
+    #[test]
+    fn test_metrics_updated() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_metrics.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 8,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 4,
+            flush_interval_ms: 10,
+        };
+        let tmpl = LogTemplate::default();
+        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+
+        for i in 0..6 {
+            let rec = make_record(&format!("m-{i}"));
+            sink.write(&rec).unwrap();
+        }
+
+        sink.flush().unwrap();
+
+        let start = std::time::Instant::now();
+        let mut m = sink.metrics();
+        while m.bytes_written == 0 && start.elapsed() < std::time::Duration::from_millis(300) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            m = sink.metrics();
+        }
+
+        assert!(m.bytes_written >= 1);
+        assert!(m.flush_count >= 1);
+
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_backpressure_drop_newest() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_drop_newest.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 2,
+            backpressure_strategy: BackpressureStrategy::DropNewest,
+            flush_batch_size: 2,
+            flush_interval_ms: 1000,
+        };
+        let tmpl = LogTemplate::default();
+        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+
+        for i in 0..64 {
+            let rec = make_record(&format!("drop-newest-{i}"));
+            sink.write(&rec).unwrap();
+        }
+
+        let m = sink.metrics();
+        assert!(m.dropped_count > 0);
+        sink.flush().unwrap();
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_backpressure_drop_oldest() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_drop_oldest.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 2,
+            backpressure_strategy: BackpressureStrategy::DropOldest,
+            flush_batch_size: 2,
+            flush_interval_ms: 1000,
+        };
+        let tmpl = LogTemplate::default();
+        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+
+        for i in 0..64 {
+            let rec = make_record(&format!("drop-oldest-{i}"));
+            sink.write(&rec).unwrap();
+        }
+
+        let m = sink.metrics();
+        assert!(m.dropped_count > 0);
+        sink.flush().unwrap();
+        sink.shutdown().unwrap();
     }
 }

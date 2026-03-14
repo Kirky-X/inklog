@@ -251,9 +251,11 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_should_colorize_defaults() {
-        // Set NO_COLOR to ensure deterministic test result
-        std::env::set_var("NO_COLOR", "1");
+        env::remove_var("CLICOLOR_FORCE");
+        env::remove_var("TERM");
+        env::set_var("NO_COLOR", "1");
         let config = ConsoleSinkConfig {
             enabled: true,
             colored: true,
@@ -261,13 +263,12 @@ mod tests {
         };
         let template = LogTemplate::default();
         let sink = ConsoleSink::new(config, template);
-        // Test should_colorize with is_stderr = false
-        // When NO_COLOR is set, should NOT colorize
         let result = sink.should_colorize(false);
         assert!(
             !result,
             "should_colorize should return false when NO_COLOR is set"
         );
+        env::remove_var("NO_COLOR");
     }
 
     #[test]

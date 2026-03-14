@@ -24,7 +24,7 @@
 //! let pool1 = ObjectPool::<String, i32>::new();
 //!
 //! // Pattern 2: builder() - Custom configuration
-//! let pool2 = ObjectPool::builder()
+//! let pool2 = ObjectPool::<String, i32>::builder()
 //!     .capacity(2048)
 //!     .build();
 //! ```
@@ -63,6 +63,7 @@ impl Default for ObjectPoolConfig {
 }
 
 /// Object pool metrics for monitoring
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PoolMetrics {
     pub current_size: usize,
@@ -83,6 +84,7 @@ pub struct PoolMetrics {
 /// - Configurable capacity and TTL
 /// - Internal metrics tracking
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct ObjectPool<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
@@ -94,8 +96,6 @@ where
     config: ObjectPoolConfig,
     /// Metrics tracking
     stats: Arc<PoolStats>,
-    /// Tokio runtime handle for sync operations
-    handle: Handle,
 }
 
 impl<K, V> ObjectPool<K, V>
@@ -109,6 +109,7 @@ where
     }
 
     /// Create a new object pool with specified max capacity
+    #[allow(dead_code)]
     pub fn with_capacity(max_capacity: usize) -> Self {
         let config = ObjectPoolConfig {
             max_capacity,
@@ -126,7 +127,6 @@ where
                 .enable_all()
                 .build()
                 .expect("Failed to create tokio runtime for object pool");
-            let handle = rt.handle().clone();
 
             let cache = rt.block_on(async {
                 let mut builder = Cache::builder();
@@ -137,20 +137,20 @@ where
                 Arc::new(builder.build().await.expect("Failed to build cache"))
             });
 
-            let _ = tx.send((cache, handle));
+            let _ = tx.send(cache);
         });
 
-        let (cache, handle) = rx.recv().expect("Failed to receive from worker thread");
+        let cache = rx.recv().expect("Failed to receive from worker thread");
 
         Self {
             cache,
             config: config.clone(),
             stats: Arc::new(PoolStats::default()),
-            handle,
         }
     }
 
     /// Create a new ObjectPoolBuilder for configuring the pool
+    #[allow(dead_code)]
     pub fn builder() -> ObjectPoolBuilder<K, V> {
         ObjectPoolBuilder::new()
     }
@@ -226,6 +226,7 @@ where
     }
 
     /// Check if a key exists in the pool
+    #[allow(dead_code)]
     pub fn contains(&self, key: &K) -> bool
     where
         K: Clone,
@@ -249,6 +250,7 @@ where
     }
 
     /// Remove and return an item from the pool by key
+    #[allow(dead_code)]
     pub fn remove(&self, key: &K) -> Option<V>
     where
         K: Clone,
@@ -300,21 +302,25 @@ where
     }
 
     /// Get the current number of items in the pool
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.stats.total_items.load(Ordering::Relaxed)
     }
 
     /// Check if the pool is empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Get the maximum capacity of the pool
+    #[allow(dead_code)]
     pub fn capacity(&self) -> usize {
         self.config.max_capacity
     }
 
     /// Get pool metrics for internal monitoring
+    #[allow(dead_code)]
     pub fn metrics(&self) -> PoolMetrics {
         let total = self.stats.total_items.load(Ordering::Relaxed);
         let hits = self.stats.hits.load(Ordering::Relaxed);
@@ -342,6 +348,7 @@ where
     }
 
     /// Clear all items from the pool
+    #[allow(dead_code)]
     pub fn clear(&self) {
         if let Ok(_handle) = Handle::try_current() {
             let cache = self.cache.clone();
@@ -377,6 +384,7 @@ where
 }
 
 /// Builder for creating ObjectPool instances with custom configuration
+#[allow(dead_code)]
 pub struct ObjectPoolBuilder<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
@@ -390,6 +398,7 @@ where
     _marker: std::marker::PhantomData<(K, V)>,
 }
 
+#[allow(dead_code)]
 impl<K, V> ObjectPoolBuilder<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
@@ -405,18 +414,21 @@ where
     }
 
     /// Set the maximum capacity of the pool
+    #[allow(dead_code)]
     pub fn capacity(mut self, capacity: usize) -> Self {
         self.capacity = capacity;
         self
     }
 
     /// Set the TTL for pool entries
+    #[allow(dead_code)]
     pub fn ttl_secs(mut self, ttl_secs: u64) -> Self {
         self.ttl_secs = Some(ttl_secs);
         self
     }
 
     /// Build the ObjectPool with the configured settings
+    #[allow(dead_code)]
     pub fn build(self) -> ObjectPool<K, V> {
         let config = ObjectPoolConfig {
             max_capacity: self.capacity,
@@ -443,6 +455,7 @@ struct PoolStats {
     pub(crate) total_items: AtomicUsize,
     pub(crate) hits: AtomicUsize,
     pub(crate) misses: AtomicUsize,
+    #[allow(dead_code)]
     pub(crate) items_created: AtomicUsize,
     pub(crate) items_reused: AtomicUsize,
 }
@@ -477,14 +490,17 @@ impl LogRecordPool {
         self.pool.put(&"log_record".to_string(), record);
     }
 
+    #[allow(dead_code)]
     pub fn metrics(&self) -> PoolMetrics {
         self.pool.metrics()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.pool.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
     }
@@ -528,14 +544,17 @@ impl StringPool {
         self.pool.put(&"string_buffer".to_string(), s);
     }
 
+    #[allow(dead_code)]
     pub fn metrics(&self) -> PoolMetrics {
         self.pool.metrics()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.pool.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
     }
@@ -561,10 +580,14 @@ mod tests {
     fn test_object_pool_basic_operations() {
         let pool = ObjectPool::<String, i32>::with_capacity(10);
 
+        assert!(pool.is_empty());
+
         let value = pool.get(&"nonexistent".to_string());
         assert!(value.is_none());
 
         pool.put(&"key1".to_string(), 42);
+
+        assert!(pool.contains(&"key1".to_string()));
 
         let value = pool.get(&"key1".to_string());
         assert_eq!(value, Some(42));
@@ -577,11 +600,15 @@ mod tests {
 
         let value3 = pool.get(&"key1".to_string());
         assert!(value3.is_none());
+        assert!(pool.is_empty());
     }
 
     #[test]
     fn test_object_pool_capacity() {
-        let pool = ObjectPool::<String, i32>::with_capacity(3);
+        let pool = ObjectPool::<String, i32>::builder()
+            .capacity(3)
+            .ttl_secs(1)
+            .build();
 
         assert_eq!(pool.capacity(), 3);
 
@@ -598,6 +625,9 @@ mod tests {
 
         let _ = pool.get(&"1".to_string());
         let _ = pool.get(&"4".to_string());
+
+        pool.clear();
+        assert!(pool.is_empty());
     }
 
     #[test]
@@ -606,37 +636,56 @@ mod tests {
 
         let metrics = pool.metrics();
         assert_eq!(metrics.current_size, 0);
+        assert_eq!(metrics.max_capacity, 1024);
+        assert_eq!(metrics.total_requests, 0);
         assert_eq!(metrics.hits, 0);
         assert_eq!(metrics.misses, 0);
+        assert_eq!(metrics.items_created, 0);
+        assert_eq!(metrics.items_reused, 0);
 
         let _ = pool.get(&"missing".to_string());
         let metrics = pool.metrics();
         assert_eq!(metrics.misses, 1);
+        assert_eq!(metrics.total_requests, 1);
 
         pool.put(&"key".to_string(), 100);
         let _ = pool.get(&"key".to_string());
         let metrics = pool.metrics();
         assert_eq!(metrics.hits, 1);
         assert_eq!(metrics.hit_rate, 50.0);
+        assert_eq!(metrics.items_created, 0);
+        assert_eq!(metrics.items_reused, 1);
     }
 
     #[test]
     fn test_log_record_pool() {
         let pool = LogRecordPool::with_capacity(10);
 
+        assert!(pool.is_empty());
+
         let record = pool.get();
         assert_eq!(record.level, "INFO");
+
+        let metrics = pool.metrics();
+        assert_eq!(metrics.current_size, 0);
 
         let record = LogRecord::default();
         pool.put(record);
 
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 10);
+
         let record2 = pool.get();
         assert_eq!(record2.level, "INFO");
+
+        let _ = pool.len();
     }
 
     #[test]
     fn test_string_pool() {
         let pool = StringPool::with_capacity(10);
+
+        assert!(pool.is_empty());
 
         let s = pool.get();
         assert!(s.is_empty());
@@ -645,5 +694,9 @@ mod tests {
 
         let s2 = pool.get();
         assert!(s2.is_empty() || s2 == *"hello");
+
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 10);
+        let _ = pool.len();
     }
 }

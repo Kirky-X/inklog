@@ -16,13 +16,13 @@ use crate::error::InklogError;
 use chrono::{DateTime, Datelike, Duration, Utc};
 #[cfg(feature = "dbnexus")]
 use dbnexus::pool::Session;
+#[cfg(feature = "dbnexus")]
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler};
-#[cfg(feature = "aws")]
-use tracing::debug;
 use tracing::{error, info, warn};
 
 /// 归档服务
@@ -115,6 +115,7 @@ impl ArchiveService {
         Ok(Self {
             config: config.clone(),
             archive_manager,
+            #[cfg(feature = "dbnexus")]
             database_session: None,
             local_retention_path,
             scheduler,
@@ -139,6 +140,7 @@ impl ArchiveService {
         // 克隆 Arc 引用供闭包使用
         let config = self.config.clone();
         let archive_manager = Arc::clone(&self.archive_manager);
+        #[cfg(feature = "dbnexus")]
         let db_conn = self.database_session.clone();
 
         // 预先克隆配置供闭包使用
@@ -146,6 +148,7 @@ impl ArchiveService {
         let config_for_cleanup = config.clone();
 
         // 添加归档任务（根据配置选择调度方式）
+        #[cfg(feature = "dbnexus")]
         if let Some(cron_expr) = &config.schedule_expression {
             // 使用 cron 表达式调度
             let job = Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
@@ -191,6 +194,59 @@ impl ArchiveService {
                         &schedule_state,
                     )
                     .await
+                    {
+                        error!("Archive task failed: {}", e);
+                    }
+                })
+            })
+            .map_err(|e| {
+                InklogError::ConfigError(format!("Failed to create interval job: {}", e))
+            })?;
+
+            self.scheduler.add(job).await.map_err(|e| {
+                InklogError::ConfigError(format!("Failed to add interval job: {}", e))
+            })?;
+
+            info!(
+                "Archive service started with interval: {} days",
+                config.archive_interval_days
+            );
+        }
+
+        #[cfg(not(feature = "dbnexus"))]
+        if let Some(cron_expr) = &config.schedule_expression {
+            let job = Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
+                let archive_manager = Arc::clone(&archive_manager);
+                let config = config_for_archive.clone();
+                let schedule_state = schedule_state.clone();
+                Box::pin(async move {
+                    if let Err(e) =
+                        Self::perform_archive_simple(&config, &archive_manager, &schedule_state)
+                            .await
+                    {
+                        error!("Archive task failed: {}", e);
+                    }
+                })
+            })
+            .map_err(|e| {
+                InklogError::ConfigError(format!("Failed to create archive job: {}", e))
+            })?;
+
+            self.scheduler.add(job).await.map_err(|e| {
+                InklogError::ConfigError(format!("Failed to add archive job: {}", e))
+            })?;
+
+            info!("Using cron schedule: {}", cron_expr);
+        } else {
+            let cron_expr = "0 0 2 * * *".to_string();
+            let job = Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
+                let archive_manager = Arc::clone(&archive_manager);
+                let config = config_for_archive.clone();
+                let schedule_state = Arc::clone(&schedule_state);
+                Box::pin(async move {
+                    if let Err(e) =
+                        Self::perform_archive_simple(&config, &archive_manager, &schedule_state)
+                            .await
                     {
                         error!("Archive task failed: {}", e);
                     }
@@ -273,27 +329,9 @@ impl ArchiveService {
             let start_date = Utc::now() - Duration::days(config.archive_interval_days as i64);
             let end_date = Utc::now();
 
-            // Query logs using dbnexus
             let log_records: Vec<crate::log_record::LogRecord> = if let Some(session) = &db_session
             {
-                let sql = r#"
-                    SELECT timestamp, level, target, message, file, line
-                    FROM logs
-                    WHERE timestamp >= $1 AND timestamp < $2
-                    ORDER BY timestamp ASC
-                "#;
-                // dbnexus execute_paramized uses sea_orm::Value
-                let _ = session
-                    .execute_paramized(
-                        sql,
-                        vec![
-                            sea_orm::Value::from(start_date.to_rfc3339()),
-                            sea_orm::Value::from(end_date.to_rfc3339()),
-                        ],
-                    )
-                    .await
-                    .ok();
-                Vec::new()
+                Self::query_database_records(session, start_date, end_date).await?
             } else {
                 Vec::new()
             };
@@ -311,15 +349,17 @@ impl ArchiveService {
             let log_data = if config.archive_format.to_lowercase() == "parquet" {
                 // 带重试的 Parquet 转换
                 Self::retry_with_backoff(|| async {
-                    convert_logs_to_parquet(&log_records, &config.parquet_config).map_err(|e| {
-                        InklogError::SerializationError(serde_json::Error::io(
-                            std::io::Error::other(e.to_string()),
-                        ))
-                    })
+                    convert_logs_to_parquet(&log_records, &config.parquet_config).map_err(
+                        |e: String| {
+                            InklogError::SerializationError(serde_json::Error::io(
+                                std::io::Error::other(e),
+                            ))
+                        },
+                    )
                 })
                 .await?
             } else {
-                serde_json::to_vec(&log_records).map_err(|e| {
+                serde_json::to_vec(&log_records).map_err(|e: serde_json::Error| {
                     InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
                         e.to_string(),
                     )))
@@ -348,13 +388,44 @@ impl ArchiveService {
             })?;
 
             match result {
-                Ok(_) => {
+                Ok(archive_key) => {
                     state.mark_success();
-                    info!("Archived {} logs to S3", log_records.len());
+                    info!("Archived {} logs to S3: {}", log_records.len(), archive_key);
                 }
                 Err(e) => {
                     state.mark_failed();
-                    return Err(e);
+
+                    // S3上传失败时保存到本地保留目录
+                    let local_path = config.local_retention_path.join(format!(
+                        "archive_{}_{}_failed.json",
+                        start_date.format("%Y%m%d_%H%M%S"),
+                        end_date.format("%Y%m%d_%H%M%S")
+                    ));
+
+                    warn!(
+                        "S3 archive failed, saving to local retention: {} (error: {})",
+                        local_path.display(),
+                        e
+                    );
+
+                    // 尝试保存到本地
+                    if let Err(local_err) = fs::write(&local_path, &log_data).await {
+                        error!(
+                            "Failed to save archive to local retention {}: {}",
+                            local_path.display(),
+                            local_err
+                        );
+                        return Err(InklogError::ArchiveError(format!(
+                            "S3 upload failed: {}; Local save also failed: {}",
+                            e, local_err
+                        )));
+                    }
+
+                    info!(
+                        "Archive saved to local retention: {} ({} bytes)",
+                        local_path.display(),
+                        log_data.len()
+                    );
                 }
             }
         }
@@ -366,7 +437,54 @@ impl ArchiveService {
         Ok(())
     }
 
+    /// 执行归档任务（非 dbnexus 版本）- 简单实现，不包含数据库查询
+    #[cfg(not(feature = "dbnexus"))]
+    #[cfg(feature = "aws")]
+    async fn perform_archive_simple(
+        _config: &S3ArchiveConfig,
+        _archive_manager: &Arc<S3ArchiveManager>,
+        schedule_state: &Arc<std::sync::Mutex<super::ScheduleState>>,
+    ) -> Result<(), InklogError> {
+        // 并发控制：检查是否可以执行
+        {
+            let mut state = schedule_state.lock().map_err(|e| {
+                InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
+            })?;
+            if !state.can_run_today() {
+                info!("Archive already running or completed today, skipping");
+                return Ok(());
+            }
+            state.start_execution();
+        }
+
+        // 非 dbnexus 版本只执行清理任务，不进行数据库归档
+        warn!("Archive service running without database support - only cleanup will be performed");
+
+        let mut state = schedule_state.lock().map_err(|e| {
+            InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
+        })?;
+        state.mark_success();
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "dbnexus"))]
+    #[cfg(not(feature = "aws"))]
+    async fn perform_archive_simple(
+        _config: &S3ArchiveConfig,
+        _archive_manager: &Arc<()>,
+        schedule_state: &Arc<std::sync::Mutex<super::ScheduleState>>,
+    ) -> Result<(), InklogError> {
+        warn!("AWS feature not enabled, skipping S3 archive");
+        let mut state = schedule_state.lock().map_err(|e| {
+            InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
+        })?;
+        state.mark_success();
+        Ok(())
+    }
+
     /// 指数退避重试辅助函数
+    #[cfg(feature = "dbnexus")]
     async fn retry_with_backoff<T, F, Fut>(mut attempt: F) -> Result<T, InklogError>
     where
         F: FnMut() -> Fut,
@@ -486,19 +604,57 @@ impl ArchiveService {
     #[cfg(feature = "dbnexus")]
     async fn fetch_database_logs(
         &self,
-        _session: &Session,
-        _start_date: DateTime<Utc>,
-        _end_date: DateTime<Utc>,
+        session: &Session,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
     ) -> Result<Vec<u8>, InklogError> {
-        // 当 dbnexus feature 禁用时，无法从数据库获取日志数据
-        // 因为 Sea-ORM 版本的 LogEntity 是空实现，无法正确转换数据
-        tracing::warn!(
-            "Database log archiving is not available when 'dbnexus' feature is disabled. \
-             Enable the 'dbnexus' feature to use database log archiving."
-        );
-        Err(InklogError::ConfigError(
-            "Database log archiving requires 'dbnexus' feature to be enabled".to_string(),
-        ))
+        let log_records = Self::query_database_records(session, start_date, end_date).await?;
+        serde_json::to_vec(&log_records).map_err(|e: serde_json::Error| {
+            InklogError::SerializationError(serde_json::Error::io(std::io::Error::other(
+                e.to_string(),
+            )))
+        })
+    }
+
+    #[cfg(feature = "dbnexus")]
+    async fn query_database_records(
+        session: &Session,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<Vec<crate::log_record::LogRecord>, InklogError> {
+        let conn = session
+            .connection()
+            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+        let models = crate::sink::entity::Entity::find()
+            .filter(crate::sink::entity::Column::Timestamp.gte(start_date.naive_utc()))
+            .filter(crate::sink::entity::Column::Timestamp.lt(end_date.naive_utc()))
+            .order_by_asc(crate::sink::entity::Column::Timestamp)
+            .all(conn)
+            .await
+            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+
+        let mut records = Vec::with_capacity(models.len());
+        for model in models {
+            let fields = match model.fields {
+                Some(value) => serde_json::from_str(&value).unwrap_or_default(),
+                None => std::collections::HashMap::new(),
+            };
+            let timestamp = DateTime::<Utc>::from_naive_utc_and_offset(model.timestamp, Utc);
+            let line = model
+                .line
+                .and_then(|value| if value >= 0 { Some(value as u32) } else { None });
+            records.push(crate::log_record::LogRecord {
+                timestamp,
+                level: model.level,
+                target: model.target,
+                message: model.message,
+                fields,
+                file: model.file,
+                line,
+                thread_id: model.thread_id,
+            });
+        }
+        Ok(records)
     }
 
     /// 从文件系统获取日志数据 (异步版本)
@@ -551,15 +707,18 @@ impl ArchiveService {
 
     /// 清理旧的数据库日志
     #[cfg(feature = "dbnexus")]
+    #[allow(dead_code)]
     async fn cleanup_old_database_logs(
         &self,
         session: &Session,
         cutoff_date: DateTime<Utc>,
     ) -> Result<(), InklogError> {
-        let sql = "DELETE FROM logs WHERE timestamp < $1";
-
-        let _affected = session
-            .execute_paramized(sql, vec![sea_orm::Value::from(cutoff_date.to_rfc3339())])
+        let conn = session
+            .connection()
+            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+        crate::sink::entity::Entity::delete_many()
+            .filter(crate::sink::entity::Column::Timestamp.lt(cutoff_date.naive_utc()))
+            .exec(conn)
             .await
             .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
 
@@ -568,6 +727,7 @@ impl ArchiveService {
     }
 
     /// 清理旧的日志文件（异步版本）
+    #[allow(dead_code)]
     async fn cleanup_old_files(&self, cutoff_date: DateTime<Utc>) -> Result<(), InklogError> {
         let log_dir = &self.local_retention_path;
         let mut count = 0;
@@ -615,6 +775,7 @@ impl ArchiveService {
     }
 
     /// 保存归档数据到本地保留目录（异步版本）
+    #[allow(dead_code)]
     async fn save_to_local_retention(
         &self,
         data: Vec<u8>,
@@ -829,17 +990,33 @@ impl ArchiveServiceBuilder {
             .ok_or_else(|| InklogError::ConfigError("S3 archive config is required".to_string()))?;
         let (shutdown_tx, _) = tokio::sync::mpsc::channel(1);
 
-        Ok(ArchiveService {
-            config: config.clone(),
-            archive_manager: Arc::new(S3ArchiveManager::new(config.clone()).await?),
-            database_session: self.database_session.map(std::sync::Arc::new),
-            local_retention_path: std::path::PathBuf::from("target/test_logs"),
-            scheduler: JobScheduler::new().await?,
-            shutdown_tx,
-            shutdown_rx: None,
-            schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
-            parquet_config: config.parquet_config.clone(),
-        })
+        #[cfg(feature = "dbnexus")]
+        {
+            Ok(ArchiveService {
+                config: config.clone(),
+                archive_manager: Arc::new(S3ArchiveManager::new(config.clone()).await?),
+                database_session: self.database_session.map(std::sync::Arc::new),
+                local_retention_path: std::path::PathBuf::from("target/test_logs"),
+                scheduler: JobScheduler::new().await?,
+                shutdown_tx,
+                shutdown_rx: None,
+                schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+                parquet_config: config.parquet_config.clone(),
+            })
+        }
+        #[cfg(not(feature = "dbnexus"))]
+        {
+            Ok(ArchiveService {
+                config: config.clone(),
+                archive_manager: Arc::new(S3ArchiveManager::new(config.clone()).await?),
+                local_retention_path: std::path::PathBuf::from("target/test_logs"),
+                scheduler: JobScheduler::new().await?,
+                shutdown_tx,
+                shutdown_rx: None,
+                schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+                parquet_config: config.parquet_config.clone(),
+            })
+        }
     }
 }
 
@@ -863,72 +1040,58 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(all(not(feature = "aws"), feature = "dbnexus"))]
+    #[cfg(feature = "dbnexus")]
     async fn test_fetch_database_logs() {
         use chrono::{Duration, Utc};
         use dbnexus::pool::DbPool;
+        use sea_orm::{ActiveModelTrait, ConnectionTrait, Schema, Set};
 
-        // Create in-memory SQLite for testing
         let pool = DbPool::new("sqlite::memory:").await.unwrap();
-        let session = pool.get_session("").await.unwrap();
+        let session = pool.get_session("admin").await.unwrap();
+        let conn = session.connection().unwrap();
 
-        // Setup schema
-        let create_sql = r#"
-            CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                level TEXT NOT NULL,
-                target TEXT NOT NULL,
-                message TEXT NOT NULL,
-                fields TEXT,
-                file TEXT,
-                line INTEGER,
-                thread_id TEXT
-            )
-        "#;
-        session.execute_raw(create_sql, &[]).await.unwrap();
+        let schema = Schema::new(conn.get_database_backend());
+        conn.execute(
+            schema
+                .create_table_from_entity(crate::sink::entity::Entity)
+                .if_not_exists(),
+        )
+        .await
+        .unwrap();
 
-        // Insert mock logs
         let now = Utc::now();
-        let insert_sql = r#"
-            INSERT INTO logs (timestamp, level, target, message, fields, file, line, thread_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#;
-
         for i in 0..3 {
-            session
-                .execute_raw(
-                    insert_sql,
-                    &[
-                        &(now - Duration::hours(i as i64)),
-                        &"INFO",
-                        &"test_target",
-                        &format!("Test message {}", i),
-                        &r#"{}"#,
-                        &"test.rs",
-                        &(100 + i),
-                        &"thread-1",
-                    ],
-                )
-                .await
-                .unwrap();
+            let record = crate::sink::entity::ActiveModel {
+                timestamp: Set((now - Duration::hours(i as i64)).naive_utc()),
+                level: Set("INFO".to_string()),
+                target: Set("test_target".to_string()),
+                message: Set(format!("Test message {}", i)),
+                fields: Set(Some(r#"{}"#.to_string())),
+                file: Set(Some("test.rs".to_string())),
+                line: Set(Some(100 + i)),
+                thread_id: Set("test-thread".to_string()),
+                module_path: Set(Some("test_module".to_string())),
+                metadata: Set(Some(r#"{}"#.to_string())),
+                ..Default::default()
+            };
+            record.insert(conn).await.unwrap();
         }
 
-        // Initialize service config (mocked, won't use S3)
         let config = S3ArchiveConfig {
             enabled: true,
             bucket: "test-bucket".to_string(),
             region: "us-east-1".to_string(),
             archive_interval_days: 1,
             local_retention_days: 7,
+            skip_bucket_validation: true,
             ..Default::default()
         };
 
-        let service = ArchiveService::new(config.clone(), Some(session.clone()))
+        let service_session = pool.get_session("admin").await.unwrap();
+        let service = ArchiveService::new(config.clone(), Some(service_session))
             .await
             .unwrap();
 
-        // Fetch logs
         let start_date = now - Duration::hours(3);
         let end_date = now;
         let data = service
@@ -940,81 +1103,69 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(all(not(feature = "aws"), feature = "dbnexus"))]
+    #[cfg(feature = "dbnexus")]
     async fn test_cleanup_old_database_logs() {
         use chrono::{Duration, Utc};
         use dbnexus::pool::DbPool;
+        use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Schema, Set};
 
         let pool = DbPool::new("sqlite::memory:").await.unwrap();
-        let session = pool.get_session("").await.unwrap();
+        let session = pool.get_session("admin").await.unwrap();
+        let conn = session.connection().unwrap();
 
-        // Setup schema
-        let create_sql = r#"
-            CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                level TEXT NOT NULL,
-                target TEXT NOT NULL,
-                message TEXT NOT NULL,
-                fields TEXT,
-                file TEXT,
-                line INTEGER,
-                thread_id TEXT
-            )
-        "#;
-        session.execute_raw(create_sql, &[]).await.unwrap();
+        let schema = Schema::new(conn.get_database_backend());
+        conn.execute(
+            schema
+                .create_table_from_entity(crate::sink::entity::Entity)
+                .if_not_exists(),
+        )
+        .await
+        .unwrap();
 
         let now = Utc::now();
         let old_date = now - Duration::days(10);
 
-        let insert_sql = r#"
-            INSERT INTO logs (timestamp, level, target, message, fields, file, line, thread_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#;
+        let old_record = crate::sink::entity::ActiveModel {
+            timestamp: Set(old_date.naive_utc()),
+            level: Set("INFO".to_string()),
+            target: Set("test".to_string()),
+            message: Set("old log".to_string()),
+            fields: Set(Some(r#"{}"#.to_string())),
+            file: Set(Some("test.rs".to_string())),
+            line: Set(Some(100)),
+            thread_id: Set("test-thread".to_string()),
+            module_path: Set(Some("test_module".to_string())),
+            metadata: Set(Some(r#"{}"#.to_string())),
+            ..Default::default()
+        };
+        old_record.insert(conn).await.unwrap();
 
-        // Insert old log
-        session
-            .execute_raw(
-                insert_sql,
-                &[
-                    &old_date,
-                    &"INFO",
-                    &"test",
-                    &"old log",
-                    &r#"{}"#,
-                    &"test.rs",
-                    &100,
-                    &"thread-1",
-                ],
-            )
-            .await
-            .unwrap();
-
-        // Insert new log
-        session
-            .execute_raw(
-                insert_sql,
-                &[
-                    &now,
-                    &"INFO",
-                    &"test",
-                    &"new log",
-                    &r#"{}"#,
-                    &"test.rs",
-                    &101,
-                    &"thread-2",
-                ],
-            )
-            .await
-            .unwrap();
+        let new_record = crate::sink::entity::ActiveModel {
+            timestamp: Set(now.naive_utc()),
+            level: Set("INFO".to_string()),
+            target: Set("test".to_string()),
+            message: Set("new log".to_string()),
+            fields: Set(Some(r#"{}"#.to_string())),
+            file: Set(Some("test.rs".to_string())),
+            line: Set(Some(101)),
+            thread_id: Set("test-thread".to_string()),
+            module_path: Set(Some("test_module".to_string())),
+            metadata: Set(Some(r#"{}"#.to_string())),
+            ..Default::default()
+        };
+        new_record.insert(conn).await.unwrap();
 
         let config = S3ArchiveConfig {
             enabled: true,
+            bucket: "test-bucket".to_string(),
+            region: "us-east-1".to_string(),
             local_retention_days: 7,
+            skip_bucket_validation: true,
             ..Default::default()
         };
 
-        let service = ArchiveService::new(config.clone(), Some(session.clone()))
+        let service_session = pool.get_session("admin").await.unwrap();
+        let service = ArchiveService::new(config.clone(), Some(service_session))
             .await
             .unwrap();
 
@@ -1024,13 +1175,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify only 1 log remains
-        let rows = session
-            .execute_raw("SELECT COUNT(*) FROM logs", &[])
-            .await
-            .unwrap();
-        let count: i64 = rows[0].get(0).and_then(|v| v.as_i64()).unwrap_or(0);
-        assert_eq!(count, 1);
+        let remaining = crate::sink::entity::Entity::find().all(conn).await.unwrap();
+        assert_eq!(remaining.len(), 1);
     }
 
     #[tokio::test]

@@ -197,6 +197,8 @@ pub struct MetricsSnapshot {
     pub logs_dropped: u64,
     pub channel_blocked: u64,
     pub sink_errors: u64,
+    pub db_batch_size: i64,
+    pub db_batch_records_total: u64,
     pub avg_latency_us: u64,
     pub latency_distribution: Vec<u64>,
     pub active_workers: i64,
@@ -235,6 +237,7 @@ pub struct Metrics {
     pub(crate) logs_dropped_total: AtomicU64,
     pub(crate) channel_send_blocked_total: AtomicU64,
     pub(crate) sink_errors_total: AtomicU64,
+    pub(crate) db_batch_records_total: AtomicU64,
     pub(crate) start_time: Instant,
 
     // Latency tracking
@@ -244,6 +247,7 @@ pub struct Metrics {
 
     // Gauges
     pub(crate) active_workers: Gauge,
+    pub(crate) db_batch_size: Gauge,
 
     // Sink Health
     pub(crate) sink_health: Mutex<HashMap<String, SinkHealth>>,
@@ -258,11 +262,13 @@ impl Default for Metrics {
             logs_dropped_total: AtomicU64::new(0),
             channel_send_blocked_total: AtomicU64::new(0),
             sink_errors_total: AtomicU64::new(0),
+            db_batch_records_total: AtomicU64::new(0),
             start_time: Instant::now(),
             total_latency_us: AtomicU64::new(0),
             latency_count: AtomicU64::new(0),
             latency_histogram: Histogram::new(bounds),
             active_workers: Gauge::new(0),
+            db_batch_size: Gauge::new(0),
             sink_health: Mutex::new(HashMap::new()),
         }
     }
@@ -300,6 +306,14 @@ impl Metrics {
         self.sink_errors_total.load(Ordering::Relaxed)
     }
 
+    pub fn db_batch_size(&self) -> i64 {
+        self.db_batch_size.get()
+    }
+
+    pub fn db_batch_records_total(&self) -> u64 {
+        self.db_batch_records_total.load(Ordering::Relaxed)
+    }
+
     /// Returns the number of active workers (with audit logging).
     pub fn active_workers(&self) -> i64 {
         self.audit_access("active_workers");
@@ -335,6 +349,15 @@ impl Metrics {
 
     pub fn inc_sink_error(&self) {
         self.sink_errors_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn set_db_batch_size(&self, size: usize) {
+        self.db_batch_size.set(size as i64);
+    }
+
+    pub fn add_db_batch_records_total(&self, count: usize) {
+        self.db_batch_records_total
+            .fetch_add(count as u64, Ordering::Relaxed);
     }
 
     pub fn record_latency(&self, duration: Duration) {
@@ -480,6 +503,8 @@ impl Metrics {
                 logs_dropped: self.logs_dropped_total.load(Ordering::Relaxed),
                 channel_blocked: self.channel_send_blocked_total.load(Ordering::Relaxed),
                 sink_errors: self.sink_errors_total.load(Ordering::Relaxed),
+                db_batch_size: self.db_batch_size.get(),
+                db_batch_records_total: self.db_batch_records_total.load(Ordering::Relaxed),
                 avg_latency_us: avg_latency,
                 latency_distribution: self.latency_histogram.snapshot(),
                 active_workers: self.active_workers.get(),
@@ -515,6 +540,20 @@ impl Metrics {
         s.push_str(&format!(
             "inklog_sink_errors_total {}\n",
             self.sink_errors_total.load(Ordering::Relaxed)
+        ));
+
+        s.push_str("# HELP inklog_db_batch_size Database batch size in last flush\n");
+        s.push_str("# TYPE inklog_db_batch_size gauge\n");
+        s.push_str(&format!(
+            "inklog_db_batch_size{{sink=\"database\"}} {}\n",
+            self.db_batch_size.get()
+        ));
+
+        s.push_str("# HELP inklog_db_batch_records_total Total records written by database batch flushes\n");
+        s.push_str("# TYPE inklog_db_batch_records_total counter\n");
+        s.push_str(&format!(
+            "inklog_db_batch_records_total{{sink=\"database\"}} {}\n",
+            self.db_batch_records_total.load(Ordering::Relaxed)
         ));
 
         s.push_str("# HELP inklog_active_workers Current active worker threads\n");
@@ -1405,6 +1444,15 @@ mod metrics_tests {
     }
 
     #[test]
+    fn test_metrics_record_db_batch() {
+        let metrics = Metrics::new();
+        metrics.set_db_batch_size(8);
+        metrics.add_db_batch_records_total(8);
+        assert_eq!(metrics.db_batch_size(), 8);
+        assert_eq!(metrics.db_batch_records_total(), 8);
+    }
+
+    #[test]
     fn test_metrics_record_channel_blocked() {
         let metrics = Metrics::new();
         metrics.inc_channel_blocked();
@@ -1453,6 +1501,16 @@ mod metrics_tests {
     }
 
     #[test]
+    fn test_metrics_export_prometheus_db_batch() {
+        let metrics = Metrics::new();
+        metrics.set_db_batch_size(5);
+        metrics.add_db_batch_records_total(12);
+        let output = metrics.export_prometheus();
+        assert!(output.contains("inklog_db_batch_size{sink=\"database\"} 5"));
+        assert!(output.contains("inklog_db_batch_records_total{sink=\"database\"} 12"));
+    }
+
+    #[test]
     fn test_metrics_channel_blocked() {
         let metrics = Metrics::new();
         metrics.inc_channel_blocked();
@@ -1470,6 +1528,6 @@ mod metrics_tests {
     fn test_metrics_uptime() {
         let metrics = Metrics::new();
         let uptime = metrics.uptime();
-        assert!(uptime.as_nanos() >= 0);
+        assert!(uptime <= std::time::Duration::from_secs(60));
     }
 }
