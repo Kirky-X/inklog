@@ -7,9 +7,33 @@
 //!
 //! 为 inklog 添加额外的测试用例，将测试数量提升到 200+
 
-use inklog::{LoggerManager, LoggerBuilder};
-use std::time::Duration;
+use inklog::{ChannelStrategy, LoggerBuilder, LoggerManager};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier};
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
+use tracing_subscriber::layer::SubscriberExt;
+
+fn percentile_upper_bound_us(latency_distribution: &[u64], percentile: f64) -> u64 {
+    let bounds = [1000, 5000, 10000, 50000, 100000, 500000, 1000000];
+    let total: u64 = latency_distribution.iter().sum();
+    if total == 0 {
+        return 0;
+    }
+    let target = (total as f64 * percentile).ceil() as u64;
+    let mut cumulative = 0_u64;
+    for (idx, &count) in latency_distribution.iter().enumerate() {
+        cumulative += count;
+        if cumulative >= target {
+            return if idx < bounds.len() {
+                bounds[idx]
+            } else {
+                bounds[bounds.len() - 1]
+            };
+        }
+    }
+    bounds[bounds.len() - 1]
+}
 
 // === FileSink 额外测试 ===
 
@@ -414,6 +438,195 @@ async fn test_manager_message_count() {
 
     let count = manager.get_message_count();
     assert!(count >= 0);
+}
+
+#[tokio::test]
+async fn test_manager_health_status_after_logging() {
+    let mut config = inklog::InklogConfig::default();
+    config.global.level = "info".to_string();
+    config.performance.channel_capacity = 8;
+
+    let (manager, subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
+    let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+
+    tracing::subscriber::with_default(registry, || {
+        for i in 0..20 {
+            tracing::info!(target: "test::health", message = format!("health-{i}"));
+        }
+    });
+
+    let start = std::time::Instant::now();
+    let mut status = manager.get_health_status();
+    while status.metrics.logs_written == 0 && start.elapsed() < Duration::from_millis(1000) {
+        std::thread::sleep(Duration::from_millis(10));
+        status = manager.get_health_status();
+    }
+
+    assert!(status.channel_usage >= 0.0);
+    assert!(status.channel_usage <= 1.0);
+    assert!(status.metrics.logs_written >= 1);
+
+    let _ = manager.shutdown();
+}
+
+#[tokio::test]
+async fn test_manager_block_strategy_high_load_sampling() {
+    let temp_dir = tempdir().unwrap();
+    let log_path = temp_dir.path().join("block_sampling.log");
+
+    let mut config = inklog::InklogConfig::default();
+    config.global.level = "info".to_string();
+    config.console_sink = Some(inklog::ConsoleSinkConfig {
+        enabled: false,
+        ..Default::default()
+    });
+    config.file_sink = Some(inklog::FileSinkConfig {
+        enabled: true,
+        path: log_path,
+        batch_size: 1,
+        flush_interval_ms: 10,
+        ..Default::default()
+    });
+    config.performance.channel_capacity = 4;
+
+    let (manager, subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
+    let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+
+    let thread_count = 6_usize;
+    let messages_per_thread = 2000_usize;
+    let barrier = Arc::new(Barrier::new(thread_count));
+
+    tracing::subscriber::with_default(registry, || {
+        let handles: Vec<_> = (0..thread_count)
+            .map(|thread_index| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for i in 0..messages_per_thread {
+                        tracing::info!(
+                            target: "test::block_sampling",
+                            message = format!("msg-{thread_index}-{i}")
+                        );
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            let _ = handle.join();
+        }
+    });
+
+    let start = Instant::now();
+    let mut status = manager.get_health_status();
+    while (status.metrics.logs_written == 0 || status.metrics.channel_blocked == 0)
+        && start.elapsed() < Duration::from_secs(3)
+    {
+        std::thread::sleep(Duration::from_millis(20));
+        status = manager.get_health_status();
+    }
+
+    let blocked = status.metrics.channel_blocked;
+    let written = status.metrics.logs_written;
+    let tail_us = percentile_upper_bound_us(&status.metrics.latency_distribution, 0.95);
+
+    assert!(written > 0);
+    assert!(blocked > 0);
+    assert!(tail_us > 0);
+
+    let blocked_rate = blocked as f64 / written as f64;
+    assert!(blocked_rate > 0.0);
+
+    let _ = manager.shutdown();
+}
+
+#[tokio::test]
+async fn test_manager_adaptive_channel_capacity_and_health_link() {
+    let temp_dir = tempdir().unwrap();
+    let log_path = temp_dir.path().join("adaptive_capacity.log");
+
+    let mut config = inklog::InklogConfig::default();
+    config.global.level = "info".to_string();
+    config.console_sink = Some(inklog::ConsoleSinkConfig {
+        enabled: false,
+        ..Default::default()
+    });
+    config.file_sink = Some(inklog::FileSinkConfig {
+        enabled: true,
+        path: log_path,
+        batch_size: 1,
+        flush_interval_ms: 10,
+        ..Default::default()
+    });
+    config.performance.channel_capacity = 10;
+    config.performance.channel_strategy = ChannelStrategy::Adaptive;
+    config.performance.expand_threshold_percent = 20;
+    config.performance.shrink_threshold_percent = 10;
+    config.performance.shrink_wait_seconds = 1;
+    config.performance.min_capacity = 5;
+    config.performance.max_capacity = 40;
+
+    let (manager, subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
+    let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+
+    let initial_capacity = manager.effective_channel_capacity();
+    let producers = 4_usize;
+    let per_producer = 1500_usize;
+    let barrier = Arc::new(Barrier::new(producers));
+    let emitted = Arc::new(AtomicUsize::new(0));
+
+    tracing::subscriber::with_default(registry, || {
+        let handles: Vec<_> = (0..producers)
+            .map(|producer_index| {
+                let barrier = barrier.clone();
+                let emitted = emitted.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for i in 0..per_producer {
+                        tracing::info!(
+                            target: "test::adaptive_capacity",
+                            message = format!("m-{producer_index}-{i}")
+                        );
+                        emitted.fetch_add(1, Ordering::Relaxed);
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            let _ = handle.join();
+        }
+    });
+
+    let start_expand = Instant::now();
+    let mut expanded = manager.effective_channel_capacity();
+    while expanded <= initial_capacity && start_expand.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(50));
+        expanded = manager.effective_channel_capacity();
+    }
+
+    assert!(expanded >= initial_capacity);
+
+    let start_shrink = Instant::now();
+    let mut shrunk = manager.effective_channel_capacity();
+    while shrunk >= expanded && start_shrink.elapsed() < Duration::from_secs(4) {
+        std::thread::sleep(Duration::from_millis(200));
+        shrunk = manager.effective_channel_capacity();
+    }
+
+    assert!(shrunk <= expanded);
+    assert!(shrunk >= 5);
+
+    let channel_len = manager.channel_len();
+    let effective_capacity = manager.effective_channel_capacity();
+    let status = manager.get_health_status();
+    let expected_usage = if effective_capacity > 0 {
+        channel_len as f64 / effective_capacity as f64
+    } else {
+        0.0
+    };
+    let usage_delta = (status.channel_usage - expected_usage).abs();
+    assert!(usage_delta <= 0.1);
+
+    let _ = manager.shutdown();
 }
 
 // === Builder 额外测试 ===

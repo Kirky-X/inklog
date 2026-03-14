@@ -56,11 +56,8 @@ async fn test_load_from_file() {
     .expect("Failed to write config to temp file");
 
     // Load config from file using FromStr
-    let config_content = std::fs::read_to_string(file.path())
-        .expect("Failed to read config file");
-    let config: inklog::InklogConfig = config_content
-        .parse()
-        .expect("Failed to parse config");
+    let config_content = std::fs::read_to_string(file.path()).expect("Failed to read config file");
+    let config: inklog::InklogConfig = config_content.parse().expect("Failed to parse config");
 
     // Verify config was parsed correctly
     assert_eq!(config.global.level, "debug");
@@ -118,6 +115,31 @@ fn test_archive_metadata_mark_failed() {
     match result.status {
         inklog::archive::ArchiveStatus::Failed => {}
         _ => panic!("Expected Failed status"),
+    }
+}
+
+#[test]
+fn test_archive_metadata_with_checksum() {
+    let checksum = "abc123".to_string();
+    let metadata = ArchiveMetadata::new(10, 100, "json").with_checksum(checksum.clone());
+    assert_eq!(metadata.checksum, checksum);
+}
+
+#[test]
+fn test_archive_metadata_with_s3_key() {
+    let s3_key = "archive/2026/02/03/test.json".to_string();
+    let metadata = ArchiveMetadata::new(10, 100, "json").with_s3_key(s3_key.clone());
+    assert_eq!(metadata.s3_key, s3_key);
+}
+
+#[test]
+fn test_archive_metadata_mark_failed_local() {
+    let metadata = ArchiveMetadata::new(100, 50000, "json");
+    let result = metadata.mark_failed_local();
+
+    match result.status {
+        inklog::archive::ArchiveStatus::FailedLocal => {}
+        _ => panic!("Expected FailedLocal status"),
     }
 }
 
@@ -370,15 +392,129 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
 }
 
 // ============ 批量写入集成测试 (integration::batch) ============
-// These tests used the sea-orm path which no longer exists.
-// The dbnexus path doesn't expose query results for counting.
-// TODO: Re-implement batch write tests for dbnexus path.
+use inklog::config::DatabaseDriver as BatchDatabaseDriver;
+use inklog::log_record::LogRecord as BatchLogRecord;
+use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
+use inklog::sink::LogSink as BatchLogSink;
+use inklog::DatabaseSinkConfig as BatchDatabaseSinkConfig;
+use std::time::Duration as BatchDuration;
+use tempfile::TempDir as BatchTempDir;
+use tracing::Level as BatchLevel;
 
-// ============ Test Helper Functions ============
-// Dead code - sea-orm path removed
+#[cfg(feature = "dbnexus")]
+#[test]
+fn test_database_batch_write_dbnexus() {
+    let temp_dir = BatchTempDir::new().expect("Failed to create temp directory");
+    let db_path = temp_dir.path().join("logs.db");
+    let url = format!("sqlite://{}?mode=rwc", db_path.display());
+    let _ = create_logs_table(&url);
 
-// ============ Tests ============
-// Dead code - sea-orm path removed
+    let config = BatchDatabaseSinkConfig {
+        name: "test".to_string(),
+        enabled: true,
+        driver: BatchDatabaseDriver::SQLite,
+        url: url.clone(),
+        batch_size: 5,
+        flush_interval_ms: 1000,
+        pool_size: 5,
+        partition: inklog::config::PartitionStrategy::default(),
+        archive_to_s3: false,
+        archive_after_days: 30,
+        s3_bucket: None,
+        s3_region: None,
+        table_name: "logs".to_string(),
+        archive_format: "json".to_string(),
+        parquet_config: inklog::config::ParquetConfig::default(),
+    };
+
+    let mut sink = BatchDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
+
+    for i in 0..3 {
+        let record = BatchLogRecord::new(
+            BatchLevel::INFO,
+            "batch_test".into(),
+            format!("Message {}", i),
+        );
+        sink.write(&record).expect("Failed to write log record");
+    }
+
+    std::thread::sleep(BatchDuration::from_millis(1100));
+
+    let record = BatchLogRecord::new(
+        BatchLevel::INFO,
+        "batch_test".into(),
+        "Trigger flush".into(),
+    );
+    sink.write(&record).expect("Failed to write log record");
+
+    std::thread::sleep(BatchDuration::from_millis(200));
+
+    sink.flush().expect("Failed to flush batch logs");
+
+    for i in 4..9 {
+        let record = BatchLogRecord::new(
+            BatchLevel::INFO,
+            "batch_test".into(),
+            format!("Message {}", i),
+        );
+        sink.write(&record).expect("Failed to write log record");
+    }
+
+    std::thread::sleep(BatchDuration::from_millis(500));
+
+    sink.flush().expect("Failed to flush batch logs");
+}
+
+#[cfg(feature = "dbnexus")]
+#[test]
+fn test_database_timeout_flush_dbnexus() {
+    let temp_dir = BatchTempDir::new().expect("Failed to create temp directory");
+    let db_path = temp_dir.path().join("logs_timeout.db");
+    let url = format!("sqlite://{}?mode=rwc", db_path.display());
+    let _ = create_logs_table(&url);
+
+    let config = BatchDatabaseSinkConfig {
+        name: "test".to_string(),
+        enabled: true,
+        driver: BatchDatabaseDriver::SQLite,
+        url: url.clone(),
+        batch_size: 100,
+        flush_interval_ms: 300,
+        pool_size: 5,
+        partition: inklog::config::PartitionStrategy::default(),
+        archive_to_s3: false,
+        archive_after_days: 30,
+        s3_bucket: None,
+        s3_region: None,
+        table_name: "logs".to_string(),
+        archive_format: "json".to_string(),
+        parquet_config: inklog::config::ParquetConfig::default(),
+    };
+
+    let mut sink = BatchDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
+
+    let record1 = BatchLogRecord::new(
+        BatchLevel::INFO,
+        "timeout_test".into(),
+        "First message".into(),
+    );
+    sink.write(&record1)
+        .expect("Failed to write first log record");
+
+    std::thread::sleep(BatchDuration::from_millis(500));
+
+    let record2 = BatchLogRecord::new(
+        BatchLevel::INFO,
+        "timeout_test".into(),
+        "Second message".into(),
+    );
+    sink.write(&record2)
+        .expect("Failed to write second log record");
+
+    std::thread::sleep(BatchDuration::from_millis(500));
+
+    sink.flush().expect("Failed to flush timeout logs");
+}
 
 // ============ 配置环境集成测试 (integration::config) ============
 
@@ -948,7 +1084,6 @@ async fn test_long_running_stability() {
 // ============ 验证集成测试 (integration::verification) ============
 
 use inklog::config::DatabaseDriver as VerifyDatabaseDriver;
-use inklog::sink::LogSink;
 use inklog::sink::database::DatabaseSink as VerifyDatabaseSink;
 use inklog::sink::file::FileSink as VerifyFileSink;
 use inklog::{
@@ -963,7 +1098,7 @@ use tempfile::TempDir as VerifyTempDir;
 use tracing::Level as VerifyLevel;
 
 // ============ Database Helper Functions ============
-#[cfg(not(feature = "dbnexus"))]
+#[cfg(feature = "dbnexus")]
 fn get_log_count(url: &str) -> i64 {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     rt.block_on(async {
@@ -975,41 +1110,6 @@ fn get_log_count(url: &str) -> i64 {
             .expect("Failed to connect to database");
         let logs: Vec<LogModel> = Entity::find().all(&db).await.expect("Failed to query logs");
         logs.len() as i64
-    })
-}
-
-#[cfg(feature = "dbnexus")]
-fn get_log_count(url: &str) -> i64 {
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    rt.block_on(async {
-        let pool = dbnexus::pool::DbPool::new(url)
-            .await
-            .expect("Failed to create pool");
-        let session = pool
-            .get_session("admin")
-            .await
-            .expect("Failed to get session");
-
-        // Create table if not exists
-        let create_table = r#"
-            CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                level TEXT NOT NULL,
-                target TEXT,
-                message TEXT,
-                fields TEXT,
-                file TEXT,
-                line INTEGER,
-                thread_id TEXT
-            )
-        "#;
-        let _ = session.execute_raw(create_table).await;
-
-        let query = format!("SELECT COUNT(*) as count FROM {}", "logs");
-        let _ = session.execute_raw(&query).await;
-        // For simplicity in test, just return 1 if we got here
-        1
     })
 }
 
@@ -1119,6 +1219,7 @@ fn verify_file_sink_encryption() {
 }
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn verify_database_sink_sqlite() {
     let temp_dir = VerifyTempDir::new().expect("Failed to create temp directory");
     let db_path = temp_dir.path().join("logs.db");
@@ -1145,8 +1246,29 @@ fn verify_database_sink_sqlite() {
 
     std::thread::sleep(VerifyDuration::from_millis(500));
 
-    let count = get_log_count(&url);
-    assert_eq!(count, 1);
+    #[cfg(not(feature = "dbnexus"))]
+    {
+        let count = get_log_count(&url);
+        assert_eq!(count, 1);
+    }
+
+    #[cfg(feature = "dbnexus")]
+    {
+        use inklog::sink::entity::Entity;
+        use sea_orm::{Database, EntityTrait};
+
+        sink.flush().expect("Failed to flush database sink");
+
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+        let count = rt.block_on(async {
+            let db = Database::connect(&url)
+                .await
+                .expect("Failed to connect to database");
+            let logs = Entity::find().all(&db).await.expect("Failed to query logs");
+            logs.len()
+        });
+        assert_eq!(count, 1);
+    }
 }
 
 #[cfg(feature = "dbnexus")]
@@ -1156,25 +1278,19 @@ fn create_logs_table(url: &str) -> Result<(), String> {
         let pool = dbnexus::pool::DbPool::new(url)
             .await
             .map_err(|e| e.to_string())?;
-        let session = pool
-            .get_session("admin")
-            .await
-            .map_err(|e| e.to_string())?;
+        let session = pool.get_session("admin").await.map_err(|e| e.to_string())?;
 
-        let create_table = r#"
-            CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                level TEXT NOT NULL,
-                target TEXT,
-                message TEXT,
-                fields TEXT,
-                file TEXT,
-                line INTEGER,
-                thread_id TEXT
-            )
-        "#;
-        let _ = session.execute_raw(create_table).await.map_err(|e| e.to_string())?;
+        use sea_orm::{ConnectionTrait, Schema};
+
+        let conn = session.connection().map_err(|e| e.to_string())?;
+        let schema = Schema::new(conn.get_database_backend());
+        conn.execute(
+            schema
+                .create_table_from_entity(inklog::sink::entity::Entity)
+                .if_not_exists(),
+        )
+        .await
+        .map_err(|e: sea_orm::DbErr| e.to_string())?;
         Ok(())
     })
 }
@@ -1197,9 +1313,6 @@ async fn test_log_crate_native_support() {
 
     // 给异步 workers 一些时间处理
     std::thread::sleep(Duration::from_millis(200));
-
-    // 如果没有 panic，说明日志系统正常工作
-    assert!(true);
 }
 
 /// 测试 tracing 和 log 可以同时使用
@@ -1216,8 +1329,6 @@ async fn test_tracing_and_log_coexist() {
     tracing::error!("tracing::error message");
 
     std::thread::sleep(Duration::from_millis(200));
-
-    assert!(true);
 }
 
 /// 测试日志级别过滤
@@ -1236,8 +1347,6 @@ async fn test_log_level_filtering() {
     log::error!("This error message should appear");
 
     std::thread::sleep(Duration::from_millis(100));
-
-    assert!(true);
 }
 
 /// 测试所有日志级别
@@ -1253,8 +1362,6 @@ async fn test_log_all_levels() {
     log::error!("Error message from log crate");
 
     std::thread::sleep(Duration::from_millis(100));
-
-    assert!(true);
 }
 
 /// 测试日志文件写入

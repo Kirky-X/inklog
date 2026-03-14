@@ -137,3 +137,21 @@ fn test_database_timeout_flush() {
 
     println!("超时刷新测试通过！刷新间隔: 300ms, 实际写入: {}", count);
 }
+
+#[cfg(not(feature = "dbnexus"))]
+#[test]
+fn test_database_manual_flush() {
+    let (_temp_dir, mut sink, url) = create_test_database_sink(100, 10_000);
+
+    for i in 0..2 {
+        let record = LogRecord::new(Level::INFO, "manual_flush".into(), format!("Message {}", i));
+        sink.write(&record).expect("Failed to write log record");
+    }
+
+    sink.flush().expect("Failed to flush");
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    let count = count_database_logs(&url);
+    assert_eq!(count, 2, "手动刷新应该写入2条记录，当前记录数: {}", count);
+}

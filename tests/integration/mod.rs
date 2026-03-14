@@ -19,6 +19,7 @@ mod archive;
 mod additional_tests;
 mod batch;
 mod config;
+mod comprehensive_validation_test; // 新增：综合验证测试
 mod http;
 mod log;
 mod parquet;
