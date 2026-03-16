@@ -157,6 +157,14 @@ impl InklogConfig {
     }
 }
 
+impl std::str::FromStr for InklogConfig {
+    type Err = toml::de::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        toml::from_str(s)
+    }
+}
+
 impl Default for InklogConfig {
     fn default() -> Self {
         Self {
