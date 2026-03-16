@@ -1,0 +1,26 @@
+[package]
+name = "inklog-examples"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Examples for inklog - Enterprise-grade Rust logging infrastructure"
+
+[dependencies]
+inklog = { path = ".." }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+anyhow = "1.0"
+serde_json = "1.0"
+uuid = { version = "1.20", features = ["v4"] }
+
+[[bin]]
+name = "basic"
+path = "src/bin/basic.rs"
+
+[[bin]]
+name = "production"
+path = "src/bin/production.rs"
+
+[[bin]]
+name = "all_features"
+path = "src/bin/all_features.rs"
