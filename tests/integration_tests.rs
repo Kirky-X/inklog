@@ -1097,24 +1097,6 @@ use std::time::Duration as VerifyDuration;
 use tempfile::TempDir as VerifyTempDir;
 use tracing::Level as VerifyLevel;
 
-// ============ Database Helper Functions ============
-#[cfg(feature = "dbnexus")]
-fn get_log_count(url: &str) -> i64 {
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    rt.block_on(async {
-        use inklog::sink::entity::{
-            sea_orm::{Database, EntityTrait},
-            Entity, Model,
-        };
-
-        let db = Database::connect(url)
-            .await
-            .expect("Failed to connect to database");
-        let logs: Vec<Model> = Entity::find().all(&db).await.expect("Failed to query logs");
-        logs.len() as i64
-    })
-}
-
 // ============ File Helper Functions ============
 
 /// Finds a file with the specified extension in a directory
@@ -1228,7 +1210,6 @@ fn verify_database_sink_sqlite() {
 
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
-    // Create table before using sink
     let _ = create_logs_table(&url);
 
     let config = VerifyDatabaseSinkConfig {
@@ -1248,13 +1229,6 @@ fn verify_database_sink_sqlite() {
 
     std::thread::sleep(VerifyDuration::from_millis(500));
 
-    #[cfg(not(feature = "dbnexus"))]
-    {
-        let count = get_log_count(&url);
-        assert_eq!(count, 1);
-    }
-
-    #[cfg(feature = "dbnexus")]
     {
         use inklog::sink::entity::{
             sea_orm::{Database, EntityTrait},
