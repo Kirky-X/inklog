@@ -29,6 +29,85 @@ impl InklogConfig {
         Ok(())
     }
 
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(level) = std::env::var("INKLOG_LEVEL") {
+            self.global.level = level;
+        }
+        if let Ok(format) = std::env::var("INKLOG_FORMAT") {
+            self.global.format = format;
+        }
+        if let Ok(enabled) = std::env::var("INKLOG_CONSOLE_ENABLED") {
+            if enabled.to_lowercase() != "false" {
+                self.console_sink = Some(crate::config::ConsoleSinkConfig::default());
+            }
+        }
+        if let Ok(enabled) = std::env::var("INKLOG_FILE_ENABLED") {
+            if enabled.to_lowercase() != "false" {
+                self.file_sink = Some(crate::config::FileSinkConfig::default());
+            }
+        }
+        if let Ok(path) = std::env::var("INKLOG_FILE_PATH") {
+            if let Some(ref mut file) = self.file_sink {
+                file.path = std::path::PathBuf::from(path);
+            }
+        }
+        if let Ok(max_size) = std::env::var("INKLOG_FILE_MAX_SIZE") {
+            if let Some(ref mut file) = self.file_sink {
+                file.max_size = max_size;
+            }
+        }
+        if let Ok(compress) = std::env::var("INKLOG_FILE_COMPRESS") {
+            if let Some(ref mut file) = self.file_sink {
+                file.compress = compress.to_lowercase() != "false";
+            }
+        }
+        #[cfg(feature = "aws")]
+        {
+            if let Ok(enabled) = std::env::var("INKLOG_S3_ENABLED") {
+                if enabled.to_lowercase() != "false" {
+                    self.s3_archive = Some(crate::archive::S3ArchiveConfig::default());
+                }
+            }
+            if let Ok(bucket) = std::env::var("INKLOG_S3_BUCKET") {
+                if let Some(ref mut s3) = self.s3_archive {
+                    s3.bucket = bucket;
+                }
+            }
+            if let Ok(region) = std::env::var("INKLOG_S3_REGION") {
+                if let Some(ref mut s3) = self.s3_archive {
+                    s3.region = region;
+                }
+            }
+            if let Ok(format) = std::env::var("INKLOG_ARCHIVE_FORMAT") {
+                if let Some(ref mut s3) = self.s3_archive {
+                    s3.archive_format = format;
+                }
+            }
+        }
+        if let Ok(enabled) = std::env::var("INKLOG_HTTP_ENABLED") {
+            if enabled.to_lowercase() != "false" {
+                self.http_server = Some(crate::config::HttpServerConfig::default());
+            }
+        }
+        if let Ok(host) = std::env::var("INKLOG_HTTP_HOST") {
+            if let Some(ref mut http) = self.http_server {
+                http.host = host;
+            }
+        }
+        if let Ok(port) = std::env::var("INKLOG_HTTP_PORT") {
+            if let Ok(port_num) = port.parse() {
+                if let Some(ref mut http) = self.http_server {
+                    http.port = port_num;
+                }
+            }
+        }
+        if let Ok(threads) = std::env::var("INKLOG_WORKER_THREADS") {
+            if let Ok(num) = threads.parse() {
+                self.performance.worker_threads = num;
+            }
+        }
+    }
+
     pub fn sinks_enabled(&self) -> Vec<&'static str> {
         let mut sinks = Vec::new();
         if self.console_sink.as_ref().is_some_and(|c| c.enabled) {
