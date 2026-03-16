@@ -12,7 +12,7 @@
 //! # Construction Patterns
 //!
 //! This module supports two construction patterns:
-//! - `new()` - Creates pool with default configuration
+//! - `new()` - Creates pool with default configuration using shared runtime
 //! - `builder()` - Creates pool with custom configuration
 //!
 //! # Usage Examples
@@ -37,6 +37,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Handle;
+
+static SHARED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create shared tokio runtime for object pool")
+});
+
+fn get_runtime() -> &'static tokio::runtime::Runtime {
+    &SHARED_RUNTIME
+}
 
 /// Pool configuration - configurable via InklogConfig.performance.object_pool
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,27 +131,14 @@ where
 
     /// Create a new object pool with full configuration
     pub fn with_config(config: ObjectPoolConfig) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to create tokio runtime for object pool");
-
-            let cache = rt.block_on(async {
-                let mut builder = Cache::builder();
-                builder = builder.capacity(config.max_capacity as u64);
-                if let Some(ttl_secs) = config.ttl_secs {
-                    builder = builder.ttl(Duration::from_secs(ttl_secs));
-                }
-                Arc::new(builder.build().await.expect("Failed to build cache"))
-            });
-
-            let _ = tx.send(cache);
+        let cache = get_runtime().block_on(async {
+            let mut builder = Cache::builder();
+            builder = builder.capacity(config.max_capacity as u64);
+            if let Some(ttl_secs) = config.ttl_secs {
+                builder = builder.ttl(Duration::from_secs(ttl_secs));
+            }
+            Arc::new(builder.build().await.expect("Failed to build cache"))
         });
-
-        let cache = rx.recv().expect("Failed to receive from worker thread");
 
         Self {
             cache,
@@ -155,45 +153,35 @@ where
         ObjectPoolBuilder::new()
     }
 
+    fn execute_async<F, T>(&self, f: F) -> T
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(f)
+        } else {
+            get_runtime().block_on(f)
+        }
+    }
+
     /// Get an item from the pool by key
     pub fn get(&self, key: &K) -> Option<V>
     where
         K: Clone,
     {
-        if let Ok(_handle) = Handle::try_current() {
-            let cache = Arc::clone(&self.cache);
-            let stats = Arc::clone(&self.stats);
-            let key = key.clone();
-            let result = futures::executor::block_on(async move {
-                let handle =
-                    tokio::task::spawn(
-                        async move { cache.get(&key).await.expect("Cache get failed") },
-                    );
-                handle.await.expect("Task panicked")
-            });
-            if result.is_some() {
-                stats.hits.fetch_add(1, Ordering::Relaxed);
-                stats.items_reused.fetch_add(1, Ordering::Relaxed);
-            } else {
-                stats.misses.fetch_add(1, Ordering::Relaxed);
-            }
-            stats.total_items.store(self.len(), Ordering::Relaxed);
-            return result;
-        }
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create runtime");
+        let cache = Arc::clone(&self.cache);
+        let stats = Arc::clone(&self.stats);
+        let key = key.clone();
         let result =
-            runtime.block_on(async { self.cache.get(key).await.expect("Cache get failed") });
+            self.execute_async(async move { cache.get(&key).await.expect("Cache get failed") });
         if result.is_some() {
-            self.stats.hits.fetch_add(1, Ordering::Relaxed);
-            self.stats.items_reused.fetch_add(1, Ordering::Relaxed);
+            stats.hits.fetch_add(1, Ordering::Relaxed);
+            stats.items_reused.fetch_add(1, Ordering::Relaxed);
         } else {
-            self.stats.misses.fetch_add(1, Ordering::Relaxed);
+            stats.misses.fetch_add(1, Ordering::Relaxed);
         }
-        self.stats.total_items.store(self.len(), Ordering::Relaxed);
+        stats.total_items.store(self.len(), Ordering::Relaxed);
         result
     }
 
@@ -203,25 +191,10 @@ where
         K: Clone,
         V: Clone,
     {
-        if let Ok(_handle) = Handle::try_current() {
-            let cache = Arc::clone(&self.cache);
-            let key = key.clone();
-            let value = value.clone();
-            futures::executor::block_on(async move {
-                let handle = tokio::task::spawn(async move {
-                    cache.set(&key, &value).await.expect("Cache set failed")
-                });
-                handle.await.expect("Task panicked")
-            });
-            self.stats.total_items.store(self.len(), Ordering::Relaxed);
-            return;
-        }
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create runtime");
-        runtime.block_on(async { self.cache.set(key, &value).await.expect("Cache set failed") });
+        let cache = Arc::clone(&self.cache);
+        let key = key.clone();
+        let value = value.clone();
+        self.execute_async(async move { cache.set(&key, &value).await.expect("Cache set failed") });
         self.stats.total_items.store(self.len(), Ordering::Relaxed);
     }
 
@@ -231,22 +204,9 @@ where
     where
         K: Clone,
     {
-        if let Ok(_handle) = Handle::try_current() {
-            let cache = Arc::clone(&self.cache);
-            let key = key.clone();
-            return futures::executor::block_on(async move {
-                let handle = tokio::task::spawn(async move {
-                    cache.exists(&key).await.expect("Cache exists failed")
-                });
-                handle.await.expect("Task panicked")
-            });
-        }
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create runtime");
-        runtime.block_on(async { self.cache.exists(key).await.expect("Cache exists failed") })
+        let cache = Arc::clone(&self.cache);
+        let key = key.clone();
+        self.execute_async(async move { cache.exists(&key).await.expect("Cache exists failed") })
     }
 
     /// Remove and return an item from the pool by key
@@ -256,43 +216,20 @@ where
         K: Clone,
         V: Clone,
     {
-        if let Ok(_handle) = Handle::try_current() {
-            let cache_get = Arc::clone(&self.cache);
-            let cache_delete = Arc::clone(&self.cache);
-            let key_get = key.clone();
-            let key_delete = key.clone();
-            let value = futures::executor::block_on(async move {
-                let get_handle = tokio::task::spawn(async move {
-                    cache_get.get(&key_get).await.expect("Cache get failed")
-                });
-                get_handle.await.expect("Task panicked")
-            });
+        let cache_get = Arc::clone(&self.cache);
+        let cache_delete = Arc::clone(&self.cache);
+        let key_get = key.clone();
+        let key_delete = key.clone();
 
-            futures::executor::block_on(async move {
-                let delete_handle = tokio::task::spawn(async move {
-                    cache_delete
-                        .delete(&key_delete)
-                        .await
-                        .expect("Cache delete failed")
-                });
-                delete_handle.await.expect("Task panicked")
-            });
+        let value = self
+            .execute_async(async move { cache_get.get(&key_get).await.expect("Cache get failed") });
 
-            if value.is_some() {
-                self.stats.hits.fetch_add(1, Ordering::Relaxed);
-            }
-            self.stats.total_items.store(self.len(), Ordering::Relaxed);
-            return value;
-        }
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create runtime");
-        let value =
-            runtime.block_on(async { self.cache.get(key).await.expect("Cache get failed") });
-
-        runtime.block_on(async { self.cache.delete(key).await.expect("Cache delete failed") });
+        self.execute_async(async move {
+            cache_delete
+                .delete(&key_delete)
+                .await
+                .expect("Cache delete failed")
+        });
 
         if value.is_some() {
             self.stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -350,25 +287,8 @@ where
     /// Clear all items from the pool
     #[allow(dead_code)]
     pub fn clear(&self) {
-        if let Ok(_handle) = Handle::try_current() {
-            let cache = self.cache.clone();
-            let handle = tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("Failed to create runtime");
-                rt.block_on(async { cache.clear().await.expect("Cache clear failed") })
-            });
-            futures::executor::block_on(handle).expect("Blocking task panicked");
-            self.stats.total_items.store(0, Ordering::Relaxed);
-            return;
-        }
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create runtime");
-        runtime.block_on(async { self.cache.clear().await.expect("Cache clear failed") });
+        let cache = self.cache.clone();
+        self.execute_async(async move { cache.clear().await.expect("Cache clear failed") });
         self.stats.total_items.store(0, Ordering::Relaxed);
     }
 }

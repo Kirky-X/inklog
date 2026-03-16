@@ -19,7 +19,11 @@ use anyhow::Result;
 #[cfg(feature = "dbnexus")]
 use dbnexus::pool::DbPool;
 #[cfg(feature = "dbnexus")]
+use once_cell::sync::Lazy;
+#[cfg(feature = "dbnexus")]
 use sea_orm::{EntityTrait, Set};
+#[cfg(feature = "dbnexus")]
+use tokio::runtime::Handle;
 
 #[cfg(feature = "dbnexus")]
 use crate::config::FileSinkConfig;
@@ -40,10 +44,24 @@ const DEFAULT_BATCH_SIZE: usize = 100;
 const DEFAULT_FLUSH_INTERVAL_MS: u64 = 500;
 
 #[cfg(feature = "dbnexus")]
+static DB_SHARED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(std::cmp::max(2, num_cpus::get()))
+        .thread_name("inklog-db-shared")
+        .enable_all()
+        .build()
+        .expect("Failed to create shared tokio runtime for database sink")
+});
+
+#[cfg(feature = "dbnexus")]
+fn get_db_runtime() -> &'static tokio::runtime::Runtime {
+    &DB_SHARED_RUNTIME
+}
+
+#[cfg(feature = "dbnexus")]
 pub struct DatabaseSink {
     buffer: Vec<LogRecord>,
     last_flush: Instant,
-    rt: tokio::runtime::Runtime,
     pool: Option<Arc<DbPool>>,
     fallback_sink: Option<FileSink>,
     circuit_breaker: CircuitBreaker,
@@ -62,14 +80,7 @@ impl DatabaseSink {
         };
         let fallback_sink = FileSink::new(fallback_config).ok();
 
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(std::cmp::max(2, num_cpus::get()))
-            .thread_name("inklog-db-worker")
-            .enable_all()
-            .build()
-            .map_err(InklogError::IoError)?;
-
-        let pool = rt.block_on(async {
+        let pool = get_db_runtime().block_on(async {
             let pool = dbnexus::DbPoolBuilder::new()
                 .url(&config.url)
                 .max_connections(config.pool_size)
@@ -82,7 +93,6 @@ impl DatabaseSink {
         Ok(Self {
             buffer: Vec::with_capacity(DEFAULT_BATCH_SIZE),
             last_flush: Instant::now(),
-            rt,
             pool: Some(Arc::new(pool)),
             fallback_sink,
             circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),
@@ -94,6 +104,18 @@ impl DatabaseSink {
 
     pub fn set_metrics(&mut self, metrics: Arc<Metrics>) {
         self.metrics = Some(metrics);
+    }
+
+    fn execute_async<F, T>(&self, f: F) -> T
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(f)
+        } else {
+            get_db_runtime().block_on(f)
+        }
     }
 }
 
@@ -151,25 +173,31 @@ impl crate::sink::LogSink for DatabaseSink {
 
         if let Some(ref pool) = self.pool {
             let pool_clone = pool.clone();
-            self.rt.block_on(async {
-                match write_batch_to_db(&pool_clone, &records).await {
+            let metrics = self.metrics.clone();
+            let records_for_async = records.clone();
+            let result = self.execute_async(async move {
+                match write_batch_to_db(&pool_clone, &records_for_async).await {
                     Ok(written) => {
-                        if let Some(metrics) = &self.metrics {
+                        if let Some(metrics) = &metrics {
                             metrics.add_db_batch_records_total(written);
                             metrics.update_sink_health("database", true, None);
                         }
                         Ok(())
                     }
                     Err(e) => {
-                        self.buffer = records;
-                        if let Some(metrics) = &self.metrics {
+                        if let Some(metrics) = &metrics {
                             metrics.inc_sink_error();
                             metrics.update_sink_health("database", false, Some(e.to_string()));
                         }
                         Err(e)
                     }
                 }
-            })?;
+            });
+
+            if let Err(e) = result {
+                self.buffer = records;
+                return Err(e);
+            }
         }
 
         Ok(())

@@ -556,8 +556,7 @@ impl FileSink {
             return Ok(());
         }
 
-        let records = self.batch_buffer.clone();
-        self.batch_buffer.clear();
+        let records = std::mem::take(&mut self.batch_buffer);
 
         if let Some(file) = &mut self.current_file {
             for record in &records {

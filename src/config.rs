@@ -66,8 +66,10 @@ impl InklogConfig {
             if let Ok(enabled) = std::env::var("INKLOG_S3_ENABLED") {
                 let is_enabled = enabled.to_lowercase() != "false";
                 if is_enabled {
-                    let mut s3 = crate::archive::S3ArchiveConfig::default();
-                    s3.enabled = true;
+                    let s3 = crate::archive::S3ArchiveConfig {
+                        enabled: true,
+                        ..Default::default()
+                    };
                     self.s3_archive = Some(s3);
                 }
             }
@@ -105,8 +107,10 @@ impl InklogConfig {
         if let Ok(enabled) = std::env::var("INKLOG_HTTP_ENABLED") {
             let is_enabled = enabled.to_lowercase() != "false";
             if is_enabled {
-                let mut http = crate::config::HttpServerConfig::default();
-                http.enabled = true;
+                let http = crate::config::HttpServerConfig {
+                    enabled: true,
+                    ..Default::default()
+                };
                 self.http_server = Some(http);
             }
         }
@@ -136,7 +140,6 @@ impl InklogConfig {
             if let Some(ref mut http) = self.http_server {
                 http.error_mode = match error_mode.to_lowercase().as_str() {
                     "warn" => crate::config::HttpErrorMode::Warn,
-                    "panic" => crate::config::HttpErrorMode::Panic,
                     "strict" => crate::config::HttpErrorMode::Strict,
                     _ => crate::config::HttpErrorMode::Warn,
                 };
@@ -651,12 +654,10 @@ impl Default for HttpServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum HttpErrorMode {
-    #[serde(rename = "panic")]
-    #[default]
-    Panic,
     #[serde(rename = "warn")]
     Warn,
     #[serde(rename = "strict")]
+    #[default]
     Strict,
 }
 

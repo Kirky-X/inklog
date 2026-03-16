@@ -189,9 +189,6 @@ impl LoggerManager {
             if http_cfg.enabled {
                 if let Err(e) = manager.start_http_server(http_cfg).await {
                     match http_cfg.error_mode {
-                        crate::config::HttpErrorMode::Panic => {
-                            panic!("HTTP server startup failed: {}", e);
-                        }
                         crate::config::HttpErrorMode::Warn => {
                             tracing::warn!("HTTP server startup failed (continuing): {}", e);
                         }
@@ -1423,11 +1420,10 @@ impl LoggerBuilder {
     /// 设置HTTP服务器错误处理模式
     ///
     /// # Arguments
-    /// * `mode` - 错误处理模式（"panic"、"warn" 或 "strict"）
+    /// * `mode` - 错误处理模式（"warn" 或 "strict"）
     #[cfg(feature = "http")]
     pub fn http_error_mode(mut self, mode: impl Into<String>) -> Self {
         let error_mode = match mode.into().to_lowercase().as_str() {
-            "panic" => crate::config::HttpErrorMode::Panic,
             "warn" => crate::config::HttpErrorMode::Warn,
             "strict" => crate::config::HttpErrorMode::Strict,
             _ => crate::config::HttpErrorMode::default(),
