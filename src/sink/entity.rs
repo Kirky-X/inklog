@@ -2,6 +2,8 @@
 //!
 //! This module provides entity definitions for database logging.
 
+pub use sea_orm;
+
 use sea_orm::entity::prelude::*;
 
 /// The main log entity for database storage

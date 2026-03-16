@@ -64,8 +64,11 @@ impl InklogConfig {
         #[cfg(feature = "aws")]
         {
             if let Ok(enabled) = std::env::var("INKLOG_S3_ENABLED") {
-                if enabled.to_lowercase() != "false" {
-                    self.s3_archive = Some(crate::archive::S3ArchiveConfig::default());
+                let is_enabled = enabled.to_lowercase() != "false";
+                if is_enabled {
+                    let mut s3 = crate::archive::S3ArchiveConfig::default();
+                    s3.enabled = true;
+                    self.s3_archive = Some(s3);
                 }
             }
             if let Ok(bucket) = std::env::var("INKLOG_S3_BUCKET") {
@@ -83,10 +86,28 @@ impl InklogConfig {
                     s3.archive_format = format;
                 }
             }
+            if let Ok(algorithm) = std::env::var("INKLOG_S3_ENCRYPTION_ALGORITHM") {
+                if let Some(ref mut s3) = self.s3_archive {
+                    let algo = match algorithm.to_lowercase().as_str() {
+                        "awskms" => crate::archive::EncryptionAlgorithm::AwsKms,
+                        "aes256" => crate::archive::EncryptionAlgorithm::Aes256,
+                        _ => crate::archive::EncryptionAlgorithm::Aes256,
+                    };
+                    let key_id = std::env::var("INKLOG_S3_ENCRYPTION_KMS_KEY_ID").ok();
+                    s3.encryption = Some(crate::archive::EncryptionConfig {
+                        algorithm: algo,
+                        kms_key_id: key_id,
+                        customer_key: crate::archive::SecretString::default(),
+                    });
+                }
+            }
         }
         if let Ok(enabled) = std::env::var("INKLOG_HTTP_ENABLED") {
-            if enabled.to_lowercase() != "false" {
-                self.http_server = Some(crate::config::HttpServerConfig::default());
+            let is_enabled = enabled.to_lowercase() != "false";
+            if is_enabled {
+                let mut http = crate::config::HttpServerConfig::default();
+                http.enabled = true;
+                self.http_server = Some(http);
             }
         }
         if let Ok(host) = std::env::var("INKLOG_HTTP_HOST") {
@@ -101,9 +122,34 @@ impl InklogConfig {
                 }
             }
         }
+        if let Ok(metrics_path) = std::env::var("INKLOG_HTTP_METRICS_PATH") {
+            if let Some(ref mut http) = self.http_server {
+                http.metrics_path = metrics_path;
+            }
+        }
+        if let Ok(health_path) = std::env::var("INKLOG_HTTP_HEALTH_PATH") {
+            if let Some(ref mut http) = self.http_server {
+                http.health_path = health_path;
+            }
+        }
+        if let Ok(error_mode) = std::env::var("INKLOG_HTTP_ERROR_MODE") {
+            if let Some(ref mut http) = self.http_server {
+                http.error_mode = match error_mode.to_lowercase().as_str() {
+                    "warn" => crate::config::HttpErrorMode::Warn,
+                    "panic" => crate::config::HttpErrorMode::Panic,
+                    "strict" => crate::config::HttpErrorMode::Strict,
+                    _ => crate::config::HttpErrorMode::Warn,
+                };
+            }
+        }
         if let Ok(threads) = std::env::var("INKLOG_WORKER_THREADS") {
             if let Ok(num) = threads.parse() {
                 self.performance.worker_threads = num;
+            }
+        }
+        if let Ok(capacity) = std::env::var("INKLOG_CHANNEL_CAPACITY") {
+            if let Ok(num) = capacity.parse() {
+                self.performance.channel_capacity = num;
             }
         }
     }

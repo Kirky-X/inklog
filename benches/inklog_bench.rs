@@ -14,6 +14,7 @@ use inklog::{
 };
 use rand::Rng;
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -276,26 +277,37 @@ fn bench_parquet_conversion(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
 
     // 生成测试日志数据
-    fn generate_test_logs(count: usize) -> Vec<inklog::sink::database::Model> {
-        let mut rng = rand::thread_rng();
+    fn generate_test_logs(count: usize) -> Vec<LogRecord> {
+        let mut rng = rand::rng();
         (0..count)
-            .map(|i| inklog::sink::database::Model {
-                id: i as i64,
-                timestamp: chrono::Utc::now(),
-                level: format!("{:?}", Level::INFO),
-                target: format!("target_{}", i % 10),
-                message: format!(
-                    "Test log message {} with some additional data for testing performance",
-                    i
-                ),
-                fields: Some(serde_json::json!({
-                    "user_id": rng.gen::<u64>() % 10000,
-                    "request_id": format!("req-{:x}", rng.gen::<u64>()),
-                    "duration_ms": rng.gen::<u64>() % 500,
-                })),
-                file: Some(format!("src/file_{}.rs", i % 5)),
-                line: Some((i % 1000) as i32),
-                thread_id: format!("thread-{}", i % 4),
+            .map(|i| {
+                let mut fields = HashMap::new();
+                fields.insert(
+                    "user_id".to_string(),
+                    serde_json::json!(rng.random::<u64>() % 10000),
+                );
+                fields.insert(
+                    "request_id".to_string(),
+                    serde_json::json!(format!("req-{:x}", rng.random::<u64>())),
+                );
+                fields.insert(
+                    "duration_ms".to_string(),
+                    serde_json::json!(rng.random::<u64>() % 500),
+                );
+
+                LogRecord {
+                    timestamp: chrono::Utc::now(),
+                    level: Level::INFO.to_string(),
+                    target: format!("target_{}", i % 10),
+                    message: format!(
+                        "Test log message {} with some additional data for testing performance",
+                        i
+                    ),
+                    fields,
+                    file: Some(format!("src/file_{}.rs", i % 5)),
+                    line: Some((i % 1000) as u32),
+                    thread_id: format!("thread-{}", i % 4),
+                }
             })
             .collect()
     }

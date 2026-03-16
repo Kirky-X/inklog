@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("Health check endpoint would listen on {addr}");
     println!("Router type: {:?}", std::any::type_name_of_val(&app));
-    
+
     // Skip actual server startup for this example
     println!("Server would start here. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;

@@ -12,7 +12,6 @@
 
 use std::error::Error;
 
-use inklog::config::DatabaseDriver;
 use inklog::{archive::ArchiveServiceBuilder, InklogConfig, LoggerManager};
 
 #[tokio::main]

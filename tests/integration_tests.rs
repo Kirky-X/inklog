@@ -1102,13 +1102,15 @@ use tracing::Level as VerifyLevel;
 fn get_log_count(url: &str) -> i64 {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     rt.block_on(async {
-        use inklog::sink::entity::{Entity, LogModel};
-        use sea_orm::Database;
+        use inklog::sink::entity::{
+            sea_orm::{Database, EntityTrait},
+            Entity, Model,
+        };
 
         let db = Database::connect(url)
             .await
             .expect("Failed to connect to database");
-        let logs: Vec<LogModel> = Entity::find().all(&db).await.expect("Failed to query logs");
+        let logs: Vec<Model> = Entity::find().all(&db).await.expect("Failed to query logs");
         logs.len() as i64
     })
 }
@@ -1254,8 +1256,10 @@ fn verify_database_sink_sqlite() {
 
     #[cfg(feature = "dbnexus")]
     {
-        use inklog::sink::entity::Entity;
-        use sea_orm::{Database, EntityTrait};
+        use inklog::sink::entity::{
+            sea_orm::{Database, EntityTrait},
+            Entity,
+        };
 
         sink.flush().expect("Failed to flush database sink");
 
@@ -1280,7 +1284,7 @@ fn create_logs_table(url: &str) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         let session = pool.get_session("admin").await.map_err(|e| e.to_string())?;
 
-        use sea_orm::{ConnectionTrait, Schema};
+        use inklog::sink::entity::sea_orm::{ConnectionTrait, Schema};
 
         let conn = session.connection().map_err(|e| e.to_string())?;
         let schema = Schema::new(conn.get_database_backend());
@@ -1290,7 +1294,7 @@ fn create_logs_table(url: &str) -> Result<(), String> {
                 .if_not_exists(),
         )
         .await
-        .map_err(|e: sea_orm::DbErr| e.to_string())?;
+        .map_err(|e: inklog::sink::entity::sea_orm::DbErr| e.to_string())?;
         Ok(())
     })
 }
