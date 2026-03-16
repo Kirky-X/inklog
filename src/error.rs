@@ -114,6 +114,9 @@ pub enum InklogError {
     #[error("S3 error: {0}")]
     S3Error(String),
 
+    #[error("Archive error: {0}")]
+    ArchiveError(String),
+
     #[error("Compression error: {0}")]
     CompressionError(String),
 
@@ -190,6 +193,9 @@ impl InklogError {
             }
             InklogError::S3Error(msg) => {
                 format!("S3 error: {}", sanitize_message(msg))
+            }
+            InklogError::ArchiveError(msg) => {
+                format!("Archive error: {}", sanitize_message(msg))
             }
             InklogError::CompressionError(msg) => {
                 format!("Compression error: {}", sanitize_message(msg))

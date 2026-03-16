@@ -272,24 +272,19 @@ impl LoggerManager {
                 #[cfg(feature = "dbnexus")]
                 let db_conn: Option<dbnexus::pool::DbPool> =
                     if let Some(ref db_cfg) = config.database_sink {
-                        use dbnexus::DbConfigBuilder;
-                        let db_config = DbConfigBuilder::new()
+                        use dbnexus::DbPoolBuilder;
+                        let db_result = DbPoolBuilder::new()
                             .url(&db_cfg.url)
                             .max_connections(db_cfg.pool_size)
                             .build()
-                            .map_err(|e| {
-                                tracing::warn!("Failed to build DbConfig: {}", e);
-                            })
-                            .ok();
-                        match db_config {
-                            Some(cfg) => match dbnexus::pool::DbPool::with_config(cfg).await {
-                                Ok(pool) => Some(pool),
-                                Err(e) => {
-                                    tracing::warn!("Failed to create DbPool: {}", e);
-                                    None
-                                }
-                            },
-                            None => None,
+                            .await;
+
+                        match db_result {
+                            Ok(pool) => Some(pool),
+                            Err(e) => {
+                                tracing::warn!("Failed to create DbPool: {}", e);
+                                None
+                            }
                         }
                     } else {
                         None

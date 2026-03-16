@@ -70,14 +70,12 @@ impl DatabaseSink {
             .map_err(InklogError::IoError)?;
 
         let pool = rt.block_on(async {
-            let db_config = dbnexus::DbConfigBuilder::new()
+            let pool = dbnexus::DbPoolBuilder::new()
                 .url(&config.url)
                 .max_connections(config.pool_size)
                 .build()
-                .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-            let pool = DbPool::with_config(db_config)
                 .await
-                .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
+                .map_err(|e: dbnexus::DbError| InklogError::DatabaseError(e.to_string()))?;
             Ok::<_, InklogError>(pool)
         })?;
 

@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// 归档服务
 pub struct ArchiveService {
@@ -382,19 +382,21 @@ impl ArchiveService {
             })
             .await;
 
-            // 更新状态
-            let mut state = schedule_state.lock().map_err(|e| {
-                InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
-            })?;
-
             match result {
                 Ok(archive_key) => {
-                    state.mark_success();
+                    // 更新状态（在await之后）
+                    {
+                        let mut state = schedule_state.lock().map_err(|e| {
+                            InklogError::RuntimeError(format!(
+                                "Failed to acquire schedule lock: {}",
+                                e
+                            ))
+                        })?;
+                        state.mark_success();
+                    }
                     info!("Archived {} logs to S3: {}", log_records.len(), archive_key);
                 }
                 Err(e) => {
-                    state.mark_failed();
-
                     // S3上传失败时保存到本地保留目录
                     let local_path = config.local_retention_path.join(format!(
                         "archive_{}_{}_failed.json",
@@ -408,8 +410,21 @@ impl ArchiveService {
                         e
                     );
 
-                    // 尝试保存到本地
-                    if let Err(local_err) = fs::write(&local_path, &log_data).await {
+                    // 尝试保存到本地（先释放锁）
+                    let save_result = fs::write(&local_path, &log_data).await;
+
+                    // 更新状态
+                    {
+                        let mut state = schedule_state.lock().map_err(|e| {
+                            InklogError::RuntimeError(format!(
+                                "Failed to acquire schedule lock: {}",
+                                e
+                            ))
+                        })?;
+                        state.mark_failed();
+                    }
+
+                    if let Err(local_err) = save_result {
                         error!(
                             "Failed to save archive to local retention {}: {}",
                             local_path.display(),

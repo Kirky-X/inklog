@@ -1102,8 +1102,8 @@ use tracing::Level as VerifyLevel;
 fn get_log_count(url: &str) -> i64 {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     rt.block_on(async {
-        use inklog::sink::database::{Entity, LogModel};
-        use sea_orm::{Database, EntityTrait};
+        use inklog::sink::entity::{Entity, LogModel};
+        use sea_orm::Database;
 
         let db = Database::connect(url)
             .await
