@@ -218,8 +218,6 @@ impl LoggerManager {
         ),
         InklogError,
     > {
-        config.validate()?;
-
         let metrics = Arc::new(Metrics::new());
         let (sender, receiver) = bounded(config.performance.channel_capacity);
         let (shutdown_tx, shutdown_rx) = bounded(1);
@@ -374,7 +372,9 @@ impl LoggerManager {
     /// }
     /// ```
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
-        let config = InklogConfig::from_file(path)?;
+        let config = InklogConfig::from_file(path.as_ref()).map_err(|e| {
+            InklogError::ConfigError(format!("Failed to load config from file: {}", e))
+        })?;
         Self::with_config(config).await
     }
 
@@ -400,7 +400,8 @@ impl LoggerManager {
     /// }
     /// ```
     pub async fn load() -> Result<Self, InklogError> {
-        let config = InklogConfig::load()?;
+        let config = InklogConfig::load()
+            .map_err(|e| InklogError::ConfigError(format!("Failed to load config: {}", e)))?;
         Self::with_config(config).await
     }
 

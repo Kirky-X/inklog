@@ -38,13 +38,7 @@ pub fn validate_config(config_path: &PathBuf) -> Result<()> {
 
 #[cfg(feature = "confers")]
 fn validate_with_confers(config_path: &PathBuf) -> Result<()> {
-    use confers::ConfersCli;
-
-    // Use confers to validate the config file
-    ConfersCli::validate(config_path.to_str().unwrap_or("inklog_config.toml"), "full")
-        .map_err(|e| anyhow::anyhow!("Validation failed: {}", e))?;
-
-    // Additional inklog-specific validation
+    // Use TOML parsing for validation
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 

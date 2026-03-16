@@ -97,7 +97,6 @@
 pub mod archive;
 pub mod cache;
 pub mod config;
-mod config_validator;
 mod error;
 pub mod infrastructure;
 pub mod log_adapter;
