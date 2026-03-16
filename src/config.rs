@@ -19,6 +19,16 @@ pub struct InklogConfig {
 }
 
 impl InklogConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.performance.channel_capacity == 0 {
+            return Err("channel_capacity cannot be 0".to_string());
+        }
+        if self.performance.worker_threads == 0 {
+            return Err("worker_threads cannot be 0".to_string());
+        }
+        Ok(())
+    }
+
     pub fn sinks_enabled(&self) -> Vec<&'static str> {
         let mut sinks = Vec::new();
         if self.console_sink.as_ref().is_some_and(|c| c.enabled) {
