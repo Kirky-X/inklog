@@ -50,6 +50,7 @@ enum SinkControlMessage {
 struct WorkerParams {
     config: InklogConfig,
     receiver: Receiver<LogRecord>,
+    console_receiver: Receiver<LogRecord>,
     shutdown_rx: Receiver<()>,
     control_rx: Receiver<SinkControlMessage>,
     control_tx: Sender<SinkControlMessage>,
@@ -103,7 +104,9 @@ pub struct LoggerManager {
     #[allow(dead_code)]
     config: InklogConfig,
     sender: Sender<LogRecord>,
+    console_sender: Sender<LogRecord>,
     shutdown_tx: Sender<()>,
+    #[allow(dead_code)]
     console_sink: Arc<Mutex<ConsoleSink>>,
     metrics: Arc<Metrics>,
     worker_handles: Mutex<Vec<JoinHandle<()>>>,
@@ -162,7 +165,7 @@ impl LoggerManager {
 
         // 2. 安装 log crate logger（原生支持，无需 tracing_log）
         let log_adapter = LogAdapter::new(
-            manager.console_sink.clone(),
+            manager.console_sender.clone(),
             manager.sender.clone(),
             manager.metrics.clone(),
         );
@@ -217,6 +220,7 @@ impl LoggerManager {
     > {
         let metrics = Arc::new(Metrics::new());
         let (sender, receiver) = bounded(config.performance.channel_capacity);
+        let (console_sender, console_receiver) = bounded(config.performance.channel_capacity);
         let (shutdown_tx, shutdown_rx) = bounded(1);
         let (control_tx, control_rx) = bounded(10); // Control channel for recovery commands
         let effective_capacity = Arc::new(AtomicUsize::new(config.performance.channel_capacity));
@@ -226,9 +230,9 @@ impl LoggerManager {
             LogTemplate::new(&config.global.format),
         )));
 
-        // Initialize tracing subscriber
+        // Initialize tracing subscriber with console_sender channel
         let subscriber =
-            LoggerSubscriber::new(console_sink.clone(), sender.clone(), metrics.clone());
+            LoggerSubscriber::new(console_sender.clone(), sender.clone(), metrics.clone());
 
         // Filter
         let level = config
@@ -249,6 +253,7 @@ impl LoggerManager {
         let handles = Self::start_workers(WorkerParams {
             config: config.clone(),
             receiver,
+            console_receiver,
             shutdown_rx,
             control_rx,
             control_tx: control_tx.clone(),
@@ -318,6 +323,7 @@ impl LoggerManager {
         let manager = Self {
             config,
             sender,
+            console_sender,
             shutdown_tx,
             console_sink,
             metrics,
@@ -333,6 +339,7 @@ impl LoggerManager {
         let manager = Self {
             config,
             sender,
+            console_sender,
             shutdown_tx,
             console_sink,
             metrics,
@@ -530,6 +537,7 @@ impl LoggerManager {
         let WorkerParams {
             config,
             receiver,
+            console_receiver,
             shutdown_rx,
             control_rx,
             control_tx,
@@ -541,6 +549,85 @@ impl LoggerManager {
         let file_config = config.file_sink.clone();
         #[allow(unused_variables)]
         let db_config = config.database_sink.clone();
+
+        // Thread 0: Console Sink (dedicated for lock-free hot path)
+        let shutdown_console = shutdown_rx.clone();
+        let metrics_console = metrics.clone();
+        let console_sink_console = console_sink.clone();
+        let handle_console = thread::spawn(move || {
+            metrics_console.active_workers.inc();
+            loop {
+                // Check for shutdown
+                if shutdown_console.try_recv().is_ok() {
+                    // Drain with 5s timeout (console is fast)
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while let Ok(record) = console_receiver.try_recv() {
+                        let latency = Utc::now()
+                            .signed_duration_since(record.timestamp)
+                            .to_std()
+                            .unwrap_or(Duration::ZERO);
+                        metrics_console.record_latency(latency);
+
+                        // Hot path: use try_lock to avoid blocking
+                        match console_sink_console.try_lock() {
+                            Ok(mut sink) => {
+                                if sink.write(&record).is_err() {
+                                    metrics_console.inc_sink_error();
+                                }
+                            }
+                            Err(_) => {
+                                // Lock contention detected, increment metric and skip
+                                metrics_console.inc_lock_contention();
+                            }
+                        }
+
+                        if Instant::now() > deadline {
+                            break;
+                        }
+                    }
+                    break;
+                }
+
+                // Process console logs with timeout
+                match console_receiver.recv_timeout(Duration::from_millis(100)) {
+                    Ok(record) => {
+                        let latency = Utc::now()
+                            .signed_duration_since(record.timestamp)
+                            .to_std()
+                            .unwrap_or(Duration::ZERO);
+                        metrics_console.record_latency(latency);
+
+                        // Hot path: use try_lock to avoid blocking
+                        match console_sink_console.try_lock() {
+                            Ok(mut sink) => {
+                                if sink.write(&record).is_err() {
+                                    metrics_console.inc_sink_error();
+                                    metrics_console.update_sink_health(
+                                        "console",
+                                        false,
+                                        Some("Write error".to_string()),
+                                    );
+                                } else {
+                                    metrics_console.inc_logs_written();
+                                    metrics_console.update_sink_health("console", true, None);
+                                }
+                            }
+                            Err(_) => {
+                                // Lock contention detected, increment metric and skip
+                                metrics_console.inc_lock_contention();
+                            }
+                        }
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        // Timeout, continue loop
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        break;
+                    }
+                }
+            }
+            metrics_console.active_workers.dec();
+        });
 
         // Thread 1: File Sink
         let rx_file = receiver.clone();
@@ -1076,9 +1163,9 @@ impl LoggerManager {
         });
 
         #[cfg(feature = "dbnexus")]
-        let handles = vec![handle_file, handle_db, handle_health];
+        let handles = vec![handle_console, handle_file, handle_db, handle_health];
         #[cfg(not(feature = "dbnexus"))]
-        let handles = vec![handle_file, handle_health];
+        let handles = vec![handle_console, handle_file, handle_health];
 
         Ok(handles)
     }
