@@ -70,6 +70,8 @@ pub struct FileSink {
     rotation_timer: Option<Arc<std::sync::Mutex<Instant>>>,
     /// 清理定时器句柄
     cleanup_timer_handle: Option<thread::JoinHandle<()>>,
+    /// 上次清理时间（每个实例独立）
+    last_cleanup_time: Arc<Mutex<Option<Instant>>>,
     /// Shutdown flag for graceful thread termination
     shutdown_flag: Arc<AtomicBool>,
 }
@@ -105,6 +107,7 @@ impl FileSink {
             timer_handle: None,
             rotation_timer: Some(rotation_timer.clone()),
             cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
         };
 
@@ -233,6 +236,7 @@ impl FileSink {
         let shutdown_flag = self.shutdown_flag.clone();
         let config = self.config.clone();
         let path = self.config.path.clone();
+        let last_cleanup_time = self.last_cleanup_time.clone();
 
         let handle = thread::spawn(move || {
             let check_interval = StdDuration::from_secs(60);
@@ -250,11 +254,8 @@ impl FileSink {
                     break;
                 }
 
-                // 检查是否到达清理时间
-                static LAST_CLEANUP: std::sync::Mutex<Option<Instant>> =
-                    std::sync::Mutex::new(None);
-
-                let mut last_cleanup = match LAST_CLEANUP.lock() {
+                // 检查是否到达清理时间（使用实例级别的清理时间）
+                let mut last_cleanup = match last_cleanup_time.lock() {
                     Ok(guard) => guard,
                     Err(e) => {
                         error!("Cleanup timer lock poisoned: {}", e);
@@ -425,71 +426,6 @@ impl FileSink {
 
     fn update_next_rotation_time(&mut self) {
         self.next_rotation_time = Self::calculate_next_rotation_time(&self.config.rotation_time);
-    }
-
-    /// 清理旧的日志文件
-    ///
-    /// 根据 retention_days 和 max_total_size 配置自动清理过期日志。
-    /// 此方法在后台定期调用，也可手动触发。
-    ///
-    /// # Errors
-    ///
-    /// 返回文件系统操作可能产生的错误
-    #[allow(dead_code)]
-    fn cleanup_old_logs(&self) -> Result<(), InklogError> {
-        if let Some(parent) = self.config.path.parent() {
-            let entries: Result<Vec<_>, _> = fs::read_dir(parent)?.collect();
-
-            if let Ok(entries) = entries {
-                // 计算截止日期
-                let cutoff_date = Utc::now()
-                    .checked_sub_signed(chrono::Duration::days(self.config.retention_days as i64))
-                    .unwrap_or_else(Utc::now);
-
-                let mut expired_count = 0;
-                let mut total_size = 0u64;
-
-                for entry in &entries {
-                    total_size += entry.path().metadata()?.len();
-
-                    if let Ok(modified) = entry.path().metadata().and_then(|m| m.modified()) {
-                        let modified_utc: DateTime<Utc> = modified.into();
-                        if modified_utc < cutoff_date {
-                            expired_count += 1;
-                        }
-                    }
-                }
-
-                if let Some(max_total_size_bytes) = Self::parse_size(&self.config.max_total_size) {
-                    if total_size > max_total_size_bytes {
-                        let excess_size = total_size.saturating_sub(max_total_size_bytes);
-                        let mut deleted_size: u64 = 0;
-
-                        for entry in entries {
-                            if deleted_size >= excess_size {
-                                break;
-                            }
-
-                            if let Ok(metadata) = entry.path().metadata() {
-                                deleted_size += metadata.len();
-                            }
-
-                            if let Err(e) = fs::remove_file(entry.path()) {
-                                error!("Failed to remove {}: {}", entry.path().display(), e);
-                            }
-                        }
-                    } else if expired_count > 0 {
-                        let to_delete =
-                            (entries.len() as i32 - self.config.keep_files as i32).max(0) as usize;
-                        for entry in entries.into_iter().take(to_delete) {
-                            let _ = fs::remove_file(entry.path());
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// 启动轮转定时器
@@ -755,6 +691,7 @@ impl FileSink {
                     timer_handle: None,
                     rotation_timer: None,
                     cleanup_timer_handle: None,
+                    last_cleanup_time: Arc::new(Mutex::new(None)),
                     shutdown_flag: Arc::new(AtomicBool::new(false)),
                 };
                 if let Err(e) = sink.compress_file(&path) {
@@ -782,6 +719,7 @@ impl FileSink {
                     timer_handle: None,
                     rotation_timer: None,
                     cleanup_timer_handle: None,
+                    last_cleanup_time: Arc::new(Mutex::new(None)),
                     shutdown_flag: Arc::new(AtomicBool::new(false)),
                 };
                 let encrypted_path = path.with_extension("enc");
@@ -999,6 +937,7 @@ impl Clone for FileSink {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -1038,7 +977,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cleanup_old_logs() {
+    fn test_perform_cleanup() {
         let dir = tempdir().unwrap();
         let log_path = dir.path().join("test.log");
 
@@ -1059,30 +998,11 @@ mod tests {
             flush_interval_ms: 100,
         };
 
-        let sink = FileSink {
-            config: config.clone(),
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: StdDuration::from_secs(86400),
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-            batch_buffer: Vec::new(),
-            last_flush_time: Instant::now(),
-            timer_handle: None,
-            rotation_timer: None,
-            cleanup_timer_handle: None,
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-            next_rotation_time: None,
-            last_rotation_date: None,
-        };
-
         // Create test files
         let old_file = dir.path().join("test_old.log");
         std::fs::write(&old_file, "old content").unwrap();
 
-        let result = sink.cleanup_old_logs();
+        let result = FileSink::perform_cleanup(&config, &log_path);
         assert!(result.is_ok());
     }
 
@@ -1113,6 +1033,7 @@ mod tests {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             next_rotation_time: None,
             last_rotation_date: None,
@@ -1149,6 +1070,7 @@ mod tests {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             next_rotation_time: None,
             last_rotation_date: None,
@@ -1185,6 +1107,7 @@ mod tests {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             next_rotation_time: None,
             last_rotation_date: None,
@@ -1291,6 +1214,7 @@ mod tests {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             next_rotation_time: None,
             last_rotation_date: None,
@@ -1323,6 +1247,7 @@ mod tests {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             next_rotation_time: None,
             last_rotation_date: None,
