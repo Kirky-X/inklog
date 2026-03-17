@@ -16,6 +16,7 @@ use crate::error::InklogError;
 use chrono::{DateTime, Datelike, Duration, Utc};
 #[cfg(feature = "dbnexus")]
 use dbnexus::pool::Session;
+use parking_lot::Mutex;
 #[cfg(feature = "dbnexus")]
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::path::PathBuf;
@@ -40,7 +41,7 @@ pub struct ArchiveService {
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
     /// 调度状态跟踪（用于并发控制和持久化）
-    schedule_state: std::sync::Mutex<super::ScheduleState>,
+    schedule_state: Mutex<super::ScheduleState>,
     /// Parquet配置（用于归档格式）
     #[allow(dead_code)]
     parquet_config: crate::config::ParquetConfig,
@@ -83,7 +84,7 @@ impl ArchiveService {
             scheduler,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
-            schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+            schedule_state: Mutex::new(super::ScheduleState::default()),
             parquet_config: config.parquet_config.clone(),
         })
     }
@@ -121,7 +122,7 @@ impl ArchiveService {
             scheduler,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
-            schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+            schedule_state: Mutex::new(super::ScheduleState::default()),
             parquet_config: config.parquet_config.clone(),
         })
     }
@@ -131,7 +132,7 @@ impl ArchiveService {
         info!("Starting S3 archive service");
 
         // 将 schedule_state 转换为 Arc 以便在闭包中共享
-        let schedule_state: Arc<std::sync::Mutex<super::ScheduleState>> =
+        let schedule_state: Arc<Mutex<super::ScheduleState>> =
             Arc::new(std::mem::take(&mut self.schedule_state));
         let mut shutdown_rx = self.shutdown_rx.take().ok_or_else(|| {
             InklogError::ConfigError("Shutdown receiver already taken".to_string())
@@ -306,13 +307,11 @@ impl ArchiveService {
         config: &S3ArchiveConfig,
         archive_manager: &Arc<S3ArchiveManager>,
         db_session: Option<Arc<Session>>,
-        schedule_state: &Arc<std::sync::Mutex<super::ScheduleState>>,
+        schedule_state: &Arc<Mutex<super::ScheduleState>>,
     ) -> Result<(), InklogError> {
         // 并发控制：检查是否可以执行（在锁内）
         let _can_run = {
-            let mut state = schedule_state.lock().map_err(|e| {
-                InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
-            })?;
+            let mut state = schedule_state.lock();
             if !state.can_run_today() {
                 info!("Archive already running or completed today, skipping");
                 return Ok(());
@@ -338,9 +337,7 @@ impl ArchiveService {
 
             if log_records.is_empty() {
                 debug!("No logs to archive");
-                let mut state = schedule_state.lock().map_err(|e| {
-                    InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
-                })?;
+                let mut state = schedule_state.lock();
                 state.mark_success();
                 return Ok(());
             }
@@ -386,12 +383,7 @@ impl ArchiveService {
                 Ok(archive_key) => {
                     // 更新状态（在await之后）
                     {
-                        let mut state = schedule_state.lock().map_err(|e| {
-                            InklogError::RuntimeError(format!(
-                                "Failed to acquire schedule lock: {}",
-                                e
-                            ))
-                        })?;
+                        let mut state = schedule_state.lock();
                         state.mark_success();
                     }
                     info!("Archived {} logs to S3: {}", log_records.len(), archive_key);
@@ -415,12 +407,7 @@ impl ArchiveService {
 
                     // 更新状态
                     {
-                        let mut state = schedule_state.lock().map_err(|e| {
-                            InklogError::RuntimeError(format!(
-                                "Failed to acquire schedule lock: {}",
-                                e
-                            ))
-                        })?;
+                        let mut state = schedule_state.lock();
                         state.mark_failed();
                     }
 
@@ -458,13 +445,11 @@ impl ArchiveService {
     async fn perform_archive_simple(
         _config: &S3ArchiveConfig,
         _archive_manager: &Arc<S3ArchiveManager>,
-        schedule_state: &Arc<std::sync::Mutex<super::ScheduleState>>,
+        schedule_state: &Arc<Mutex<super::ScheduleState>>,
     ) -> Result<(), InklogError> {
         // 并发控制：检查是否可以执行
         {
-            let mut state = schedule_state.lock().map_err(|e| {
-                InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
-            })?;
+            let mut state = schedule_state.lock();
             if !state.can_run_today() {
                 info!("Archive already running or completed today, skipping");
                 return Ok(());
@@ -475,9 +460,7 @@ impl ArchiveService {
         // 非 dbnexus 版本只执行清理任务，不进行数据库归档
         warn!("Archive service running without database support - only cleanup will be performed");
 
-        let mut state = schedule_state.lock().map_err(|e| {
-            InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
-        })?;
+        let mut state = schedule_state.lock();
         state.mark_success();
 
         Ok(())
@@ -488,12 +471,10 @@ impl ArchiveService {
     async fn perform_archive_simple(
         _config: &S3ArchiveConfig,
         _archive_manager: &Arc<()>,
-        schedule_state: &Arc<std::sync::Mutex<super::ScheduleState>>,
+        schedule_state: &Arc<Mutex<super::ScheduleState>>,
     ) -> Result<(), InklogError> {
         warn!("AWS feature not enabled, skipping S3 archive");
-        let mut state = schedule_state.lock().map_err(|e| {
-            InklogError::RuntimeError(format!("Failed to acquire schedule lock: {}", e))
-        })?;
+        let mut state = schedule_state.lock();
         state.mark_success();
         Ok(())
     }
@@ -1015,7 +996,7 @@ impl ArchiveServiceBuilder {
                 scheduler: JobScheduler::new().await?,
                 shutdown_tx,
                 shutdown_rx: None,
-                schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+                schedule_state: Mutex::new(super::ScheduleState::default()),
                 parquet_config: config.parquet_config.clone(),
             })
         }
@@ -1028,7 +1009,7 @@ impl ArchiveServiceBuilder {
                 scheduler: JobScheduler::new().await?,
                 shutdown_tx,
                 shutdown_rx: None,
-                schedule_state: std::sync::Mutex::new(super::ScheduleState::default()),
+                schedule_state: Mutex::new(super::ScheduleState::default()),
                 parquet_config: config.parquet_config.clone(),
             })
         }
