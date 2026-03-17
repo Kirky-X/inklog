@@ -119,8 +119,7 @@ pub use log_adapter::{LogAdapter, LogLogger};
 pub use log_record::LogRecord;
 pub use manager::{LoggerBuilder, LoggerManager};
 pub use metrics::{
-    FallbackAction, FallbackConfig, FallbackState, FallbackStats, HealthStatus, Metrics,
-    SinkHealthMonitor, SinkStatus,
+    FallbackConfig, FallbackState, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
 };
 pub use object_pool::ObjectPool;
 pub use template::LogTemplate;
