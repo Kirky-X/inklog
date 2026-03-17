@@ -237,6 +237,7 @@ pub struct Metrics {
     pub(crate) logs_dropped_total: AtomicU64,
     pub(crate) channel_send_blocked_total: AtomicU64,
     pub(crate) sink_errors_total: AtomicU64,
+    pub(crate) lock_contention_total: AtomicU64,
     pub(crate) db_batch_records_total: AtomicU64,
     pub(crate) start_time: Instant,
 
@@ -262,6 +263,7 @@ impl Default for Metrics {
             logs_dropped_total: AtomicU64::new(0),
             channel_send_blocked_total: AtomicU64::new(0),
             sink_errors_total: AtomicU64::new(0),
+            lock_contention_total: AtomicU64::new(0),
             db_batch_records_total: AtomicU64::new(0),
             start_time: Instant::now(),
             total_latency_us: AtomicU64::new(0),
@@ -349,6 +351,15 @@ impl Metrics {
 
     pub fn inc_sink_error(&self) {
         self.sink_errors_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_lock_contention(&self) {
+        self.lock_contention_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns the total number of lock contention events.
+    pub fn lock_contention(&self) -> u64 {
+        self.lock_contention_total.load(Ordering::Relaxed)
     }
 
     pub fn set_db_batch_size(&self, size: usize) {
