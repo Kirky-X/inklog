@@ -654,7 +654,7 @@ async fn test_http_server_startup_with_default_config() {
         port,
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
-        error_mode: HttpErrorMode::Panic,
+        error_mode: HttpErrorMode::Strict,
     };
 
     let inklog_config = HttpInklogConfig {
@@ -679,12 +679,12 @@ async fn test_http_server_error_mode_panic() {
         port: 18081,
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
-        error_mode: HttpErrorMode::Panic,
+        error_mode: HttpErrorMode::Strict,
     };
 
     match config.error_mode {
-        HttpErrorMode::Panic => {}
-        _ => panic!("Expected Panic mode"),
+        HttpErrorMode::Strict => {}
+        _ => panic!("Expected Strict mode"),
     }
 }
 
