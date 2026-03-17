@@ -11,20 +11,23 @@
 use crate::log_record::LogRecord;
 use crate::metrics::Metrics;
 use crate::object_pool::{LOG_RECORD_POOL, STRING_POOL};
-use crate::sink::console::ConsoleSink;
-use crate::sink::LogSink;
 use chrono::Utc;
 use crossbeam_channel::Sender;
 use log::{Level, LevelFilter, Metadata, Record};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// `log` crate 适配器，实现 `log::Log` trait
 ///
 /// 此适配器将 `log` crate 的日志转换为 inklog 的 `LogRecord` 格式，
-/// 并分发到配置的 sinks（console + async workers）。
+/// 并分发到配置的 channels（console + async workers）。
+///
+/// 使用 channel 实现无锁热路径，避免锁竞争。
 pub struct LogAdapter {
-    console_sink: Arc<Mutex<ConsoleSink>>,
+    /// Channel sender for console output (lock-free)
+    console_sender: Sender<LogRecord>,
+    /// Channel sender for async sinks (file, database, etc.)
     async_sender: Sender<LogRecord>,
+    /// Metrics for monitoring
     metrics: Arc<Metrics>,
 }
 
@@ -32,16 +35,16 @@ impl LogAdapter {
     /// 创建新的 LogAdapter
     ///
     /// # Arguments
-    /// * `console_sink` - 控制台 sink，用于同步快速输出
+    /// * `console_sender` - 控制台 channel 发送端，用于无锁快速输出
     /// * `async_sender` - 异步 channel 发送端，用于后台处理
     /// * `metrics` - 指标收集器
     pub fn new(
-        console_sink: Arc<Mutex<ConsoleSink>>,
+        console_sender: Sender<LogRecord>,
         async_sender: Sender<LogRecord>,
         metrics: Arc<Metrics>,
     ) -> Self {
         Self {
-            console_sink,
+            console_sender,
             async_sender,
             metrics,
         }
@@ -101,28 +104,35 @@ impl log::Log for LogAdapter {
 
         let log_record = self.record_to_log_record(record);
 
-        // Fast path: Console (同步写入)
-        if let Ok(mut sink) = self.console_sink.lock() {
-            if sink.write(&log_record).is_err() {
-                self.metrics.inc_sink_error();
-            }
-        }
-
-        // Slow path: Async (发送到后台 workers)
-        match self.async_sender.try_send(log_record.clone()) {
+        // Fast path: Console - lock-free try_send, drop on full to avoid blocking
+        match self.console_sender.try_send(log_record.clone()) {
             Ok(_) => {}
-            Err(crossbeam_channel::TrySendError::Full(r)) => {
+            Err(crossbeam_channel::TrySendError::Full(_)) => {
                 self.metrics.inc_channel_blocked();
-                if self.async_sender.send(r).is_err() {
-                    self.metrics.inc_logs_dropped();
-                }
+                self.metrics.inc_logs_dropped();
             }
             Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
                 self.metrics.inc_logs_dropped();
             }
         }
 
-        LOG_RECORD_POOL.put(log_record);
+        // Slow path: Async sinks (file, database, etc.) - drop on full to avoid blocking
+        match self.async_sender.try_send(log_record.clone()) {
+            Ok(_) => {}
+            Err(crossbeam_channel::TrySendError::Full(_)) => {
+                self.metrics.inc_channel_blocked();
+                self.metrics.inc_logs_dropped();
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                self.metrics.inc_logs_dropped();
+            }
+        }
+
+        // Return resources to pools
+        let mut r = log_record;
+        let msg = std::mem::take(&mut r.message);
+        STRING_POOL.put(msg);
+        LOG_RECORD_POOL.put(r);
     }
 
     /// 刷新缓冲区（no-op，因为使用 channel）
@@ -194,13 +204,11 @@ mod tests {
 
     #[test]
     fn test_record_to_log_record() {
-        let (sender, _) = bounded(100);
-        let console_config = crate::config::ConsoleSinkConfig::default();
-        let template = crate::template::LogTemplate::new("{timestamp} [{level}] {message}");
-        let console_sink = Arc::new(Mutex::new(ConsoleSink::new(console_config, template)));
+        let (console_tx, _) = bounded(100);
+        let (async_tx, _) = bounded(100);
         let metrics = Arc::new(Metrics::new());
 
-        let adapter = LogAdapter::new(console_sink, sender, metrics);
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
 
         // 创建一个测试 log::Record
         let metadata = log::Metadata::builder()
@@ -224,14 +232,12 @@ mod tests {
     }
 
     #[test]
-    fn test_log_adapter_log_sends_to_channel() {
-        let (sender, receiver) = bounded(10);
-        let console_config = crate::config::ConsoleSinkConfig::default();
-        let template = crate::template::LogTemplate::new("{message}");
-        let console_sink = Arc::new(Mutex::new(ConsoleSink::new(console_config, template)));
+    fn test_log_adapter_log_sends_to_channels() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
         let metrics = Arc::new(Metrics::new());
 
-        let adapter = LogAdapter::new(console_sink, sender, metrics);
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
 
         log::set_max_level(log::LevelFilter::Info);
         let metadata = log::Metadata::builder()
@@ -247,9 +253,44 @@ mod tests {
 
         adapter.log(&record);
 
-        let received = receiver.recv().unwrap();
-        assert_eq!(received.level, "INFO");
-        assert_eq!(received.target, "test::adapter");
-        assert_eq!(received.message, "Adapter send");
+        // Verify console channel received the record
+        let console_received = console_rx.recv().unwrap();
+        assert_eq!(console_received.level, "INFO");
+        assert_eq!(console_received.target, "test::adapter");
+        assert_eq!(console_received.message, "Adapter send");
+
+        // Verify async channel received the record
+        let async_received = async_rx.recv().unwrap();
+        assert_eq!(async_received.level, "INFO");
+        assert_eq!(async_received.target, "test::adapter");
+        assert_eq!(async_received.message, "Adapter send");
+    }
+
+    #[test]
+    fn test_log_adapter_handles_full_channel() {
+        // Create channels with capacity 1
+        let (console_tx, console_rx) = bounded(1);
+        let (async_tx, async_rx) = bounded(1);
+        let metrics = Arc::new(Metrics::new());
+
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+
+        log::set_max_level(log::LevelFilter::Info);
+
+        // Send multiple records - should not panic even when channels are full
+        for i in 0..5 {
+            let metadata = log::Metadata::builder()
+                .target("test::adapter")
+                .level(Level::Info)
+                .build();
+            let msg = format!("Test message {}", i);
+            let args = format_args!("{}", msg);
+            let record = log::Record::builder().metadata(metadata).args(args).build();
+            adapter.log(&record);
+        }
+
+        // Drain channels
+        while console_rx.try_recv().is_ok() {}
+        while async_rx.try_recv().is_ok() {}
     }
 }
