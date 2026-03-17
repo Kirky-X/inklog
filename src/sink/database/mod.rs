@@ -173,21 +173,21 @@ impl crate::sink::LogSink for DatabaseSink {
 
         if let Some(ref pool) = self.pool {
             let pool_clone = pool.clone();
-            let metrics = self.metrics.clone();
+            let metrics_ref = self.metrics.clone();
             let records_for_async = records.clone();
             let result = self.execute_async(async move {
                 match write_batch_to_db(&pool_clone, &records_for_async).await {
                     Ok(written) => {
-                        if let Some(metrics) = &metrics {
-                            metrics.add_db_batch_records_total(written);
-                            metrics.update_sink_health("database", true, None);
+                        if let Some(m) = &metrics_ref {
+                            m.add_db_batch_records_total(written);
+                            m.update_sink_health("database", true, None);
                         }
                         Ok(())
                     }
                     Err(e) => {
-                        if let Some(metrics) = &metrics {
-                            metrics.inc_sink_error();
-                            metrics.update_sink_health("database", false, Some(e.to_string()));
+                        if let Some(m) = &metrics_ref {
+                            m.inc_sink_error();
+                            m.update_sink_health("database", false, Some(e.to_string()));
                         }
                         Err(e)
                     }
