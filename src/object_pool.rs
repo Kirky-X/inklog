@@ -137,7 +137,13 @@ where
             if let Some(ttl_secs) = config.ttl_secs {
                 builder = builder.ttl(Duration::from_secs(ttl_secs));
             }
-            Arc::new(builder.build().await.expect("Failed to build cache"))
+            match builder.build().await {
+                Ok(cache) => Arc::new(cache),
+                Err(e) => {
+                    tracing::warn!("Failed to build cache: {}", e);
+                    Arc::new(Cache::default())
+                }
+            }
         });
 
         Self {
@@ -173,8 +179,7 @@ where
         let cache = Arc::clone(&self.cache);
         let stats = Arc::clone(&self.stats);
         let key = key.clone();
-        let result =
-            self.execute_async(async move { cache.get(&key).await.expect("Cache get failed") });
+        let result = self.execute_async(async move { cache.get(&key).await.unwrap_or(None) });
         if result.is_some() {
             stats.hits.fetch_add(1, Ordering::Relaxed);
             stats.items_reused.fetch_add(1, Ordering::Relaxed);
@@ -194,7 +199,11 @@ where
         let cache = Arc::clone(&self.cache);
         let key = key.clone();
         let value = value.clone();
-        self.execute_async(async move { cache.set(&key, &value).await.expect("Cache set failed") });
+        self.execute_async(async move {
+            if let Err(e) = cache.set(&key, &value).await {
+                tracing::debug!("Cache set failed: {}", e);
+            }
+        });
         self.stats.total_items.store(self.len(), Ordering::Relaxed);
     }
 
@@ -206,7 +215,7 @@ where
     {
         let cache = Arc::clone(&self.cache);
         let key = key.clone();
-        self.execute_async(async move { cache.exists(&key).await.expect("Cache exists failed") })
+        self.execute_async(async move { cache.exists(&key).await.unwrap_or(false) })
     }
 
     /// Remove and return an item from the pool by key
@@ -221,14 +230,13 @@ where
         let key_get = key.clone();
         let key_delete = key.clone();
 
-        let value = self
-            .execute_async(async move { cache_get.get(&key_get).await.expect("Cache get failed") });
+        let value =
+            self.execute_async(async move { cache_get.get(&key_get).await.unwrap_or(None) });
 
         self.execute_async(async move {
-            cache_delete
-                .delete(&key_delete)
-                .await
-                .expect("Cache delete failed")
+            if let Err(e) = cache_delete.delete(&key_delete).await {
+                tracing::debug!("Cache delete failed: {}", e);
+            }
         });
 
         if value.is_some() {

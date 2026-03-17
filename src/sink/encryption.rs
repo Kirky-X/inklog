@@ -66,7 +66,7 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
 
     // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
     if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
-        return derive_key_from_password(env_value.as_str());
+        return derive_key_from_password(env_value.as_str(), None);
     }
 
     // 密钥长度无效
@@ -82,13 +82,18 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
 /// # 参数
 ///
 /// * `password` - 密码字符串
+/// * `salt` - 可选的盐值，如果为 None 则使用默认盐
 ///
 /// # 返回值
 ///
 /// 返回 32 字节的派生密钥
-pub fn derive_key_from_password(password: &str) -> Result<[u8; 32], InklogError> {
+pub fn derive_key_from_password(
+    password: &str,
+    salt: Option<&[u8]>,
+) -> Result<[u8; 32], InklogError> {
     let mut key = [0u8; 32];
-    let salt = b"inklog-encryption-salt-v1"; // 固定盐，实际应用中应该使用随机盐
+
+    let salt = salt.unwrap_or(b"inklog-encryption-salt-v1");
 
     // 使用 PBKDF2-HMAC-SHA256 派生密钥
     pbkdf2_hmac::<Sha256>(
