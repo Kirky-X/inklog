@@ -3,9 +3,22 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
+use confers::{Config, ConfigBuilder, ConfigResult};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+// ============================================================================
+// InklogConfig - Root configuration struct
+// ============================================================================
+
+/// Root configuration for inklog logger.
+///
+/// # Loading
+///
+/// Configuration can be loaded from:
+/// - TOML files (via `load_file()` or `load()`)
+/// - Environment variables (prefix `INKLOG_`)
+/// - Defaults (lowest priority)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InklogConfig {
     pub global: GlobalConfig,
@@ -13,23 +26,316 @@ pub struct InklogConfig {
     pub file_sink: Option<FileSinkConfig>,
     pub database_sink: Option<DatabaseSinkConfig>,
     #[cfg(feature = "aws")]
+    #[serde(skip)]
     pub s3_archive: Option<crate::archive::S3ArchiveConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
 }
 
 impl InklogConfig {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.performance.channel_capacity == 0 {
-            return Err("channel_capacity cannot be 0".to_string());
+    /// Load configuration from a TOML file.
+    ///
+    /// Environment variables with prefix `INKLOG_` override file values.
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_file(path).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
+
+    /// Load configuration from a TOML file using Config derive on child types.
+    pub fn load_file<P: AsRef<std::path::Path>>(path: P) -> ConfigResult<Self> {
+        let path_buf = std::path::PathBuf::from(path.as_ref());
+        let mut config = ConfigBuilder::<Self>::new()
+            .file(path_buf)
+            .env_prefix("INKLOG_")
+            .build()?;
+
+        // Apply post-load overrides for complex nested structures
+        Self::apply_post_load_overrides(&mut config)?;
+
+        // Validate after loading
+        Self::validate_config(&config)?;
+
+        Ok(config)
+    }
+
+    /// Load configuration from search paths or defaults.
+    ///
+    /// Search paths (first existing file wins):
+    /// 1. `$INKLOG_CONFIG_PATH`
+    /// 2. `inklog_config.toml` (current directory)
+    /// 3. `~/.config/inklog/config.toml`
+    /// 4. `/etc/inklog/config.toml`
+    ///
+    /// Environment variables with prefix `INKLOG_` override all file values.
+    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::build_config().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
+
+    /// Build configuration using the Config derive on child types.
+    ///
+    /// Priority: Env vars > File > Defaults
+    pub fn build_config() -> ConfigResult<Self> {
+        // Build defaults using child config types
+        let default_console = ConfigBuilder::<ConsoleSinkConfig>::new().build()?;
+
+        let search_paths = vec![
+            std::env::var("INKLOG_CONFIG_PATH").ok(),
+            Some("inklog_config.toml".to_string()),
+            dirs::config_dir().map(|p| {
+                p.join("inklog")
+                    .join("config.toml")
+                    .to_string_lossy()
+                    .to_string()
+            }),
+            Some("/etc/inklog/config.toml".to_string()),
+        ];
+
+        // Start with defaults (GlobalConfig and PerformanceConfig use serde defaults)
+        let mut config = Self {
+            global: GlobalConfig::default(),
+            console_sink: Some(default_console),
+            file_sink: None,
+            database_sink: None,
+            #[cfg(feature = "aws")]
+            s3_archive: None,
+            performance: PerformanceConfig::default(),
+            http_server: None,
+        };
+
+        // Try to load from first existing file
+        for path_opt in search_paths.into_iter().flatten() {
+            if std::path::Path::new(&path_opt).exists() {
+                let file_config = Self::load_file(&path_opt)?;
+                config = Self::merge_configs(config, file_config);
+                break;
+            }
         }
-        if self.performance.worker_threads == 0 {
-            return Err("worker_threads cannot be 0".to_string());
+
+        // Apply post-load env overrides
+        Self::apply_post_load_overrides(&mut config)?;
+
+        // Validate
+        Self::validate_config(&config)?;
+
+        Ok(config)
+    }
+
+    /// Merge two configs, with `other` taking priority for non-None fields.
+    fn merge_configs(base: Self, other: Self) -> Self {
+        Self {
+            global: if other.global != GlobalConfig::default() {
+                other.global
+            } else {
+                base.global
+            },
+            console_sink: other.console_sink.or(base.console_sink),
+            file_sink: other.file_sink.or(base.file_sink),
+            database_sink: other.database_sink.or(base.database_sink),
+            #[cfg(feature = "aws")]
+            s3_archive: other.s3_archive.or(base.s3_archive),
+            performance: if other.performance != PerformanceConfig::default() {
+                other.performance
+            } else {
+                base.performance
+            },
+            http_server: other.http_server.or(base.http_server),
+        }
+    }
+
+    /// Apply post-load environment variable overrides for complex nested structures.
+    fn apply_post_load_overrides(config: &mut Self) -> ConfigResult<()> {
+        // Global config env overrides
+        if let Ok(level) = std::env::var("INKLOG_LEVEL") {
+            config.global.level = level;
+        }
+        if let Ok(format) = std::env::var("INKLOG_FORMAT") {
+            config.global.format = format;
+        }
+
+        // Console sink env overrides
+        if let Ok(enabled) = std::env::var("INKLOG_CONSOLE_ENABLED") {
+            if enabled.to_lowercase() != "false" {
+                config.console_sink = Some(ConsoleSinkConfig::default());
+            } else {
+                config.console_sink = None;
+            }
+        }
+
+        // File sink env overrides
+        if let Ok(enabled) = std::env::var("INKLOG_FILE_ENABLED") {
+            if enabled.to_lowercase() != "false" {
+                config.file_sink = Some(FileSinkConfig::default());
+            } else {
+                config.file_sink = None;
+            }
+        }
+        if let Ok(path) = std::env::var("INKLOG_FILE_PATH") {
+            if let Some(ref mut file) = config.file_sink {
+                file.path = std::path::PathBuf::from(path);
+            }
+        }
+        if let Ok(max_size) = std::env::var("INKLOG_FILE_MAX_SIZE") {
+            if let Some(ref mut file) = config.file_sink {
+                file.max_size = max_size;
+            }
+        }
+        if let Ok(compress) = std::env::var("INKLOG_FILE_COMPRESS") {
+            if let Some(ref mut file) = config.file_sink {
+                file.compress = compress.to_lowercase() != "false";
+            }
+        }
+
+        // HTTP server env overrides
+        #[allow(clippy::field_reassign_with_default)]
+        if let Ok(enabled) = std::env::var("INKLOG_HTTP_ENABLED") {
+            let is_enabled = enabled.to_lowercase() != "false";
+            if is_enabled {
+                let cfg = HttpServerConfig {
+                    enabled: true,
+                    ..Default::default()
+                };
+                config.http_server = Some(cfg);
+            } else {
+                config.http_server = None;
+            }
+        }
+        if let Ok(host) = std::env::var("INKLOG_HTTP_HOST") {
+            if let Some(ref mut http) = config.http_server {
+                http.host = host;
+            }
+        }
+        if let Ok(port) = std::env::var("INKLOG_HTTP_PORT") {
+            if let Ok(port_num) = port.parse() {
+                if let Some(ref mut http) = config.http_server {
+                    http.port = port_num;
+                }
+            }
+        }
+        if let Ok(metrics_path) = std::env::var("INKLOG_HTTP_METRICS_PATH") {
+            if let Some(ref mut http) = config.http_server {
+                http.metrics_path = metrics_path;
+            }
+        }
+        if let Ok(health_path) = std::env::var("INKLOG_HTTP_HEALTH_PATH") {
+            if let Some(ref mut http) = config.http_server {
+                http.health_path = health_path;
+            }
+        }
+        if let Ok(error_mode) = std::env::var("INKLOG_HTTP_ERROR_MODE") {
+            if let Some(ref mut http) = config.http_server {
+                http.error_mode = match error_mode.to_lowercase().as_str() {
+                    "warn" => HttpErrorMode::Warn,
+                    "strict" => HttpErrorMode::Strict,
+                    _ => HttpErrorMode::Warn,
+                };
+            }
+        }
+
+        // Performance env overrides
+        if let Ok(threads) = std::env::var("INKLOG_WORKER_THREADS") {
+            if let Ok(num) = threads.parse() {
+                config.performance.worker_threads = num;
+            }
+        }
+        if let Ok(capacity) = std::env::var("INKLOG_CHANNEL_CAPACITY") {
+            if let Ok(num) = capacity.parse() {
+                config.performance.channel_capacity = num;
+            }
+        }
+
+        #[cfg(feature = "aws")]
+        {
+            use crate::archive::{EncryptionAlgorithm, EncryptionConfig, SecretString};
+
+            if let Ok(enabled) = std::env::var("INKLOG_S3_ENABLED") {
+                let is_enabled = enabled.to_lowercase() != "false";
+                if is_enabled {
+                    let s3 = crate::archive::S3ArchiveConfig::default();
+                    config.s3_archive = Some(s3);
+                } else {
+                    config.s3_archive = None;
+                }
+            }
+            if let Ok(bucket) = std::env::var("INKLOG_S3_BUCKET") {
+                if let Some(ref mut s3) = config.s3_archive {
+                    s3.bucket = bucket;
+                }
+            }
+            if let Ok(region) = std::env::var("INKLOG_S3_REGION") {
+                if let Some(ref mut s3) = config.s3_archive {
+                    s3.region = region;
+                }
+            }
+            if let Ok(format) = std::env::var("INKLOG_ARCHIVE_FORMAT") {
+                if let Some(ref mut s3) = config.s3_archive {
+                    s3.archive_format = format;
+                }
+            }
+            if let Ok(algorithm) = std::env::var("INKLOG_S3_ENCRYPTION_ALGORITHM") {
+                if let Some(ref mut s3) = config.s3_archive {
+                    let algo = match algorithm.to_lowercase().as_str() {
+                        "awskms" => EncryptionAlgorithm::AwsKms,
+                        "aes256" => EncryptionAlgorithm::Aes256,
+                        _ => EncryptionAlgorithm::Aes256,
+                    };
+                    let key_id = std::env::var("INKLOG_S3_ENCRYPTION_KMS_KEY_ID").ok();
+                    s3.encryption = Some(EncryptionConfig {
+                        algorithm: algo,
+                        kms_key_id: key_id,
+                        customer_key: SecretString::default(),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate the loaded configuration.
+    fn validate_config(config: &Self) -> ConfigResult<()> {
+        if config.performance.channel_capacity == 0 {
+            return Err(confers::ConfigError::validation(
+                "channel_capacity",
+                "min",
+                "channel_capacity cannot be 0",
+            ));
+        }
+        if config.performance.worker_threads == 0 {
+            return Err(confers::ConfigError::validation(
+                "worker_threads",
+                "min",
+                "worker_threads cannot be 0",
+            ));
         }
         Ok(())
     }
 
+    /// Returns a list of enabled sink names.
+    pub fn sinks_enabled(&self) -> Vec<&'static str> {
+        let mut sinks = Vec::new();
+        if self.console_sink.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("console");
+        }
+        if self.file_sink.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("file");
+        }
+        if self.database_sink.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("database");
+        }
+        #[cfg(feature = "aws")]
+        if self.s3_archive.as_ref().is_some_and(|c| c.enabled) {
+            sinks.push("s3_archive");
+        }
+        sinks
+    }
+
+    /// Apply environment variable overrides to the configuration.
+    ///
+    /// This is a convenience method for applying env overrides after
+    /// loading configuration from a file.
     pub fn apply_env_overrides(&mut self) {
+        // Global config env overrides
         if let Ok(level) = std::env::var("INKLOG_LEVEL") {
             self.global.level = level;
         }
@@ -38,12 +344,12 @@ impl InklogConfig {
         }
         if let Ok(enabled) = std::env::var("INKLOG_CONSOLE_ENABLED") {
             if enabled.to_lowercase() != "false" {
-                self.console_sink = Some(crate::config::ConsoleSinkConfig::default());
+                self.console_sink = Some(ConsoleSinkConfig::default());
             }
         }
         if let Ok(enabled) = std::env::var("INKLOG_FILE_ENABLED") {
             if enabled.to_lowercase() != "false" {
-                self.file_sink = Some(crate::config::FileSinkConfig::default());
+                self.file_sink = Some(FileSinkConfig::default());
             }
         }
         if let Ok(path) = std::env::var("INKLOG_FILE_PATH") {
@@ -63,6 +369,7 @@ impl InklogConfig {
         }
         #[cfg(feature = "aws")]
         {
+            #[allow(clippy::field_reassign_with_default)]
             if let Ok(enabled) = std::env::var("INKLOG_S3_ENABLED") {
                 let is_enabled = enabled.to_lowercase() != "false";
                 if is_enabled {
@@ -90,16 +397,17 @@ impl InklogConfig {
             }
             if let Ok(algorithm) = std::env::var("INKLOG_S3_ENCRYPTION_ALGORITHM") {
                 if let Some(ref mut s3) = self.s3_archive {
+                    use crate::archive::{EncryptionAlgorithm, EncryptionConfig, SecretString};
                     let algo = match algorithm.to_lowercase().as_str() {
-                        "awskms" => crate::archive::EncryptionAlgorithm::AwsKms,
-                        "aes256" => crate::archive::EncryptionAlgorithm::Aes256,
-                        _ => crate::archive::EncryptionAlgorithm::Aes256,
+                        "awskms" => EncryptionAlgorithm::AwsKms,
+                        "aes256" => EncryptionAlgorithm::Aes256,
+                        _ => EncryptionAlgorithm::Aes256,
                     };
                     let key_id = std::env::var("INKLOG_S3_ENCRYPTION_KMS_KEY_ID").ok();
-                    s3.encryption = Some(crate::archive::EncryptionConfig {
+                    s3.encryption = Some(EncryptionConfig {
                         algorithm: algo,
                         kms_key_id: key_id,
-                        customer_key: crate::archive::SecretString::default(),
+                        customer_key: SecretString::default(),
                     });
                 }
             }
@@ -107,7 +415,7 @@ impl InklogConfig {
         if let Ok(enabled) = std::env::var("INKLOG_HTTP_ENABLED") {
             let is_enabled = enabled.to_lowercase() != "false";
             if is_enabled {
-                let http = crate::config::HttpServerConfig {
+                let http = HttpServerConfig {
                     enabled: true,
                     ..Default::default()
                 };
@@ -139,9 +447,9 @@ impl InklogConfig {
         if let Ok(error_mode) = std::env::var("INKLOG_HTTP_ERROR_MODE") {
             if let Some(ref mut http) = self.http_server {
                 http.error_mode = match error_mode.to_lowercase().as_str() {
-                    "warn" => crate::config::HttpErrorMode::Warn,
-                    "strict" => crate::config::HttpErrorMode::Strict,
-                    _ => crate::config::HttpErrorMode::Warn,
+                    "warn" => HttpErrorMode::Warn,
+                    "strict" => HttpErrorMode::Strict,
+                    _ => HttpErrorMode::Warn,
                 };
             }
         }
@@ -157,60 +465,18 @@ impl InklogConfig {
         }
     }
 
-    pub fn sinks_enabled(&self) -> Vec<&'static str> {
-        let mut sinks = Vec::new();
-        if self.console_sink.as_ref().is_some_and(|c| c.enabled) {
-            sinks.push("console");
+    /// Validate the configuration.
+    ///
+    /// Returns `Ok(())` if the configuration is valid,
+    /// or an error message if validation fails.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.performance.channel_capacity == 0 {
+            return Err("channel_capacity cannot be 0".to_string());
         }
-        if self.file_sink.as_ref().is_some_and(|c| c.enabled) {
-            sinks.push("file");
+        if self.performance.worker_threads == 0 {
+            return Err("worker_threads cannot be 0".to_string());
         }
-        if self.database_sink.as_ref().is_some_and(|c| c.enabled) {
-            sinks.push("database");
-        }
-        #[cfg(feature = "aws")]
-        if self.s3_archive.as_ref().is_some_and(|c| c.enabled) {
-            sinks.push("s3_archive");
-        }
-        sinks
-    }
-
-    pub fn from_file<P: AsRef<std::path::Path>>(
-        path: P,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let content = std::fs::read_to_string(path.as_ref())?;
-        let config: InklogConfig = toml::from_str(&content)?;
-        Ok(config)
-    }
-
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let search_paths = vec![
-            std::env::var("INKLOG_CONFIG_PATH").ok(),
-            Some("inklog_config.toml".to_string()),
-            dirs::config_dir().map(|p| {
-                p.join("inklog")
-                    .join("config.toml")
-                    .to_string_lossy()
-                    .to_string()
-            }),
-            Some("/etc/inklog/config.toml".to_string()),
-        ];
-
-        for path_opt in search_paths.into_iter().flatten() {
-            if std::path::Path::new(&path_opt).exists() {
-                return Self::from_file(&path_opt);
-            }
-        }
-
-        Ok(InklogConfig::default())
-    }
-}
-
-impl std::str::FromStr for InklogConfig {
-    type Err = toml::de::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        toml::from_str(s)
+        Ok(())
     }
 }
 
@@ -229,7 +495,20 @@ impl Default for InklogConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl std::str::FromStr for InklogConfig {
+    type Err = toml::de::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        toml::from_str(s)
+    }
+}
+
+// ============================================================================
+// GlobalConfig - Global logger settings
+// ============================================================================
+
+/// Global logger configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GlobalConfig {
     #[serde(default = "default_level")]
     pub level: String,
@@ -245,6 +524,20 @@ pub struct GlobalConfig {
     pub fallback_max_delay_ms: u64,
     #[serde(default = "default_retries")]
     pub fallback_max_retries: u32,
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            format: "{timestamp} [{level}] {target} - {message}".to_string(),
+            masking_enabled: true,
+            auto_fallback: true,
+            fallback_initial_delay_ms: 1000,
+            fallback_max_delay_ms: 60000,
+            fallback_max_retries: 10,
+        }
+    }
 }
 
 fn default_level() -> String {
@@ -271,48 +564,33 @@ fn default_retries() -> u32 {
     10
 }
 
-impl Default for GlobalConfig {
-    fn default() -> Self {
-        Self {
-            level: "info".to_string(),
-            format: "{timestamp} [{level}] {target} - {message}".to_string(),
-            masking_enabled: true,
-            auto_fallback: true,
-            fallback_initial_delay_ms: 1000,
-            fallback_max_delay_ms: 60000,
-            fallback_max_retries: 10,
-        }
-    }
-}
+// ============================================================================
+// ConsoleSinkConfig - Console output settings
+// ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Console sink configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Config)]
 pub struct ConsoleSinkConfig {
-    #[serde(default = "default_true")]
+    #[config(default = true)]
     pub enabled: bool,
-    #[serde(default = "default_true")]
+    #[config(default = true)]
     pub colored: bool,
-    #[serde(default = "default_stderr_levels")]
+    #[config(default = vec!["error".to_string(), "warn".to_string()])]
     pub stderr_levels: Vec<String>,
 }
 
-fn default_stderr_levels() -> Vec<String> {
-    vec!["error".to_string(), "warn".to_string()]
-}
+// impl Default for ConsoleSinkConfig is provided by Config derive
 
-impl Default for ConsoleSinkConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            colored: true,
-            stderr_levels: vec!["error".to_string(), "warn".to_string()],
-        }
-    }
-}
+// ============================================================================
+// FileSinkConfig - File output settings
+// ============================================================================
 
+/// File sink configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSinkConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default = "default_file_path")]
     pub path: PathBuf,
     #[serde(default = "default_max_size")]
     pub max_size: String,
@@ -326,6 +604,7 @@ pub struct FileSinkConfig {
     pub compression_level: i32,
     #[serde(default = "default_false")]
     pub encrypt: bool,
+    #[serde(default)]
     pub encryption_key_env: Option<String>,
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
@@ -337,6 +616,10 @@ pub struct FileSinkConfig {
     pub batch_size: usize,
     #[serde(default = "default_flush_interval")]
     pub flush_interval_ms: u64,
+}
+
+fn default_file_path() -> PathBuf {
+    PathBuf::from("logs/app.log")
 }
 
 fn default_max_size() -> String {
@@ -400,7 +683,12 @@ impl Default for FileSinkConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+// ============================================================================
+// DatabaseDriver - Supported database drivers
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum DatabaseDriver {
     #[serde(rename = "postgres")]
     #[default]
@@ -433,6 +721,10 @@ impl std::fmt::Display for DatabaseDriver {
     }
 }
 
+// ============================================================================
+// PartitionStrategy - Database table partitioning strategy
+// ============================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PartitionStrategy {
@@ -463,44 +755,32 @@ impl std::fmt::Display for PartitionStrategy {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// ============================================================================
+// ParquetConfig - Parquet export configuration
+// ============================================================================
+
+/// Parquet export configuration for database sink.
+#[derive(Debug, Clone, Serialize, Deserialize, Config)]
 pub struct ParquetConfig {
-    #[serde(default = "default_compression_level")]
+    #[config(default = 3)]
     pub compression_level: i32,
-    #[serde(default = "default_encoding")]
+    #[config(skip)]
     pub encoding: String,
-    #[serde(default = "default_max_row_group_size")]
+    #[config(default = 10000)]
     pub max_row_group_size: usize,
-    #[serde(default = "default_max_page_size")]
+    #[config(default = 1048576)]
     pub max_page_size: usize,
-    #[serde(default)]
+    #[config(skip)]
     pub include_fields: Vec<String>,
 }
 
-fn default_max_row_group_size() -> usize {
-    10000
-}
+// impl Default for ParquetConfig is provided by Config derive
 
-fn default_encoding() -> String {
-    "PLAIN".to_string()
-}
+// ============================================================================
+// DatabaseSinkConfig - Database sink settings
+// ============================================================================
 
-fn default_max_page_size() -> usize {
-    1024 * 1024
-}
-
-impl Default for ParquetConfig {
-    fn default() -> Self {
-        Self {
-            compression_level: 3,
-            encoding: "PLAIN".to_string(),
-            max_row_group_size: 10000,
-            max_page_size: 1024 * 1024,
-            include_fields: Vec::new(),
-        }
-    }
-}
-
+/// Database sink configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseSinkConfig {
     #[serde(default = "default_db_name")]
@@ -509,12 +789,13 @@ pub struct DatabaseSinkConfig {
     pub enabled: bool,
     #[serde(default)]
     pub driver: DatabaseDriver,
+    #[serde(default = "default_db_url")]
     pub url: String,
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
-    #[serde(default = "default_batch_size")]
+    #[serde(default = "default_db_batch_size")]
     pub batch_size: usize,
-    #[serde(default = "default_flush_interval")]
+    #[serde(default = "default_db_flush_interval")]
     pub flush_interval_ms: u64,
     #[serde(default)]
     pub partition: PartitionStrategy,
@@ -538,8 +819,20 @@ fn default_db_name() -> String {
     "default".to_string()
 }
 
+fn default_db_url() -> String {
+    "postgres://localhost/logs".to_string()
+}
+
 fn default_pool_size() -> u32 {
     10
+}
+
+fn default_db_batch_size() -> usize {
+    100
+}
+
+fn default_db_flush_interval() -> u64 {
+    500
 }
 
 fn default_archive_after_days() -> u32 {
@@ -576,6 +869,10 @@ impl Default for DatabaseSinkConfig {
     }
 }
 
+// ============================================================================
+// ChannelStrategy - Adaptive channel sizing strategy
+// ============================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelStrategy {
@@ -606,6 +903,11 @@ impl std::fmt::Display for ChannelStrategy {
     }
 }
 
+// ============================================================================
+// HttpServerConfig - HTTP health/metrics server settings
+// ============================================================================
+
+/// HTTP server configuration for health checks and metrics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerConfig {
     #[serde(default)]
@@ -651,6 +953,10 @@ impl Default for HttpServerConfig {
     }
 }
 
+// ============================================================================
+// HttpErrorMode - HTTP server error handling mode
+// ============================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum HttpErrorMode {
@@ -661,7 +967,12 @@ pub enum HttpErrorMode {
     Strict,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// ============================================================================
+// PerformanceConfig - Performance tuning parameters
+// ============================================================================
+
+/// Performance tuning configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PerformanceConfig {
     #[serde(default = "default_channel_capacity")]
     pub channel_capacity: usize,
@@ -679,6 +990,21 @@ pub struct PerformanceConfig {
     pub min_capacity: usize,
     #[serde(default = "default_max_capacity")]
     pub max_capacity: usize,
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            channel_capacity: 10000,
+            worker_threads: 3,
+            channel_strategy: ChannelStrategy::default(),
+            expand_threshold_percent: 80,
+            shrink_threshold_percent: 20,
+            shrink_wait_seconds: 30,
+            min_capacity: 1000,
+            max_capacity: 50000,
+        }
+    }
 }
 
 fn default_channel_capacity() -> usize {
@@ -709,20 +1035,9 @@ fn default_max_capacity() -> usize {
     50000
 }
 
-impl Default for PerformanceConfig {
-    fn default() -> Self {
-        Self {
-            channel_capacity: 10000,
-            worker_threads: 3,
-            channel_strategy: ChannelStrategy::default(),
-            expand_threshold_percent: 80,
-            shrink_threshold_percent: 20,
-            shrink_wait_seconds: 30,
-            min_capacity: 1000,
-            max_capacity: 50000,
-        }
-    }
-}
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -922,5 +1237,21 @@ mod tests {
         let config = InklogConfig::default();
         let sinks = config.sinks_enabled();
         assert!(sinks.contains(&"console"));
+    }
+
+    #[test]
+    fn test_console_sink_config_load_sync() {
+        let config = ConsoleSinkConfig::load_sync().unwrap();
+        assert!(config.enabled);
+        assert!(config.colored);
+        assert_eq!(config.stderr_levels.len(), 2);
+    }
+
+    #[test]
+    fn test_global_config_load_sync() {
+        // GlobalConfig uses Default impl
+        let config = GlobalConfig::default();
+        assert_eq!(config.level, "info");
+        assert!(config.auto_fallback);
     }
 }
