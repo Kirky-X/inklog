@@ -10,7 +10,6 @@
 
 use crate::log_record::LogRecord;
 use crate::metrics::Metrics;
-use crate::object_pool::{LOG_RECORD_POOL, STRING_POOL};
 use chrono::Utc;
 use crossbeam_channel::Sender;
 use log::{Level, LevelFilter, Metadata, Record};
@@ -22,11 +21,12 @@ use std::sync::Arc;
 /// 并分发到配置的 channels（console + async workers）。
 ///
 /// 使用 channel 实现无锁热路径，避免锁竞争。
+/// 使用 Arc<LogRecord> 避免深拷贝。
 pub struct LogAdapter {
     /// Channel sender for console output (lock-free)
-    console_sender: Sender<LogRecord>,
+    console_sender: Sender<Arc<LogRecord>>,
     /// Channel sender for async sinks (file, database, etc.)
-    async_sender: Sender<LogRecord>,
+    async_sender: Sender<Arc<LogRecord>>,
     /// Metrics for monitoring
     metrics: Arc<Metrics>,
 }
@@ -39,8 +39,8 @@ impl LogAdapter {
     /// * `async_sender` - 异步 channel 发送端，用于后台处理
     /// * `metrics` - 指标收集器
     pub fn new(
-        console_sender: Sender<LogRecord>,
-        async_sender: Sender<LogRecord>,
+        console_sender: Sender<Arc<LogRecord>>,
+        async_sender: Sender<Arc<LogRecord>>,
         metrics: Arc<Metrics>,
     ) -> Self {
         Self {
@@ -63,29 +63,19 @@ impl LogAdapter {
 
     /// 将 `log::Record` 转换为 `LogRecord`
     fn record_to_log_record(&self, record: &Record) -> LogRecord {
-        let mut log_record = LOG_RECORD_POOL.get();
-        log_record.reset();
-
-        let mut message = STRING_POOL.get();
-        message.clear();
-        message.push_str(&record.args().to_string());
-
-        log_record.timestamp = Utc::now();
-        log_record.level.clear();
-        log_record
-            .level
-            .push_str(Self::level_to_string(record.level()));
-        log_record.target.clear();
-        log_record.target.push_str(record.target());
-        log_record.message = message;
-        log_record.file = record.file().map(|s| s.to_string());
-        log_record.line = record.line();
-        log_record.thread_id.clear();
-        log_record
-            .thread_id
-            .push_str(std::thread::current().name().unwrap_or("unknown"));
-
-        log_record
+        LogRecord {
+            timestamp: Utc::now(),
+            level: Self::level_to_string(record.level()).to_string(),
+            target: record.target().to_string(),
+            message: record.args().to_string(),
+            file: record.file().map(|s| s.to_string()),
+            line: record.line(),
+            thread_id: std::thread::current()
+                .name()
+                .unwrap_or("unknown")
+                .to_string(),
+            fields: Default::default(),
+        }
     }
 }
 
@@ -102,10 +92,10 @@ impl log::Log for LogAdapter {
             return;
         }
 
-        let log_record = self.record_to_log_record(record);
+        let log_record = Arc::new(self.record_to_log_record(record));
 
         // Fast path: Console - lock-free try_send, drop on full to avoid blocking
-        match self.console_sender.try_send(log_record.clone()) {
+        match self.console_sender.try_send(Arc::clone(&log_record)) {
             Ok(_) => {}
             Err(crossbeam_channel::TrySendError::Full(_)) => {
                 self.metrics.inc_channel_blocked();
@@ -117,7 +107,7 @@ impl log::Log for LogAdapter {
         }
 
         // Slow path: Async sinks (file, database, etc.) - drop on full to avoid blocking
-        match self.async_sender.try_send(log_record.clone()) {
+        match self.async_sender.try_send(log_record) {
             Ok(_) => {}
             Err(crossbeam_channel::TrySendError::Full(_)) => {
                 self.metrics.inc_channel_blocked();
@@ -127,12 +117,6 @@ impl log::Log for LogAdapter {
                 self.metrics.inc_logs_dropped();
             }
         }
-
-        // Return resources to pools
-        let mut r = log_record;
-        let msg = std::mem::take(&mut r.message);
-        STRING_POOL.put(msg);
-        LOG_RECORD_POOL.put(r);
     }
 
     /// 刷新缓冲区（no-op，因为使用 channel）

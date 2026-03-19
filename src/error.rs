@@ -212,3 +212,94 @@ impl InklogError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_safe_message_redacts_aws_keys() {
+        let error = InklogError::ConfigError(
+            "Failed to load AKIAIOSFODNN7EXAMPLE from credentials".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("[AWS_ACCESS_KEY_ID]") || msg.contains("***"),
+            "Message: {}",
+            msg
+        );
+        assert!(!msg.contains("AKIAIOSFODNN7EXAMPLE"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_jwt_tokens() {
+        let error = InklogError::ConfigError(
+            "prefix.eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.suffix".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("[JWT_TOKEN]") || msg.contains("***"),
+            "Message: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_safe_message_redacts_database_urls() {
+        let error = InklogError::ConfigError(
+            "Connection failed: postgres://user:secret@localhost:5432/db".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("***") || !msg.contains("secret"),
+            "Message: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_safe_message_redacts_user_paths() {
+        let error = InklogError::ConfigError(
+            "Config not found at /home/user/.config/inklog.yaml".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("[USER_HOME_PATH]") || msg.contains("***"),
+            "Message: {}",
+            msg
+        );
+        assert!(!msg.contains("/home/user/"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_bearer_tokens() {
+        let error = InklogError::HttpServerError(
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("REDACTED") || msg.contains("***"),
+            "Message: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_safe_message_preserves_non_sensitive() {
+        let error = InklogError::ConfigError("Configuration file not found".to_string());
+        let msg = error.safe_message();
+        assert!(msg.contains("Configuration file not found"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_passwords() {
+        let error =
+            InklogError::ConfigError("Failed to connect: password=mysecretpassword".to_string());
+        let msg = error.safe_message();
+        assert!(
+            !msg.contains("mysecretpassword") || msg.contains("***"),
+            "Message: {}",
+            msg
+        );
+    }
+}

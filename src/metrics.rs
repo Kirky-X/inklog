@@ -156,6 +156,40 @@ impl Gauge {
     }
 }
 
+/// Gauge metric for atomic f64 values (used for pool_hit_rate)
+#[derive(Debug)]
+pub struct GaugeF64 {
+    value: Mutex<f64>,
+}
+
+impl GaugeF64 {
+    pub fn new(val: f64) -> Self {
+        Self {
+            value: Mutex::new(val),
+        }
+    }
+    pub fn set(&self, v: f64) {
+        let mut guard = match self.value.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("GaugeF64 mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
+        *guard = v;
+    }
+    pub fn get(&self) -> f64 {
+        let guard = match self.value.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("GaugeF64 mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
+        *guard
+    }
+}
+
 /// Histogram metric for latency distribution
 #[derive(Debug)]
 pub struct Histogram {
@@ -189,6 +223,42 @@ impl Histogram {
             .map(|b| b.load(Ordering::Relaxed))
             .collect()
     }
+
+    pub fn percentile(&self, p: f64) -> u64 {
+        let snapshot = self.snapshot();
+        let total: u64 = snapshot.iter().sum();
+        if total == 0 {
+            return 0;
+        }
+
+        let target = (total as f64 * p / 100.0).ceil() as u64;
+        let mut cumulative: u64 = 0;
+
+        for (i, &count) in snapshot.iter().enumerate() {
+            cumulative += count;
+            if cumulative >= target {
+                if i < self.bounds.len() {
+                    return self.bounds[i];
+                } else {
+                    return self.bounds.last().copied().unwrap_or(0);
+                }
+            }
+        }
+
+        self.bounds.last().copied().unwrap_or(0)
+    }
+
+    pub fn p50(&self) -> u64 {
+        self.percentile(50.0)
+    }
+
+    pub fn p95(&self) -> u64 {
+        self.percentile(95.0)
+    }
+
+    pub fn p99(&self) -> u64 {
+        self.percentile(99.0)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -200,8 +270,19 @@ pub struct MetricsSnapshot {
     pub db_batch_size: i64,
     pub db_batch_records_total: u64,
     pub avg_latency_us: u64,
+    pub p50_latency_us: u64,
+    pub p95_latency_us: u64,
+    pub p99_latency_us: u64,
     pub latency_distribution: Vec<u64>,
     pub active_workers: i64,
+    pub pool_hit_rate: f64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct PoolStats {
+    pub log_record_pool_size: usize,
+    pub string_buffer_pool_size: usize,
+    pub hit_rate: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -212,6 +293,8 @@ pub struct HealthStatus {
     pub channel_usage: f64,
     pub uptime_seconds: u64,
     pub metrics: MetricsSnapshot,
+    pub pool_stats: Option<PoolStats>,
+    pub encryption_key_valid: bool,
 }
 
 /// Health monitoring metrics collector.
@@ -249,6 +332,7 @@ pub struct Metrics {
     // Gauges
     pub(crate) active_workers: Gauge,
     pub(crate) db_batch_size: Gauge,
+    pub(crate) pool_hit_rate: GaugeF64,
 
     // Sink Health
     pub(crate) sink_health: Mutex<HashMap<String, SinkHealth>>,
@@ -271,6 +355,7 @@ impl Default for Metrics {
             latency_histogram: Histogram::new(bounds),
             active_workers: Gauge::new(0),
             db_batch_size: Gauge::new(0),
+            pool_hit_rate: GaugeF64::new(0.0),
             sink_health: Mutex::new(HashMap::new()),
         }
     }
@@ -320,6 +405,17 @@ impl Metrics {
     pub fn active_workers(&self) -> i64 {
         self.audit_access("active_workers");
         self.active_workers.get()
+    }
+
+    /// Returns the pool hit rate (0.0 to 100.0).
+    pub fn pool_hit_rate(&self) -> f64 {
+        self.audit_access("pool_hit_rate");
+        self.pool_hit_rate.get()
+    }
+
+    /// Sets the pool hit rate (0.0 to 100.0).
+    pub fn set_pool_hit_rate(&self, rate: f64) {
+        self.pool_hit_rate.set(rate);
     }
 
     /// Returns the sink health status map (with audit logging).
@@ -517,9 +613,15 @@ impl Metrics {
                 db_batch_size: self.db_batch_size.get(),
                 db_batch_records_total: self.db_batch_records_total.load(Ordering::Relaxed),
                 avg_latency_us: avg_latency,
+                p50_latency_us: self.latency_histogram.p50(),
+                p95_latency_us: self.latency_histogram.p95(),
+                p99_latency_us: self.latency_histogram.p99(),
                 latency_distribution: self.latency_histogram.snapshot(),
                 active_workers: self.active_workers.get(),
+                pool_hit_rate: self.pool_hit_rate.get(),
             },
+            pool_stats: None,
+            encryption_key_valid: true,
         }
     }
 
@@ -583,6 +685,28 @@ impl Metrics {
         s.push_str("# TYPE inklog_avg_latency_us gauge\n");
         s.push_str(&format!("inklog_avg_latency_us {}\n", avg_latency));
 
+        // P50/P95/P99 latency percentiles
+        s.push_str("# HELP inklog_latency_p50_us P50 latency in microseconds\n");
+        s.push_str("# TYPE inklog_latency_p50_us gauge\n");
+        s.push_str(&format!(
+            "inklog_latency_p50_us {}\n",
+            self.latency_histogram.p50()
+        ));
+
+        s.push_str("# HELP inklog_latency_p95_us P95 latency in microseconds\n");
+        s.push_str("# TYPE inklog_latency_p95_us gauge\n");
+        s.push_str(&format!(
+            "inklog_latency_p95_us {}\n",
+            self.latency_histogram.p95()
+        ));
+
+        s.push_str("# HELP inklog_latency_p99_us P99 latency in microseconds\n");
+        s.push_str("# TYPE inklog_latency_p99_us gauge\n");
+        s.push_str(&format!(
+            "inklog_latency_p99_us {}\n",
+            self.latency_histogram.p99()
+        ));
+
         //
         let uptime = self.uptime().as_secs();
         if uptime > 0 {
@@ -590,6 +714,13 @@ impl Metrics {
             s.push_str("# TYPE inklog_uptime_seconds gauge\n");
             s.push_str(&format!("inklog_uptime_seconds {}\n", uptime));
         }
+
+        s.push_str("# HELP inklog_pool_hit_rate Pool hit rate percentage (0-100)\n");
+        s.push_str("# TYPE inklog_pool_hit_rate gauge\n");
+        s.push_str(&format!(
+            "inklog_pool_hit_rate {}\n",
+            self.pool_hit_rate.get()
+        ));
 
         //
         s.push_str("# HELP inklog_sink_healthy Sink health status (1=healthy, 0=unhealthy)\n");

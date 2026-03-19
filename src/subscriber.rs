@@ -5,36 +5,79 @@
 
 use crate::log_record::LogRecord;
 use crate::metrics::Metrics;
-use crate::object_pool::{LOG_RECORD_POOL, STRING_POOL};
 use crossbeam_channel::Sender;
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
+
+const DEFAULT_SEND_TIMEOUT_MS: u64 = 100;
+const FALLBACK_BUFFER_SIZE: usize = 100;
 
 /// High-performance logging subscriber with lock-free hot path.
 ///
 /// Uses crossbeam channels for both console and async sinks to eliminate
 /// lock contention in the hot path (on_event).
+/// Uses Arc<LogRecord> to avoid deep cloning when sending to multiple sinks.
+/// Includes fallback buffer for critical logs (ERROR/FATAL).
 pub struct LoggerSubscriber {
     /// Channel sender for console output (lock-free)
-    console_sender: Sender<LogRecord>,
+    console_sender: Sender<Arc<LogRecord>>,
     /// Channel sender for async sinks (file, database, etc.)
-    async_sender: Sender<LogRecord>,
+    async_sender: Sender<Arc<LogRecord>>,
     /// Metrics for monitoring
     metrics: Arc<Metrics>,
+    /// Timeout for async channel send (milliseconds)
+    send_timeout_ms: u64,
+    /// Fallback buffer for critical logs
+    fallback_buffer: Arc<Mutex<VecDeque<Arc<LogRecord>>>>,
 }
 
 impl LoggerSubscriber {
     pub fn new(
-        console_sender: Sender<LogRecord>,
-        async_sender: Sender<LogRecord>,
+        console_sender: Sender<Arc<LogRecord>>,
+        async_sender: Sender<Arc<LogRecord>>,
         metrics: Arc<Metrics>,
     ) -> Self {
         Self {
             console_sender,
             async_sender,
             metrics,
+            send_timeout_ms: DEFAULT_SEND_TIMEOUT_MS,
+            fallback_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(FALLBACK_BUFFER_SIZE))),
+        }
+    }
+
+    pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
+        self.send_timeout_ms = timeout_ms;
+        self
+    }
+
+    fn is_critical_level(level: &str) -> bool {
+        level == "ERROR" || level == "FATAL"
+    }
+
+    pub fn try_flush_fallback(&self) {
+        let mut buffer = match self.fallback_buffer.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                // Mutex poison 只在持有锁的线程 panic 时发生
+                // 这时我们恢复互斥锁并继续使用（因为数据可能仍然有效）
+                tracing::warn!("Fallback buffer mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
+        while let Some(record) = buffer.front() {
+            let timeout = Duration::from_millis(self.send_timeout_ms);
+            match self.async_sender.send_timeout(Arc::clone(record), timeout) {
+                Ok(_) => {
+                    buffer.pop_front();
+                }
+                Err(_) => break,
+            }
         }
     }
 }
@@ -45,9 +88,10 @@ where
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let record = LogRecord::from_event(event);
+        let record = Arc::new(record);
 
         // Fast path: Console - lock-free try_send, never block
-        match self.console_sender.try_send(record.clone()) {
+        match self.console_sender.try_send(Arc::clone(&record)) {
             Ok(_) => {}
             Err(crossbeam_channel::TrySendError::Full(_)) => {
                 // Channel full, drop the message and record metric
@@ -60,24 +104,35 @@ where
             }
         }
 
-        // Slow path: Async sinks (file, database, etc.) - also never block
-        match self.async_sender.try_send(record.clone()) {
+        // Slow path: Async sinks - use timeout for backpressure handling
+        let timeout = Duration::from_millis(self.send_timeout_ms);
+        match self.async_sender.send_timeout(Arc::clone(&record), timeout) {
             Ok(_) => {}
-            Err(crossbeam_channel::TrySendError::Full(_)) => {
-                // Channel full, drop the message and record metric
-                self.metrics.inc_channel_blocked();
-                self.metrics.inc_logs_dropped();
+            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
+                // For critical logs, add to fallback buffer
+                if Self::is_critical_level(&record.level) {
+                    let mut buffer = match self.fallback_buffer.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            // Mutex poison 只在持有锁的线程 panic 时发生
+                            // 这时我们恢复互斥锁并继续使用（因为数据可能仍然有效）
+                            tracing::warn!("Fallback buffer mutex poisoned, recovering");
+                            poisoned.into_inner()
+                        }
+                    };
+                    if buffer.len() >= FALLBACK_BUFFER_SIZE {
+                        buffer.pop_front();
+                    }
+                    buffer.push_back(record);
+                } else {
+                    self.metrics.inc_channel_blocked();
+                    self.metrics.inc_logs_dropped();
+                }
             }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
                 self.metrics.inc_logs_dropped();
             }
         }
-
-        // Return resources to pools
-        let mut r = record;
-        let msg = std::mem::take(&mut r.message);
-        STRING_POOL.put(msg);
-        LOG_RECORD_POOL.put(r);
     }
 }
 

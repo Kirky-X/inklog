@@ -105,3 +105,80 @@ pub fn derive_key_from_password(
 
     Ok(key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_encryption_key_from_base64() {
+        let key_b64 = "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
+        std::env::set_var("INKLOG_TEST_KEY", key_b64);
+        let result = get_encryption_key("INKLOG_TEST_KEY");
+        std::env::remove_var("INKLOG_TEST_KEY");
+        assert!(result.is_ok());
+        let key = result.unwrap();
+        assert_eq!(key.len(), 32);
+    }
+
+    #[test]
+    fn test_get_encryption_key_from_raw_bytes() {
+        let key_raw = "abcdefghijklmnopqrstuvwxyz123456";
+        std::env::set_var("INKLOG_TEST_KEY", key_raw);
+        let result = get_encryption_key("INKLOG_TEST_KEY");
+        std::env::remove_var("INKLOG_TEST_KEY");
+        assert!(result.is_ok());
+        let key = result.unwrap();
+        assert_eq!(key.len(), 32);
+    }
+
+    #[test]
+    fn test_get_encryption_key_missing() {
+        std::env::remove_var("INKLOG_NONEXISTENT_KEY");
+        let result = get_encryption_key("INKLOG_NONEXISTENT_KEY");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_derive_key_from_password() {
+        let result = derive_key_from_password("test_password", Some(b"test_salt"));
+        assert!(result.is_ok());
+        let key = result.unwrap();
+        assert_eq!(key.len(), 32);
+    }
+
+    #[test]
+    fn test_derive_key_deterministic() {
+        let result1 = derive_key_from_password("password", Some(b"salt"));
+        let result2 = derive_key_from_password("password", Some(b"salt"));
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert_eq!(result1.unwrap(), result2.unwrap());
+    }
+
+    #[test]
+    fn test_derive_key_different_salts() {
+        let result1 = derive_key_from_password("password", Some(b"salt1"));
+        let result2 = derive_key_from_password("password", Some(b"salt2"));
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert_ne!(result1.unwrap(), result2.unwrap());
+    }
+
+    #[test]
+    fn test_derive_key_different_passwords() {
+        let result1 = derive_key_from_password("password1", Some(b"salt"));
+        let result2 = derive_key_from_password("password2", Some(b"salt"));
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert_ne!(result1.unwrap(), result2.unwrap());
+    }
+
+    #[test]
+    fn test_derive_key_with_default_salt() {
+        let result = derive_key_from_password("test_password", None);
+        assert!(result.is_ok());
+        let key = result.unwrap();
+        assert_eq!(key.len(), 32);
+    }
+}

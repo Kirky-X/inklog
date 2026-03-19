@@ -7,6 +7,7 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes256Gcm;
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose, Engine as _};
+use inklog::sink::encryption::derive_key_from_password;
 #[cfg(test)]
 use sha2::Digest as Sha256Digest;
 #[cfg(test)]
@@ -14,6 +15,7 @@ use sha2::Sha256;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 /// 验证文件路径是否在允许的目录内，防止路径遍历攻击
 fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
@@ -139,7 +141,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
         return Err(anyhow!("Unsupported encryption algorithm: {}", algo));
     }
 
-    let key = get_encryption_key(key_env)
+    let key = get_encryption_key_cli(key_env)
         .with_context(|| format!("Failed to get encryption key from env var: {}", key_env))?;
 
     let nonce = aes_gcm::Nonce::from_slice(&header[12..24]);
@@ -190,7 +192,7 @@ pub fn decrypt_file_compatible(
         return Err(anyhow!("Unsupported file version: {}", version));
     }
 
-    let key = get_encryption_key(key_env)
+    let key = get_encryption_key_cli(key_env)
         .with_context(|| format!("Failed to get encryption key from env var: {}", key_env))?;
 
     let algo = u16::from_le_bytes([header[10], header[11]]);
@@ -244,9 +246,18 @@ pub fn decrypt_file_compatible(
     Ok(())
 }
 
-fn get_encryption_key(env_var: &str) -> Result<[u8; 32]> {
+fn get_encryption_key_cli(env_var: &str) -> Result<[u8; 32]> {
     let key_str = std::env::var(env_var)
         .map_err(|_| anyhow!("Encryption key environment variable not set. Please ensure INKLOG_DECRYPT_KEY or INKLOG_ENCRYPTION_KEY is defined."))?;
+
+    let raw_bytes = key_str.as_bytes();
+
+    // 如果长度是32字节，尝试直接使用原始字节
+    if raw_bytes.len() == 32 {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(raw_bytes);
+        return Ok(key);
+    }
 
     // 尝试解码 Base64 编码的密钥
     if let Ok(decoded) = general_purpose::STANDARD.decode(key_str.trim()) {
@@ -263,19 +274,21 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32]> {
         }
     }
 
-    // 如果不是 Base64，尝试使用原始字节
-    let bytes = key_str.as_bytes();
-    if bytes.len() == 32 {
-        let mut key = [0u8; 32];
-        key.copy_from_slice(bytes);
-        Ok(key)
-    } else {
-        Err(anyhow!(
-            "Encryption key must be exactly 32 bytes (256 bits), got {} bytes. \
-             Please provide a valid 32-byte key.",
-            bytes.len()
-        ))
+    // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
+    if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
+        warn!(
+            "Using PBKDF2 key derivation for password-based key. For better security, use a 32-byte key."
+        );
+        return derive_key_from_password(&key_str, None)
+            .map_err(|e| anyhow!("Failed to derive key from password: {}", e));
     }
+
+    // 密钥长度无效
+    Err(anyhow!(
+        "Encryption key must be exactly 32 bytes (256 bits) for raw keys, or a password string (1-127 chars) for key derivation. Got {} bytes. \
+         Please provide a valid 32-byte key in raw or Base64 format, or use a password string.",
+        raw_bytes.len()
+    ))
 }
 
 pub fn decrypt_directory_compatible(
@@ -523,10 +536,34 @@ mod tests {
         let key_base64 = general_purpose::STANDARD.encode(test_key);
         std::env::set_var("TEST_ENCRYPTION_KEY", &key_base64);
 
-        let key = get_encryption_key("TEST_ENCRYPTION_KEY").unwrap();
+        let key = get_encryption_key_cli("TEST_ENCRYPTION_KEY").unwrap();
         assert_eq!(key, test_key);
 
         std::env::remove_var("TEST_ENCRYPTION_KEY");
+    }
+
+    #[test]
+    fn test_get_encryption_key_password_derivation() {
+        std::env::set_var("TEST_PASSWORD_KEY", "my-secret-password");
+
+        let key = get_encryption_key_cli("TEST_PASSWORD_KEY").unwrap();
+        assert_eq!(key.len(), 32);
+
+        let derived_again = derive_key_from_password("my-secret-password", None).unwrap();
+        assert_eq!(key, derived_again);
+
+        std::env::remove_var("TEST_PASSWORD_KEY");
+    }
+
+    #[test]
+    fn test_get_encryption_key_raw_32_bytes() {
+        let raw_key = [0x42u8; 32];
+        std::env::set_var("TEST_RAW_KEY", std::str::from_utf8(&raw_key).unwrap());
+
+        let key = get_encryption_key_cli("TEST_RAW_KEY").unwrap();
+        assert_eq!(key, raw_key);
+
+        std::env::remove_var("TEST_RAW_KEY");
     }
 
     #[test]

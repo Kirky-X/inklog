@@ -11,15 +11,76 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::{Event, Level};
 
+/// Represents a single log record with all associated metadata.
+///
+/// `LogRecord` is the core data structure that captures log events from the tracing
+/// ecosystem and stores them in a structured format. It includes the log message,
+/// timestamp, severity level, source location, and any additional contextual fields.
+///
+/// # Fields
+///
+/// - `timestamp`: UTC timestamp when the log record was created
+/// - `level`: Log severity level (e.g., "INFO", "ERROR", "DEBUG")
+/// - `target`: The target/module path that emitted this log (e.g., "myapp::handlers")
+/// - `message`: The primary log message content
+/// - `fields`: Additional structured key-value pairs attached to the log
+/// - `file`: Source file path where the log was emitted (optional)
+/// - `line`: Line number in the source file (optional)
+/// - `thread_id`: ID of the thread that emitted this log
+///
+/// # Performance
+///
+/// `LogRecord` instances are pooled using [`object_pool::LOG_RECORD_POOL`] to reduce
+/// memory allocations in the hot path. Use [`reset()`](Self::reset) to reuse instances.
+///
+/// # Sensitive Data
+///
+/// The struct includes built-in support for masking sensitive information through
+/// [`mask_sensitive_fields()`](Self::mask_sensitive_fields). This should be called
+/// by sinks before persisting logs to external storage.
+///
+/// # Example
+///
+/// ```
+/// use inklog::log_record::LogRecord;
+/// use tracing::Level;
+///
+/// let record = LogRecord::new(
+///     Level::INFO,
+///     "myapp::service".to_string(),
+///     "User logged in successfully".to_string(),
+/// );
+///
+/// assert_eq!(record.level, "INFO");
+/// assert_eq!(record.target, "myapp::service");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogRecord {
+    /// UTC timestamp when this log record was created.
     pub timestamp: DateTime<Utc>,
+
+    /// Log severity level (e.g., "INFO", "ERROR", "DEBUG", "WARN", "TRACE").
     pub level: String,
+
+    /// Target module path that emitted this log (e.g., "myapp::handlers::auth").
     pub target: String,
+
+    /// The primary log message content.
     pub message: String,
+
+    /// Additional structured key-value pairs attached to the log event.
+    ///
+    /// These fields are extracted from tracing span and event attributes,
+    /// supporting types like strings, numbers, booleans, and nested JSON.
     pub fields: HashMap<String, Value>,
+
+    /// Source file path where the log was emitted (e.g., "src/handlers.rs").
     pub file: Option<String>,
+
+    /// Line number in the source file where the log was emitted.
     pub line: Option<u32>,
+
+    /// Thread ID where the log was emitted (e.g., "ThreadId(1)").
     pub thread_id: String,
 }
 
@@ -39,6 +100,36 @@ impl Default for LogRecord {
 }
 
 impl LogRecord {
+    /// Resets this log record to default values for reuse.
+    ///
+    /// This method is used in conjunction with the object pool to recycle
+    /// `LogRecord` instances, avoiding memory allocations in the hot path.
+    /// After calling `reset()`, the record will have default values suitable
+    /// for populating with new log data.
+    ///
+    /// # Performance
+    ///
+    /// This method clears all fields and resets the timestamp to the current time.
+    /// It uses `clear()` and `push_str()` on String fields to reuse existing capacity.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use inklog::log_record::LogRecord;
+    /// use tracing::Level;
+    ///
+    /// let mut record = LogRecord::new(
+    ///     Level::INFO,
+    ///     "module".to_string(),
+    ///     "message".to_string(),
+    /// );
+    ///
+    /// record.reset();
+    ///
+    /// assert_eq!(record.level, "INFO");
+    /// assert!(record.target.is_empty());
+    /// assert!(record.message.is_empty());
+    /// ```
     pub fn reset(&mut self) {
         self.timestamp = Utc::now();
         self.level.clear();
@@ -50,6 +141,36 @@ impl LogRecord {
         self.line = None;
         self.thread_id.clear();
     }
+
+    /// Creates a new log record with the specified level, target, and message.
+    ///
+    /// This is a convenience constructor for creating log records programmatically.
+    /// The timestamp is set to the current UTC time, and the thread ID is captured
+    /// automatically. No source location (file/line) is attached.
+    ///
+    /// # Arguments
+    ///
+    /// * `level` - The severity level of the log (e.g., `Level::INFO`)
+    /// * `target` - The module path or target that emitted this log
+    /// * `message` - The primary log message content
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use inklog::log_record::LogRecord;
+    /// use tracing::Level;
+    ///
+    /// let record = LogRecord::new(
+    ///     Level::WARN,
+    ///     "myapp::cache".to_string(),
+    ///     "Cache miss for key: user_123".to_string(),
+    /// );
+    ///
+    /// assert_eq!(record.level, "WARN");
+    /// assert_eq!(record.target, "myapp::cache");
+    /// assert_eq!(record.message, "Cache miss for key: user_123");
+    /// assert!(!record.thread_id.is_empty());
+    /// ```
     pub fn new(level: Level, target: String, message: String) -> Self {
         Self {
             timestamp: Utc::now(),
@@ -63,6 +184,40 @@ impl LogRecord {
         }
     }
 
+    /// Creates a log record from a tracing event.
+    ///
+    /// This is the primary method for converting tracing events into the internal
+    /// `LogRecord` format. It extracts all relevant metadata from the event,
+    /// including level, target, message, fields, source location, and thread ID.
+    ///
+    /// # Performance
+    ///
+    /// This method uses object pooling for both the `LogRecord` and the message
+    /// string to minimize allocations in the hot path. The returned instance
+    /// is taken from [`LOG_RECORD_POOL`](crate::object_pool::LOG_RECORD_POOL).
+    ///
+    /// # Sensitive Data
+    ///
+    /// For performance reasons, this method does **NOT** automatically mask
+    /// sensitive fields. Callers who need masking (e.g., FileSink, DatabaseSink)
+    /// should call [`mask_sensitive_fields()`](Self::mask_sensitive_fields) in
+    /// their write() method. ConsoleSink may optionally call it based on configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `event` - The tracing event to convert
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tracing::Event;
+    /// use inklog::log_record::LogRecord;
+    ///
+    /// fn process_event(event: &Event) {
+    ///     let record = LogRecord::from_event(event);
+    ///     // Use record...
+    /// }
+    /// ```
     pub fn from_event(event: &Event) -> Self {
         let mut record = LOG_RECORD_POOL.get();
         record.reset();
@@ -89,7 +244,10 @@ impl LogRecord {
         record.line = metadata.line();
         record.thread_id = format!("{:?}", std::thread::current().id());
 
-        record.mask_sensitive_fields();
+        // NOTE: mask_sensitive_fields() is NOT called here for performance.
+        // Callers who need masking (e.g., FileSink, DatabaseSink) should call
+        // record.mask_sensitive_fields() in their write() method.
+        // ConsoleSink may optionally call it based on configuration.
         record
     }
 
@@ -105,7 +263,57 @@ impl LogRecord {
             .any(|pattern| key_lower.contains(*pattern))
     }
 
-    fn mask_sensitive_fields(&mut self) {
+    /// Masks sensitive information in the log message and fields.
+    ///
+    /// This method performs in-place masking of sensitive data such as:
+    /// - Email addresses (user@example.com → **@**.***)
+    /// - Phone numbers (13812345678 → ***-****-****)
+    /// - ID card numbers (110101199001011234 → ******1234)
+    /// - Bank card numbers (6222021234567890123 → ****-****-****-0123)
+    /// - Field names containing sensitive patterns (password, token, secret, etc.)
+    ///
+    /// Sensitive field names (case-insensitive matching) are replaced with "***MASKED***".
+    /// Field values containing PII are masked according to their type.
+    ///
+    /// # When to Use
+    ///
+    /// This method should be called by sinks before persisting logs to external
+    /// storage (files, databases, S3). It is intentionally NOT called in
+    /// [`from_event()`](Self::from_event) for performance reasons, and because
+    /// console output may not require masking.
+    ///
+    /// # Performance
+    ///
+    /// This method creates a new `DataMasker` instance and processes both the
+    /// message and all field values. For high-throughput scenarios, consider
+    /// whether masking is needed for every log or only certain log levels.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use inklog::log_record::LogRecord;
+    /// use tracing::Level;
+    /// use serde_json::Value;
+    ///
+    /// let mut record = LogRecord::new(
+    ///     Level::INFO,
+    ///     "auth".to_string(),
+    ///     "Login attempt: user@example.com".to_string(),
+    /// );
+    /// record.fields.insert(
+    ///     "password".to_string(),
+    ///     Value::String("secret123".to_string()),
+    /// );
+    ///
+    /// record.mask_sensitive_fields();
+    ///
+    /// assert_eq!(record.message, "Login attempt: **@**.***");
+    /// assert_eq!(
+    ///     record.fields.get("password").unwrap(),
+    ///     &Value::String("***MASKED***".to_string())
+    /// );
+    /// ```
+    pub fn mask_sensitive_fields(&mut self) {
         let masker = DataMasker::new();
         self.message = masker.mask(&self.message);
         for (_, v) in self.fields.iter_mut() {

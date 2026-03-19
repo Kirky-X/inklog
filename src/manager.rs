@@ -49,8 +49,8 @@ enum SinkControlMessage {
 // Parameters for worker threads
 struct WorkerParams {
     config: InklogConfig,
-    receiver: Receiver<LogRecord>,
-    console_receiver: Receiver<LogRecord>,
+    receiver: Receiver<Arc<LogRecord>>,
+    console_receiver: Receiver<Arc<LogRecord>>,
     shutdown_rx: Receiver<()>,
     control_rx: Receiver<SinkControlMessage>,
     control_tx: Sender<SinkControlMessage>,
@@ -103,8 +103,8 @@ struct EnvironmentProfile {
 pub struct LoggerManager {
     #[allow(dead_code)]
     config: InklogConfig,
-    sender: Sender<LogRecord>,
-    console_sender: Sender<LogRecord>,
+    sender: Sender<Arc<LogRecord>>,
+    console_sender: Sender<Arc<LogRecord>>,
     shutdown_tx: Sender<()>,
     #[allow(dead_code)]
     console_sink: Arc<Mutex<ConsoleSink>>,
@@ -376,7 +376,7 @@ impl LoggerManager {
     /// }
     /// ```
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
-        let config = InklogConfig::from_file(path.as_ref()).map_err(|e| {
+        let config = InklogConfig::load_file(path.as_ref()).map_err(|e| {
             InklogError::ConfigError(format!("Failed to load config from file: {}", e))
         })?;
         Self::with_config(config).await
@@ -404,7 +404,7 @@ impl LoggerManager {
     /// }
     /// ```
     pub async fn load() -> Result<Self, InklogError> {
-        let config = InklogConfig::load()
+        let config = InklogConfig::load_sync()
             .map_err(|e| InklogError::ConfigError(format!("Failed to load config: {}", e)))?;
         Self::with_config(config).await
     }
@@ -412,12 +412,21 @@ impl LoggerManager {
     /// 启动HTTP监控服务器
     ///
     /// 提供健康检查和Prometheus指标端点
+    /// 支持 Bearer Token 认证和 IP 白名单
     #[cfg(feature = "http")]
     async fn start_http_server(
         &self,
         config: &crate::config::HttpServerConfig,
     ) -> Result<(), InklogError> {
-        use axum::{routing::get, Router};
+        use axum::{
+            extract::{ConnectInfo, State},
+            http::{header, Request, StatusCode},
+            middleware::{self, Next},
+            response::{IntoResponse, Response},
+            routing::get,
+            Router,
+        };
+        use std::net::SocketAddr;
 
         let metrics = self.metrics.clone();
         let health_path = config.health_path.clone();
@@ -434,6 +443,98 @@ impl LoggerManager {
             }
         };
 
+        #[derive(Clone)]
+        struct HttpAuthState {
+            auth_enabled: bool,
+            token_env: Option<String>,
+            ip_whitelist: Option<Vec<String>>,
+        }
+
+        let auth_state = HttpAuthState {
+            auth_enabled: config.auth.as_ref().map(|a| a.enabled).unwrap_or(false),
+            token_env: config.auth.as_ref().map(|a| a.token_env.clone()),
+            ip_whitelist: config.ip_whitelist.clone(),
+        };
+
+        async fn auth_middleware(
+            State(state): State<HttpAuthState>,
+            ConnectInfo(addr): ConnectInfo<SocketAddr>,
+            request: Request<axum::body::Body>,
+            next: Next,
+        ) -> Response {
+            if state.auth_enabled {
+                if let Some(ref token_env) = state.token_env {
+                    let expected_token = match std::env::var(token_env) {
+                        Ok(t) => t,
+                        Err(_) => {
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Auth token not configured",
+                            )
+                                .into_response();
+                        }
+                    };
+
+                    let auth_header = request
+                        .headers()
+                        .get(header::AUTHORIZATION)
+                        .and_then(|h: &axum::http::HeaderValue| h.to_str().ok());
+
+                    match auth_header {
+                        Some(h) if h.starts_with("Bearer ") => {
+                            let token = &h[7..];
+                            if !subtle_constant_time_compare(
+                                token.as_bytes(),
+                                expected_token.as_bytes(),
+                            ) {
+                                return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                            }
+                        }
+                        _ => {
+                            return (
+                                StatusCode::UNAUTHORIZED,
+                                "Missing or invalid Authorization header",
+                            )
+                                .into_response();
+                        }
+                    }
+                }
+            }
+
+            if let Some(ref whitelist) = state.ip_whitelist {
+                let client_ip = addr.ip().to_string();
+                if !whitelist.iter().any(|allowed| {
+                    if allowed.ends_with(".*") {
+                        let prefix = &allowed[..allowed.len() - 2];
+                        client_ip.starts_with(prefix)
+                    } else if allowed.contains('/') {
+                        matches!(parse_cidr(allowed), Some(network) if network.contains(&addr.ip()))
+                    } else {
+                        client_ip == *allowed
+                    }
+                }) {
+                    return (StatusCode::FORBIDDEN, "IP not in whitelist").into_response();
+                }
+            }
+
+            next.run(request).await
+        }
+
+        fn subtle_constant_time_compare(a: &[u8], b: &[u8]) -> bool {
+            if a.len() != b.len() {
+                return false;
+            }
+            let mut result = 0u8;
+            for (x, y) in a.iter().zip(b.iter()) {
+                result |= x ^ y;
+            }
+            result == 0
+        }
+
+        fn parse_cidr(cidr: &str) -> Option<ipnet::IpNet> {
+            cidr.parse().ok()
+        }
+
         let app = Router::new()
             .route(
                 &health_path,
@@ -445,11 +546,19 @@ impl LoggerManager {
             .route(
                 &metrics_path,
                 get(move || async move { metrics.export_prometheus() }),
-            );
+            )
+            .layer(middleware::from_fn_with_state(
+                auth_state.clone(),
+                auth_middleware,
+            ))
+            .with_state(auth_state);
 
         let addr: std::net::SocketAddr = format!("{}:{}", config.host, config.port)
             .parse()
             .map_err(|e| InklogError::ConfigError(format!("Invalid HTTP server address: {}", e)))?;
+
+        let auth_enabled = config.auth.as_ref().map(|a| a.enabled).unwrap_or(false);
+        let ip_whitelist = config.ip_whitelist.clone();
 
         let handle = tokio::spawn(async move {
             let listener = match tokio::net::TcpListener::bind(addr).await {
@@ -459,8 +568,16 @@ impl LoggerManager {
                     return;
                 }
             };
-            info!("HTTP server started on {}", addr);
-            match axum::serve(listener, app).await {
+            info!(
+                "HTTP server started on {} (auth: {}, ip_whitelist: {:?})",
+                addr, auth_enabled, ip_whitelist
+            );
+            match axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            {
                 Ok(_) => info!("HTTP server stopped"),
                 Err(e) => tracing::error!("HTTP server error: {}", e),
             }

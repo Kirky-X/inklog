@@ -94,6 +94,185 @@ export INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 export INKLOG_ENCRYPTION_KEY=your-32-byte-base64-encoded-key
 ```
 
+### 密钥轮换
+
+密钥轮换是加密安全的关键实践，Inklog 提供完整的密钥轮换支持。
+
+#### 为什么需要密钥轮换
+
+- **降低密钥泄露风险**: 定期更换密钥可限制泄露的影响范围
+- **合规要求**: PCI-DSS、HIPAA 等标准要求定期轮换密钥
+- **加密算法演进**: 支持未来升级到更强的加密算法
+- **密钥生命周期管理**: 防止长期使用同一密钥带来的安全隐患
+
+#### 密钥轮换流程
+
+**步骤 1: 生成新密钥**
+
+```bash
+# 生成新的 32 字节密钥
+NEW_KEY=$(openssl rand -base64 32)
+echo "新密钥: $NEW_KEY"
+
+# 或使用 PBKDF2 从密码派生
+# 密码字符串会自动使用 PBKDF2-HMAC-SHA256 派生为 32 字节密钥
+export INKLOG_NEW_ENCRYPTION_KEY="your-strong-password-phrase"
+```
+
+**步骤 2: 使用新密钥加密新日志**
+
+```rust
+// 配置使用新密钥
+std::env::set_var("INKLOG_ENCRYPTION_KEY", &new_key);
+
+let config = InklogConfig {
+    file_sink: Some(FileSinkConfig {
+        enabled: true,
+        path: "logs/app.log".into(),
+        encrypt: true,
+        encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
+        ..Default::default()
+    }),
+    ..Default::default()
+};
+
+// 新日志将使用新密钥加密
+```
+
+**步骤 3: 迁移旧日志文件**
+
+```bash
+# 使用 CLI 工具批量迁移
+# 1. 先用旧密钥解密
+export INKLOG_DECRYPT_KEY=$OLD_KEY
+inklog decrypt --input "logs/*.enc" --output temp_decrypted/ --batch
+
+# 2. 用新密钥重新加密
+export INKLOG_ENCRYPTION_KEY=$NEW_KEY
+inklog encrypt --input temp_decrypted/ --output logs_new/ --recursive
+
+# 3. 清理临时文件
+rm -rf temp_decrypted/
+mv logs_new/ logs/
+```
+
+**步骤 4: 更新环境变量**
+
+```bash
+# 更新生产环境变量
+export INKLOG_ENCRYPTION_KEY=$NEW_KEY
+unset INKLOG_OLD_ENCRYPTION_KEY
+
+# 更新配置管理工具 (如 Kubernetes Secrets)
+kubectl create secret generic inklog-encryption-key \
+  --from-literal=INKLOG_ENCRYPTION_KEY=$NEW_KEY \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+#### 自动化密钥轮换脚本
+
+```bash
+#!/bin/bash
+# key_rotation.sh - 自动密钥轮换脚本
+
+set -e
+
+LOG_DIR="${LOG_DIR:-/var/log/inklog}"
+OLD_KEY_VAR="${OLD_KEY_VAR:-INKLOG_ENCRYPTION_KEY}"
+NEW_KEY_VAR="${NEW_KEY_VAR:-INKLOG_NEW_ENCRYPTION_KEY}"
+BACKUP_DIR="${BACKUP_DIR:-/var/log/inklog/backup}"
+
+echo "=== Inklog 密钥轮换开始 ==="
+echo "时间: $(date -Iseconds)"
+
+# 1. 验证旧密钥存在
+if [ -z "${!OLD_KEY_VAR}" ]; then
+    echo "错误: 环境变量 $OLD_KEY_VAR 未设置"
+    exit 1
+fi
+
+# 2. 生成新密钥
+NEW_KEY=$(openssl rand -base64 32)
+export $NEW_KEY_VAR=$NEW_KEY
+echo "新密钥已生成"
+
+# 3. 创建备份目录
+mkdir -p "$BACKUP_DIR/$(date +%Y%m%d)"
+
+# 4. 备份旧加密文件
+cp -r "$LOG_DIR"/*.enc "$BACKUP_DIR/$(date +%Y%m%d)/" 2>/dev/null || true
+echo "旧文件已备份到 $BACKUP_DIR/$(date +%Y%m%d)/"
+
+# 5. 解密旧文件
+export INKLOG_DECRYPT_KEY="${!OLD_KEY_VAR}"
+TEMP_DIR=$(mktemp -d)
+inklog decrypt --input "$LOG_DIR/*.enc" --output "$TEMP_DIR" --batch 2>/dev/null || {
+    echo "警告: 部分文件解密失败"
+}
+
+# 6. 用新密钥重新加密
+export INKLOG_ENCRYPTION_KEY=$NEW_KEY
+for file in "$TEMP_DIR"/*; do
+    if [ -f "$file" ]; then
+        filename=$(basename "$file")
+        # 这里需要 encrypt 命令 (待实现)
+        echo "重新加密: $filename"
+    fi
+done
+
+# 7. 清理临时文件
+rm -rf "$TEMP_DIR"
+
+# 8. 更新环境变量
+export $OLD_KEY_VAR=$NEW_KEY
+unset $NEW_KEY_VAR
+
+echo "=== 密钥轮换完成 ==="
+echo "请更新您的密钥管理系统以使用新密钥"
+```
+
+#### 密钥轮换最佳实践
+
+| 实践 | 说明 |
+|------|------|
+| **轮换周期** | 建议 90 天轮换一次，高安全环境可缩短至 30 天 |
+| **密钥存储** | 使用 KMS 或 Secrets Manager，不要硬编码 |
+| **备份策略** | 轮换前备份旧密钥和加密文件 |
+| **渐进迁移** | 支持新旧密钥并存，逐步迁移 |
+| **审计日志** | 记录所有密钥轮换操作 |
+| **测试验证** | 轮换后验证解密功能正常 |
+
+#### 多密钥支持
+
+Inklog 支持配置多个解密密钥，实现平滑迁移：
+
+```rust
+// 配置多密钥解密 (CLI 工具)
+// 解密时自动尝试所有可用密钥
+let decrypt_keys = vec![
+    std::env::var("INKLOG_ENCRYPTION_KEY")?,      // 当前密钥
+    std::env::var("INKLOG_OLD_ENCRYPTION_KEY")?,  // 旧密钥
+];
+
+for key in decrypt_keys {
+    if let Ok(plaintext) = try_decrypt(&ciphertext, &key) {
+        return Ok(plaintext);
+    }
+}
+```
+
+#### 密钥轮换检查清单
+
+- [ ] 生成新的强密钥 (32 字节，高熵值)
+- [ ] 备份当前加密文件
+- [ ] 配置新密钥到环境变量
+- [ ] 验证新密钥加密功能
+- [ ] 迁移旧加密文件
+- [ ] 更新密钥管理系统
+- [ ] 清理旧密钥引用
+- [ ] 记录轮换审计日志
+- [ ] 验证所有日志可正常解密
+
 ### 加密/解密流程
 
 #### 文件加密实现

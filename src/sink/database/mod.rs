@@ -42,6 +42,9 @@ use crate::sink::file::FileSink;
 
 const DEFAULT_BATCH_SIZE: usize = 100;
 const DEFAULT_FLUSH_INTERVAL_MS: u64 = 500;
+const MIN_BATCH_SIZE: usize = 10;
+const MAX_BATCH_SIZE: usize = 1000;
+const ADAPTIVE_WINDOW_SIZE: usize = 10;
 
 #[cfg(feature = "dbnexus")]
 static DB_SHARED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
@@ -50,7 +53,12 @@ static DB_SHARED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
         .thread_name("inklog-db-shared")
         .enable_all()
         .build()
-        .expect("Failed to create shared tokio runtime for database sink")
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to create shared tokio runtime for database sink: {}",
+                e
+            )
+        })
 });
 
 #[cfg(feature = "dbnexus")]
@@ -68,6 +76,10 @@ pub struct DatabaseSink {
     masker: Arc<DataMasker>,
     stop: Arc<AtomicBool>,
     metrics: Option<Arc<Metrics>>,
+    current_batch_size: usize,
+    write_latencies: Vec<Duration>,
+    success_count: usize,
+    failure_count: usize,
 }
 
 #[cfg(feature = "dbnexus")]
@@ -99,11 +111,40 @@ impl DatabaseSink {
             masker: Arc::new(DataMasker::new()),
             stop: Arc::new(AtomicBool::new(false)),
             metrics: None,
+            current_batch_size: DEFAULT_BATCH_SIZE,
+            write_latencies: Vec::with_capacity(ADAPTIVE_WINDOW_SIZE),
+            success_count: 0,
+            failure_count: 0,
         })
     }
 
     pub fn set_metrics(&mut self, metrics: Arc<Metrics>) {
         self.metrics = Some(metrics);
+    }
+
+    fn adjust_batch_size(&mut self) {
+        if self.write_latencies.len() < ADAPTIVE_WINDOW_SIZE {
+            return;
+        }
+
+        let avg_latency: Duration =
+            self.write_latencies.iter().sum::<Duration>() / self.write_latencies.len() as u32;
+        let total_ops = self.success_count + self.failure_count;
+        let success_rate = if total_ops > 0 {
+            self.success_count as f64 / total_ops as f64
+        } else {
+            1.0
+        };
+
+        if success_rate >= 0.95 && avg_latency < Duration::from_millis(50) {
+            self.current_batch_size = (self.current_batch_size * 2).min(MAX_BATCH_SIZE);
+        } else if success_rate < 0.8 || avg_latency > Duration::from_millis(200) {
+            self.current_batch_size = (self.current_batch_size / 2).max(MIN_BATCH_SIZE);
+        }
+
+        self.write_latencies.clear();
+        self.success_count = 0;
+        self.failure_count = 0;
     }
 
     fn execute_async<F, T>(&self, f: F) -> T
@@ -143,16 +184,21 @@ impl crate::sink::LogSink for DatabaseSink {
 
         self.buffer.push(masked_record);
 
-        if self.buffer.len() >= DEFAULT_BATCH_SIZE
+        if self.buffer.len() >= self.current_batch_size
             || self.last_flush.elapsed() > Duration::from_millis(DEFAULT_FLUSH_INTERVAL_MS)
         {
+            let start = Instant::now();
             if let Err(e) = self.flush() {
+                self.failure_count += 1;
                 self.circuit_breaker.record_failure();
                 if let Some(ref mut sink) = self.fallback_sink {
                     let _ = sink.write(record);
                 }
                 return Err(e);
             }
+            self.success_count += 1;
+            self.write_latencies.push(start.elapsed());
+            self.adjust_batch_size();
         }
 
         self.circuit_breaker.record_success();

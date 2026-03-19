@@ -6,6 +6,7 @@
 use crate::config::ConsoleSinkConfig;
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
+use crate::masking::DataMasker;
 use crate::sink::LogSink;
 use crate::template::LogTemplate;
 use is_terminal::IsTerminal;
@@ -18,6 +19,7 @@ pub struct ConsoleSink {
     config: ConsoleSinkConfig,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     template: LogTemplate,
+    masker: DataMasker,
 }
 
 impl fmt::Debug for ConsoleSink {
@@ -35,6 +37,7 @@ impl ConsoleSink {
             config,
             writer: Arc::new(Mutex::new(Box::new(io::stdout()))),
             template,
+            masker: DataMasker::new(),
         }
     }
 
@@ -110,24 +113,34 @@ impl ConsoleSink {
 
 impl LogSink for ConsoleSink {
     fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+        // 应用数据脱敏（如果启用）
+        let masked_record = if self.config.masking_enabled {
+            let mut masked = record.clone();
+            masked.message = self.masker.mask(&record.message);
+            self.masker.mask_hashmap(&mut masked.fields);
+            masked
+        } else {
+            record.clone()
+        };
+
         // Stderr separation
         let is_stderr = self
             .config
             .stderr_levels
-            .contains(&record.level.to_lowercase());
+            .contains(&masked_record.level.to_lowercase());
 
         let use_color = self.should_colorize(is_stderr);
 
         if is_stderr {
             let mut stderr = io::stderr();
-            self.write_record(&mut stderr, record, use_color)
+            self.write_record(&mut stderr, &masked_record, use_color)
                 .map_err(InklogError::IoError)?;
         } else {
             let mut writer = self
                 .writer
                 .lock()
                 .map_err(|_| InklogError::IoError(io::Error::other("Lock poisoned")))?;
-            self.write_record(&mut *writer, record, use_color)
+            self.write_record(&mut *writer, &masked_record, use_color)
                 .map_err(InklogError::IoError)?;
         }
 
@@ -158,6 +171,7 @@ impl Clone for ConsoleSink {
             // Clone shares the same writer (Arc ensures reference counting)
             writer: Arc::clone(&self.writer),
             template: self.template.clone(),
+            masker: DataMasker::new(),
         }
     }
 }

@@ -42,7 +42,12 @@ static SHARED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .expect("Failed to create shared tokio runtime for object pool")
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to create shared tokio runtime for object pool: {}",
+                e
+            )
+        })
 });
 
 fn get_runtime() -> &'static tokio::runtime::Runtime {
@@ -131,7 +136,9 @@ where
 
     /// Create a new object pool with full configuration
     pub fn with_config(config: ObjectPoolConfig) -> Self {
-        let cache = get_runtime().block_on(async {
+        use tokio::runtime::Handle;
+
+        let build_cache = || async {
             let mut builder = Cache::builder();
             builder = builder.capacity(config.max_capacity as u64);
             if let Some(ttl_secs) = config.ttl_secs {
@@ -144,7 +151,15 @@ where
                     Arc::new(Cache::default())
                 }
             }
-        });
+        };
+
+        let cache = if let Ok(handle) = Handle::try_current() {
+            // We're in an async context, use block_in_place
+            tokio::task::block_in_place(|| handle.block_on(build_cache()))
+        } else {
+            // We're not in an async context, use the shared runtime
+            get_runtime().block_on(build_cache())
+        };
 
         Self {
             cache,
@@ -165,7 +180,7 @@ where
         T: Send + 'static,
     {
         if let Ok(handle) = Handle::try_current() {
-            handle.block_on(f)
+            tokio::task::block_in_place(|| handle.block_on(f))
         } else {
             get_runtime().block_on(f)
         }
@@ -296,7 +311,11 @@ where
     #[allow(dead_code)]
     pub fn clear(&self) {
         let cache = self.cache.clone();
-        self.execute_async(async move { cache.clear().await.expect("Cache clear failed") });
+        self.execute_async(async move {
+            if let Err(e) = cache.clear().await {
+                tracing::warn!("Failed to clear cache: {}", e);
+            }
+        });
         self.stats.total_items.store(0, Ordering::Relaxed);
     }
 }
@@ -414,6 +433,7 @@ impl LogRecordPool {
         self.pool.get(&"log_record".to_string()).unwrap_or_default()
     }
 
+    #[allow(dead_code)]
     pub fn put(&self, record: LogRecord) {
         self.pool.put(&"log_record".to_string(), record);
     }
@@ -468,6 +488,7 @@ impl StringPool {
             .unwrap_or_default()
     }
 
+    #[allow(dead_code)]
     pub fn put(&self, s: String) {
         self.pool.put(&"string_buffer".to_string(), s);
     }
@@ -499,6 +520,161 @@ pub static LOG_RECORD_POOL: Lazy<LogRecordPool> = Lazy::new(|| LogRecordPool::wi
 
 /// Global pool for String buffers
 pub static STRING_POOL: Lazy<StringPool> = Lazy::new(|| StringPool::with_capacity(1024));
+
+// ============================================================================
+// Thread-Local Object Pool (High Performance)
+// ============================================================================
+
+/// High-performance thread-local pool for LogRecord.
+///
+/// Uses thread-local storage to eliminate lock contention entirely.
+/// Each thread has its own independent pool, maximizing performance.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct ThreadLocalLogRecordPool {
+    capacity: usize,
+}
+
+impl ThreadLocalLogRecordPool {
+    /// Create a new pool with the specified capacity.
+    pub fn new(capacity: usize) -> Self {
+        Self { capacity }
+    }
+
+    /// Get an object from the pool, or create a new one if empty.
+    pub fn get(&self) -> LogRecord {
+        THREAD_LOCAL_LOG_RECORD_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            pool.pop().unwrap_or_default()
+        })
+    }
+
+    /// Return an object to the pool.
+    /// If the pool is at capacity, the object is dropped.
+    pub fn put(&self, record: LogRecord) {
+        THREAD_LOCAL_LOG_RECORD_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            if pool.len() < self.capacity {
+                // Reset the record before pooling for reuse
+                let mut record = record;
+                record.reset();
+                pool.push(record);
+            }
+            // If at capacity, the record is simply dropped
+        });
+    }
+
+    /// Get the current size of the calling thread's pool.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        THREAD_LOCAL_LOG_RECORD_POOL.with(|pool| pool.borrow().len())
+    }
+
+    /// Check if the calling thread's pool is empty.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for ThreadLocalLogRecordPool {
+    fn default() -> Self {
+        Self::new(1024)
+    }
+}
+
+// Thread-local storage for LogRecord pool.
+thread_local! {
+    static THREAD_LOCAL_LOG_RECORD_POOL: std::cell::RefCell<Vec<LogRecord>> =
+        std::cell::RefCell::new(Vec::with_capacity(1024));
+}
+
+/// High-performance thread-local pool for String buffers.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct ThreadLocalStringPool {
+    capacity: usize,
+}
+
+impl ThreadLocalStringPool {
+    /// Create a new pool with the specified capacity.
+    pub fn new(capacity: usize) -> Self {
+        Self { capacity }
+    }
+
+    /// Get a String from the pool, or create a new empty one if empty.
+    pub fn get(&self) -> String {
+        THREAD_LOCAL_STRING_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            pool.pop().unwrap_or_default()
+        })
+    }
+
+    /// Return a String to the pool.
+    /// The String is cleared before pooling for reuse.
+    pub fn put(&self, s: String) {
+        THREAD_LOCAL_STRING_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            if pool.len() < self.capacity {
+                pool.push(s);
+            }
+            // If at capacity, the string is simply dropped
+        });
+    }
+
+    /// Get the current size of the calling thread's pool.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        THREAD_LOCAL_STRING_POOL.with(|pool| pool.borrow().len())
+    }
+
+    /// Check if the calling thread's pool is empty.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for ThreadLocalStringPool {
+    fn default() -> Self {
+        Self::new(1024)
+    }
+}
+
+// Thread-local storage for String pool.
+thread_local! {
+    static THREAD_LOCAL_STRING_POOL: std::cell::RefCell<Vec<String>> =
+        std::cell::RefCell::new(Vec::with_capacity(1024));
+}
+
+// ============================================================================
+// Global Convenience Functions
+// ============================================================================
+
+static GLOBAL_LOG_RECORD_POOL: Lazy<ThreadLocalLogRecordPool> =
+    Lazy::new(|| ThreadLocalLogRecordPool::new(1024));
+static GLOBAL_STRING_POOL: Lazy<ThreadLocalStringPool> =
+    Lazy::new(|| ThreadLocalStringPool::new(1024));
+
+/// Get a LogRecord from the global thread-local pool.
+pub fn get_log_record() -> LogRecord {
+    GLOBAL_LOG_RECORD_POOL.get()
+}
+
+/// Return a LogRecord to the global thread-local pool.
+pub fn put_log_record(record: LogRecord) {
+    GLOBAL_LOG_RECORD_POOL.put(record)
+}
+
+/// Get a String buffer from the global thread-local pool.
+pub fn get_string_buffer() -> String {
+    GLOBAL_STRING_POOL.get()
+}
+
+/// Return a String buffer to the global thread-local pool.
+pub fn put_string_buffer(s: String) {
+    GLOBAL_STRING_POOL.put(s)
+}
 
 #[cfg(test)]
 mod tests {
@@ -626,5 +802,88 @@ mod tests {
         let metrics = pool.metrics();
         assert_eq!(metrics.max_capacity, 10);
         let _ = pool.len();
+    }
+
+    // Thread-local pool tests
+
+    #[test]
+    fn test_thread_local_log_record_pool() {
+        let pool = ThreadLocalLogRecordPool::new(10);
+
+        // Initially empty
+        assert!(pool.is_empty());
+
+        // Get creates new record if pool is empty
+        let record = pool.get();
+        assert_eq!(record.level, "INFO");
+
+        // Put returns record to pool
+        pool.put(record);
+
+        // Now pool should have one item
+        assert!(!pool.is_empty());
+
+        // Get should return the pooled record (reused)
+        let record2 = pool.get();
+        assert_eq!(record2.level, "INFO");
+    }
+
+    #[test]
+    fn test_thread_local_string_pool() {
+        let pool = ThreadLocalStringPool::new(10);
+
+        // Initially empty
+        assert!(pool.is_empty());
+
+        // Get creates new string if pool is empty
+        let s = pool.get();
+        assert!(s.is_empty());
+
+        // Put returns string to pool
+        pool.put("test".to_string());
+
+        // Now pool should have one item
+        assert!(!pool.is_empty());
+
+        // Get should return pooled string
+        let s2 = pool.get();
+        assert_eq!(s2, "test");
+    }
+
+    #[test]
+    fn test_thread_local_pool_capacity() {
+        let pool = ThreadLocalLogRecordPool::new(2);
+
+        // Add items up to capacity
+        let record1 = pool.get();
+        pool.put(record1);
+
+        let record2 = pool.get();
+        pool.put(record2);
+
+        // At capacity, adding more should not increase pool size
+        let record3 = pool.get();
+        pool.put(record3);
+
+        // Pool should still have at most 2 items (capacity)
+        assert!(pool.len() <= 2);
+    }
+
+    #[test]
+    fn test_thread_local_pool_reset_on_put() {
+        let pool = ThreadLocalLogRecordPool::new(10);
+
+        // Get a record and modify it
+        let mut record = pool.get();
+        record.level = "ERROR".to_string();
+        record.message = "test message".to_string();
+
+        // Put back to pool (should be reset)
+        pool.put(record);
+
+        // Get should return reset record
+        let record2 = pool.get();
+        assert_eq!(record2.level, "INFO");
+        assert!(record2.message.is_empty());
     }
 }

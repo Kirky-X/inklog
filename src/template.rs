@@ -25,6 +25,63 @@ fn format_field(key: &str, value: &Value) -> String {
     }
 }
 
+/// Template-based log message formatter with customizable placeholders.
+///
+/// `LogTemplate` provides flexible log message formatting through template strings
+/// with placeholders that are replaced with values from [`LogRecord`].
+///
+/// # Supported Placeholders
+///
+/// | Placeholder | Description | Example Output |
+/// |-------------|-------------|----------------|
+/// | `{timestamp}` | UTC timestamp in ISO 8601 format | `2026-03-19T10:30:45.123Z` |
+/// | `{level}` | Log level | `INFO`, `ERROR`, `DEBUG` |
+/// | `{target}` | Target module path | `my_module::submodule` |
+/// | `{message}` | Log message content | `User logged in` |
+/// | `{file}` | Source file path | `src/main.rs` |
+/// | `{line}` | Line number in source file | `42` |
+/// | `{thread_id}` | Thread identifier | `thread-1` |
+/// | `{fields}` | Structured fields as key=value pairs | `user=123 action=login` |
+///
+/// # Escaping
+///
+/// To include literal braces in the output, use `{{` and `}}`:
+/// - Template: `{{literal}} {message}`
+/// - Output: `{literal} User logged in`
+///
+/// # Examples
+///
+/// ```
+/// use inklog::template::LogTemplate;
+/// use inklog::log_record::LogRecord;
+/// use chrono::Utc;
+/// use std::collections::HashMap;
+/// use serde_json::Value;
+///
+/// // Create a template with standard format
+/// let template = LogTemplate::new("{timestamp} [{level}] {target} - {message}");
+///
+/// // Render a log record
+/// let record = LogRecord {
+///     timestamp: Utc::now(),
+///     level: "INFO".to_string(),
+///     target: "my_app::api".to_string(),
+///     message: "Request processed".to_string(),
+///     fields: HashMap::new(),
+///     file: None,
+///     line: None,
+///     thread_id: "main".to_string(),
+/// };
+///
+/// let output = template.render(&record);
+/// // Output: "2026-03-19T10:30:45.123Z [INFO] my_app::api - Request processed"
+/// ```
+///
+/// # Performance
+///
+/// Template parsing happens once during [`LogTemplate::new()`], and the parsed
+/// placeholder structure is reused for all subsequent [`render()`](LogTemplate::render)
+/// calls, making rendering efficient for high-throughput logging scenarios.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogTemplate {
@@ -46,6 +103,51 @@ enum Placeholder {
 }
 
 impl LogTemplate {
+    /// Creates a new `LogTemplate` from a template string.
+    ///
+    /// Parses the template string to identify placeholders (enclosed in `{}`) and
+    /// literal text. The parsed structure is stored for efficient rendering.
+    ///
+    /// # Arguments
+    ///
+    /// * `template` - A template string containing placeholders and literal text.
+    ///   Placeholders are enclosed in curly braces: `{placeholder_name}`.
+    ///
+    /// # Supported Placeholders
+    ///
+    /// - `{timestamp}` - UTC timestamp (ISO 8601 format with milliseconds)
+    /// - `{level}` - Log level (INFO, ERROR, DEBUG, etc.)
+    /// - `{target}` - Target module path
+    /// - `{message}` - Log message content
+    /// - `{file}` - Source file path (optional, renders empty if not present)
+    /// - `{line}` - Line number (optional, renders empty if not present)
+    /// - `{thread_id}` - Thread identifier
+    /// - `{fields}` - Structured fields as `key=value` pairs
+    ///
+    /// # Escaping
+    ///
+    /// Use `{{` to output a literal `{` character:
+    /// - Input: `"{{escaped}}"` → Output: `"{escaped}"`
+    ///
+    /// Unknown placeholders are rendered as-is (e.g., `{unknown}` remains `{unknown}`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use inklog::template::LogTemplate;
+    ///
+    /// // Standard log format
+    /// let template = LogTemplate::new("{timestamp} [{level}] {target} - {message}");
+    ///
+    /// // With file and line information
+    /// let template = LogTemplate::new("{message} ({file}:{line})");
+    ///
+    /// // Custom format with fields
+    /// let template = LogTemplate::new("[{level}] {message} {fields}");
+    ///
+    /// // With literal braces
+    /// let template = LogTemplate::new("{{literal}} {message}");
+    /// ```
     pub fn new(template: &str) -> Self {
         let mut placeholders = Vec::new();
         let mut current = String::new();
@@ -95,6 +197,56 @@ impl LogTemplate {
         }
     }
 
+    /// Renders a log record using the template.
+    ///
+    /// Replaces all placeholders in the template with values from the provided `LogRecord`.
+    /// The rendering is efficient as the template is pre-parsed during construction.
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - The log record containing values to substitute into the template.
+    ///
+    /// # Returns
+    ///
+    /// A formatted string with all placeholders replaced by their corresponding values
+    /// from the log record.
+    ///
+    /// # Placeholder Resolution
+    ///
+    /// | Placeholder | Source Field | Behavior When Missing |
+    /// |-------------|--------------|----------------------|
+    /// | `{timestamp}` | `record.timestamp` | Always present (required field) |
+    /// | `{level}` | `record.level` | Always present (required field) |
+    /// | `{target}` | `record.target` | Always present (required field) |
+    /// | `{message}` | `record.message` | Always present (required field) |
+    /// | `{file}` | `record.file` | Renders as empty string if `None` |
+    /// | `{line}` | `record.line` | Renders as empty string if `None` |
+    /// | `{thread_id}` | `record.thread_id` | Always present (required field) |
+    /// | `{fields}` | `record.fields` | Renders as empty string if empty |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use inklog::template::LogTemplate;
+    /// use inklog::log_record::LogRecord;
+    /// use chrono::Utc;
+    /// use std::collections::HashMap;
+    ///
+    /// let template = LogTemplate::new("[{level}] {message}");
+    /// let record = LogRecord {
+    ///     timestamp: Utc::now(),
+    ///     level: "INFO".to_string(),
+    ///     target: "my_module".to_string(),
+    ///     message: "Task completed".to_string(),
+    ///     fields: HashMap::new(),
+    ///     file: None,
+    ///     line: None,
+    ///     thread_id: "main".to_string(),
+    /// };
+    ///
+    /// let output = template.render(&record);
+    /// assert!(output.starts_with("[INFO] Task completed"));
+    /// ```
     pub fn render(&self, record: &LogRecord) -> String {
         let mut result = String::new();
 

@@ -11,7 +11,10 @@
 use crate::config::FileSinkConfig;
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
-use crate::sink::{circuit_breaker, LogSink};
+use crate::masking::DataMasker;
+use crate::sink::circuit_breaker::CircuitBreaker;
+use crate::sink::rotation::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
+use crate::sink::LogSink;
 use aes_gcm::aead::Aead;
 use aes_gcm::KeyInit;
 use bytes::BytesMut;
@@ -27,7 +30,7 @@ use std::time::{Duration as StdDuration, Instant};
 use tracing::{debug, error, info, warn};
 
 // 类型别名，保持向后兼容
-pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
+pub use super::circuit_breaker::{CircuitBreakerConfig, CircuitState};
 
 /// 文件日志接收器
 ///
@@ -74,6 +77,10 @@ pub struct FileSink {
     last_cleanup_time: Arc<Mutex<Option<Instant>>>,
     /// Shutdown flag for graceful thread termination
     shutdown_flag: Arc<AtomicBool>,
+    /// 数据脱敏器
+    masker: DataMasker,
+    /// 轮转策略
+    rotation_strategy: Box<dyn RotationStrategy>,
 }
 
 /// FileSink 的实现，包含所有文件日志操作的核心逻辑
@@ -91,6 +98,21 @@ impl FileSink {
         let rotation_timer = Arc::new(Mutex::new(Instant::now()));
         let last_rotation = Instant::now();
 
+        // Create rotation strategy based on config
+        let rotation_strategy: Box<dyn RotationStrategy> = {
+            let max_size = Self::parse_size(&config.max_size).unwrap_or(100 * 1024 * 1024);
+            let size_strategy = SizeBasedRotation::new(max_size);
+            let time_strategy = TimeBasedRotation::from_interval_string(&config.rotation_time)
+                .unwrap_or_else(|_| {
+                    TimeBasedRotation::from_interval_string("daily")
+                        .expect("hardcoded 'daily' interval is valid")
+                });
+            Box::new(crate::sink::rotation::CompositeRotation::new(vec![
+                Box::new(size_strategy),
+                Box::new(time_strategy),
+            ]))
+        };
+
         let mut sink = Self {
             config: config.clone(),
             current_file: None,
@@ -99,6 +121,8 @@ impl FileSink {
             rotation_interval,
             next_rotation_time: None,
             last_rotation_date: None,
+            masker: DataMasker::new(),
+            rotation_strategy,
             sequence: 0,
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -181,6 +205,13 @@ impl FileSink {
             ))
         })?;
 
+        // 验证密钥长度（Base64 编码前至少 16 字符）
+        if key.len() < 16 {
+            return Err(InklogError::EncryptionError(
+                "Encryption key must be at least 16 characters".to_string(),
+            ));
+        }
+
         let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key)
             .map_err(|_| {
                 InklogError::EncryptionError(
@@ -188,15 +219,46 @@ impl FileSink {
                 )
             })?;
 
-        let key_bytes = BytesMut::from(&decoded[..]);
-
-        if key_bytes.len() != 32 {
+        if decoded.len() != 32 {
             return Err(InklogError::EncryptionError(
                 "Encryption key must be 32 bytes (256 bits)".to_string(),
             ));
         }
 
+        // 验证密钥熵（确保不是弱密钥）
+        if !Self::validate_key_entropy(&decoded) {
+            warn!("Encryption key has low entropy - consider using a stronger key");
+        }
+
+        let key_bytes = BytesMut::from(&decoded[..]);
+
         Ok(key_bytes)
+    }
+
+    /// 验证密钥熵（Shannon entropy）
+    /// 返回 true 如果密钥有足够的熵（>= 4.0）
+    fn validate_key_entropy(key: &[u8]) -> bool {
+        if key.is_empty() {
+            return false;
+        }
+
+        let mut freq = [0u32; 256];
+        for &b in key {
+            freq[b as usize] += 1;
+        }
+
+        let len = key.len() as f64;
+        let entropy: f64 = freq
+            .iter()
+            .filter(|&&count| count > 0)
+            .map(|&count| {
+                let p = count as f64 / len;
+                -p * p.log2()
+            })
+            .sum();
+
+        // Shannon entropy >= 4.0 表示足够随机
+        entropy >= 4.0
     }
 
     fn open_file(&mut self) -> Result<(), InklogError> {
@@ -594,7 +656,9 @@ impl FileSink {
         let cipher = Aes256Gcm::new_from_slice(&key_bytes)
             .map_err(|e| InklogError::EncryptionError(format!("Invalid key: {}", e)))?;
 
-        // 生成随机 nonce
+        // 生成加密安全的随机 nonce
+        // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 OsRng 定期种子化
+        // rand::rng() 返回 ThreadRng，它是密码学安全的
         let mut nonce_bytes = [0u8; 12];
         rand::rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
@@ -683,6 +747,10 @@ impl FileSink {
                     rotation_interval: StdDuration::from_secs(86400),
                     next_rotation_time: None,
                     last_rotation_date: None,
+                    masker: DataMasker::new(),
+                    rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(
+                        vec![],
+                    )),
                     sequence: 0,
                     fallback_sink: None,
                     circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -711,6 +779,10 @@ impl FileSink {
                     rotation_interval: StdDuration::from_secs(86400),
                     next_rotation_time: None,
                     last_rotation_date: None,
+                    masker: DataMasker::new(),
+                    rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(
+                        vec![],
+                    )),
                     sequence: 0,
                     fallback_sink: None,
                     circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -775,15 +847,25 @@ impl LogSink for FileSink {
             return Ok(());
         }
 
+        // 应用数据脱敏（如果启用）
+        let masked_record = if self.config.masking_enabled {
+            let mut masked = record.clone();
+            masked.message = self.masker.mask(&record.message);
+            self.masker.mask_hashmap(&mut masked.fields);
+            masked
+        } else {
+            record.clone()
+        };
+
         // 添加到批量缓冲区
         // Update current_size before adding to buffer
-        let record_len = record.timestamp.to_rfc3339().len()
-            + record.level.len()
-            + record.target.len()
-            + record.message.len()
+        let record_len = masked_record.timestamp.to_rfc3339().len()
+            + masked_record.level.len()
+            + masked_record.target.len()
+            + masked_record.message.len()
             + 7;
         self.current_size += record_len as u64;
-        self.batch_buffer.push(record.clone());
+        self.batch_buffer.push(masked_record);
 
         // 检查轮转条件（在更新 current_size 之后）
         if Self::parse_size(&self.config.max_size).is_some_and(|max| self.current_size >= max)
@@ -929,6 +1011,7 @@ impl Clone for FileSink {
             rotation_interval: self.rotation_interval,
             next_rotation_time: None,
             last_rotation_date: None,
+            masker: DataMasker::new(),
             sequence: 0,
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -939,6 +1022,7 @@ impl Clone for FileSink {
             cleanup_timer_handle: None,
             last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
+            rotation_strategy: self.rotation_strategy.clone_boxed(),
         }
     }
 }
@@ -996,6 +1080,7 @@ mod tests {
             cleanup_interval_minutes: 60,
             batch_size: 100,
             flush_interval_ms: 100,
+            masking_enabled: true,
         };
 
         // Create test files
@@ -1025,6 +1110,8 @@ mod tests {
             current_size: 0,
             last_rotation: Instant::now(),
             rotation_interval: StdDuration::from_secs(86400),
+            next_rotation_time: None,
+            last_rotation_date: None,
             sequence: 0,
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -1035,8 +1122,8 @@ mod tests {
             cleanup_timer_handle: None,
             last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
-            next_rotation_time: None,
-            last_rotation_date: None,
+            masker: DataMasker::new(),
+            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
         };
 
         let key_result = sink.get_encryption_key();
@@ -1062,6 +1149,8 @@ mod tests {
             current_size: 0,
             last_rotation: Instant::now(),
             rotation_interval: StdDuration::from_secs(86400),
+            next_rotation_time: None,
+            last_rotation_date: None,
             sequence: 0,
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -1072,8 +1161,8 @@ mod tests {
             cleanup_timer_handle: None,
             last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
-            next_rotation_time: None,
-            last_rotation_date: None,
+            masker: DataMasker::new(),
+            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
         };
 
         let result = sink.get_disk_space_info();
@@ -1099,6 +1188,8 @@ mod tests {
             current_size: 0,
             last_rotation: Instant::now(),
             rotation_interval: StdDuration::from_secs(86400),
+            next_rotation_time: None,
+            last_rotation_date: None,
             sequence: 0,
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -1109,8 +1200,8 @@ mod tests {
             cleanup_timer_handle: None,
             last_cleanup_time: Arc::new(Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
-            next_rotation_time: None,
-            last_rotation_date: None,
+            masker: DataMasker::new(),
+            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
         };
 
         let result = sink.check_disk_space();
@@ -1218,6 +1309,8 @@ mod tests {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             next_rotation_time: None,
             last_rotation_date: None,
+            masker: DataMasker::new(),
+            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
         };
 
         let result = sink.get_encryption_key();
@@ -1251,6 +1344,8 @@ mod tests {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             next_rotation_time: None,
             last_rotation_date: None,
+            masker: DataMasker::new(),
+            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
         };
 
         let result = sink.get_encryption_key();
@@ -1266,8 +1361,16 @@ mod tests {
     #[test]
     fn test_file_sink_new_default() {
         let config = FileSinkConfig::default();
+        println!("FileSinkConfig: {:?}", config);
         let result = FileSink::new(config);
-        assert!(result.is_ok());
+        if let Err(ref e) = result {
+            println!("Error: {:?}", e);
+        }
+        assert!(
+            result.is_ok(),
+            "Expected FileSink::new to succeed with default config, but got error: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1291,5 +1394,96 @@ mod tests {
         };
         let result = FileSink::new(config);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_key_entropy_strong() {
+        // 使用真正的随机密钥（高熵）
+        let strong_key = [
+            0x3a, 0x7b, 0x9c, 0x1d, 0x4e, 0x8f, 0x2c, 0x6b, 0x9a, 0x3d, 0x8e, 0x1f, 0x4a, 0x7d,
+            0x2e, 0x6f, 0x9b, 0x3c, 0x8d, 0x1e, 0x4b, 0x6a, 0x2b, 0x6c, 0x9f, 0x3a, 0x8b, 0x1c,
+            0x4d, 0x7e, 0x2f, 0x6a,
+        ];
+        assert!(FileSink::validate_key_entropy(&strong_key));
+    }
+
+    #[test]
+    fn test_validate_key_entropy_weak() {
+        // 使用弱密钥（全相同字节）
+        let weak_key = [0xaa; 32];
+        assert!(!FileSink::validate_key_entropy(&weak_key));
+    }
+
+    #[test]
+    fn test_validate_key_entropy_empty() {
+        // 空密钥应该返回 false
+        let empty_key: [u8; 0] = [];
+        assert!(!FileSink::validate_key_entropy(&empty_key));
+    }
+
+    #[test]
+    fn test_get_encryption_key_too_short() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("test.log"),
+            encryption_key_env: Some("TEST_SHORT_KEY".to_string()),
+            ..Default::default()
+        };
+
+        // 设置一个太短的密钥（Base64 编码前 < 16 字符）
+        std::env::set_var("TEST_SHORT_KEY", "YWJjZA=="); // "abcd"
+
+        let sink = FileSink {
+            config,
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            rotation_interval: StdDuration::from_secs(86400),
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            last_cleanup_time: Arc::new(Mutex::new(None)),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            next_rotation_time: None,
+            last_rotation_date: None,
+            masker: DataMasker::new(),
+            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
+        };
+
+        let result = sink.get_encryption_key();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("at least 16 characters"));
+    }
+
+    #[test]
+    fn test_nonce_generation_unique() {
+        // 测试每次生成的 nonce 都是唯一的
+        use rand::RngCore;
+
+        let mut nonces = Vec::new();
+        for _ in 0..100 {
+            let mut nonce_bytes = [0u8; 12];
+            rand::rng().fill_bytes(&mut nonce_bytes);
+            nonces.push(nonce_bytes);
+        }
+
+        // 确保所有 nonce 都是唯一的
+        for i in 0..nonces.len() {
+            for j in (i + 1)..nonces.len() {
+                assert_ne!(
+                    nonces[i], nonces[j],
+                    "Nonce {} and {} should be different",
+                    i, j
+                );
+            }
+        }
     }
 }

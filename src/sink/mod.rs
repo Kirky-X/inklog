@@ -13,7 +13,16 @@ pub mod encryption;
 #[cfg(feature = "dbnexus")]
 pub mod entity;
 pub mod file;
+pub mod registry;
 pub mod ring_buffered_file;
+pub mod rotation;
+
+pub use compression::{CompressionStrategy, GzipCompression, NoCompression, ZstdCompression};
+pub use registry::{FileSinkFactory, SinkFactory, SinkMetadata, SinkRegistry};
+pub use rotation::{
+    CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,
+    TimeBasedRotation,
+};
 
 use crate::error::InklogError;
 use crate::log_record::LogRecord;

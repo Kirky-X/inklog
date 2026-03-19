@@ -108,6 +108,7 @@ mod object_pool;
 pub mod sink;
 pub mod subscriber;
 pub mod template;
+pub mod validation;
 
 pub use config::{
     ChannelStrategy, ConsoleSinkConfig, DatabaseSinkConfig, FileSinkConfig, InklogConfig,
@@ -119,10 +120,15 @@ pub use log_adapter::{LogAdapter, LogLogger};
 pub use log_record::LogRecord;
 pub use manager::{LoggerBuilder, LoggerManager};
 pub use metrics::{
-    FallbackConfig, FallbackState, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
+    FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
 };
-pub use object_pool::ObjectPool;
+pub use object_pool::{
+    get_log_record, get_string_buffer, put_log_record, put_string_buffer, ObjectPool,
+};
 pub use template::LogTemplate;
+pub use validation::{
+    EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,
+};
 
 #[cfg(feature = "aws")]
 pub use archive::{ArchiveService, ArchiveServiceBuilder, S3ArchiveConfig, S3ArchiveManager};
