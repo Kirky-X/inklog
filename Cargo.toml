@@ -16,7 +16,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\"))"] }
 
 [features]
-default = ["aws", "http", "cli", "dbnexus", "confers"]
+default = ["aws", "http", "cli", "confers"]
 confers = []
 dbnexus = ["dep:dbnexus", "dep:sea-orm"]
 http = ["dep:axum"]
@@ -32,11 +32,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "fmt", "registry", "env-filter"] }
 tracing-core = "0.1"
 crossbeam-channel = "0.5"
-tokio = { version = "1.49", features = ["full"] }
+tokio = { version = "1.50", features = ["full"] }
 rayon = "1.11"
 num_cpus = "1.17"
 futures = { version = "0.3", features = ["executor"] }
-owo-colors = { version = "4.2", features = ["supports-colors"] }
+owo-colors = { version = "4.3", features = ["supports-colors"] }
 regex = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -49,7 +49,7 @@ num-traits = "0.2"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 axum = { version = "0.8", optional = true }
-uuid = { version = "1.20", features = ["v4"] }
+uuid = { version = "1.22", features = ["v4"] }
 hostname = "0.4"
 is-terminal = "0.4"
 once_cell = "1.21"
@@ -64,13 +64,13 @@ zstd = "0.13"
 aes-gcm = "0.10"
 rand = "0.9"
 base64 = "0.22"
-parquet = { version = "57.2", features = ["async"] }
-arrow-array = "57.2"
-arrow-schema = "57.2"
+parquet = { version = "57.3", features = ["async"] }
+arrow-array = "57.3"
+arrow-schema = "57.3"
 dbnexus = { path = "/home/dev/projects/dbnexus", default-features = false, features = ["sqlite", "sql-parser", "config-env", "macros", "permission"], optional = true }
-sea-orm = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-native-tls", "with-chrono"], optional = true }
-aws-sdk-s3 = { version = "1.120.0", features = ["rt-tokio"], optional = true }
-aws-config = { version = "1.8.12", features = ["behavior-version-latest", "rt-tokio"], optional = true }
+sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio-native-tls", "with-chrono"], optional = true }
+aws-sdk-s3 = { version = "1.127.0", features = ["rt-tokio"], optional = true }
+aws-config = { version = "1.8.15", features = ["behavior-version-latest", "rt-tokio"], optional = true }
 aws-types = { version = "1.3", optional = true }
 aws-credential-types = { version = "1.2", optional = true }
 flate2 = "1.1"
@@ -83,20 +83,22 @@ zeroize = "1.8"
 zeroize_derive = "1.4"
 sha2 = "0.10"
 pbkdf2 = "0.12"
-clap = { version = "4.5", features = ["derive", "env"], optional = true }
+clap = { version = "4.6", features = ["derive", "env"], optional = true }
 glob = { version = "0.3", optional = true }
+ipnet = "2.12"
+subtle = "2.6"
 
 [dev-dependencies]
-tempfile = "3.24"
+tempfile = "3.27"
 criterion = { version = "0.8", features = ["async_tokio"] }
-serial_test = "3.3"
+serial_test = "3.4"
 axum = "0.8"
 log = "0.4"
 reqwest = { version = "0.13", features = ["json"] }
 filetime = "0.2"
 bytes = "1.11"
-assert_cmd = "2.0"
-predicates = "3.0"
+assert_cmd = "2.2"
+predicates = "3.1"
 
 [[bench]]
 name = "inklog_bench"

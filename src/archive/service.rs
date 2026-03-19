@@ -24,7 +24,9 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{debug, error, info, warn};
+#[cfg(feature = "dbnexus")]
+use tracing::debug;
+use tracing::{error, info, warn};
 
 /// 归档服务
 pub struct ArchiveService {

@@ -5,14 +5,57 @@ edition = "2021"
 publish = false
 description = "Examples for inklog - Enterprise-grade Rust logging infrastructure"
 
+[features]
+dbnexus = ["inklog/dbnexus", "dep:dbnexus"]
+
 [dependencies]
-inklog = { path = ".." }
+inklog = { path = "..", features = ["dbnexus"] }
+dbnexus = { path = "/home/dev/projects/dbnexus", features = ["sqlite"], optional = true }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.20", features = ["v4"] }
+chrono = "0.4.44"
+aes-gcm = "0.10.3"
+base64 = "0.22.1"
+rand = "0.10.0"
+tempfile = "3.27.0"
 
+[[bin]]
+name = "console"
+path = "src/bin/console.rs"
+
+[[bin]]
+name = "file"
+path = "src/bin/file.rs"
+
+[[bin]]
+name = "encryption"
+path = "src/bin/encryption.rs"
+
+[[bin]]
+name = "performance"
+path = "src/bin/performance.rs"
+
+[[bin]]
+name = "database"
+path = "src/bin/database.rs"
+
+[[bin]]
+name = "http"
+path = "src/bin/http.rs"
+
+[[bin]]
+name = "fallback"
+path = "src/bin/fallback.rs"
+
+[[bin]]
+name = "s3_archive"
+path = "src/bin/s3_archive.rs"
+
+# 现有 binary（保留）
 [[bin]]
 name = "basic"
 path = "src/bin/basic.rs"
@@ -24,3 +67,16 @@ path = "src/bin/production.rs"
 [[bin]]
 name = "all_features"
 path = "src/bin/all_features.rs"
+
+# Layer 0 零依赖示例
+[[bin]]
+name = "builder"
+path = "src/bin/builder.rs"
+
+[[bin]]
+name = "template"
+path = "src/bin/template.rs"
+
+[[bin]]
+name = "masking"
+path = "src/bin/masking.rs"

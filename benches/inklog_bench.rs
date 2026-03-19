@@ -5,6 +5,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use inklog::masking::{self, DataMasker};
+#[cfg(feature = "dbnexus")]
 use inklog::sink::database::convert_logs_to_parquet;
 use inklog::{
     config::{FileSinkConfig, PerformanceConfig},
@@ -271,7 +272,7 @@ fn bench_memory_usage(c: &mut Criterion) {
 }
 
 // ============ Parquet 转换性能测试 ============
-
+#[cfg(feature = "dbnexus")]
 fn bench_parquet_conversion(c: &mut Criterion) {
     let mut group = c.benchmark_group("parquet_conversion");
     group.measurement_time(Duration::from_secs(10));
@@ -536,10 +537,121 @@ criterion_group!(
     bench_memory_usage,
     bench_file_sink_throughput,
     bench_noop_throughput,
-    bench_parquet_conversion,
     bench_template_rendering,
     bench_masking,
     bench_backpressure,
-    bench_concurrency
+    bench_concurrency,
+    bench_object_pool,
+    bench_zero_allocation
 );
+#[cfg(feature = "dbnexus")]
+criterion_group!(dbnexus_benches, bench_parquet_conversion);
 criterion_main!(benches);
+
+// ============ Object Pool Performance Benchmark ============
+
+fn bench_object_pool(c: &mut Criterion) {
+    use inklog::{get_log_record, get_string_buffer, put_log_record, put_string_buffer};
+
+    let mut group = c.benchmark_group("object_pool");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function("pool_get_put_log_record", |b| {
+        b.iter(|| {
+            let mut record = get_log_record();
+            record.level = Level::INFO.to_string();
+            record.message = "Test message".to_string();
+            put_log_record(record);
+        })
+    });
+
+    group.bench_function("pool_get_put_string_buffer", |b| {
+        b.iter(|| {
+            let mut s = get_string_buffer();
+            s.push_str("Test string content");
+            s.clear();
+            put_string_buffer(s);
+        })
+    });
+
+    group.bench_function("pool_vs_allocation_log_record", |b| {
+        b.iter(|| {
+            let record = LogRecord::new(
+                Level::INFO,
+                "benchmark_target".to_string(),
+                "This is a benchmark log message".to_string(),
+            );
+            std::mem::forget(record);
+        })
+    });
+
+    group.bench_function("pool_vs_allocation_string", |b| {
+        b.iter(|| {
+            let mut s = String::with_capacity(256);
+            s.push_str("Test string content for benchmarking");
+            s.clear();
+            std::mem::forget(s);
+        })
+    });
+
+    group.bench_function("pool_hit_rate_after_warmup", |b| {
+        for _ in 0..100 {
+            let record = get_log_record();
+            put_log_record(record);
+        }
+        b.iter(|| {
+            let record = get_log_record();
+            put_log_record(record);
+        })
+    });
+
+    group.finish();
+}
+
+// ============ Zero-Allocation Hot Path Validation ============
+
+fn bench_zero_allocation(c: &mut Criterion) {
+    use inklog::{get_log_record, put_log_record};
+
+    let mut group = c.benchmark_group("zero_allocation");
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function("hot_path_with_pool", |b| {
+        b.iter(|| {
+            let mut record = get_log_record();
+            record.timestamp = chrono::Utc::now();
+            record.level = Level::INFO.to_string();
+            record.target = "hot_path_target".to_string();
+            record.message = "Hot path test message".to_string();
+            put_log_record(record);
+        })
+    });
+
+    group.bench_function("hot_path_without_pool", |b| {
+        b.iter(|| {
+            let _record = LogRecord::new(
+                Level::INFO,
+                "hot_path_target".to_string(),
+                "Hot path test message".to_string(),
+            );
+        })
+    });
+
+    group.bench_function("string_pool_reuse", |b| {
+        use inklog::{get_string_buffer, put_string_buffer};
+
+        for _ in 0..100 {
+            let s = get_string_buffer();
+            put_string_buffer(s);
+        }
+
+        b.iter(|| {
+            let mut s = get_string_buffer();
+            s.push_str("Reusable string buffer");
+            s.clear();
+            put_string_buffer(s);
+        })
+    });
+
+    group.finish();
+}

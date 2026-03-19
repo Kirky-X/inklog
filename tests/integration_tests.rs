@@ -23,6 +23,11 @@ use inklog::LoggerManager;
 use std::time::Duration;
 use tracing::{error, info};
 
+#[cfg(feature = "dbnexus")]
+use inklog::sink::database::DatabaseSink;
+#[cfg(feature = "dbnexus")]
+use inklog::sink::LogSink;
+
 #[tokio::test]
 #[ignore] // Uses global subscriber, may hang in parallel test execution
 async fn test_e2e_logging() {
@@ -49,6 +54,7 @@ async fn test_load_from_file() {
         r#"
         [global]
         level = "debug"
+        format = "{{timestamp}} [{{level}}] {{target}} - {{message}}"
         [performance]
         channel_capacity = 500
     "#
@@ -62,6 +68,7 @@ async fn test_load_from_file() {
     // Verify config was parsed correctly
     assert_eq!(config.global.level, "debug");
     assert_eq!(config.performance.channel_capacity, 500);
+    assert_eq!(config.performance.worker_threads, 3); // Should default to 3
 
     // Skip full LoggerManager initialization in test (can cause timeout in CI)
     // Just verify config is valid
@@ -392,13 +399,21 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
 }
 
 // ============ 批量写入集成测试 (integration::batch) ============
+#[cfg(feature = "dbnexus")]
 use inklog::config::DatabaseDriver as BatchDatabaseDriver;
+#[cfg(feature = "dbnexus")]
 use inklog::log_record::LogRecord as BatchLogRecord;
+#[cfg(feature = "dbnexus")]
 use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
+#[cfg(feature = "dbnexus")]
 use inklog::sink::LogSink as BatchLogSink;
+#[cfg(feature = "dbnexus")]
 use inklog::DatabaseSinkConfig as BatchDatabaseSinkConfig;
+#[cfg(feature = "dbnexus")]
 use std::time::Duration as BatchDuration;
+#[cfg(feature = "dbnexus")]
 use tempfile::TempDir as BatchTempDir;
+#[cfg(feature = "dbnexus")]
 use tracing::Level as BatchLevel;
 
 #[cfg(feature = "dbnexus")]
@@ -535,14 +550,14 @@ fn clear_all_inklog_env_vars() {
 fn test_config_from_env_overrides() {
     clear_all_inklog_env_vars();
 
-    std::env::set_var("INKLOG_LEVEL", "debug");
+    std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
     std::env::set_var("INKLOG_FILE_ENABLED", "true");
     std::env::set_var("INKLOG_FILE_PATH", "/tmp/test_logs/app.log");
     std::env::set_var("INKLOG_FILE_MAX_SIZE", "50MB");
     std::env::set_var("INKLOG_FILE_COMPRESS", "true");
 
-    let mut config = ConfigInklogConfig::default();
-    config.apply_env_overrides();
+    // 使用 load_with_nested_env() 自动应用环境变量覆盖（包括嵌套字段）
+    let config = ConfigInklogConfig::load_with_nested_env().unwrap();
 
     // 验证环境变量覆盖生效
     assert_eq!(config.global.level, "debug");
@@ -567,8 +582,8 @@ fn test_config_env_override_s3_encryption() {
     std::env::set_var("INKLOG_S3_ENCRYPTION_KMS_KEY_ID", "test-key-id");
     std::env::set_var("INKLOG_ARCHIVE_FORMAT", "parquet");
 
-    let mut config = ConfigInklogConfig::default();
-    config.apply_env_overrides();
+    // 使用 load_with_nested_env() 自动应用环境变量覆盖（包括嵌套字段）
+    let config = ConfigInklogConfig::load_with_nested_env().unwrap();
 
     // 验证 S3 归档配置
     assert!(config.s3_archive.is_some());
@@ -595,8 +610,8 @@ fn test_config_env_override_http_server() {
     std::env::set_var("INKLOG_HTTP_METRICS_PATH", "/prometheus");
     std::env::set_var("INKLOG_HTTP_HEALTH_PATH", "/status");
 
-    let mut config = ConfigInklogConfig::default();
-    config.apply_env_overrides();
+    // 使用 load_with_nested_env() 自动应用环境变量覆盖（包括嵌套字段）
+    let config = ConfigInklogConfig::load_with_nested_env().unwrap();
 
     assert!(config.http_server.is_some());
     let http = config.http_server.unwrap();
@@ -615,8 +630,8 @@ fn test_config_env_override_performance() {
     std::env::set_var("INKLOG_WORKER_THREADS", "8");
     std::env::set_var("INKLOG_CHANNEL_CAPACITY", "20000");
 
-    let mut config = ConfigInklogConfig::default();
-    config.apply_env_overrides();
+    // 使用 load_with_nested_env() 自动应用环境变量覆盖（包括嵌套字段）
+    let config = ConfigInklogConfig::load_with_nested_env().unwrap();
 
     assert_eq!(config.performance.worker_threads, 8);
     assert_eq!(config.performance.channel_capacity, 20000);
@@ -655,6 +670,8 @@ async fn test_http_server_startup_with_default_config() {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Strict,
+        auth: None,
+        ip_whitelist: None,
     };
 
     let inklog_config = HttpInklogConfig {
@@ -680,6 +697,8 @@ async fn test_http_server_error_mode_panic() {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Strict,
+        auth: None,
+        ip_whitelist: None,
     };
 
     match config.error_mode {
@@ -700,6 +719,8 @@ async fn test_http_server_error_mode_warn() {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Warn,
+        auth: None,
+        ip_whitelist: None,
     };
 
     match config.error_mode {
@@ -720,6 +741,8 @@ async fn test_http_server_error_mode_strict() {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Strict,
+        auth: None,
+        ip_whitelist: None,
     };
 
     match config.error_mode {
@@ -738,8 +761,8 @@ async fn test_http_server_with_logger_manager() {
     std::env::set_var("INKLOG_HTTP_PORT", "18084");
     std::env::set_var("INKLOG_HTTP_ERROR_MODE", "warn");
 
-    let mut config = HttpInklogConfig::default();
-    config.apply_env_overrides();
+    // 使用 load_with_nested_env() 自动应用环境变量覆盖（包括嵌套字段）
+    let config = HttpInklogConfig::load_with_nested_env().unwrap();
 
     assert!(config.http_server.is_some());
     let http = config.http_server.unwrap();
@@ -766,8 +789,8 @@ async fn test_http_metrics_path_configuration() {
     std::env::set_var("INKLOG_HTTP_METRICS_PATH", "/prometheus/metrics");
     std::env::set_var("INKLOG_HTTP_HEALTH_PATH", "/status");
 
-    let mut config = HttpInklogConfig::default();
-    config.apply_env_overrides();
+    // 使用 load_with_nested_env() 自动应用环境变量覆盖（包括嵌套字段）
+    let config = HttpInklogConfig::load_with_nested_env().unwrap();
 
     let http = config
         .http_server
@@ -781,8 +804,8 @@ async fn test_http_metrics_path_configuration() {
 async fn test_http_server_disabled_by_default() {
     clear_inklog_env();
 
-    let mut config = HttpInklogConfig::default();
-    config.apply_env_overrides();
+    // 使用 load_with_nested_env() 自动应用环境变量覆盖（包括嵌套字段）
+    let config = HttpInklogConfig::load_with_nested_env().unwrap();
 
     assert!(
         config.http_server.is_none(),
@@ -795,11 +818,17 @@ async fn test_http_server_disabled_by_default() {
 // Parquet功能验证测试
 // 测试Parquet导出功能的正确性、性能和兼容性
 
+#[cfg(feature = "dbnexus")]
 use arrow_array::RecordBatchReader;
+#[cfg(feature = "dbnexus")]
 use arrow_schema::DataType;
+#[cfg(feature = "dbnexus")]
 use bytes::Bytes;
+#[cfg(feature = "dbnexus")]
 use inklog::sink::database::convert_logs_to_parquet;
+#[cfg(feature = "dbnexus")]
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+#[cfg(feature = "dbnexus")]
 use std::time::Instant;
 
 // ============ Test Data Helper Functions ============
@@ -842,6 +871,7 @@ const EXPECTED_FIELD_NAMES: &[&str] = &[
 ];
 
 /// Expected schema field types
+#[cfg(feature = "dbnexus")]
 const EXPECTED_FIELD_TYPES: &[DataType] = &[
     DataType::Int64,  // id
     DataType::Date64, // timestamp
@@ -855,6 +885,7 @@ const EXPECTED_FIELD_TYPES: &[DataType] = &[
 ];
 
 /// Verifies Parquet file schema (names and types)
+#[cfg(feature = "dbnexus")]
 fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
@@ -879,6 +910,7 @@ fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 /// Verifies Parquet file data content
+#[cfg(feature = "dbnexus")]
 fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
@@ -896,6 +928,7 @@ fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Complete Parquet file verification (schema + data)
+#[cfg(feature = "dbnexus")]
 fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     verify_parquet_schema(data)?;
     verify_parquet_data(data)?;
@@ -905,6 +938,7 @@ fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 // ============ Parquet Tests ============
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn test_parquet_basic_conversion() {
     let logs = create_test_logs(100);
     let result = convert_logs_to_parquet(&logs, &Default::default());
@@ -922,6 +956,7 @@ fn test_parquet_basic_conversion() {
 }
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn test_parquet_small_dataset() {
     let logs = create_test_logs(1_000);
     let start = Instant::now();
@@ -948,6 +983,7 @@ fn test_parquet_small_dataset() {
 }
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn test_parquet_medium_dataset() {
     let logs = create_test_logs(10_000);
     let start = Instant::now();
@@ -970,6 +1006,7 @@ fn test_parquet_medium_dataset() {
 }
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn test_parquet_large_dataset() {
     let logs = create_test_logs(100_000);
     let start = Instant::now();
@@ -992,6 +1029,7 @@ fn test_parquet_large_dataset() {
 }
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn test_parquet_compression_ratio() {
     let logs = create_test_logs(10_000);
     let result = convert_logs_to_parquet(&logs, &Default::default())
@@ -1017,6 +1055,7 @@ fn test_parquet_compression_ratio() {
 }
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn test_parquet_empty_dataset() {
     let logs: Vec<inklog::log_record::LogRecord> = vec![];
     let result = convert_logs_to_parquet(&logs, &Default::default());
@@ -1031,6 +1070,7 @@ fn test_parquet_empty_dataset() {
 }
 
 #[test]
+#[cfg(feature = "dbnexus")]
 fn test_parquet_schema_compatibility() {
     let logs = create_test_logs(100);
     let result = convert_logs_to_parquet(&logs, &Default::default())
@@ -1083,13 +1123,19 @@ async fn test_long_running_stability() {
 
 // ============ 验证集成测试 (integration::verification) ============
 
+#[cfg(feature = "dbnexus")]
 use inklog::config::DatabaseDriver as VerifyDatabaseDriver;
+#[cfg(feature = "dbnexus")]
 use inklog::sink::database::DatabaseSink as VerifyDatabaseSink;
 use inklog::sink::file::FileSink as VerifyFileSink;
+use inklog::sink::LogSink;
+#[cfg(feature = "dbnexus")]
 use inklog::{
     log_record::LogRecord as VerifyLogRecord, DatabaseSinkConfig as VerifyDatabaseSinkConfig,
     FileSinkConfig as VerifyFileSinkConfig,
 };
+#[cfg(not(feature = "dbnexus"))]
+use inklog::{log_record::LogRecord as VerifyLogRecord, FileSinkConfig as VerifyFileSinkConfig};
 use std::fs::File as VerifyFile;
 use std::io::Read as VerifyRead;
 use std::path::PathBuf;
