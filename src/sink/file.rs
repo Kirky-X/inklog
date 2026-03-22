@@ -1360,7 +1360,14 @@ mod tests {
 
     #[test]
     fn test_file_sink_new_default() {
-        let config = FileSinkConfig::default();
+        // Note: confers derive generates Default with empty PathBuf for path field.
+        // We need to provide an explicit path for the test.
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
         println!("FileSinkConfig: {:?}", config);
         let result = FileSink::new(config);
         if let Err(ref e) = result {
