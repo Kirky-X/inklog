@@ -28,7 +28,7 @@ use inklog::sink::database::DatabaseSink;
 #[cfg(feature = "dbnexus")]
 use inklog::sink::LogSink;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Uses global subscriber, may hang in parallel test execution
 async fn test_e2e_logging() {
     // This test might fail if run in parallel with others due to global subscriber
@@ -268,7 +268,7 @@ use std::fs as recovery_fs;
 use std::thread as recovery_thread;
 use std::time::Duration as RecoveryDuration;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires file recovery mechanism, may timeout in CI
 async fn test_file_sink_auto_recovery() {
     // Create a test directory
@@ -312,7 +312,7 @@ async fn test_file_sink_auto_recovery() {
     let _ = recovery_fs::remove_dir_all(test_dir);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires file recovery mechanism, may timeout in CI
 async fn test_manual_sink_recovery() {
     let test_dir = "tests/temp_manual_recovery";
@@ -354,7 +354,7 @@ async fn test_manual_sink_recovery() {
     assert!(recovery_result.is_ok());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires file recovery mechanism, may timeout in CI
 async fn test_bulk_recovery_for_unhealthy_sinks() {
     let test_dir = "tests/temp_bulk_recovery";
@@ -1087,7 +1087,7 @@ use std::thread as stability_thread;
 use std::time::{Duration as StabilityDuration, Instant as StabilityInstant};
 use tracing::{error as stability_error, info as stability_info};
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Run manually: cargo test --test integration_tests -- --ignored
 async fn test_long_running_stability() {
     let logger = StabilityLoggerManager::new()
@@ -1128,7 +1128,7 @@ use inklog::config::DatabaseDriver as VerifyDatabaseDriver;
 #[cfg(feature = "dbnexus")]
 use inklog::sink::database::DatabaseSink as VerifyDatabaseSink;
 use inklog::sink::file::FileSink as VerifyFileSink;
-use inklog::sink::LogSink;
+// LogSink already imported at line 29
 #[cfg(feature = "dbnexus")]
 use inklog::{
     log_record::LogRecord as VerifyLogRecord, DatabaseSinkConfig as VerifyDatabaseSinkConfig,
@@ -1323,7 +1323,7 @@ fn create_logs_table(url: &str) -> Result<(), String> {
 
 /// 测试 log crate 原生支持
 /// 验证用户可以直接使用 log::info! 等宏，无需 tracing_log 适配器
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires full logger initialization, may timeout in CI
 async fn test_log_crate_native_support() {
     // 初始化 inklog
@@ -1340,7 +1340,7 @@ async fn test_log_crate_native_support() {
 }
 
 /// 测试 tracing 和 log 可以同时使用
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires full logger initialization, may timeout in CI
 async fn test_tracing_and_log_coexist() {
     let _logger = LoggerManager::builder().level("debug").build().await;
@@ -1356,7 +1356,7 @@ async fn test_tracing_and_log_coexist() {
 }
 
 /// 测试日志级别过滤
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires full logger initialization, may timeout in CI
 async fn test_log_level_filtering() {
     // 设置为 WARN 级别
@@ -1374,7 +1374,7 @@ async fn test_log_level_filtering() {
 }
 
 /// 测试所有日志级别
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires full logger initialization, may timeout in CI
 async fn test_log_all_levels() {
     let _logger = LoggerManager::builder().level("trace").build().await;
@@ -1391,7 +1391,7 @@ async fn test_log_all_levels() {
 /// 测试日志文件写入
 /// 注意：此测试依赖于全局 logger 未被其他测试占用，建议单独运行
 /// 暂时忽略：测试依赖全局 logger 状态，容易与其他测试冲突
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_log_to_file() {
     let temp_dir = tempfile::tempdir().unwrap();

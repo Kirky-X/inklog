@@ -33,7 +33,7 @@ mod tests {
         0.0
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_long_running_memory_stability() {
         let duration = std::env::var("TEST_DURATION_SECS")
