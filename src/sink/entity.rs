@@ -7,7 +7,7 @@ pub use sea_orm;
 use sea_orm::entity::prelude::*;
 
 /// The main log entity for database storage
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, serde::Serialize, serde::Deserialize)]
 #[sea_orm(table_name = "logs")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
