@@ -19,18 +19,54 @@ use aes_gcm::aead::Aead;
 use aes_gcm::KeyInit;
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, Utc};
+use parking_lot::RwLock;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 use tracing::{debug, error, info, warn};
 
 // 类型别名，保持向后兼容
 pub use super::circuit_breaker::{CircuitBreakerConfig, CircuitState};
+
+/// FileSink 的可变内部状态
+///
+/// 所有需要 `&mut self` 访问的字段都封装在这里，
+/// 通过 `RwLock` 实现内部可变性。
+struct FileSinkInner {
+    /// 当前文件句柄
+    current_file: Option<File>,
+    /// 当前文件大小
+    current_size: u64,
+    /// 上次轮转时间
+    last_rotation: Instant,
+    /// 下次轮转时间
+    next_rotation_time: Option<DateTime<Utc>>,
+    /// 上次轮转日期
+    last_rotation_date: Option<i32>,
+    /// 序列号（用于区分同名轮转文件）
+    sequence: u32,
+    /// 批量写入缓冲区
+    batch_buffer: Vec<LogRecord>,
+    /// 最后一次刷新时间
+    last_flush_time: Instant,
+    /// 断路器
+    circuit_breaker: CircuitBreaker,
+    /// 降级接收器
+    fallback_sink: Option<Arc<parking_lot::Mutex<dyn LogSink + Send>>>,
+    /// 轮转定时器
+    rotation_timer: Option<Arc<parking_lot::Mutex<Instant>>>,
+    /// 轮转定时器句柄
+    timer_handle: Option<thread::JoinHandle<()>>,
+    /// 清理定时器句柄
+    cleanup_timer_handle: Option<thread::JoinHandle<()>>,
+    /// 轮转策略
+    rotation_strategy: Box<dyn RotationStrategy>,
+}
 
 /// 文件日志接收器
 ///
@@ -42,45 +78,24 @@ pub use super::circuit_breaker::{CircuitBreakerConfig, CircuitState};
 ///
 /// FileSink 是 Inklog 的核心 sink 之一，用于将日志持久化到文件系统。
 /// 当数据库不可用时，DatabaseSink 会自动降级使用 FileSink 作为备用方案。
+///
+/// ## 内部可变性
+///
+/// FileSink 使用 `RwLock<FileSinkInner>` 实现内部可变性，
+/// 允许通过 `&self` 进行写入操作，支持依赖注入模式。
 pub struct FileSink {
-    /// 配置
+    /// 配置（只读）
     config: FileSinkConfig,
-    /// 当前文件句柄
-    current_file: Option<File>,
-    /// 当前文件大小
-    current_size: u64,
-    /// 上次轮转时间
-    last_rotation: Instant,
-    /// 轮转间隔
+    /// 轮转间隔（只读）
     rotation_interval: StdDuration,
-    /// 下次轮转时间
-    next_rotation_time: Option<DateTime<Utc>>,
-    /// 上次轮转日期
-    last_rotation_date: Option<i32>,
-    /// 序列号（用于区分同名轮转文件）
-    sequence: u32,
-    /// 降级接收器
-    fallback_sink: Option<Arc<std::sync::Mutex<dyn LogSink + Send>>>,
-    /// 断路器
-    circuit_breaker: CircuitBreaker,
-    /// 批量写入缓冲区
-    batch_buffer: Vec<LogRecord>,
-    /// 最后一次刷新时间
-    last_flush_time: Instant,
-    /// 轮转定时器句柄
-    timer_handle: Option<thread::JoinHandle<()>>,
-    /// 轮转定时器
-    rotation_timer: Option<Arc<std::sync::Mutex<Instant>>>,
-    /// 清理定时器句柄
-    cleanup_timer_handle: Option<thread::JoinHandle<()>>,
     /// 上次清理时间（每个实例独立）
-    last_cleanup_time: Arc<Mutex<Option<Instant>>>,
+    last_cleanup_time: Arc<parking_lot::Mutex<Option<Instant>>>,
     /// Shutdown flag for graceful thread termination
     shutdown_flag: Arc<AtomicBool>,
-    /// 数据脱敏器
+    /// 数据脱敏器（只读）
     masker: DataMasker,
-    /// 轮转策略
-    rotation_strategy: Box<dyn RotationStrategy>,
+    /// 可变内部状态
+    inner: RwLock<FileSinkInner>,
 }
 
 /// FileSink 的实现，包含所有文件日志操作的核心逻辑
@@ -95,7 +110,7 @@ impl FileSink {
             _ => StdDuration::from_secs(86400),
         };
 
-        let rotation_timer = Arc::new(Mutex::new(Instant::now()));
+        let rotation_timer = Arc::new(parking_lot::Mutex::new(Instant::now()));
         let last_rotation = Instant::now();
 
         // Create rotation strategy based on config
@@ -113,16 +128,12 @@ impl FileSink {
             ]))
         };
 
-        let mut sink = Self {
-            config: config.clone(),
+        let inner = FileSinkInner {
             current_file: None,
             current_size: 0,
             last_rotation,
-            rotation_interval,
             next_rotation_time: None,
             last_rotation_date: None,
-            masker: DataMasker::new(),
-            rotation_strategy,
             sequence: 0,
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -131,17 +142,31 @@ impl FileSink {
             timer_handle: None,
             rotation_timer: Some(rotation_timer.clone()),
             cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
+            rotation_strategy,
+        };
+
+        let sink = Self {
+            config: config.clone(),
+            rotation_interval,
+            last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
+            masker: DataMasker::new(),
+            inner: RwLock::new(inner),
         };
 
         // 初始化轮转时间
-        sink.update_next_rotation_time();
+        {
+            let mut inner = sink.inner.write();
+            sink.update_next_rotation_time_inner(&mut inner);
+        }
 
         // 打开日志文件
-        if let Err(e) = sink.open_file() {
-            error!("Failed to open log file: {}", e);
-            return Err(e);
+        {
+            let mut inner = sink.inner.write();
+            if let Err(e) = sink.open_file_inner(&mut inner) {
+                error!("Failed to open log file: {}", e);
+                return Err(e);
+            }
         }
 
         // 启动轮转定时器
@@ -226,9 +251,7 @@ impl FileSink {
         }
 
         // 验证密钥熵（确保不是弱密钥）
-        if !Self::validate_key_entropy(&decoded) {
-            warn!("Encryption key has low entropy - consider using a stronger key");
-        }
+        Self::validate_key_entropy(&decoded)?;
 
         let key_bytes = BytesMut::from(&decoded[..]);
 
@@ -236,10 +259,12 @@ impl FileSink {
     }
 
     /// 验证密钥熵（Shannon entropy）
-    /// 返回 true 如果密钥有足够的熵（>= 4.0）
-    fn validate_key_entropy(key: &[u8]) -> bool {
+    /// 返回 Ok(()) 如果密钥有足够的熵（>= 4.0）
+    fn validate_key_entropy(key: &[u8]) -> Result<(), InklogError> {
         if key.is_empty() {
-            return false;
+            return Err(InklogError::EncryptionError(
+                "Encryption key cannot be empty".to_string(),
+            ));
         }
 
         let mut freq = [0u32; 256];
@@ -257,11 +282,19 @@ impl FileSink {
             })
             .sum();
 
-        // Shannon entropy >= 4.0 表示足够随机
-        entropy >= 4.0
+        const MIN_ENTROPY_THRESHOLD: f64 = 4.0;
+        if entropy < MIN_ENTROPY_THRESHOLD {
+            return Err(InklogError::EncryptionError(format!(
+                "Encryption key has insufficient entropy ({} < {}). \
+                 Please use a cryptographically random key.",
+                entropy, MIN_ENTROPY_THRESHOLD
+            )));
+        }
+
+        Ok(())
     }
 
-    fn open_file(&mut self) -> Result<(), InklogError> {
+    fn open_file_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
         if let Some(parent) = self.config.path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
                 error!("Failed to create log directory {}: {}", parent.display(), e);
@@ -275,12 +308,12 @@ impl FileSink {
             .open(&self.config.path)
         {
             Ok(file) => {
-                self.current_file = Some(file);
-                self.current_size = self.config.path.metadata().map(|m| m.len()).unwrap_or(0);
+                inner.current_file = Some(file);
+                inner.current_size = self.config.path.metadata().map(|m| m.len()).unwrap_or(0);
                 debug!(
                     "Opened log file: {} (size: {} bytes)",
                     self.config.path.display(),
-                    self.current_size
+                    inner.current_size
                 );
                 Ok(())
             }
@@ -292,7 +325,7 @@ impl FileSink {
     }
 
     /// 启动清理定时器
-    fn start_cleanup_timer(&mut self) {
+    fn start_cleanup_timer(&self) {
         let interval_minutes = self.config.cleanup_interval_minutes;
         let cleanup_interval = StdDuration::from_secs(interval_minutes * 60);
         let shutdown_flag = self.shutdown_flag.clone();
@@ -317,13 +350,7 @@ impl FileSink {
                 }
 
                 // 检查是否到达清理时间（使用实例级别的清理时间）
-                let mut last_cleanup = match last_cleanup_time.lock() {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        error!("Cleanup timer lock poisoned: {}", e);
-                        return;
-                    }
-                };
+                let mut last_cleanup = last_cleanup_time.lock();
                 let now = Instant::now();
 
                 if last_cleanup.is_none_or(|t| now.duration_since(t) >= cleanup_interval) {
@@ -337,7 +364,7 @@ impl FileSink {
             }
         });
 
-        self.cleanup_timer_handle = Some(handle);
+        self.inner.write().cleanup_timer_handle = Some(handle);
     }
 
     /// 清理旧的日志文件
@@ -465,19 +492,19 @@ impl FileSink {
         }
     }
 
-    fn should_rotate_by_time(&self) -> bool {
+    fn should_rotate_by_time_inner(&self, inner: &FileSinkInner) -> bool {
         let now = Utc::now();
         let current_date = now.date_naive().num_days_from_ce();
 
         if self.config.rotation_time == "daily" || self.config.rotation_time == "weekly" {
-            if let Some(last_date) = self.last_rotation_date {
+            if let Some(last_date) = inner.last_rotation_date {
                 if current_date > last_date {
                     return true;
                 }
             }
         }
 
-        if let Some(next_time) = self.next_rotation_time {
+        if let Some(next_time) = inner.next_rotation_time {
             if now >= next_time {
                 return true;
             }
@@ -486,15 +513,22 @@ impl FileSink {
         false
     }
 
-    fn update_next_rotation_time(&mut self) {
-        self.next_rotation_time = Self::calculate_next_rotation_time(&self.config.rotation_time);
+    fn update_next_rotation_time_inner(&self, inner: &mut FileSinkInner) {
+        inner.next_rotation_time = Self::calculate_next_rotation_time(&self.config.rotation_time);
     }
 
     /// 启动轮转定时器
-    fn start_rotation_timer(&mut self) {
+    fn start_rotation_timer(&self) {
         let rotation_interval = self.rotation_interval;
-        let last_rotation = Arc::new(Mutex::new(self.last_rotation));
-        self.rotation_timer = Some(last_rotation.clone());
+        let last_rotation;
+        {
+            let inner = self.inner.read();
+            last_rotation = Arc::new(parking_lot::Mutex::new(inner.last_rotation));
+        }
+        {
+            let mut inner = self.inner.write();
+            inner.rotation_timer = Some(last_rotation.clone());
+        }
 
         // Clone the shutdown flag for the timer thread
         let shutdown_flag = self.shutdown_flag.clone();
@@ -514,17 +548,16 @@ impl FileSink {
                     break;
                 }
 
-                if let Ok(mut last_rotation_guard) = last_rotation.lock() {
-                    if last_rotation_guard.elapsed() >= rotation_interval {
-                        // Timer will trigger rotation on next write
-                        *last_rotation_guard =
-                            Instant::now() - rotation_interval + StdDuration::from_secs(1);
-                    }
+                let mut last_rotation_guard = last_rotation.lock();
+                if last_rotation_guard.elapsed() >= rotation_interval {
+                    // Timer will trigger rotation on next write
+                    *last_rotation_guard =
+                        Instant::now() - rotation_interval + StdDuration::from_secs(1);
                 }
             }
         });
 
-        self.timer_handle = Some(timer_handle);
+        self.inner.write().timer_handle = Some(timer_handle);
     }
 
     /// 停止轮转定时器
@@ -538,25 +571,26 @@ impl FileSink {
     /// - 等待 timer_handle 线程完成
     /// - 清理 rotation_timer 状态
     #[allow(dead_code)]
-    fn stop_rotation_timer(&mut self) {
+    fn stop_rotation_timer(&self) {
         // Signal shutdown to the timer thread
         self.shutdown_flag.store(true, Ordering::Relaxed);
 
-        if let Some(handle) = self.timer_handle.take() {
+        let mut inner = self.inner.write();
+        if let Some(handle) = inner.timer_handle.take() {
             let _ = handle.join();
         }
-        self.rotation_timer = None;
+        inner.rotation_timer = None;
     }
 
     /// 批量刷新缓冲区到文件
-    fn flush_batch(&mut self) -> Result<(), InklogError> {
-        if self.batch_buffer.is_empty() {
+    fn flush_batch_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
+        if inner.batch_buffer.is_empty() {
             return Ok(());
         }
 
-        let records = std::mem::take(&mut self.batch_buffer);
+        let records = std::mem::take(&mut inner.batch_buffer);
 
-        if let Some(file) = &mut self.current_file {
+        if let Some(file) = &mut inner.current_file {
             for record in &records {
                 match writeln!(
                     file,
@@ -573,23 +607,23 @@ impl FileSink {
                             + record.message.len()
                             + 7; // " []  - \n"
 
-                        self.current_size += len as u64;
+                        inner.current_size += len as u64;
                     }
                     Err(e) => {
                         error!("Batch write error: {}", e);
-                        self.circuit_breaker.record_failure();
-                        let _ = self.open_file();
+                        inner.circuit_breaker.record_failure();
+                        let _ = self.open_file_inner(inner);
                         break;
                     }
                 }
             }
-            self.circuit_breaker.record_success();
+            inner.circuit_breaker.record_success();
         }
 
-        self.last_flush_time = Instant::now();
+        inner.last_flush_time = Instant::now();
 
         // 批量写入后检查是否需要旋转
-        self.check_rotation()?;
+        self.check_rotation_inner(inner)?;
 
         Ok(())
     }
@@ -690,11 +724,11 @@ impl FileSink {
     }
 
     /// 执行文件轮转
-    fn rotate(&mut self) -> Result<(), InklogError> {
+    fn rotate_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
         debug!("Rotating log file: {}", self.config.path.display());
 
         // 关闭当前文件
-        let _ = self.current_file.take();
+        let _ = inner.current_file.take();
 
         // 重命名当前日志文件
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
@@ -725,12 +759,12 @@ impl FileSink {
         }
 
         // 更新序列号
-        self.sequence += 1;
+        inner.sequence += 1;
 
         // 更新轮转时间
-        self.last_rotation = Instant::now();
-        self.update_next_rotation_time();
-        self.current_size = 0;
+        inner.last_rotation = Instant::now();
+        self.update_next_rotation_time_inner(inner);
+        inner.current_size = 0;
 
         info!("Log rotated to: {}", new_path.display());
 
@@ -739,18 +773,13 @@ impl FileSink {
             let config = self.config.clone();
             let path = new_path.clone();
             let _ = thread::spawn(move || {
-                let sink = FileSink {
-                    config,
+                // 为后台线程创建一个最小化的 FileSink 实例用于压缩
+                let inner = FileSinkInner {
                     current_file: None,
                     current_size: 0,
                     last_rotation: Instant::now(),
-                    rotation_interval: StdDuration::from_secs(86400),
                     next_rotation_time: None,
                     last_rotation_date: None,
-                    masker: DataMasker::new(),
-                    rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(
-                        vec![],
-                    )),
                     sequence: 0,
                     fallback_sink: None,
                     circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -759,8 +788,17 @@ impl FileSink {
                     timer_handle: None,
                     rotation_timer: None,
                     cleanup_timer_handle: None,
-                    last_cleanup_time: Arc::new(Mutex::new(None)),
+                    rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(
+                        vec![],
+                    )),
+                };
+                let sink = FileSink {
+                    config,
+                    rotation_interval: StdDuration::from_secs(86400),
+                    last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
                     shutdown_flag: Arc::new(AtomicBool::new(false)),
+                    masker: DataMasker::new(),
+                    inner: RwLock::new(inner),
                 };
                 if let Err(e) = sink.compress_file(&path) {
                     error!("Failed to compress rotated log: {}", e);
@@ -771,18 +809,13 @@ impl FileSink {
             let config = self.config.clone();
             let path = new_path.clone();
             let _ = thread::spawn(move || {
-                let sink = FileSink {
-                    config,
+                // 为后台线程创建一个最小化的 FileSink 实例用于加密
+                let inner = FileSinkInner {
                     current_file: None,
                     current_size: 0,
                     last_rotation: Instant::now(),
-                    rotation_interval: StdDuration::from_secs(86400),
                     next_rotation_time: None,
                     last_rotation_date: None,
-                    masker: DataMasker::new(),
-                    rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(
-                        vec![],
-                    )),
                     sequence: 0,
                     fallback_sink: None,
                     circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -791,8 +824,17 @@ impl FileSink {
                     timer_handle: None,
                     rotation_timer: None,
                     cleanup_timer_handle: None,
-                    last_cleanup_time: Arc::new(Mutex::new(None)),
+                    rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(
+                        vec![],
+                    )),
+                };
+                let sink = FileSink {
+                    config,
+                    rotation_interval: StdDuration::from_secs(86400),
+                    last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
                     shutdown_flag: Arc::new(AtomicBool::new(false)),
+                    masker: DataMasker::new(),
+                    inner: RwLock::new(inner),
                 };
                 let encrypted_path = path.with_extension("enc");
                 if let Err(e) = sink.encrypt_file(&path, &encrypted_path) {
@@ -804,18 +846,18 @@ impl FileSink {
         }
 
         // 重新打开文件
-        self.open_file()
+        self.open_file_inner(inner)
     }
 
     /// 检查是否需要轮转
-    fn check_rotation(&mut self) -> Result<(), InklogError> {
+    fn check_rotation_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
         let rotate_by_size =
-            Self::parse_size(&self.config.max_size).is_some_and(|max| self.current_size >= max);
+            Self::parse_size(&self.config.max_size).is_some_and(|max| inner.current_size >= max);
 
-        let rotate_by_time = self.should_rotate_by_time();
+        let rotate_by_time = self.should_rotate_by_time_inner(inner);
 
         if rotate_by_size || rotate_by_time {
-            self.rotate()?;
+            self.rotate_inner(inner)?;
         }
 
         Ok(())
@@ -823,13 +865,13 @@ impl FileSink {
 }
 
 impl LogSink for FileSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        let mut inner = self.inner.write();
+
         // 检查断路器
-        if !self.circuit_breaker.can_execute() {
-            if let Some(sink) = &mut self.fallback_sink {
-                let mut locked = sink
-                    .lock()
-                    .map_err(|_| InklogError::IoError(std::io::Error::other("Lock poisoned")))?;
+        if !inner.circuit_breaker.can_execute() {
+            if let Some(sink) = &inner.fallback_sink {
+                let locked = sink.lock();
                 let _ = locked.write(record);
             }
             return Ok(());
@@ -838,10 +880,8 @@ impl LogSink for FileSink {
         // 检查磁盘空间
         if !self.check_disk_space()? {
             warn!("Low disk space - checking before write");
-            if let Some(sink) = &mut self.fallback_sink {
-                let mut locked = sink
-                    .lock()
-                    .map_err(|_| InklogError::IoError(std::io::Error::other("Lock poisoned")))?;
+            if let Some(sink) = &inner.fallback_sink {
+                let locked = sink.lock();
                 let _ = locked.write(record);
             }
             return Ok(());
@@ -864,27 +904,23 @@ impl LogSink for FileSink {
             + masked_record.target.len()
             + masked_record.message.len()
             + 7;
-        self.current_size += record_len as u64;
-        self.batch_buffer.push(masked_record);
+        inner.current_size += record_len as u64;
+        inner.batch_buffer.push(masked_record);
 
         // 检查轮转条件（在更新 current_size 之后）
-        if Self::parse_size(&self.config.max_size).is_some_and(|max| self.current_size >= max)
-            || self
+        let should_rotate = Self::parse_size(&self.config.max_size)
+            .is_some_and(|max| inner.current_size >= max)
+            || inner
                 .rotation_timer
                 .as_ref()
-                .map(|t| {
-                    t.lock()
-                        .map(|guard| guard.elapsed() >= self.rotation_interval)
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false)
-        {
-            if let Err(e) = self.rotate() {
+                .map(|t| t.lock().elapsed() >= self.rotation_interval)
+                .unwrap_or(false);
+
+        if should_rotate {
+            if let Err(e) = self.rotate_inner(&mut inner) {
                 error!("Rotation failed: {}", e);
-                if let Some(sink) = &mut self.fallback_sink {
-                    let mut locked = sink.lock().map_err(|_| {
-                        InklogError::IoError(std::io::Error::other("Lock poisoned"))
-                    })?;
+                if let Some(sink) = &inner.fallback_sink {
+                    let locked = sink.lock();
                     let _ = locked.write(record);
                 }
                 return Ok(());
@@ -895,46 +931,55 @@ impl LogSink for FileSink {
         let now = Instant::now();
         let flush_interval = StdDuration::from_millis(self.config.flush_interval_ms);
 
-        if self.batch_buffer.len() >= self.config.batch_size
-            || now.duration_since(self.last_flush_time) >= flush_interval
+        if inner.batch_buffer.len() >= self.config.batch_size
+            || now.duration_since(inner.last_flush_time) >= flush_interval
         {
-            self.flush_batch()?;
+            self.flush_batch_inner(&mut inner)?;
         }
 
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), InklogError> {
+    fn flush(&self) -> Result<(), InklogError> {
+        let mut inner = self.inner.write();
         // 先刷新批量缓冲区
-        self.flush_batch()?;
+        self.flush_batch_inner(&mut inner)?;
 
         // 然后刷新文件
-        if let Some(file) = &mut self.current_file {
+        if let Some(file) = &mut inner.current_file {
             file.flush()?;
         }
         Ok(())
     }
 
     fn is_healthy(&self) -> bool {
-        self.current_file.is_some()
+        self.inner.read().current_file.is_some()
     }
 
-    fn shutdown(&mut self) -> Result<(), InklogError> {
+    fn shutdown(&self) -> Result<(), InklogError> {
         // Signal shutdown to all timer threads first
         self.shutdown_flag.store(true, Ordering::Relaxed);
 
+        let mut inner = self.inner.write();
+
         // Stop rotation timer with graceful shutdown
-        if let Some(handle) = self.timer_handle.take() {
+        if let Some(handle) = inner.timer_handle.take() {
             let _ = handle.join(); // Join without timeout for simplicity
         }
-        self.rotation_timer = None;
+        inner.rotation_timer = None;
 
         // Stop cleanup timer with graceful shutdown
-        if let Some(handle) = self.cleanup_timer_handle.take() {
+        if let Some(handle) = inner.cleanup_timer_handle.take() {
             let _ = handle.join();
         }
 
-        self.flush()
+        // Flush remaining data
+        self.flush_batch_inner(&mut inner)?;
+        if let Some(file) = &mut inner.current_file {
+            file.flush()?;
+        }
+
+        Ok(())
     }
 }
 
@@ -946,45 +991,56 @@ impl Drop for FileSink {
         self.shutdown_flag.store(true, Ordering::SeqCst);
 
         // Flush any remaining buffered records
-        let _ = self.flush_batch();
-        // Close current file handle
-        if let Some(mut file) = self.current_file.take() {
-            let _ = file.flush();
+        {
+            let mut inner = self.inner.write();
+            let _ = self.flush_batch_inner(&mut inner);
+            // Close current file handle
+            if let Some(mut file) = inner.current_file.take() {
+                let _ = file.flush();
+            }
         }
 
         // Wait for rotation timer thread to finish with timeout
-        if let Some(handle) = self.timer_handle.take() {
-            let start = std::time::Instant::now();
-            while handle.is_finished() {
-                if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
-                    tracing::warn!(
-                        "Warning: rotation timer shutdown timeout after {}ms",
-                        SHUTDOWN_TIMEOUT_MS
-                    );
-                    break;
+        {
+            let mut inner = self.inner.write();
+            if let Some(handle) = inner.timer_handle.take() {
+                let start = std::time::Instant::now();
+                while !handle.is_finished() {
+                    if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
+                        tracing::warn!(
+                            "Warning: rotation timer shutdown timeout after {}ms",
+                            SHUTDOWN_TIMEOUT_MS
+                        );
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
 
         // Wait for cleanup timer thread to finish with timeout
-        if let Some(handle) = self.cleanup_timer_handle.take() {
-            let start = std::time::Instant::now();
-            while handle.is_finished() {
-                if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
-                    tracing::warn!(
-                        "Warning: cleanup timer shutdown timeout after {}ms",
-                        SHUTDOWN_TIMEOUT_MS
-                    );
-                    break;
+        {
+            let mut inner = self.inner.write();
+            if let Some(handle) = inner.cleanup_timer_handle.take() {
+                let start = std::time::Instant::now();
+                while !handle.is_finished() {
+                    if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
+                        tracing::warn!(
+                            "Warning: cleanup timer shutdown timeout after {}ms",
+                            SHUTDOWN_TIMEOUT_MS
+                        );
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
 
         // Close fallback console sink
-        if let Some(fallback) = self.fallback_sink.take() {
-            if let Ok(mut locked) = fallback.lock() {
+        {
+            let mut inner = self.inner.write();
+            if let Some(fallback) = inner.fallback_sink.take() {
+                let locked = fallback.lock();
                 let _ = locked.shutdown();
             }
         }
@@ -993,25 +1049,23 @@ impl Drop for FileSink {
 
 impl std::fmt::Debug for FileSink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let inner = self.inner.read();
         f.debug_struct("FileSink")
             .field("path", &self.config.path)
-            .field("current_size", &self.current_size)
-            .field("circuit_breaker", &self.circuit_breaker)
+            .field("current_size", &inner.current_size)
+            .field("circuit_breaker", &inner.circuit_breaker)
             .finish()
     }
 }
 
 impl Clone for FileSink {
     fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
+        let inner = FileSinkInner {
             current_file: None,
             current_size: 0,
             last_rotation: Instant::now(),
-            rotation_interval: self.rotation_interval,
             next_rotation_time: None,
             last_rotation_date: None,
-            masker: DataMasker::new(),
             sequence: 0,
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
@@ -1020,9 +1074,16 @@ impl Clone for FileSink {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
+            rotation_strategy: self.inner.read().rotation_strategy.clone_boxed(),
+        };
+
+        Self {
+            config: self.config.clone(),
+            rotation_interval: self.rotation_interval,
+            last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
-            rotation_strategy: self.rotation_strategy.clone_boxed(),
+            masker: DataMasker::new(),
+            inner: RwLock::new(inner),
         }
     }
 }
@@ -1047,6 +1108,35 @@ mod tests {
             file: Some("/path/to/test.rs".to_string()),
             line: Some(42),
             thread_id: "test-thread".to_string(),
+        }
+    }
+
+    /// Helper function to create a FileSink for testing without starting timers
+    fn create_test_file_sink(config: FileSinkConfig) -> FileSink {
+        let inner = FileSinkInner {
+            current_file: None,
+            current_size: 0,
+            last_rotation: Instant::now(),
+            next_rotation_time: None,
+            last_rotation_date: None,
+            sequence: 0,
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
+            batch_buffer: Vec::new(),
+            last_flush_time: Instant::now(),
+            timer_handle: None,
+            rotation_timer: None,
+            cleanup_timer_handle: None,
+            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
+        };
+
+        FileSink {
+            config,
+            rotation_interval: StdDuration::from_secs(86400),
+            last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            masker: DataMasker::new(),
+            inner: RwLock::new(inner),
         }
     }
 
@@ -1100,31 +1190,11 @@ mod tests {
             ..Default::default()
         };
 
-        // Set a valid 32-byte test key (base64 encoded)
-        // "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" = 32 'a' bytes
-        std::env::set_var("TEST_KEY", "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=");
+        // Set a valid 32-byte test key (base64 encoded, mixed characters for entropy)
+        // "abcdefghijklmnopqrstuvwxyz123456" = 32 varied bytes
+        std::env::set_var("TEST_KEY", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=");
 
-        let sink = FileSink {
-            config,
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: StdDuration::from_secs(86400),
-            next_rotation_time: None,
-            last_rotation_date: None,
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-            batch_buffer: Vec::new(),
-            last_flush_time: Instant::now(),
-            timer_handle: None,
-            rotation_timer: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-            masker: DataMasker::new(),
-            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
-        };
+        let sink = create_test_file_sink(config);
 
         let key_result = sink.get_encryption_key();
         assert!(key_result.is_ok());
@@ -1143,27 +1213,7 @@ mod tests {
             ..Default::default()
         };
 
-        let sink = FileSink {
-            config: config.clone(),
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: StdDuration::from_secs(86400),
-            next_rotation_time: None,
-            last_rotation_date: None,
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-            batch_buffer: Vec::new(),
-            last_flush_time: Instant::now(),
-            timer_handle: None,
-            rotation_timer: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-            masker: DataMasker::new(),
-            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
-        };
+        let sink = create_test_file_sink(config);
 
         let result = sink.get_disk_space_info();
         assert!(result.is_ok());
@@ -1182,27 +1232,7 @@ mod tests {
             ..Default::default()
         };
 
-        let sink = FileSink {
-            config: config.clone(),
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: StdDuration::from_secs(86400),
-            next_rotation_time: None,
-            last_rotation_date: None,
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-            batch_buffer: Vec::new(),
-            last_flush_time: Instant::now(),
-            timer_handle: None,
-            rotation_timer: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-            masker: DataMasker::new(),
-            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
-        };
+        let sink = create_test_file_sink(config);
 
         let result = sink.check_disk_space();
         // Should succeed if there's sufficient disk space
@@ -1220,7 +1250,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut sink = FileSink::new(config).unwrap();
+        let sink = FileSink::new(config).unwrap();
 
         let record = LogRecord {
             timestamp: chrono::Utc::now(),
@@ -1291,27 +1321,7 @@ mod tests {
         // Ensure the env var doesn't exist
         std::env::remove_var("MISSING_KEY");
 
-        let sink = FileSink {
-            config,
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: StdDuration::from_secs(86400),
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-            batch_buffer: Vec::new(),
-            last_flush_time: Instant::now(),
-            timer_handle: None,
-            rotation_timer: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-            next_rotation_time: None,
-            last_rotation_date: None,
-            masker: DataMasker::new(),
-            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
-        };
+        let sink = create_test_file_sink(config);
 
         let result = sink.get_encryption_key();
         assert!(result.is_err());
@@ -1326,27 +1336,7 @@ mod tests {
             ..Default::default()
         };
 
-        let sink = FileSink {
-            config,
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: StdDuration::from_secs(86400),
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-            batch_buffer: Vec::new(),
-            last_flush_time: Instant::now(),
-            timer_handle: None,
-            rotation_timer: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-            next_rotation_time: None,
-            last_rotation_date: None,
-            masker: DataMasker::new(),
-            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
-        };
+        let sink = create_test_file_sink(config);
 
         let result = sink.get_encryption_key();
         // When encryption_key_env is None, it tries to use LOG_ENCRYPTION_KEY env var
@@ -1411,21 +1401,21 @@ mod tests {
             0x2e, 0x6f, 0x9b, 0x3c, 0x8d, 0x1e, 0x4b, 0x6a, 0x2b, 0x6c, 0x9f, 0x3a, 0x8b, 0x1c,
             0x4d, 0x7e, 0x2f, 0x6a,
         ];
-        assert!(FileSink::validate_key_entropy(&strong_key));
+        assert!(FileSink::validate_key_entropy(&strong_key).is_ok());
     }
 
     #[test]
     fn test_validate_key_entropy_weak() {
         // 使用弱密钥（全相同字节）
         let weak_key = [0xaa; 32];
-        assert!(!FileSink::validate_key_entropy(&weak_key));
+        assert!(FileSink::validate_key_entropy(&weak_key).is_err());
     }
 
     #[test]
     fn test_validate_key_entropy_empty() {
-        // 空密钥应该返回 false
+        // 空密钥应该返回错误
         let empty_key: [u8; 0] = [];
-        assert!(!FileSink::validate_key_entropy(&empty_key));
+        assert!(FileSink::validate_key_entropy(&empty_key).is_err());
     }
 
     #[test]
@@ -1440,27 +1430,7 @@ mod tests {
         // 设置一个太短的密钥（Base64 编码前 < 16 字符）
         std::env::set_var("TEST_SHORT_KEY", "YWJjZA=="); // "abcd"
 
-        let sink = FileSink {
-            config,
-            current_file: None,
-            current_size: 0,
-            last_rotation: Instant::now(),
-            rotation_interval: StdDuration::from_secs(86400),
-            sequence: 0,
-            fallback_sink: None,
-            circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-            batch_buffer: Vec::new(),
-            last_flush_time: Instant::now(),
-            timer_handle: None,
-            rotation_timer: None,
-            cleanup_timer_handle: None,
-            last_cleanup_time: Arc::new(Mutex::new(None)),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
-            next_rotation_time: None,
-            last_rotation_date: None,
-            masker: DataMasker::new(),
-            rotation_strategy: Box::new(crate::sink::rotation::CompositeRotation::new(vec![])),
-        };
+        let sink = create_test_file_sink(config);
 
         let result = sink.get_encryption_key();
         assert!(result.is_err());
