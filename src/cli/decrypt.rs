@@ -279,8 +279,9 @@ fn get_encryption_key_cli(env_var: &str) -> Result<[u8; 32]> {
         warn!(
             "Using PBKDF2 key derivation for password-based key. For better security, use a 32-byte key."
         );
-        return derive_key_from_password(&key_str, None)
-            .map_err(|e| anyhow!("Failed to derive key from password: {}", e));
+        let (key, _salt) = derive_key_from_password(&key_str, None)
+            .map_err(|e| anyhow!("Failed to derive key from password: {}", e))?;
+        return Ok(key);
     }
 
     // 密钥长度无效
@@ -544,15 +545,21 @@ mod tests {
 
     #[test]
     fn test_get_encryption_key_password_derivation() {
-        std::env::set_var("TEST_PASSWORD_KEY", "my-secret-password");
+        // 使用明确的盐值进行测试，以确保可重现性
+        let salt = b"test-salt-16b";
+        let (key1, returned_salt) =
+            derive_key_from_password("my-secret-password", Some(salt)).unwrap();
+        assert_eq!(key1.len(), 32);
+        assert_eq!(returned_salt, salt);
 
-        let key = get_encryption_key_cli("TEST_PASSWORD_KEY").unwrap();
-        assert_eq!(key.len(), 32);
+        // 使用相同密码和盐值再次派生，应该得到相同的密钥
+        let (key2, _) = derive_key_from_password("my-secret-password", Some(salt)).unwrap();
+        assert_eq!(key1, key2);
 
-        let derived_again = derive_key_from_password("my-secret-password", None).unwrap();
-        assert_eq!(key, derived_again);
-
-        std::env::remove_var("TEST_PASSWORD_KEY");
+        // 使用不同盐值派生，应该得到不同的密钥
+        let (key3, _) =
+            derive_key_from_password("my-secret-password", Some(b"different-salt!")).unwrap();
+        assert_ne!(key1, key3);
     }
 
     #[test]

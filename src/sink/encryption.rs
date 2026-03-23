@@ -10,6 +10,7 @@
 use crate::error::InklogError;
 use base64::{engine::general_purpose, Engine as _};
 use pbkdf2::pbkdf2_hmac;
+use rand::RngCore;
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
@@ -66,7 +67,8 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
 
     // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
     if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
-        return derive_key_from_password(env_value.as_str(), None);
+        let (key, _salt) = derive_key_from_password(env_value.as_str(), None)?;
+        return Ok(key);
     }
 
     // 密钥长度无效
@@ -82,28 +84,36 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
 /// # 参数
 ///
 /// * `password` - 密码字符串
-/// * `salt` - 可选的盐值，如果为 None 则使用默认盐
+/// * `salt` - 可选的盐值，如果为 None 则生成随机盐值
 ///
 /// # 返回值
 ///
-/// 返回 32 字节的派生密钥
+/// 返回 `(32 字节的派生密钥, 使用的盐值)` 元组
 pub fn derive_key_from_password(
     password: &str,
     salt: Option<&[u8]>,
-) -> Result<[u8; 32], InklogError> {
+) -> Result<([u8; 32], Vec<u8>), InklogError> {
     let mut key = [0u8; 32];
 
-    let salt = salt.unwrap_or(b"inklog-encryption-salt-v1");
+    let salt: Vec<u8> = match salt {
+        Some(s) => s.to_vec(),
+        None => {
+            // 生成 16 字节的随机盐值
+            let mut salt_bytes = vec![0u8; 16];
+            rand::rng().fill_bytes(&mut salt_bytes);
+            salt_bytes
+        }
+    };
 
     // 使用 PBKDF2-HMAC-SHA256 派生密钥
     pbkdf2_hmac::<Sha256>(
         password.as_bytes(),
-        salt,
-        100_000, // 迭代次数，增加计算成本
+        &salt,
+        100_000, // 迭代次数
         &mut key,
     );
 
-    Ok(key)
+    Ok((key, salt))
 }
 
 #[cfg(test)]
@@ -143,8 +153,9 @@ mod tests {
     fn test_derive_key_from_password() {
         let result = derive_key_from_password("test_password", Some(b"test_salt"));
         assert!(result.is_ok());
-        let key = result.unwrap();
+        let (key, salt) = result.unwrap();
         assert_eq!(key.len(), 32);
+        assert_eq!(salt, b"test_salt");
     }
 
     #[test]
@@ -153,7 +164,7 @@ mod tests {
         let result2 = derive_key_from_password("password", Some(b"salt"));
         assert!(result1.is_ok());
         assert!(result2.is_ok());
-        assert_eq!(result1.unwrap(), result2.unwrap());
+        assert_eq!(result1.unwrap().0, result2.unwrap().0);
     }
 
     #[test]
@@ -162,7 +173,7 @@ mod tests {
         let result2 = derive_key_from_password("password", Some(b"salt2"));
         assert!(result1.is_ok());
         assert!(result2.is_ok());
-        assert_ne!(result1.unwrap(), result2.unwrap());
+        assert_ne!(result1.unwrap().0, result2.unwrap().0);
     }
 
     #[test]
@@ -171,14 +182,18 @@ mod tests {
         let result2 = derive_key_from_password("password2", Some(b"salt"));
         assert!(result1.is_ok());
         assert!(result2.is_ok());
-        assert_ne!(result1.unwrap(), result2.unwrap());
+        assert_ne!(result1.unwrap().0, result2.unwrap().0);
     }
 
     #[test]
-    fn test_derive_key_with_default_salt() {
-        let result = derive_key_from_password("test_password", None);
-        assert!(result.is_ok());
-        let key = result.unwrap();
-        assert_eq!(key.len(), 32);
+    fn test_derive_key_with_random_salt() {
+        let (key1, salt1) = derive_key_from_password("test_password", None).unwrap();
+        assert_eq!(key1.len(), 32);
+        assert_eq!(salt1.len(), 16); // 随机生成的盐值应该是 16 字节
+
+        // 使用相同密码再次调用，应该得到不同的盐值和密钥
+        let (key2, salt2) = derive_key_from_password("test_password", None).unwrap();
+        assert_ne!(salt1, salt2); // 盐值应该不同
+        assert_ne!(key1, key2); // 由于盐值不同，密钥也应该不同
     }
 }
