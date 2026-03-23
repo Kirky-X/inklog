@@ -1672,4 +1672,123 @@ mod metrics_tests {
         let uptime = metrics.uptime();
         assert!(uptime <= std::time::Duration::from_secs(60));
     }
+
+    #[test]
+    fn test_gauge_f64_set_and_get() {
+        let gauge = GaugeF64::new(0.5);
+        assert!((gauge.get() - 0.5).abs() < f64::EPSILON);
+
+        gauge.set(99.9);
+        assert!((gauge.get() - 99.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_gauge_f64_pool_hit_rate() {
+        let metrics = Metrics::new();
+        metrics.set_pool_hit_rate(85.5);
+        assert!((metrics.pool_hit_rate() - 85.5).abs() < f64::EPSILON);
+
+        metrics.set_pool_hit_rate(0.0);
+        assert!((metrics.pool_hit_rate() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_sink_status_is_operational() {
+        assert!(SinkStatus::Healthy.is_operational());
+        assert!(SinkStatus::Degraded {
+            reason: "slow".to_string()
+        }
+        .is_operational());
+        assert!(!SinkStatus::Unhealthy {
+            error: "crashed".to_string()
+        }
+        .is_operational());
+        assert!(!SinkStatus::NotStarted.is_operational());
+    }
+
+    #[test]
+    fn test_fallback_action_sink_name() {
+        let none = FallbackAction::None;
+        assert_eq!(none.sink_name(), None);
+        assert!(!none.requires_action());
+
+        let retry = FallbackAction::Retry {
+            sink_name: "db".to_string(),
+            attempt: 1,
+            error: "err".to_string(),
+        };
+        assert_eq!(retry.sink_name(), Some("db"));
+        assert!(retry.requires_action());
+    }
+
+    #[test]
+    fn test_histogram_percentile_empty() {
+        let histogram = Histogram::new(vec![100, 500, 1000]);
+        // Empty histogram should return 0 for percentile
+        assert_eq!(histogram.percentile(50.0), 0);
+        assert_eq!(histogram.p50(), 0);
+        assert_eq!(histogram.p95(), 0);
+        assert_eq!(histogram.p99(), 0);
+    }
+
+    #[test]
+    fn test_histogram_percentile() {
+        // Bounds: bucket[0]=[0,100), [100,500), [500,1000), [1000,+inf)
+        let histogram = Histogram::new(vec![100, 500, 1000]);
+        // Records: three 50s, two 200s, one 600, one 2000
+        histogram.record(50);
+        histogram.record(50);
+        histogram.record(50);
+        histogram.record(200);
+        histogram.record(200);
+        histogram.record(600);
+        histogram.record(2000);
+
+        // P50 = 4th value of 7 → 200 → falls in bucket[1] (bound = 500)
+        assert_eq!(histogram.p50(), 500);
+    }
+
+    #[test]
+    fn test_metrics_export_prometheus_format() {
+        let metrics = Metrics::new();
+        metrics.inc_logs_written();
+        metrics.inc_logs_written();
+        metrics.inc_sink_error();
+        metrics.set_db_batch_size(10);
+
+        let output = metrics.export_prometheus();
+
+        // Verify Prometheus counter format
+        assert!(output.contains("# TYPE inklog_logs_written_total counter"));
+        assert!(output.contains("inklog_logs_written_total 2"));
+        assert!(output.contains("# TYPE inklog_sink_errors_total counter"));
+        assert!(output.contains("inklog_sink_errors_total 1"));
+        assert!(output.contains("inklog_db_batch_size{sink=\"database\"} 10"));
+    }
+
+    #[test]
+    fn test_fallback_config_default() {
+        let config = FallbackConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.initial_delay_ms, 1000);
+        assert_eq!(config.max_delay_ms, 60000);
+        assert_eq!(config.max_retries, 10);
+        assert_eq!(config.failure_threshold, 3);
+    }
+
+    #[test]
+    fn test_fallback_event_structure() {
+        let event = FallbackEvent {
+            timestamp: chrono::Utc::now(),
+            sink_name: "database".to_string(),
+            from_state: FallbackState::Active,
+            to_state: FallbackState::Fallback {
+                target: "file".to_string(),
+                reason: "disk error".to_string(),
+            },
+            reason: "Disk is full".to_string(),
+        };
+        assert_eq!(event.sink_name, "database");
+        assert!(matches!(event.from_state, FallbackState::Active));
+    }
 }
