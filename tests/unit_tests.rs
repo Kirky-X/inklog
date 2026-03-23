@@ -13,6 +13,9 @@
 //! - 归档测试 (unit::archive)
 //! - CLI测试 (unit::cli)
 
+#[cfg(feature = "dbnexus")]
+mod unit;
+
 use inklog::log_record::LogRecord;
 use inklog::sink::console::ConsoleSink;
 use inklog::sink::LogSink;
@@ -23,6 +26,7 @@ use tracing::Level;
 
 // ============ 配置单元测试 (unit::config) ============
 
+#[cfg(not(feature = "dbnexus"))]
 #[test]
 fn test_config_validation() {
     let config = InklogConfig::default();
@@ -33,6 +37,7 @@ fn test_config_validation() {
     assert!(invalid_config.validate().is_err());
 }
 
+#[cfg(not(feature = "dbnexus"))]
 #[test]
 fn test_builder() {
     let _logger = LoggerManager::builder()
@@ -44,6 +49,7 @@ fn test_builder() {
 
 // ============ 输出端单元测试 (unit::sink) ============
 
+#[cfg(not(feature = "dbnexus"))]
 #[test]
 fn test_console_sink_format() {
     let config = ConsoleSinkConfig {
@@ -56,6 +62,7 @@ fn test_console_sink_format() {
     assert!(sink.write(&record).is_ok());
 }
 
+#[cfg(not(feature = "dbnexus"))]
 #[test]
 fn test_file_sink_rotation() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
