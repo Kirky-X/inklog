@@ -147,6 +147,101 @@ let _logger = LoggerManager::with_config(config).await?;
 
 ---
 
+##### `with_dependencies`
+
+使用依赖注入创建 `LoggerManager`。
+
+**签名**
+```rust
+pub async fn with_dependencies(deps: LoggerDependencies) -> Result<Self, InklogError>
+```
+
+**参数**
+- `deps` - 依赖注入容器，包含可选的 Cache、Config、Database 实现
+
+**返回值**
+- `Ok(LoggerManager)` - 成功创建的管理器
+- `Err(InklogError)` - 初始化失败
+
+**示例**
+```rust
+use inklog::{LoggerManager, LoggerDependencies};
+use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use std::sync::Arc;
+
+let deps = LoggerDependencies {
+    cache: Some(Arc::new(MockCache::new())),
+    config: Some(Arc::new(MockConfig::new())),
+    #[cfg(feature = "dbnexus")]
+    database: Some(Arc::new(MockDatabaseAdapter::new())),
+};
+
+let logger = LoggerManager::with_dependencies(deps).await?;
+```
+
+---
+
+##### `builder`
+
+创建 LoggerBuilder 实例。
+
+**签名**
+```rust
+pub fn builder() -> LoggerBuilder
+```
+
+**返回值**
+- `LoggerBuilder` - 构建器实例
+
+**示例**
+```rust
+use inklog::LoggerManager;
+
+let builder = LoggerManager::builder();
+```
+
+---
+
+##### `effective_channel_capacity`
+
+获取有效的通道容量。
+
+**签名**
+```rust
+pub fn effective_channel_capacity(&self) -> usize
+```
+
+**返回值**
+- `usize` - 当前有效通道容量
+
+**示例**
+```rust
+let capacity = logger.effective_channel_capacity();
+println!("通道容量: {}", capacity);
+```
+
+---
+
+##### `channel_len`
+
+获取通道当前长度（待处理日志数）。
+
+**签名**
+```rust
+pub fn channel_len(&self) -> usize
+```
+
+**返回值**
+- `usize` - 当前队列中的日志数量
+
+**示例**
+```rust
+let pending = logger.channel_len();
+println!("待处理日志: {}", pending);
+```
+
+---
+
 ##### `get_health_status`
 
 获取当前健康状态。
@@ -663,6 +758,361 @@ pub fn http_server(mut self, host: impl Into<String>, port: u16) -> Self
 ```rust
 let builder = LoggerBuilder::new()
     .http_server("0.0.0.0", 8080);
+```
+
+---
+
+##### `console_colored`
+
+设置控制台是否使用彩色输出。
+
+**签名**
+```rust
+pub fn console_colored(mut self, colored: bool) -> Self
+```
+
+**参数**
+- `colored` - 是否启用彩色输出
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .console_colored(true);
+```
+
+---
+
+##### `console_stderr_levels`
+
+设置输出到 stderr 的日志级别。
+
+**签名**
+```rust
+pub fn console_stderr_levels(mut self, levels: &[&str]) -> Self
+```
+
+**参数**
+- `levels` - 日志级别数组（如 `["error", "warn"]`）
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .console_stderr_levels(&["error", "warn"]);
+```
+
+---
+
+##### `file_max_size`
+
+设置单个日志文件最大大小。
+
+**签名**
+```rust
+pub fn file_max_size(mut self, max_size: impl Into<String>) -> Self
+```
+
+**参数**
+- `max_size` - 最大大小（如 `"100MB"`、`"1GB"`）
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .file_max_size("50MB");
+```
+
+---
+
+##### `file_compress`
+
+设置是否压缩轮转文件。
+
+**签名**
+```rust
+pub fn file_compress(mut self, compress: bool) -> Self
+```
+
+**参数**
+- `compress` - 是否启用压缩
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .file_compress(true);
+```
+
+---
+
+##### `file_rotation_time`
+
+设置文件轮转时间策略。
+
+**签名**
+```rust
+pub fn file_rotation_time(mut self, rotation: impl Into<String>) -> Self
+```
+
+**参数**
+- `rotation` - 轮转策略（`"hourly"`、`"daily"`、`"weekly"`）
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .file_rotation_time("daily");
+```
+
+---
+
+##### `file_keep_files`
+
+设置保留的轮转文件数量。
+
+**签名**
+```rust
+pub fn file_keep_files(mut self, keep: u32) -> Self
+```
+
+**参数**
+- `keep` - 保留文件数
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .file_keep_files(30);
+```
+
+---
+
+##### `enable_http_server`
+
+启用或禁用 HTTP 服务器。
+
+**签名**
+```rust
+pub fn enable_http_server(mut self, enabled: bool) -> Self
+```
+
+**参数**
+- `enabled` - 是否启用
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .enable_http_server(true);
+```
+
+---
+
+##### `http_host`
+
+设置 HTTP 服务器监听主机。
+
+**签名**
+```rust
+pub fn http_host(mut self, host: impl Into<String>) -> Self
+```
+
+**参数**
+- `host` - 监听主机地址
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .http_host("0.0.0.0");
+```
+
+---
+
+##### `http_port`
+
+设置 HTTP 服务器监听端口。
+
+**签名**
+```rust
+pub fn http_port(mut self, port: u16) -> Self
+```
+
+**参数**
+- `port` - 监听端口
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .http_port(8080);
+```
+
+---
+
+##### `http_metrics_path`
+
+设置 Prometheus 指标端点路径。
+
+**签名**
+```rust
+pub fn http_metrics_path(mut self, path: impl Into<String>) -> Self
+```
+
+**参数**
+- `path` - 端点路径
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .http_metrics_path("/metrics");
+```
+
+---
+
+##### `http_health_path`
+
+设置健康检查端点路径。
+
+**签名**
+```rust
+pub fn http_health_path(mut self, path: impl Into<String>) -> Self
+```
+
+**参数**
+- `path` - 端点路径
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .http_health_path("/health");
+```
+
+---
+
+##### `http_error_mode`
+
+设置 HTTP 服务器启动失败时的错误处理模式。
+
+**签名**
+```rust
+pub fn http_error_mode(mut self, mode: impl Into<String>) -> Self
+```
+
+**参数**
+- `mode` - 错误模式（`"panic"`、`"warn"`、`"strict"`）
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+let builder = LoggerBuilder::new()
+    .http_error_mode("warn");
+```
+
+---
+
+##### `cache`
+
+注入自定义 Cache 实现。
+
+**签名**
+```rust
+pub fn cache(mut self, cache: Arc<dyn Cache>) -> Self
+```
+
+**参数**
+- `cache` - 实现 `Cache` trait 的缓存实例
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+use inklog::infrastructure::MockCache;
+use std::sync::Arc;
+
+let builder = LoggerBuilder::new()
+    .cache(Arc::new(MockCache::new()));
+```
+
+---
+
+##### `config`
+
+注入自定义 Config 实现。
+
+**签名**
+```rust
+pub fn config(mut self, config: Arc<dyn Config>) -> Self
+```
+
+**参数**
+- `config` - 实现 `Config` trait 的配置实例
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+use inklog::infrastructure::MockConfig;
+use std::sync::Arc;
+
+let builder = LoggerBuilder::new()
+    .config(Arc::new(MockConfig::new()));
+```
+
+---
+
+##### `with_database`
+
+注入自定义 Database 实现。
+
+**签名**
+```rust
+#[cfg(feature = "dbnexus")]
+pub fn with_database(mut self, database: Arc<dyn Database>) -> Self
+```
+
+**参数**
+- `database` - 实现 `Database` trait 的数据库实例
+
+**返回值**
+- `Self` - 构建器链
+
+**示例**
+```rust
+use inklog::infrastructure::MockDatabaseAdapter;
+use std::sync::Arc;
+
+let builder = LoggerBuilder::new()
+    .with_database(Arc::new(MockDatabaseAdapter::new()));
 ```
 
 ---
@@ -1595,6 +2045,395 @@ let driver: DatabaseDriver = "postgres".parse().unwrap();
 // 转换为字符串
 let driver_str = driver.to_string(); // "postgres"
 ```
+
+---
+
+## 依赖注入类型
+
+### LoggerDependencies
+
+依赖注入容器，用于向 LoggerManager 注入自定义实现。
+
+#### 定义
+
+```rust
+pub struct LoggerDependencies {
+    pub cache: Option<Arc<dyn Cache>>,
+    pub config: Option<Arc<dyn Config>>,
+    #[cfg(feature = "dbnexus")]
+    pub database: Option<Arc<dyn Database>>,
+}
+```
+
+#### 字段说明
+
+| 字段 | 类型 | 默认值 | 描述 |
+|------|------|----------|------|
+| `cache` | `Option<Arc<dyn Cache>>` | `None` | 缓存实现（可选） |
+| `config` | `Option<Arc<dyn Config>>` | `None` | 配置实现（可选） |
+| `database` | `Option<Arc<dyn Database>>` | `None` | 数据库实现（可选，需要 `dbnexus` feature） |
+
+**示例**
+```rust
+use inklog::LoggerDependencies;
+use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use std::sync::Arc;
+
+let deps = LoggerDependencies {
+    cache: Some(Arc::new(MockCache::new())),
+    config: Some(Arc::new(MockConfig::new().with_value("level", "debug"))),
+    #[cfg(feature = "dbnexus")]
+    database: Some(Arc::new(MockDatabaseAdapter::new())),
+};
+```
+
+---
+
+## 基础设施 Trait（Infrastructure Traits）
+
+Inklog 提供了三个核心 trait 用于依赖注入，支持自定义实现和测试。
+
+### Cache Trait
+
+缓存操作 trait，用于缓存日志元数据和配置值。
+
+#### 定义
+
+```rust
+#[async_trait]
+pub trait Cache: Send + Sync {
+    async fn get(&self, key: &str) -> Option<String>;
+    async fn set(&self, key: &str, value: String);
+    async fn delete(&self, key: &str) -> bool;
+    async fn exists(&self, key: &str) -> bool;
+}
+```
+
+#### 方法说明
+
+| 方法 | 描述 |
+|------|------|
+| `get` | 获取缓存值，不存在返回 `None` |
+| `set` | 设置缓存键值对 |
+| `delete` | 删除缓存键，返回是否成功 |
+| `exists` | 检查键是否存在 |
+
+**示例实现**
+```rust
+use inklog::infrastructure::Cache;
+use async_trait::async_trait;
+
+struct MyCache {
+    // 自定义实现
+}
+
+#[async_trait]
+impl Cache for MyCache {
+    async fn get(&self, key: &str) -> Option<String> {
+        // 实现获取逻辑
+        None
+    }
+
+    async fn set(&self, key: &str, value: String) {
+        // 实现设置逻辑
+    }
+
+    async fn delete(&self, key: &str) -> bool {
+        // 实现删除逻辑
+        false
+    }
+
+    async fn exists(&self, key: &str) -> bool {
+        // 实现存在检查逻辑
+        false
+    }
+}
+```
+
+---
+
+### Config Trait
+
+配置访问 trait，用于动态获取配置值。
+
+#### 定义
+
+```rust
+pub trait Config: Send + Sync {
+    fn get_string(&self, key: &str) -> Option<String>;
+    fn get_int(&self, key: &str) -> Option<i64>;
+    fn get_bool(&self, key: &str) -> Option<bool>;
+    fn get_float(&self, key: &str) -> Option<f64>;
+}
+```
+
+#### 方法说明
+
+| 方法 | 描述 |
+|------|------|
+| `get_string` | 获取字符串配置值 |
+| `get_int` | 获取整数配置值，解析失败返回 `None` |
+| `get_bool` | 获取布尔配置值，解析失败返回 `None` |
+| `get_float` | 获取浮点数配置值，解析失败返回 `None` |
+
+**支持的配置键**
+
+| 键路径 | 类型 | 描述 |
+|--------|------|------|
+| `global.level` | String | 日志级别 |
+| `global.format` | String | 日志格式 |
+| `global.masking_enabled` | bool | 是否启用脱敏 |
+| `global.auto_fallback` | bool | 是否自动降级 |
+| `global.fallback_initial_delay_ms` | i64 | 降级初始延迟 |
+| `global.fallback_max_delay_ms` | i64 | 降级最大延迟 |
+| `global.fallback_max_retries` | i64 | 降级最大重试次数 |
+| `file_sink.enabled` | bool | 是否启用文件 Sink |
+| `file_sink.path` | String | 日志文件路径 |
+| `file_sink.max_size` | String | 最大文件大小 |
+| `file_sink.keep_files` | i64 | 保留文件数 |
+| `file_sink.retention_days` | i64 | 保留天数 |
+| `file_sink.compression_level` | i64 | 压缩级别 |
+| `file_sink.encryption_key_env` | String | 加密密钥环境变量 |
+| `console_sink.enabled` | bool | 是否启用控制台 Sink |
+| `console_sink.colored` | bool | 是否彩色输出 |
+| `console_sink.stderr_levels` | String | stderr 日志级别 |
+| `console_sink.masking_enabled` | bool | 是否启用脱敏 |
+| `s3_archive.enabled` | bool | 是否启用 S3 归档 |
+| `s3_archive.bucket` | String | S3 存储桶 |
+| `s3_archive.region` | String | AWS 区域 |
+| `s3_archive.path_prefix` | String | 路径前缀 |
+| `s3_archive.retention_days` | i64 | 保留天数 |
+| `s3_archive.compression` | bool | 是否压缩 |
+
+**示例实现**
+```rust
+use inklog::infrastructure::Config;
+
+struct MyConfig {
+    // 自定义实现
+}
+
+impl Config for MyConfig {
+    fn get_string(&self, key: &str) -> Option<String> {
+        match key {
+            "global.level" => Some("debug".to_string()),
+            _ => None,
+        }
+    }
+
+    fn get_int(&self, key: &str) -> Option<i64> {
+        match key {
+            "file_sink.keep_files" => Some(30),
+            _ => None,
+        }
+    }
+
+    fn get_bool(&self, key: &str) -> Option<bool> {
+        match key {
+            "console_sink.colored" => Some(true),
+            _ => None,
+        }
+    }
+
+    fn get_float(&self, key: &str) -> Option<f64> {
+        None
+    }
+}
+```
+
+---
+
+### Database Trait
+
+数据库操作 trait，用于批量插入日志记录。
+
+#### 定义
+
+```rust
+#[async_trait]
+pub trait Database: Send + Sync {
+    async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError>;
+    async fn is_healthy(&self) -> bool;
+}
+```
+
+#### 方法说明
+
+| 方法 | 描述 |
+|------|------|
+| `insert_batch` | 批量插入日志记录，返回成功插入的数量 |
+| `is_healthy` | 检查数据库连接是否健康 |
+
+**示例实现**
+```rust
+use inklog::infrastructure::Database;
+use inklog::LogRecord;
+use inklog::InklogError;
+use async_trait::async_trait;
+
+struct MyDatabase {
+    // 自定义实现
+}
+
+#[async_trait]
+impl Database for MyDatabase {
+    async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {
+        // 实现批量插入逻辑
+        Ok(records.len())
+    }
+
+    async fn is_healthy(&self) -> bool {
+        // 实现健康检查逻辑
+        true
+    }
+}
+```
+
+---
+
+## Mock 实现（测试用）
+
+Inklog 提供了三个 Mock 实现，用于单元测试和集成测试。
+
+### MockCache
+
+基于内存 HashMap 的 Mock Cache 实现。
+
+#### 定义
+
+```rust
+pub struct MockCache {
+    storage: RwLock<HashMap<String, String>>,
+    delay_ms: u64,
+}
+```
+
+#### 方法
+
+| 方法 | 描述 |
+|------|------|
+| `new()` | 创建空 MockCache |
+| `with_delay(ms: u64)` | 创建带延迟模拟的 MockCache |
+
+**示例**
+```rust
+use inklog::infrastructure::MockCache;
+
+let cache = MockCache::new();
+cache.set("key", "value".to_string()).await;
+assert_eq!(cache.get("key").await, Some("value".to_string()));
+```
+
+---
+
+### MockConfig
+
+基于内存 HashMap 的 Mock Config 实现。
+
+#### 定义
+
+```rust
+pub struct MockConfig {
+    values: RwLock<HashMap<String, String>>,
+}
+```
+
+#### 方法
+
+| 方法 | 描述 |
+|------|------|
+| `new()` | 创建空 MockConfig |
+| `with_value(key, value)` | 链式添加配置值 |
+| `set(key, value)` | 运行时修改配置值 |
+
+**示例**
+```rust
+use inklog::infrastructure::MockConfig;
+
+let config = MockConfig::new()
+    .with_value("level", "debug")
+    .with_value("port", "8080");
+
+assert_eq!(config.get_string("level"), Some("debug".to_string()));
+assert_eq!(config.get_int("port"), Some(8080));
+```
+
+---
+
+### MockDatabaseAdapter
+
+基于内存 Vec 的 Mock Database 实现。
+
+#### 定义
+
+```rust
+pub struct MockDatabaseAdapter {
+    records: RwLock<Vec<LogRecord>>,
+    healthy: Arc<AtomicBool>,
+}
+```
+
+#### 方法
+
+| 方法 | 描述 |
+|------|------|
+| `new()` | 创建健康的 MockDatabaseAdapter |
+| `set_healthy(bool)` | 设置健康状态 |
+| `get_records()` | 获取所有插入的记录（用于测试验证） |
+| `clear()` | 清空记录 |
+
+**示例**
+```rust
+use inklog::infrastructure::MockDatabaseAdapter;
+
+let db = MockDatabaseAdapter::new();
+db.set_healthy(false); // 模拟数据库故障
+
+assert_eq!(db.is_healthy().await, false);
+
+db.set_healthy(true);
+let count = db.insert_batch(&records).await?;
+assert_eq!(count, records.len());
+```
+
+---
+
+## 适配器实现
+
+Inklog 提供了生产环境的适配器实现。
+
+### OxCacheAdapter
+
+OxCache 缓存适配器。
+
+**需要**: `oxcache` 库
+
+**特性**:
+- 高性能内存缓存
+- 支持 TTL 过期
+- 线程安全
+
+### ConfersAdapter
+
+Confers 配置适配器。
+
+**需要**: `confers` feature
+
+**特性**:
+- TOML 配置文件支持
+- 环境变量覆盖
+- 热重载
+
+### DbNexusAdapter
+
+DbNexus 数据库适配器。
+
+**需要**: `dbnexus` feature
+
+**特性**:
+- 连接池管理
+- 支持 PostgreSQL、MySQL、SQLite
+- 自动重连
 
 ---
 

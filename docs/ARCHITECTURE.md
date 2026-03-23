@@ -181,6 +181,259 @@ pub struct InklogConfig {
 - 加密必须提供密钥环境变量
 - S3 bucket 和 region 必须配置
 
+## 依赖注入架构
+
+Inklog 采用依赖注入（Dependency Injection, DI）架构，通过 trait 抽象实现模块解耦和可测试性。
+
+### 架构层次
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Feature Layer (inklog)                │
+│                                                          │
+│  LoggerManager ──── LoggerBuilder ──── LoggerDependencies│
+│        │                  │                    │         │
+│        └──────────────────┴────────────────────┘         │
+│                          │                               │
+│                          ▼                               │
+│            ┌─────────────────────────────┐              │
+│            │   Infrastructure Traits     │              │
+│            ├─────────────────────────────┤              │
+│            │  - Cache trait              │              │
+│            │  - Config trait             │              │
+│            │  - Database trait           │              │
+│            └─────────────────────────────┘              │
+│                          │                               │
+└──────────────────────────┼───────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│  OxCache     │   │  Confers     │   │  DbNexus     │
+│  Adapter     │   │  Adapter     │   │  Adapter     │
+│              │   │              │   │              │
+│  (缓存服务)   │   │  (配置服务)   │   │  (数据库服务) │
+└──────────────┘   └──────────────┘   └──────────────┘
+```
+
+### 核心设计原则
+
+1. **依赖倒置原则 (DIP)**
+   - 高层模块（LoggerManager）依赖抽象接口（trait）
+   - 低层模块（OxCacheAdapter、ConfersAdapter、DbNexusAdapter）实现接口
+
+2. **接口隔离原则 (ISP)**
+   - 每个 trait 职责单一：Cache 负责缓存、Config 负责配置、Database 负责存储
+   - 避免"胖接口"，保持 trait 精简
+
+3. **依赖注入模式**
+   - 构造器注入：通过 `LoggerDependencies` 传入依赖
+   - 可选依赖：所有依赖都是 `Option<Arc<dyn Trait>>`
+   - 默认实现：未注入时使用默认适配器
+
+### Infrastructure Traits
+
+#### Cache Trait
+
+缓存操作抽象，用于缓存日志元数据和配置值。
+
+```rust
+#[async_trait]
+pub trait Cache: Send + Sync {
+    async fn get(&self, key: &str) -> Option<String>;
+    async fn set(&self, key: &str, value: String);
+    async fn delete(&self, key: &str) -> bool;
+    async fn exists(&self, key: &str) -> bool;
+}
+```
+
+**生产实现**: `OxCacheAdapter` - 基于 oxcache 库的高性能缓存
+**测试实现**: `MockCache` - 基于 `RwLock<HashMap>` 的内存缓存
+
+#### Config Trait
+
+配置访问抽象，支持动态配置和运行时更新。
+
+```rust
+pub trait Config: Send + Sync {
+    fn get_string(&self, key: &str) -> Option<String>;
+    fn get_int(&self, key: &str) -> Option<i64>;
+    fn get_bool(&self, key: &str) -> Option<bool>;
+    fn get_float(&self, key: &str) -> Option<f64>;
+}
+```
+
+**生产实现**: `ConfersAdapter` - 基于 confers 库的 TOML 配置支持
+**测试实现**: `MockConfig` - 基于 `RwLock<HashMap>` 的内存配置
+
+#### Database Trait
+
+数据库操作抽象，用于批量日志持久化。
+
+```rust
+#[async_trait]
+pub trait Database: Send + Sync {
+    async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError>;
+    async fn is_healthy(&self) -> bool;
+}
+```
+
+**生产实现**: `DbNexusAdapter` - 基于 dbnexus 库的连接池管理
+**测试实现**: `MockDatabaseAdapter` - 基于 `RwLock<Vec<LogRecord>>` 的内存存储
+
+### 依赖注入容器
+
+#### LoggerDependencies
+
+```rust
+pub struct LoggerDependencies {
+    pub cache: Option<Arc<dyn Cache>>,
+    pub config: Option<Arc<dyn Config>>,
+    #[cfg(feature = "dbnexus")]
+    pub database: Option<Arc<dyn Database>>,
+}
+```
+
+**使用场景**:
+
+1. **纯默认模式** (零依赖)
+```rust
+let logger = LoggerManager::new().await?;
+// 使用 OxCacheAdapter、ConfersAdapter(默认配置)、无数据库
+```
+
+2. **配置文件模式** (confers feature)
+```rust
+let logger = LoggerManager::from_file("config.toml").await?;
+// 使用 OxCacheAdapter、ConfersAdapter(文件配置)、DbNexusAdapter(如配置)
+```
+
+3. **依赖注入模式** (测试和自定义实现)
+```rust
+let deps = LoggerDependencies {
+    cache: Some(Arc::new(MyCache::new())),
+    config: Some(Arc::new(MyConfig::new())),
+    database: Some(Arc::new(MyDatabase::new())),
+};
+let logger = LoggerManager::with_dependencies(deps).await?;
+```
+
+### Mock 实现（测试支持）
+
+#### MockCache
+
+```rust
+let cache = MockCache::new();
+cache.set("key", "value".to_string()).await;
+assert_eq!(cache.get("key").await, Some("value".to_string()));
+
+// 延迟模拟（测试超时场景）
+let slow_cache = MockCache::with_delay(100); // 100ms 延迟
+```
+
+#### MockConfig
+
+```rust
+let config = MockConfig::new()
+    .with_value("level", "debug")
+    .with_value("port", "8080");
+
+assert_eq!(config.get_string("level"), Some("debug".to_string()));
+assert_eq!(config.get_int("port"), Some(8080));
+
+// 运行时修改（测试动态配置）
+config.set("level", "error");
+```
+
+#### MockDatabaseAdapter
+
+```rust
+let db = MockDatabaseAdapter::new();
+
+// 健康状态控制（测试降级场景）
+db.set_healthy(false);
+assert_eq!(db.is_healthy().await, false);
+
+// 记录验证（测试日志持久化）
+db.insert_batch(&records).await?;
+let stored = db.get_records();
+assert_eq!(stored.len(), records.len());
+
+// 清空记录（测试隔离）
+db.clear();
+```
+
+### DatabaseSink DI 集成
+
+DatabaseSink 支持可选的数据库注入：
+
+```rust
+pub struct DatabaseSink {
+    pool: Option<Arc<DbPool>>,          // 内部连接池（无注入时）
+    database: Option<Arc<dyn Database>>, // 注入的数据库实现
+    // ...
+}
+
+impl DatabaseSink {
+    pub fn new(
+        config: &DatabaseSinkConfig,
+        database: Option<Arc<dyn Database>>,
+    ) -> Result<Self, InklogError> {
+        let pool = if database.is_some() {
+            None  // 使用注入的实现，跳过连接池创建
+        } else {
+            Some(Arc::new(create_pool(config).await?))
+        };
+        // ...
+    }
+}
+```
+
+**向后兼容性**:
+- `database = None` 时保持原有行为（创建内部连接池）
+- 现有代码无需修改，自动使用 `None` 默认值
+
+### 设计优势
+
+1. **可测试性**
+   - 生产代码依赖 trait，测试时注入 Mock 实现
+   - 无需启动真实 Redis/PostgreSQL 服务
+   - 隔离测试，提高测试速度和可靠性
+
+2. **可扩展性**
+   - 实现对应 trait 即可替换底层实现
+   - 支持自定义缓存（如 Redis Cluster）、配置中心（如 Consul）、数据库（如 TimescaleDB）
+
+3. **灵活性**
+   - 运行时可切换实现（通过重新创建 LoggerManager）
+   - 支持混合模式（部分注入，部分使用默认）
+
+4. **解耦性**
+   - inklog 包不直接依赖具体实现库的 API
+   - 通过 adapter 模式隔离外部依赖
+
+### 配置键映射
+
+ConfersAdapter 支持完整的配置键映射：
+
+**全局配置**:
+- `global.level`、`global.format`、`global.masking_enabled`
+- `global.fallback_initial_delay_ms`、`global.fallback_max_delay_ms`、`global.fallback_max_retries`
+
+**文件 Sink**:
+- `file_sink.enabled`、`file_sink.path`、`file_sink.max_size`
+- `file_sink.keep_files`、`file_sink.retention_days`、`file_sink.compression_level`
+- `file_sink.encryption_key_env`
+
+**控制台 Sink**:
+- `console_sink.enabled`、`console_sink.colored`
+- `console_sink.stderr_levels`、`console_sink.masking_enabled`
+
+**S3 归档**:
+- `s3_archive.enabled`、`s3_archive.bucket`、`s3_archive.region`
+- `s3_archive.path_prefix`、`s3_archive.retention_days`、`s3_archive.compression`
+
 ## Sink 系统
 
 Sink 抽象层定义统一接口 `LogSink`:

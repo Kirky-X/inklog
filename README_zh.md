@@ -854,6 +854,41 @@ cargo deny check advisories
 cargo deny check bans
 ```
 
+### 依赖注入测试
+
+Inklog 提供 Mock 实现，支持无外部依赖的单元测试：
+
+```rust
+use inklog::{LoggerManager, LoggerDependencies};
+use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use std::sync::Arc;
+
+#[tokio::test]
+async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
+    // 创建 Mock 依赖
+    let deps = LoggerDependencies {
+        cache: Some(Arc::new(MockCache::new())),
+        config: Some(Arc::new(MockConfig::new())),
+        database: Some(Arc::new(MockDatabaseAdapter::new())),
+    };
+
+    // 注入依赖创建 logger
+    let logger = LoggerManager::with_dependencies(deps).await?;
+
+    // 测试日志记录...
+    log::info!("Test message");
+
+    Ok(())
+}
+```
+
+**Mock 实现特性**:
+- **MockCache**: 内存 HashMap，支持延迟模拟
+- **MockConfig**: 运行时可修改的配置
+- **MockDatabaseAdapter**: 内存日志存储，支持健康状态控制
+
+详细使用方法请参考 [用户指南](docs/USER_GUIDE.md#使用-mock-实现进行测试)。
+
 ### 集成测试
 
 ```bash

@@ -854,6 +854,41 @@ cargo deny check advisories
 cargo deny check bans
 ```
 
+### Dependency Injection Testing
+
+Inklog provides Mock implementations for unit testing without external dependencies:
+
+```rust
+use inklog::{LoggerManager, LoggerDependencies};
+use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use std::sync::Arc;
+
+#[tokio::test]
+async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
+    // Create Mock dependencies
+    let deps = LoggerDependencies {
+        cache: Some(Arc::new(MockCache::new())),
+        config: Some(Arc::new(MockConfig::new())),
+        database: Some(Arc::new(MockDatabaseAdapter::new())),
+    };
+
+    // Inject dependencies to create logger
+    let logger = LoggerManager::with_dependencies(deps).await?;
+
+    // Test logging...
+    log::info!("Test message");
+
+    Ok(())
+}
+```
+
+**Mock Implementations**:
+- **MockCache**: In-memory HashMap with delay simulation
+- **MockConfig**: Runtime-modifiable configuration
+- **MockDatabaseAdapter**: In-memory log storage with health state control
+
+See [User Guide](docs/USER_GUIDE.md#using-mock-implementations-for-testing) for detailed usage.
+
 ### Integration Tests
 
 ```bash

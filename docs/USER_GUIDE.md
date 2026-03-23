@@ -1060,6 +1060,212 @@ let recovered = manager.trigger_recovery_for_unhealthy_sinks()?;
 log::info!("已恢复的 Sink: {:?}", recovered);
 ```
 
+### 使用 Mock 实现进行测试
+
+Inklog 提供了完整的 Mock 实现，用于单元测试和集成测试，无需启动真实的基础设施服务。
+
+#### 依赖注入测试模式
+
+```rust
+use inklog::{LoggerManager, LoggerDependencies};
+use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use std::sync::Arc;
+
+#[tokio::test]
+async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
+    // 创建 Mock 依赖
+    let cache = Arc::new(MockCache::new());
+    let config = Arc::new(
+        MockConfig::new()
+            .with_value("level", "debug")
+            .with_value("file_sink.enabled", "true")
+    );
+    let database = Arc::new(MockDatabaseAdapter::new());
+
+    // 注入依赖
+    let deps = LoggerDependencies {
+        cache: Some(cache.clone()),
+        config: Some(config.clone()),
+        database: Some(database.clone()),
+    };
+
+    let logger = LoggerManager::with_dependencies(deps).await?;
+
+    // 使用 logger 进行测试...
+    log::info!("Test message");
+
+    // 验证日志被写入 Mock 数据库
+    let records = database.get_records();
+    assert_eq!(records.len(), 1);
+
+    Ok(())
+}
+```
+
+#### MockCache 使用示例
+
+```rust
+use inklog::infrastructure::MockCache;
+
+#[tokio::test]
+async fn test_cache_operations() {
+    let cache = MockCache::new();
+
+    // 设置缓存
+    cache.set("key1", "value1".to_string()).await;
+    cache.set("key2", "value2".to_string()).await;
+
+    // 获取缓存
+    assert_eq!(cache.get("key1").await, Some("value1".to_string()));
+
+    // 检查存在性
+    assert!(cache.exists("key1").await);
+    assert!(!cache.exists("nonexistent").await);
+
+    // 删除缓存
+    assert!(cache.delete("key1").await);
+    assert_eq!(cache.get("key1").await, None);
+
+    // 延迟模拟（测试超时场景）
+    let slow_cache = MockCache::with_delay(100); // 100ms 延迟
+}
+```
+
+#### MockConfig 使用示例
+
+```rust
+use inklog::infrastructure::MockConfig;
+
+#[test]
+fn test_config_operations() {
+    let config = MockConfig::new()
+        .with_value("level", "debug")
+        .with_value("port", "8080")
+        .with_value("enabled", "true")
+        .with_value("ratio", "3.14");
+
+    // 获取各种类型的值
+    assert_eq!(config.get_string("level"), Some("debug".to_string()));
+    assert_eq!(config.get_int("port"), Some(8080));
+    assert_eq!(config.get_bool("enabled"), Some(true));
+    assert_eq!(config.get_float("ratio"), Some(3.14));
+
+    // 获取不存在的键
+    assert_eq!(config.get_string("nonexistent"), None);
+
+    // 运行时修改配置（测试动态配置场景）
+    config.set("level", "error");
+    assert_eq!(config.get_string("level"), Some("error".to_string()));
+}
+```
+
+#### MockDatabaseAdapter 使用示例
+
+```rust
+use inklog::infrastructure::MockDatabaseAdapter;
+use inklog::LogRecord;
+use chrono::Utc;
+
+#[tokio::test]
+async fn test_database_operations() {
+    let db = MockDatabaseAdapter::new();
+
+    // 创建测试日志记录
+    let records = vec![
+        LogRecord::new("info".to_string(), "Test message 1".to_string()),
+        LogRecord::new("error".to_string(), "Test message 2".to_string()),
+    ];
+
+    // 批量插入
+    let count = db.insert_batch(&records).await.unwrap();
+    assert_eq!(count, 2);
+
+    // 验证记录
+    let stored = db.get_records();
+    assert_eq!(stored.len(), 2);
+    assert_eq!(stored[0].message, "Test message 1");
+
+    // 健康状态控制（测试降级场景）
+    db.set_healthy(false);
+    assert!(!db.is_healthy().await);
+
+    // 恢复健康
+    db.set_healthy(true);
+    assert!(db.is_healthy().await);
+
+    // 清空记录（测试隔离）
+    db.clear();
+    assert_eq!(db.get_records().len(), 0);
+}
+```
+
+#### 混合模式（部分注入）
+
+```rust
+use inklog::{LoggerManager, LoggerDependencies};
+use inklog::infrastructure::MockDatabaseAdapter;
+use std::sync::Arc;
+
+#[tokio::test]
+async fn test_mixed_mode() {
+    // 只注入数据库，其他使用默认实现
+    let deps = LoggerDependencies {
+        cache: None,              // 使用默认 OxCacheAdapter
+        config: None,             // 使用默认配置
+        database: Some(Arc::new(MockDatabaseAdapter::new())),
+    };
+
+    let logger = LoggerManager::with_dependencies(deps).await?;
+    // 日志会写入 Mock 数据库，但缓存和配置使用生产实现
+}
+```
+
+#### 测试隔离最佳实践
+
+```rust
+use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+
+struct TestContext {
+    cache: Arc<MockCache>,
+    config: Arc<MockConfig>,
+    database: Arc<MockDatabaseAdapter>,
+}
+
+impl TestContext {
+    fn new() -> Self {
+        Self {
+            cache: Arc::new(MockCache::new()),
+            config: Arc::new(MockConfig::new()),
+            database: Arc::new(MockDatabaseAdapter::new()),
+        }
+    }
+
+    async fn create_logger(&self) -> Result<LoggerManager, InklogError> {
+        let deps = LoggerDependencies {
+            cache: Some(self.cache.clone()),
+            config: Some(self.config.clone()),
+            database: Some(self.database.clone()),
+        };
+        LoggerManager::with_dependencies(deps).await
+    }
+
+    fn reset(&self) {
+        self.cache.delete_all().await;  // 清空缓存
+        self.database.clear();           // 清空数据库
+    }
+}
+
+#[tokio::test]
+async fn test_isolated() {
+    let ctx = TestContext::new();
+    let logger = ctx.create_logger().await?;
+
+    // 执行测试...
+
+    ctx.reset();  // 重置状态，不影响其他测试
+}
+```
+
 ---
 
 ## 环境变量配置
