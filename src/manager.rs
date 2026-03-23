@@ -61,6 +61,9 @@ struct WorkerParams {
     console_sink: Arc<Mutex<ConsoleSink>>,
     error_sink: Arc<Mutex<Option<FileSink>>>,
     effective_capacity: Arc<AtomicUsize>,
+    /// 注入的数据库依赖（DI 模式）
+    #[cfg(feature = "dbnexus")]
+    database: Option<Arc<dyn Database>>,
 }
 
 /// 环境检测结果，用于智能配置
@@ -180,6 +183,11 @@ pub struct LoggerManager {
     archive_service: Option<Arc<tokio::sync::Mutex<ArchiveService>>>,
     #[cfg(feature = "http")]
     http_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// 注入的缓存依赖
+    cache: Option<Arc<dyn Cache>>,
+    /// 注入的数据库依赖（需要 dbnexus feature）
+    #[cfg(feature = "dbnexus")]
+    database: Option<Arc<dyn Database>>,
 }
 
 impl LoggerManager {
@@ -307,15 +315,30 @@ impl LoggerManager {
             InklogConfig::load_with_nested_env().unwrap_or_else(|_| InklogConfig::default())
         };
 
-        // 注意：cache 和 database 依赖目前保留用于未来扩展
-        // 当前 LoggerManager 的内部架构不直接使用这些依赖
-        // 它们可以通过 LoggerDependencies 传递给需要的服务
-        let _cache = deps.cache;
+        // 注意：cache 和 database 依赖传递给 LoggerManager 内部使用
+        // 它们可以通过 LoggerManager 传递给需要的服务（如 DatabaseSink）
+        let cache = deps.cache;
         #[cfg(feature = "dbnexus")]
-        let _database = deps.database;
+        let database = deps.database;
 
         // 使用解析后的配置调用现有的构建逻辑
-        Self::with_config(config).await
+        let (mut manager, _subscriber, _filter) = Self::build_detached(
+            config,
+            #[cfg(feature = "dbnexus")]
+            database.clone(),
+        )
+        .await?;
+
+        // 将 cache 依赖注入到 manager 中
+        manager.cache = cache;
+
+        // database 已经在 build_detached 中使用，同时也存储在 manager 中
+        #[cfg(feature = "dbnexus")]
+        {
+            manager.database = database;
+        }
+
+        Ok(manager)
     }
 
     /// Creates a new LoggerManager with the given configuration.
@@ -350,7 +373,12 @@ impl LoggerManager {
             "Logger manager initialized"
         );
 
-        let (manager, subscriber, filter) = Self::build_detached(config.clone()).await?;
+        let (manager, subscriber, filter) = Self::build_detached(
+            config.clone(),
+            #[cfg(feature = "dbnexus")]
+            None,
+        )
+        .await?;
 
         // 1. 安装 tracing subscriber
         let registry = tracing_subscriber::registry().with(subscriber).with(filter);
@@ -405,6 +433,7 @@ impl LoggerManager {
     /// 这主要用于测试和基准测试。
     pub async fn build_detached(
         config: InklogConfig,
+        #[cfg(feature = "dbnexus")] database: Option<Arc<dyn Database>>,
     ) -> Result<
         (
             Self,
@@ -456,6 +485,8 @@ impl LoggerManager {
             console_sink: console_sink.clone(),
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
+            #[cfg(feature = "dbnexus")]
+            database,
         })?;
 
         // Initialize archive service if configured
@@ -528,6 +559,9 @@ impl LoggerManager {
             archive_service,
             #[cfg(feature = "http")]
             http_server_handle: Mutex::new(None),
+            cache: None,
+            #[cfg(feature = "dbnexus")]
+            database: None,
         };
 
         #[cfg(not(feature = "aws"))]
@@ -543,6 +577,9 @@ impl LoggerManager {
             effective_capacity: effective_capacity.clone(),
             #[cfg(feature = "http")]
             http_server_handle: Mutex::new(None),
+            cache: None,
+            #[cfg(feature = "dbnexus")]
+            database: None,
         };
 
         Ok((manager, subscriber, filter))
@@ -850,6 +887,8 @@ impl LoggerManager {
             console_sink,
             error_sink,
             effective_capacity,
+            #[cfg(feature = "dbnexus")]
+            database,
         } = params;
         let file_config = config.file_sink.clone();
         #[allow(unused_variables)]
@@ -1161,7 +1200,7 @@ impl LoggerManager {
                 if let Some(cfg) = db_config {
                     if cfg.enabled {
                         let cfg_clone = cfg.clone(); // Clone for recovery attempts
-                        if let Ok(sink_result) = DatabaseSink::new(&cfg) {
+                        if let Ok(sink_result) = DatabaseSink::new(&cfg, database.clone()) {
                             let mut sink: DatabaseSink = sink_result;
                             sink.set_metrics(metrics_db.clone());
                             let mut consecutive_failures = 0;
@@ -1225,9 +1264,10 @@ impl LoggerManager {
                                                 if last_failure.elapsed() > Duration::from_secs(60)
                                                 {
                                                     eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
-                                                    if let Ok(new_sink) =
-                                                        DatabaseSink::new(&cfg_clone.clone())
-                                                    {
+                                                    if let Ok(new_sink) = DatabaseSink::new(
+                                                        &cfg_clone.clone(),
+                                                        database.clone(),
+                                                    ) {
                                                         sink = new_sink;
                                                         sink.set_metrics(metrics_db.clone());
                                                         consecutive_failures = 0;
@@ -1258,9 +1298,10 @@ impl LoggerManager {
                                         {
                                             eprintln!("Database sink: Received recovery command");
                                             // Attempt to recreate the sink
-                                            if let Ok(new_sink) =
-                                                DatabaseSink::new(&cfg_clone.clone())
-                                            {
+                                            if let Ok(new_sink) = DatabaseSink::new(
+                                                &cfg_clone.clone(),
+                                                database.clone(),
+                                            ) {
                                                 sink = new_sink;
                                                 sink.set_metrics(metrics_db.clone());
                                                 consecutive_failures = 0;
@@ -1329,9 +1370,10 @@ impl LoggerManager {
                                         if let Some(last_failure) = last_failure_time {
                                             if last_failure.elapsed() > Duration::from_secs(60) {
                                                 eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
-                                                if let Ok(new_sink) =
-                                                    DatabaseSink::new(&cfg_clone.clone())
-                                                {
+                                                if let Ok(new_sink) = DatabaseSink::new(
+                                                    &cfg_clone.clone(),
+                                                    database.clone(),
+                                                ) {
                                                     sink = new_sink;
                                                     sink.set_metrics(metrics_db.clone());
                                                     consecutive_failures = 0;
