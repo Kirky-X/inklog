@@ -21,6 +21,8 @@ use dbnexus::pool::DbPool;
 #[cfg(feature = "dbnexus")]
 use once_cell::sync::Lazy;
 #[cfg(feature = "dbnexus")]
+use parking_lot::Mutex;
+#[cfg(feature = "dbnexus")]
 use sea_orm::{EntityTrait, Set};
 #[cfg(feature = "dbnexus")]
 use tokio::runtime::Handle;
@@ -66,25 +68,40 @@ fn get_db_runtime() -> &'static tokio::runtime::Runtime {
     &DB_SHARED_RUNTIME
 }
 
+/// DatabaseSink 的可变内部状态
 #[cfg(feature = "dbnexus")]
-pub struct DatabaseSink {
+struct DatabaseSinkInner {
     buffer: Vec<LogRecord>,
     last_flush: Instant,
-    pool: Option<Arc<DbPool>>,
     fallback_sink: Option<FileSink>,
     circuit_breaker: CircuitBreaker,
-    masker: Arc<DataMasker>,
-    stop: Arc<AtomicBool>,
-    metrics: Option<Arc<Metrics>>,
     current_batch_size: usize,
     write_latencies: Vec<Duration>,
     success_count: usize,
     failure_count: usize,
+    metrics: Option<Arc<Metrics>>,
+}
+
+#[cfg(feature = "dbnexus")]
+pub struct DatabaseSink {
+    /// 可变内部状态
+    inner: Mutex<DatabaseSinkInner>,
+    /// 数据库连接池（只读）
+    pool: Option<Arc<DbPool>>,
+    /// 数据脱敏器（只读）
+    masker: Arc<DataMasker>,
+    /// 停止标志
+    stop: Arc<AtomicBool>,
+    /// 注入的数据库实现（DI 模式）
+    database: Option<Arc<dyn crate::infrastructure::Database>>,
 }
 
 #[cfg(feature = "dbnexus")]
 impl DatabaseSink {
-    pub fn new(config: &crate::config::DatabaseSinkConfig) -> Result<Self, InklogError> {
+    pub fn new(
+        config: &crate::config::DatabaseSinkConfig,
+        database: Option<Arc<dyn crate::infrastructure::Database>>,
+    ) -> Result<Self, InklogError> {
         let fallback_config = FileSinkConfig {
             enabled: true,
             path: PathBuf::from("logs/db_fallback.log"),
@@ -92,59 +109,70 @@ impl DatabaseSink {
         };
         let fallback_sink = FileSink::new(fallback_config).ok();
 
-        let pool = get_db_runtime().block_on(async {
-            let pool = dbnexus::DbPoolBuilder::new()
-                .url(&config.url)
-                .max_connections(config.pool_size)
-                .build()
-                .await
-                .map_err(|e: dbnexus::DbError| InklogError::DatabaseError(e.to_string()))?;
-            Ok::<_, InklogError>(pool)
-        })?;
+        // 如果注入了 database，使用它；否则创建内部连接池
+        let pool = if database.is_some() {
+            None // 使用注入的 database，不需要内部 pool
+        } else {
+            Some(Arc::new(get_db_runtime().block_on(async {
+                let pool = dbnexus::DbPoolBuilder::new()
+                    .url(&config.url)
+                    .max_connections(config.pool_size)
+                    .build()
+                    .await
+                    .map_err(|e: dbnexus::DbError| InklogError::DatabaseError(e.to_string()))?;
+                Ok::<_, InklogError>(pool)
+            })?))
+        };
 
-        Ok(Self {
+        let inner = DatabaseSinkInner {
             buffer: Vec::with_capacity(DEFAULT_BATCH_SIZE),
             last_flush: Instant::now(),
-            pool: Some(Arc::new(pool)),
             fallback_sink,
             circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),
-            masker: Arc::new(DataMasker::new()),
-            stop: Arc::new(AtomicBool::new(false)),
-            metrics: None,
             current_batch_size: DEFAULT_BATCH_SIZE,
             write_latencies: Vec::with_capacity(ADAPTIVE_WINDOW_SIZE),
             success_count: 0,
             failure_count: 0,
+            metrics: None,
+        };
+
+        Ok(Self {
+            inner: Mutex::new(inner),
+            pool,
+            masker: Arc::new(DataMasker::new()),
+            stop: Arc::new(AtomicBool::new(false)),
+            database,
         })
     }
 
-    pub fn set_metrics(&mut self, metrics: Arc<Metrics>) {
-        self.metrics = Some(metrics);
+    pub fn set_metrics(&self, metrics: Arc<Metrics>) {
+        let mut inner = self.inner.lock();
+        inner.metrics = Some(metrics);
     }
 
-    fn adjust_batch_size(&mut self) {
-        if self.write_latencies.len() < ADAPTIVE_WINDOW_SIZE {
+    fn adjust_batch_size(inner: &mut DatabaseSinkInner) {
+        if inner.write_latencies.len() < ADAPTIVE_WINDOW_SIZE {
             return;
         }
 
         let avg_latency: Duration =
-            self.write_latencies.iter().sum::<Duration>() / self.write_latencies.len() as u32;
-        let total_ops = self.success_count + self.failure_count;
+            inner.write_latencies.iter().sum::<Duration>() / inner.write_latencies.len() as u32;
+        let total_ops = inner.success_count + inner.failure_count;
         let success_rate = if total_ops > 0 {
-            self.success_count as f64 / total_ops as f64
+            inner.success_count as f64 / total_ops as f64
         } else {
             1.0
         };
 
         if success_rate >= 0.95 && avg_latency < Duration::from_millis(50) {
-            self.current_batch_size = (self.current_batch_size * 2).min(MAX_BATCH_SIZE);
+            inner.current_batch_size = (inner.current_batch_size * 2).min(MAX_BATCH_SIZE);
         } else if success_rate < 0.8 || avg_latency > Duration::from_millis(200) {
-            self.current_batch_size = (self.current_batch_size / 2).max(MIN_BATCH_SIZE);
+            inner.current_batch_size = (inner.current_batch_size / 2).max(MIN_BATCH_SIZE);
         }
 
-        self.write_latencies.clear();
-        self.success_count = 0;
-        self.failure_count = 0;
+        inner.write_latencies.clear();
+        inner.success_count = 0;
+        inner.failure_count = 0;
     }
 
     fn execute_async<F, T>(&self, f: F) -> T
@@ -169,9 +197,11 @@ impl fmt::Display for DatabaseSink {
 
 #[cfg(feature = "dbnexus")]
 impl crate::sink::LogSink for DatabaseSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
-        if !self.circuit_breaker.can_execute() {
-            if let Some(ref mut sink) = self.fallback_sink {
+    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        let mut inner = self.inner.lock();
+
+        if !inner.circuit_breaker.can_execute() {
+            if let Some(ref sink) = inner.fallback_sink {
                 let _ = sink.write(record);
             }
             return Ok(());
@@ -182,44 +212,89 @@ impl crate::sink::LogSink for DatabaseSink {
             ..record.clone()
         };
 
-        self.buffer.push(masked_record);
+        inner.buffer.push(masked_record);
 
-        if self.buffer.len() >= self.current_batch_size
-            || self.last_flush.elapsed() > Duration::from_millis(DEFAULT_FLUSH_INTERVAL_MS)
+        if inner.buffer.len() >= inner.current_batch_size
+            || inner.last_flush.elapsed() > Duration::from_millis(DEFAULT_FLUSH_INTERVAL_MS)
         {
             let start = Instant::now();
-            if let Err(e) = self.flush() {
-                self.failure_count += 1;
-                self.circuit_breaker.record_failure();
-                if let Some(ref mut sink) = self.fallback_sink {
+            if let Err(e) = Self::flush_inner(self, &mut inner) {
+                inner.failure_count += 1;
+                inner.circuit_breaker.record_failure();
+                if let Some(ref sink) = inner.fallback_sink {
                     let _ = sink.write(record);
                 }
                 return Err(e);
             }
-            self.success_count += 1;
-            self.write_latencies.push(start.elapsed());
-            self.adjust_batch_size();
+            inner.success_count += 1;
+            inner.write_latencies.push(start.elapsed());
+            Self::adjust_batch_size(&mut inner);
         }
 
-        self.circuit_breaker.record_success();
+        inner.circuit_breaker.record_success();
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), InklogError> {
-        if self.buffer.is_empty() {
+    fn flush(&self) -> Result<(), InklogError> {
+        let mut inner = self.inner.lock();
+        Self::flush_inner(self, &mut inner)
+    }
+
+    fn shutdown(&self) -> Result<(), InklogError> {
+        self.stop.store(true, Ordering::Relaxed);
+        let mut inner = self.inner.lock();
+        let _ = Self::flush_inner(self, &mut inner);
+        tracing::info!("Database sink shutdown complete");
+        Ok(())
+    }
+}
+
+#[cfg(feature = "dbnexus")]
+impl DatabaseSink {
+    fn flush_inner(&self, inner: &mut DatabaseSinkInner) -> Result<(), InklogError> {
+        if inner.buffer.is_empty() {
             return Ok(());
         }
 
-        let records = std::mem::take(&mut self.buffer);
-        self.last_flush = Instant::now();
+        let records = std::mem::take(&mut inner.buffer);
+        inner.last_flush = Instant::now();
         let batch_size = records.len();
-        if let Some(metrics) = &self.metrics {
+        if let Some(metrics) = &inner.metrics {
             metrics.set_db_batch_size(batch_size);
         }
 
-        if let Some(ref pool) = self.pool {
+        // 优先使用注入的 database 实现
+        if let Some(ref database) = self.database {
+            let database_clone = database.clone();
+            let metrics_ref = inner.metrics.clone();
+            let records_clone = records.clone();
+
+            let result = self.execute_async(async move {
+                match database_clone.insert_batch(&records_clone).await {
+                    Ok(written) => {
+                        if let Some(m) = &metrics_ref {
+                            m.add_db_batch_records_total(written);
+                            m.update_sink_health("database", true, None);
+                        }
+                        Ok(())
+                    }
+                    Err(e) => {
+                        if let Some(m) = &metrics_ref {
+                            m.inc_sink_error();
+                            m.update_sink_health("database", false, Some(e.to_string()));
+                        }
+                        Err(e)
+                    }
+                }
+            });
+
+            if let Err(e) = result {
+                inner.buffer = records;
+                return Err(e);
+            }
+        } else if let Some(ref pool) = self.pool {
             let pool_clone = pool.clone();
-            let metrics_ref = self.metrics.clone();
+            let metrics_ref = inner.metrics.clone();
             let records_for_async = records.clone();
             let result = self.execute_async(async move {
                 match write_batch_to_db(&pool_clone, &records_for_async).await {
@@ -241,18 +316,11 @@ impl crate::sink::LogSink for DatabaseSink {
             });
 
             if let Err(e) = result {
-                self.buffer = records;
+                inner.buffer = records;
                 return Err(e);
             }
         }
 
-        Ok(())
-    }
-
-    fn shutdown(&mut self) -> Result<(), InklogError> {
-        self.stop.store(true, Ordering::Relaxed);
-        let _ = self.flush();
-        tracing::info!("Database sink shutdown complete");
         Ok(())
     }
 }
