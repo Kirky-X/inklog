@@ -126,7 +126,6 @@
 //! ```
 
 pub mod archive;
-pub mod cache;
 pub mod config;
 pub mod container;
 mod error;
