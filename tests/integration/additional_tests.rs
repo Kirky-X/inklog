@@ -446,7 +446,13 @@ async fn test_manager_health_status_after_logging() {
     config.global.level = "info".to_string();
     config.performance.channel_capacity = 8;
 
-    let (manager, subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
+    let (manager, subscriber, filter) = LoggerManager::build_detached(
+        config,
+        #[cfg(feature = "dbnexus")]
+        None,
+    )
+    .await
+    .unwrap();
     let registry = tracing_subscriber::registry().with(subscriber).with(filter);
 
     tracing::subscriber::with_default(registry, || {
@@ -489,7 +495,13 @@ async fn test_manager_block_strategy_high_load_sampling() {
     });
     config.performance.channel_capacity = 4;
 
-    let (manager, subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
+    let (manager, subscriber, filter) = LoggerManager::build_detached(
+        config,
+        #[cfg(feature = "dbnexus")]
+        None,
+    )
+    .await
+    .unwrap();
     let registry = tracing_subscriber::registry().with(subscriber).with(filter);
 
     let thread_count = 6_usize;
@@ -565,7 +577,13 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
     config.performance.min_capacity = 5;
     config.performance.max_capacity = 40;
 
-    let (manager, subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
+    let (manager, subscriber, filter) = LoggerManager::build_detached(
+        config,
+        #[cfg(feature = "dbnexus")]
+        None,
+    )
+    .await
+    .unwrap();
     let registry = tracing_subscriber::registry().with(subscriber).with(filter);
 
     let initial_capacity = manager.effective_channel_capacity();

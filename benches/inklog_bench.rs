@@ -46,9 +46,13 @@ async fn setup_file_logger(log_path: &Path, channel_capacity: usize) -> (LoggerM
         ..Default::default()
     };
 
-    let (manager, subscriber, filter) = LoggerManager::build_detached(config)
-        .await
-        .expect("Benchmark setup failed");
+    let (manager, subscriber, filter) = LoggerManager::build_detached(
+        config,
+        #[cfg(feature = "dbnexus")]
+        None,
+    )
+    .await
+    .expect("Benchmark setup failed");
 
     let registry = tracing_subscriber::registry().with(subscriber).with(filter);
     let guard = tracing::subscriber::set_default(registry);
@@ -68,9 +72,13 @@ async fn setup_console_logger() -> (LoggerManager, impl Drop) {
         ..Default::default()
     };
 
-    let (manager, subscriber, filter) = LoggerManager::build_detached(config)
-        .await
-        .expect("Benchmark setup failed");
+    let (manager, subscriber, filter) = LoggerManager::build_detached(
+        config,
+        #[cfg(feature = "dbnexus")]
+        None,
+    )
+    .await
+    .expect("Benchmark setup failed");
 
     let registry = tracing_subscriber::registry().with(subscriber).with(filter);
     let guard = tracing::subscriber::set_default(registry);
@@ -86,9 +94,13 @@ async fn setup_noop_logger() -> (LoggerManager, impl Drop) {
         ..Default::default()
     };
 
-    let (manager, subscriber, filter) = LoggerManager::build_detached(config)
-        .await
-        .expect("Benchmark setup failed");
+    let (manager, subscriber, filter) = LoggerManager::build_detached(
+        config,
+        #[cfg(feature = "dbnexus")]
+        None,
+    )
+    .await
+    .expect("Benchmark setup failed");
 
     let registry = tracing_subscriber::registry().with(subscriber).with(filter);
     let guard = tracing::subscriber::set_default(registry);
