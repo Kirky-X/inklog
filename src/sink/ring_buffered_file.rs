@@ -11,11 +11,12 @@ use crate::log_record::LogRecord;
 use crate::sink::LogSink;
 use crate::template::LogTemplate;
 use crossbeam_channel;
+use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 
@@ -48,6 +49,12 @@ impl Default for ChannelBufferedConfig {
     }
 }
 
+/// ChannelBufferedFileSink 的可变状态
+struct Inner {
+    io_thread: Option<thread::JoinHandle<()>>,
+    flush_thread: Option<thread::JoinHandle<()>>,
+}
+
 pub struct ChannelBufferedFileSink {
     #[allow(dead_code)]
     config: ChannelBufferedConfig,
@@ -57,8 +64,7 @@ pub struct ChannelBufferedFileSink {
     file: Arc<Mutex<Option<BufWriter<File>>>>,
     #[allow(dead_code)]
     file_path: PathBuf,
-    io_thread: Option<thread::JoinHandle<()>>,
-    flush_thread: Option<thread::JoinHandle<()>>,
+    inner: Mutex<Inner>,
     shutdown_flag: Arc<AtomicBool>,
     bytes_written: Arc<AtomicUsize>,
     flush_count: Arc<AtomicUsize>,
@@ -80,15 +86,17 @@ impl ChannelBufferedFileSink {
         let dropped_count = Arc::new(AtomicUsize::new(0));
         let last_flush = Instant::now();
 
-        let mut sink = Self {
+        let sink = Self {
             config,
             template,
             sender,
             receiver,
             file,
             file_path,
-            io_thread: None,
-            flush_thread: None,
+            inner: Mutex::new(Inner {
+                io_thread: None,
+                flush_thread: None,
+            }),
             shutdown_flag,
             bytes_written,
             flush_count,
@@ -115,7 +123,7 @@ impl ChannelBufferedFileSink {
             .map_err(InklogError::IoError)
     }
 
-    fn start_io_thread(&mut self) {
+    fn start_io_thread(&self) {
         let receiver = self.receiver.clone();
         let file = self.file.clone();
         let shutdown_flag = self.shutdown_flag.clone();
@@ -154,41 +162,38 @@ impl ChannelBufferedFileSink {
                     batch.truncate(recv_count);
                 }
 
-                if let Ok(mut file_guard) = file.lock() {
-                    if let Some(writer) = file_guard.as_mut() {
-                        for entry in &batch {
-                            if let Err(e) = writer.write_all(entry.as_bytes()) {
-                                eprintln!("ChannelBufferedFileSink: Write error: {}", e);
-                            } else {
-                                bytes_written.fetch_add(entry.len(), Ordering::Relaxed);
-                            }
+                let mut file_guard = file.lock();
+                if let Some(writer) = file_guard.as_mut() {
+                    for entry in &batch {
+                        if let Err(e) = writer.write_all(entry.as_bytes()) {
+                            eprintln!("ChannelBufferedFileSink: Write error: {}", e);
+                        } else {
+                            bytes_written.fetch_add(entry.len(), Ordering::Relaxed);
                         }
-                        let _ = writer.flush();
                     }
+                    let _ = writer.flush();
                 }
             }
 
             // Drain remaining messages
             while let Ok(entry) = receiver.recv_timeout(StdDuration::from_millis(100)) {
-                if let Ok(mut file_guard) = file.lock() {
-                    if let Some(writer) = file_guard.as_mut() {
-                        let _ = writer.write_all(entry.as_bytes());
-                    }
+                let mut file_guard = file.lock();
+                if let Some(writer) = file_guard.as_mut() {
+                    let _ = writer.write_all(entry.as_bytes());
                 }
             }
 
             // Final flush
-            if let Ok(mut file_guard) = file.lock() {
-                if let Some(writer) = file_guard.as_mut() {
-                    let _ = writer.flush();
-                }
+            let mut file_guard = file.lock();
+            if let Some(writer) = file_guard.as_mut() {
+                let _ = writer.flush();
             }
         });
 
-        self.io_thread = Some(handle);
+        self.inner.lock().io_thread = Some(handle);
     }
 
-    fn start_flush_thread(&mut self) {
+    fn start_flush_thread(&self) {
         let file = self.file.clone();
         let shutdown_flag = self.shutdown_flag.clone();
         let interval_ms = self.config.flush_interval_ms;
@@ -202,15 +207,14 @@ impl ChannelBufferedFileSink {
             if shutdown_flag.load(Ordering::Relaxed) {
                 break;
             }
-            if let Ok(mut file_guard) = file.lock() {
-                if let Some(writer) = file_guard.as_mut() {
-                    let _ = writer.flush();
-                    flush_count.fetch_add(1, Ordering::Relaxed);
-                }
+            let mut file_guard = file.lock();
+            if let Some(writer) = file_guard.as_mut() {
+                let _ = writer.flush();
+                flush_count.fetch_add(1, Ordering::Relaxed);
             }
         });
 
-        self.flush_thread = Some(handle);
+        self.inner.lock().flush_thread = Some(handle);
     }
 
     fn try_write(&self, record: &LogRecord) -> bool {
@@ -274,29 +278,36 @@ pub struct ChannelBufferedMetrics {
 }
 
 impl LogSink for ChannelBufferedFileSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         self.try_write(record);
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), InklogError> {
-        if let Ok(mut file_guard) = self.file.lock() {
-            if let Some(writer) = file_guard.as_mut() {
-                writer.flush()?;
-            }
+    fn flush(&self) -> Result<(), InklogError> {
+        let mut file_guard = self.file.lock();
+        if let Some(writer) = file_guard.as_mut() {
+            writer.flush()?;
         }
         self.flush_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
-    fn shutdown(&mut self) -> Result<(), InklogError> {
+    fn shutdown(&self) -> Result<(), InklogError> {
+        // Signal threads to stop
         self.shutdown_flag.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.io_thread.take() {
-            let _ = handle.join();
+
+        // Join threads to ensure all pending writes are completed
+        {
+            let mut inner = self.inner.lock();
+            if let Some(handle) = inner.io_thread.take() {
+                let _ = handle.join();
+            }
+            if let Some(handle) = inner.flush_thread.take() {
+                let _ = handle.join();
+            }
         }
-        if let Some(handle) = self.flush_thread.take() {
-            let _ = handle.join();
-        }
+
+        // Final flush
         self.flush()?;
         Ok(())
     }
@@ -304,6 +315,8 @@ impl LogSink for ChannelBufferedFileSink {
 
 impl Drop for ChannelBufferedFileSink {
     fn drop(&mut self) {
+        // Ensure shutdown is called, but don't double-join threads
+        // shutdown() will handle joining threads if they haven't been joined yet
         let _ = self.shutdown();
     }
 }
@@ -337,7 +350,7 @@ mod tests {
             flush_interval_ms: 50,
         };
         let tmpl = LogTemplate::default();
-        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
         for i in 0..20 {
             let msg = format!("hello-{i}");
@@ -369,7 +382,7 @@ mod tests {
             flush_interval_ms: 10,
         };
         let tmpl = LogTemplate::default();
-        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
         for i in 0..6 {
             let rec = make_record(&format!("m-{i}"));
@@ -407,7 +420,7 @@ mod tests {
             flush_interval_ms: 1000,
         };
         let tmpl = LogTemplate::default();
-        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
         for i in 0..64 {
             let rec = make_record(&format!("drop-newest-{i}"));
@@ -436,7 +449,7 @@ mod tests {
             flush_interval_ms: 1000,
         };
         let tmpl = LogTemplate::default();
-        let mut sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
         for i in 0..64 {
             let rec = make_record(&format!("drop-oldest-{i}"));

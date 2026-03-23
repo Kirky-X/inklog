@@ -27,23 +27,37 @@ pub use rotation::{
 use crate::error::InklogError;
 use crate::log_record::LogRecord;
 
+/// Log sink trait for writing log records to various destinations.
+///
+/// All methods use `&self` instead of `&mut self` to support interior mutability
+/// and dependency injection patterns. Implementations should use `Mutex` or `RwLock`
+/// for mutable state.
 pub trait LogSink: Send + Sync {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError>;
-    fn flush(&mut self) -> Result<(), InklogError>;
+    /// Write a log record to the sink.
+    fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
+
+    /// Flush any buffered data to the underlying storage.
+    fn flush(&self) -> Result<(), InklogError>;
+
+    /// Check if the sink is healthy and operational.
     fn is_healthy(&self) -> bool {
         true
     }
-    fn shutdown(&mut self) -> Result<(), InklogError>;
 
-    // 轮转相关方法
-    fn start_rotation_timer(&mut self) {
+    /// Gracefully shutdown the sink, flushing any remaining data.
+    fn shutdown(&self) -> Result<(), InklogError>;
+
+    /// Start rotation timer (for file-based sinks with time-based rotation).
+    fn start_rotation_timer(&self) {
         // 默认空实现
     }
 
-    fn stop_rotation_timer(&mut self) {
+    /// Stop rotation timer.
+    fn stop_rotation_timer(&self) {
         // 默认空实现
     }
 
+    /// Check if there is sufficient disk space for writing.
     fn check_disk_space(&self) -> Result<bool, InklogError> {
         Ok(true) // 默认返回有足够空间
     }

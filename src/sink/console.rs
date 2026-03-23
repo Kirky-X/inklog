@@ -112,7 +112,7 @@ impl ConsoleSink {
 }
 
 impl LogSink for ConsoleSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         // 应用数据脱敏（如果启用）
         let masked_record = if self.config.masking_enabled {
             let mut masked = record.clone();
@@ -147,7 +147,7 @@ impl LogSink for ConsoleSink {
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), InklogError> {
+    fn flush(&self) -> Result<(), InklogError> {
         let mut writer = self
             .writer
             .lock()
@@ -159,7 +159,7 @@ impl LogSink for ConsoleSink {
         true
     }
 
-    fn shutdown(&mut self) -> Result<(), InklogError> {
+    fn shutdown(&self) -> Result<(), InklogError> {
         self.flush()
     }
 }

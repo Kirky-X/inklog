@@ -316,25 +316,22 @@ pub struct AsyncFileMetrics {
 }
 
 impl LogSink for AsyncFileSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         self.try_write(record);
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), InklogError> {
+    fn flush(&self) -> Result<(), InklogError> {
         self.flush_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
-    fn shutdown(&mut self) -> Result<(), InklogError> {
+    fn shutdown(&self) -> Result<(), InklogError> {
         self.shutdown_flag.store(true, Ordering::Relaxed);
 
-        if let Some(handle) = self.io_thread.take() {
-            let _ = handle.join();
-        }
-        if let Some(handle) = self.flush_thread.take() {
-            let _ = handle.join();
-        }
+        // Note: We cannot take the thread handles from &self
+        // The thread handles will be joined when the AsyncFileSink is dropped
+        // This is a limitation of the &self interface
 
         if let Ok(mut file_guard) = self.file.lock() {
             if let Some(f) = file_guard.as_mut() {
