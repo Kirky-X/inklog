@@ -73,6 +73,37 @@
 //! }
 //! ```
 //!
+//! ### 使用依赖注入模式
+//!
+//! ```rust,ignore
+//! use std::sync::Arc;
+//! use inklog::{LoggerManager, LoggerDependencies, InklogContainer};
+//! use inklog::infrastructure::{OxCacheAdapter, ConfersAdapter};
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // 方式 1: 使用依赖注入容器
+//!     let container = InklogContainer::new()?;
+//!     let logger = container.create_logger().await?;
+//!     
+//!     // 方式 2: 使用 Builder 模式注入依赖
+//!     let logger = LoggerManager::builder()
+//!         .cache(Arc::new(OxCacheAdapter::new()?))
+//!         .config(Arc::new(ConfersAdapter::new()?))
+//!         .build().await?;
+//!     
+//!     // 方式 3: 使用 with_dependencies
+//!     let deps = LoggerDependencies {
+//!         cache: Some(Arc::new(OxCacheAdapter::new()?)),
+//!         config: Some(Arc::new(ConfersAdapter::new()?)),
+//!         ..Default::default()
+//!     };
+//!     let logger = LoggerManager::with_dependencies(deps).await?;
+//!     
+//!     Ok(())
+//! }
+//! ```
+//!
 //! ## 配置文件示例 (TOML)
 //!
 //! ```toml
@@ -97,9 +128,11 @@
 pub mod archive;
 pub mod cache;
 pub mod config;
+pub mod container;
 mod error;
 pub mod infrastructure;
 pub mod log_adapter;
+pub mod log_level;
 pub mod log_record;
 mod manager;
 pub mod masking;
@@ -115,10 +148,13 @@ pub use config::{
     PerformanceConfig,
 };
 
+pub use container::{InklogContainer, InklogContainerBuilder};
+
 pub use error::InklogError;
 pub use log_adapter::{LogAdapter, LogLogger};
+pub use log_level::LogLevel;
 pub use log_record::LogRecord;
-pub use manager::{LoggerBuilder, LoggerManager};
+pub use manager::{LoggerBuilder, LoggerDependencies, LoggerManager};
 pub use metrics::{
     FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
 };
