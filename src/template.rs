@@ -152,41 +152,65 @@ impl LogTemplate {
         let mut placeholders = Vec::new();
         let mut current = String::new();
         let mut in_placeholder = false;
+        let chars: Vec<char> = template.chars().collect();
 
-        for (idx, ch) in template.chars().enumerate() {
+        let mut i = 0;
+        while i < chars.len() {
+            let ch = chars[i];
+
             if ch == '{' {
-                if idx > 0 && template.chars().nth(idx - 1) == Some('\\') {
-                    current.push(ch);
+                // Check for escaped brace {{
+                if i + 1 < chars.len() && chars[i + 1] == '{' {
+                    // Double brace escape: {{ becomes {
+                    current.push('{');
+                    i += 2;
+                    continue;
+                }
+
+                if !current.is_empty() {
+                    placeholders.push(Placeholder::Literal(current.clone()));
+                    current.clear();
+                }
+                in_placeholder = true;
+                i += 1;
+            } else if ch == '}' {
+                // Check for escaped brace }}
+                if i + 1 < chars.len() && chars[i + 1] == '}' {
+                    // Double brace escape: }} becomes }
+                    current.push('}');
+                    i += 2;
+                    continue;
+                }
+
+                if in_placeholder {
+                    let placeholder_name = current.trim().to_lowercase();
+                    match placeholder_name.as_str() {
+                        "timestamp" => placeholders.push(Placeholder::Timestamp),
+                        "level" => placeholders.push(Placeholder::Level),
+                        "target" => placeholders.push(Placeholder::Target),
+                        "message" => placeholders.push(Placeholder::Message),
+                        "file" => placeholders.push(Placeholder::File),
+                        "line" => placeholders.push(Placeholder::Line),
+                        "thread_id" => placeholders.push(Placeholder::ThreadId),
+                        "fields" => placeholders.push(Placeholder::Fields),
+                        _ => {
+                            placeholders.push(Placeholder::Literal(format!("{{{}}}", current)));
+                        }
+                    }
+                    current.clear();
+                    in_placeholder = false;
                 } else {
-                    if !current.is_empty() {
-                        placeholders.push(Placeholder::Literal(current.clone()));
-                        current.clear();
-                    }
-                    in_placeholder = true;
+                    // Literal } outside placeholder
+                    current.push(ch);
                 }
-            } else if ch == '}' && in_placeholder {
-                let placeholder_name = current.trim().to_lowercase();
-                match placeholder_name.as_str() {
-                    "timestamp" => placeholders.push(Placeholder::Timestamp),
-                    "level" => placeholders.push(Placeholder::Level),
-                    "target" => placeholders.push(Placeholder::Target),
-                    "message" => placeholders.push(Placeholder::Message),
-                    "file" => placeholders.push(Placeholder::File),
-                    "line" => placeholders.push(Placeholder::Line),
-                    "thread_id" => placeholders.push(Placeholder::ThreadId),
-                    "fields" => placeholders.push(Placeholder::Fields),
-                    _ => {
-                        placeholders.push(Placeholder::Literal(format!("{{{}}}", current)));
-                    }
-                }
-                current.clear();
-                in_placeholder = false;
+                i += 1;
             } else {
-                // Either in placeholder or not, push the character
                 current.push(ch);
+                i += 1;
             }
         }
 
+        // Don't forget remaining content after last placeholder
         if !current.is_empty() {
             placeholders.push(Placeholder::Literal(current));
         }
