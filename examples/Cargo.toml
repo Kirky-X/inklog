@@ -10,7 +10,8 @@ dbnexus = ["inklog/dbnexus", "dep:dbnexus"]
 
 [dependencies]
 inklog = { path = "..", features = ["dbnexus"] }
-dbnexus = { path = "/home/dev/projects/dbnexus", features = ["sqlite"], optional = true }
+dbnexus = { path = "../../dbnexus", features = ["sqlite"], optional = true }
+parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 anyhow = "1.0"
@@ -80,3 +81,7 @@ path = "src/bin/template.rs"
 [[bin]]
 name = "masking"
 path = "src/bin/masking.rs"
+
+[[bin]]
+name = "di_example"
+path = "src/bin/di_example.rs"

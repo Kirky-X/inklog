@@ -2681,6 +2681,7 @@ dependencies = [
  "chrono",
  "dbnexus",
  "inklog",
+ "parking_lot",
  "rand 0.10.0",
  "serde",
  "serde_json",
