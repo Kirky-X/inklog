@@ -70,63 +70,39 @@ use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// 扩展敏感字段检测列表 - 包含常见敏感字段名称模式
-static SENSITIVE_FIELDS: &[&str] = &[
-    // 基础敏感字段
-    "password",
-    "token",
-    "secret",
-    "key",
-    "credential",
-    "auth",
-    // API 相关
-    "api_key",
-    "api_key_id",
-    "api_secret",
-    "access_key",
-    "access_key_id",
-    "secret_key",
-    "private_key",
-    "public_key",
-    "encryption_key",
-    "decryption_key",
-    "master_key",
-    "session_key",
-    "oauth",
-    "oauth_token",
-    "oauth_secret",
-    "bearer",
-    "bearer_token",
-    "jwt",
-    "session_id",
-    "session_token",
-    // AWS 相关
-    "aws_secret",
-    "aws_key",
-    "aws_token",
-    "aws_credentials",
-    // 数据库相关
-    "database_url",
-    "db_password",
-    "db_user",
-    "connection_string",
-    // 支付相关
-    "credit_card",
-    "card_number",
-    "cvv",
-    "ssn",
-    "social_security",
-    // 其他敏感
-    "client_secret",
-    "client_id",
-    "refresh_token",
-    "pin",
-    "pin_code",
-    "two_factor",
-    "totp",
-    "backup_code",
-    "recovery_code",
-];
+/// Word-boundary regex patterns for sensitive field detection.
+/// Uses \b (word boundary) to avoid false positives like "cakey" matching "key".
+static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        // Authentication patterns
+        Regex::new(r"(?i)\b(password|passwd|pwd)\b").unwrap(),
+        // token/bearer/auth: preceded by a non-word separator (space, -, _, etc.) or at start
+        // This excludes cases like "cakey" where 'token' is inside a word.
+        // Covers: "token" (start), "api_token" (underscore), "bearer_token", "auth_token"
+        // The (?:[^a-zA-Z0-9_])? makes the preceding char optional (for start-of-string case)
+        Regex::new(r"(?i)(?:[^a-zA-Z0-9_])?(token|bearer|auth)\b").unwrap(),
+        Regex::new(r"(?i)\b(secret|credential)\b").unwrap(),
+        // Key patterns
+        Regex::new(r"(?i)\b(api[_-]?key|apikey|api[_-]?secret)\b").unwrap(),
+        Regex::new(r"(?i)\b(access[_-]?key|access[_-]?key[_-]?id)\b").unwrap(),
+        Regex::new(r"(?i)\b(secret[_-]?key|private[_-]?key|public[_-]?key)\b").unwrap(),
+        Regex::new(r"(?i)\b(encryption[_-]?key|decryption[_-]?key|master[_-]?key)\b").unwrap(),
+        Regex::new(r"(?i)\b(session[_-]?key|session[_-]?id|session[_-]?token)\b").unwrap(),
+        // OAuth patterns
+        Regex::new(r"(?i)\b(oauth|oauth[_-]?token|oauth[_-]?secret)\b").unwrap(),
+        Regex::new(r"(?i)\b(jwt(_[a-zA-Z0-9]+)?|bearer[_-]?token)\b").unwrap(),
+        // AWS patterns
+        Regex::new(r"(?i)\b(aws[_-]?secret|aws[_-]?key|aws[_-]?token|aws[_-]?credentials)\b").unwrap(),
+        // Database patterns
+        Regex::new(r"(?i)\b(database[_-]?url|db[_-]?password|db[_-]?user|connection[_-]?string)\b").unwrap(),
+        // Payment patterns
+        Regex::new(r"(?i)\b(credit[_-]?card|card[_-]?number|cvv|ssn|social[_-]?security)\b").unwrap(),
+        // Client patterns
+        Regex::new(r"(?i)\b(client[_-]?secret|client[_-]?id)\b").unwrap(),
+        // Other sensitive patterns
+        Regex::new(r"(?i)\b(refresh[_-]?token|pin|pin[_-]?code|two[_-]?factor|totp|backup[_-]?code|recovery[_-]?code)\b").unwrap(),
+    ]
+});
 
 /// Data masking utility for sensitive information protection.
 ///
@@ -212,12 +188,16 @@ impl DataMasker {
         Self { rules }
     }
 
-    /// 检查字段名是否为敏感字段（大小写不敏感）
+    /// 检查字段名是否为敏感字段（大小写不敏感，使用词边界正则避免误判）
+    ///
+    /// 例如：
+    /// - `"cakey"` 不会匹配 `"key"`（避免误判）
+    /// - `"polygon"` 不会匹配 `"gon"`（避免误判）
+    /// - `"password"` 会匹配（正确检测）
     pub fn is_sensitive_field(field_name: &str) -> bool {
-        let lower_name = field_name.to_lowercase();
-        SENSITIVE_FIELDS
+        SENSITIVE_FIELD_PATTERNS
             .iter()
-            .any(|sensitive| lower_name.contains(*sensitive))
+            .any(|pattern| pattern.is_match(field_name))
     }
 
     pub fn mask(&self, text: &str) -> String {
