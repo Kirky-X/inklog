@@ -117,7 +117,7 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
     };
 
     // 创建 FileSink 实例
-    let mut sink = inklog::sink::file::FileSink::new(config)?;
+    let sink = inklog::sink::file::FileSink::new(config)?;
 
     // 创建测试日志内容
     let plaintext = r#"2026-03-19T10:30:00.000Z [INFO] encryption - 这是一条加密的日志消息

@@ -43,7 +43,7 @@ fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
 		stderr_levels: vec![],
 		masking_enabled: false,
 	};
-	let mut sink = ConsoleSink::new(config, inklog::LogTemplate::default());
+	let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
 	// 写入各级别日志
 	let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
@@ -89,7 +89,7 @@ fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
 		stderr_levels: vec![],
 		masking_enabled: false,
 	};
-	let mut sink = ConsoleSink::new(config, inklog::LogTemplate::default());
+	let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
 	// 写入各级别日志
 	print_section("彩色日志输出");
@@ -144,7 +144,7 @@ fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
 		stderr_levels: vec!["error".to_string(), "warn".to_string()],
 		masking_enabled: false,
 	};
-	let mut sink = ConsoleSink::new(config, inklog::LogTemplate::default());
+	let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
 	// 写入不同级别的日志
 	let test_cases = [

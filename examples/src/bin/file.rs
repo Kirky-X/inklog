@@ -72,7 +72,7 @@ fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// 创建 FileSink
-	let mut sink = FileSink::new(config)?;
+	let sink = FileSink::new(config)?;
 
 	// 写入各级别日志
 	print_section("写入日志");
@@ -138,7 +138,7 @@ fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// 创建 FileSink
-	let mut sink = FileSink::new(config)?;
+	let sink = FileSink::new(config)?;
 
 	// 写入大量日志触发轮转
 	print_section("写入日志（触发轮转）");
@@ -233,7 +233,7 @@ fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// 创建 FileSink
-	let mut sink = FileSink::new(config)?;
+	let sink = FileSink::new(config)?;
 
 	// 写入大量日志触发轮转和压缩
 	print_section("写入日志（触发轮转和压缩）");
