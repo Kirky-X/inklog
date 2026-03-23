@@ -257,7 +257,7 @@ mod tests {
         let (async_tx, async_rx) = bounded(1);
         let metrics = Arc::new(Metrics::new());
 
-        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics.clone());
 
         log::set_max_level(log::LevelFilter::Info);
 
@@ -276,5 +276,103 @@ mod tests {
         // Drain channels
         while console_rx.try_recv().is_ok() {}
         while async_rx.try_recv().is_ok() {}
+
+        // Channels of capacity 1 can hold at most 1 item; 4 items dropped (2 per channel)
+        assert_eq!(metrics.logs_dropped(), 8);
+    }
+
+    #[test]
+    fn test_log_adapter_disconnected_channel() {
+        let (console_tx, _cr) = bounded(10);
+        let (async_tx, _ar) = bounded(1);
+        drop(_ar); // Disconnect async channel
+        let metrics = Arc::new(Metrics::new());
+
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics.clone());
+
+        log::set_max_level(log::LevelFilter::Info);
+        let metadata = log::Metadata::builder()
+            .target("test::adapter")
+            .level(Level::Info)
+            .build();
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!("after disconnect"))
+            .build();
+
+        // Should not panic; disconnected async channel drops log and increments metric
+        adapter.log(&record);
+
+        assert_eq!(metrics.logs_dropped(), 1);
+    }
+
+    #[test]
+    fn test_flush_is_noop() {
+        let (console_tx, _) = bounded(10);
+        let (async_tx, _) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+        // flush() is a no-op with channel-based design — just verify it doesn't panic
+        adapter.flush();
+    }
+
+    #[test]
+    fn test_log_adapter_all_levels_mapped() {
+        let (console_tx, _) = bounded(10);
+        let (async_tx, _) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics.clone());
+
+        log::set_max_level(log::LevelFilter::Trace);
+
+        for (level, expected_str) in [
+            (Level::Error, "ERROR"),
+            (Level::Warn, "WARN"),
+            (Level::Info, "INFO"),
+            (Level::Debug, "DEBUG"),
+            (Level::Trace, "TRACE"),
+        ] {
+            let metadata = log::Metadata::builder()
+                .target("test::levels")
+                .level(level)
+                .build();
+            let args = format_args!("msg for {expected_str}");
+            let record = log::Record::builder().metadata(metadata).args(args).build();
+
+            let log_record = adapter.record_to_log_record(&record);
+            assert_eq!(
+                log_record.level, expected_str,
+                "level {level:?} should map to {expected_str}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_log_adapter_enabled_respects_max_level() {
+        let (console_tx, _) = bounded(10);
+        let (async_tx, _) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+
+        // Set global max level to Info
+        log::set_max_level(log::LevelFilter::Info);
+
+        let info_meta = log::Metadata::builder()
+            .target("test")
+            .level(Level::Info)
+            .build();
+        let debug_meta = log::Metadata::builder()
+            .target("test")
+            .level(Level::Debug)
+            .build();
+        let trace_meta = log::Metadata::builder()
+            .target("test")
+            .level(Level::Trace)
+            .build();
+
+        assert!(adapter.enabled(&info_meta));
+        assert!(!adapter.enabled(&debug_meta));
+        assert!(!adapter.enabled(&trace_meta));
     }
 }
