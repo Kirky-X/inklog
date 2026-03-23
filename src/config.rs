@@ -8,6 +8,82 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 // ============================================================================
+// apply_env! macro - Environment variable override helper
+// ============================================================================
+
+/// 应用环境变量覆盖的宏
+///
+/// 使用 TT munching 模式匹配嵌套路径 (如 `self.global.level`)
+///
+/// # 示例
+///
+/// ```ignore
+/// // 简单字符串赋值
+/// apply_env!(self.global.level, "INKLOG_GLOBAL_LEVEL");
+///
+/// // 带 parse 和默认值
+/// apply_env!(self.global.masking_enabled, "INKLOG_GLOBAL_MASKING_ENABLED", bool);
+/// apply_env!(self.performance.worker_threads, "INKLOG_WORKER_THREADS", usize);
+/// ```
+macro_rules! apply_env {
+    // 规则 1: 无默认值 - 仅当环境变量存在时赋值字符串
+    // 匹配模式: apply_env!(self.global.level, "ENV_VAR")
+    ($lhs:expr, $env:literal) => {{
+        if let Ok(val) = std::env::var($env) {
+            $lhs = val;
+        }
+    }};
+
+    // 规则 2: 布尔类型 - 解析环境变量为 bool，失败则保持原值
+    // 匹配模式: apply_env!(self.global.masking_enabled, "ENV_VAR", bool)
+    ($lhs:expr, $env:literal, bool) => {{
+        if let Ok(val) = std::env::var($env) {
+            $lhs = val.parse().unwrap_or($lhs);
+        }
+    }};
+
+    // 规则 3: usize 类型 - 解析环境变量为 usize，失败则保持原值
+    // 匹配模式: apply_env!(self.performance.worker_threads, "ENV_VAR", usize)
+    ($lhs:expr, $env:literal, usize) => {{
+        if let Ok(val) = std::env::var($env) {
+            $lhs = val.parse().unwrap_or($lhs);
+        }
+    }};
+
+    // 规则 4: u64 类型 - 解析环境变量为 u64，失败则保持原值
+    // 匹配模式: apply_env!(self.field, "ENV_VAR", u64)
+    ($lhs:expr, $env:literal, u64) => {{
+        if let Ok(val) = std::env::var($env) {
+            $lhs = val.parse().unwrap_or($lhs);
+        }
+    }};
+
+    // 规则 5: u32 类型 - 解析环境变量为 u32，失败则保持原值
+    // 匹配模式: apply_env!(self.field, "ENV_VAR", u32)
+    ($lhs:expr, $env:literal, u32) => {{
+        if let Ok(val) = std::env::var($env) {
+            $lhs = val.parse().unwrap_or($lhs);
+        }
+    }};
+
+    // 规则 6: u16 类型 - 解析环境变量为 u16，失败则保持原值
+    // 匹配模式: apply_env!(self.field, "ENV_VAR", u16)
+    ($lhs:expr, $env:literal, u16) => {{
+        if let Ok(val) = std::env::var($env) {
+            $lhs = val.parse().unwrap_or($lhs);
+        }
+    }};
+
+    // 规则 7: i32 类型 - 解析环境变量为 i32，失败则保持原值
+    // 匹配模式: apply_env!(self.field, "ENV_VAR", i32)
+    ($lhs:expr, $env:literal, i32) => {{
+        if let Ok(val) = std::env::var($env) {
+            $lhs = val.parse().unwrap_or($lhs);
+        }
+    }};
+}
+
+// ============================================================================
 // InklogConfig - Root configuration struct
 // ============================================================================
 
@@ -55,18 +131,18 @@ impl InklogConfig {
         use std::path::PathBuf;
 
         // Check INKLOG_GLOBAL_* variables for global.* fields
-        if let Ok(level) = std::env::var("INKLOG_GLOBAL_LEVEL") {
-            self.global.level = level;
-        }
-        if let Ok(format) = std::env::var("INKLOG_GLOBAL_FORMAT") {
-            self.global.format = format;
-        }
-        if let Ok(masking) = std::env::var("INKLOG_GLOBAL_MASKING_ENABLED") {
-            self.global.masking_enabled = masking.parse().unwrap_or(self.global.masking_enabled);
-        }
-        if let Ok(fallback) = std::env::var("INKLOG_GLOBAL_AUTO_FALLBACK") {
-            self.global.auto_fallback = fallback.parse().unwrap_or(self.global.auto_fallback);
-        }
+        apply_env!(self.global.level, "INKLOG_GLOBAL_LEVEL");
+        apply_env!(self.global.format, "INKLOG_GLOBAL_FORMAT");
+        apply_env!(
+            self.global.masking_enabled,
+            "INKLOG_GLOBAL_MASKING_ENABLED",
+            bool
+        );
+        apply_env!(
+            self.global.auto_fallback,
+            "INKLOG_GLOBAL_AUTO_FALLBACK",
+            bool
+        );
 
         // Check INKLOG_FILE_* variables for file_sink.* fields
         if let Ok(enabled) = std::env::var("INKLOG_FILE_ENABLED") {
@@ -157,16 +233,16 @@ impl InklogConfig {
         }
 
         // Check INKLOG_PERFORMANCE_* variables for performance.* fields
-        if let Ok(worker_threads) = std::env::var("INKLOG_WORKER_THREADS") {
-            self.performance.worker_threads = worker_threads
-                .parse()
-                .unwrap_or(self.performance.worker_threads);
-        }
-        if let Ok(channel_capacity) = std::env::var("INKLOG_CHANNEL_CAPACITY") {
-            self.performance.channel_capacity = channel_capacity
-                .parse()
-                .unwrap_or(self.performance.channel_capacity);
-        }
+        apply_env!(
+            self.performance.worker_threads,
+            "INKLOG_WORKER_THREADS",
+            usize
+        );
+        apply_env!(
+            self.performance.channel_capacity,
+            "INKLOG_CHANNEL_CAPACITY",
+            usize
+        );
 
         #[cfg(feature = "aws")]
         {
@@ -1872,8 +1948,10 @@ mod tests {
         // Note: confers derive generates Default with console_sink: None for Option<T>
         // The actual runtime code uses unwrap_or_default() to handle this.
         // For testing sinks_enabled(), we explicitly set console_sink.
-        let mut config = InklogConfig::default();
-        config.console_sink = Some(ConsoleSinkConfig::default());
+        let config = InklogConfig {
+            console_sink: Some(ConsoleSinkConfig::default()),
+            ..Default::default()
+        };
         println!("console_sink: {:?}", config.console_sink);
         println!("global: {:?}", config.global);
         let sinks = config.sinks_enabled();
