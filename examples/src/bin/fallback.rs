@@ -36,8 +36,10 @@ use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
 use inklog::template::LogTemplate;
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
+use parking_lot::Mutex;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// 降级状态追踪器
 ///
@@ -80,31 +82,35 @@ impl FallbackState {
 /// 模拟故障的 Sink（包装器）
 ///
 /// 用于演示当主 Sink 发生故障时如何切换到备用 Sink
+///
+/// 使用 `parking_lot::Mutex` 实现内部可变性，以满足 `LogSink: &self` 的 trait 约束
 struct FailingSink {
-    inner: Option<Box<dyn LogSink>>,
+    inner: Arc<Mutex<Option<Box<dyn LogSink>>>>,
     fail_after: usize,
-    write_count: usize,
+    write_count: Arc<Mutex<usize>>,
     original_name: String,
 }
 
 impl FailingSink {
     fn new(sink: Box<dyn LogSink>, fail_after: usize, name: &str) -> Self {
         Self {
-            inner: Some(sink),
+            inner: Arc::new(Mutex::new(Some(sink))),
             fail_after,
-            write_count: 0,
+            write_count: Arc::new(Mutex::new(0)),
             original_name: name.to_string(),
         }
     }
 }
 
 impl LogSink for FailingSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), inklog::InklogError> {
-        self.write_count += 1;
+    fn write(&self, record: &LogRecord) -> Result<(), inklog::InklogError> {
+        let mut count = self.write_count.lock();
+        *count += 1;
 
         // 在达到故障点之前正常工作
-        if self.write_count <= self.fail_after {
-            if let Some(ref mut sink) = self.inner {
+        if *count <= self.fail_after {
+            let inner = self.inner.lock();
+            if let Some(ref sink) = *inner {
                 return sink.write(record);
             }
         }
@@ -116,8 +122,9 @@ impl LogSink for FailingSink {
         ))))
     }
 
-    fn flush(&mut self) -> Result<(), inklog::InklogError> {
-        if let Some(ref mut sink) = self.inner {
+    fn flush(&self) -> Result<(), inklog::InklogError> {
+        let inner = self.inner.lock();
+        if let Some(ref sink) = *inner {
             sink.flush()
         } else {
             Err(inklog::InklogError::IoError(std::io::Error::other(
@@ -127,11 +134,12 @@ impl LogSink for FailingSink {
     }
 
     fn is_healthy(&self) -> bool {
-        self.inner.is_some()
+        self.inner.lock().is_some()
     }
 
-    fn shutdown(&mut self) -> Result<(), inklog::InklogError> {
-        if let Some(ref mut sink) = self.inner {
+    fn shutdown(&self) -> Result<(), inklog::InklogError> {
+        let inner = self.inner.lock();
+        if let Some(ref sink) = *inner {
             sink.shutdown()
         } else {
             Ok(())
@@ -157,7 +165,7 @@ fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         stderr_levels: vec!["error".to_string(), "warn".to_string()],
         masking_enabled: false,
     };
-    let mut console_sink = ConsoleSink::new(
+    let console_sink = ConsoleSink::new(
         console_config,
         LogTemplate::new("[{level}] {message}"),
     );
@@ -181,7 +189,7 @@ fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 100,
         masking_enabled: false,
     };
-    let mut file_sink = FileSink::new(file_config)?;
+    let file_sink = FileSink::new(file_config)?;
     println!("File Sink: 已配置");
 
     // 3. 创建日志记录
@@ -288,7 +296,7 @@ fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 10,
         masking_enabled: false,
     };
-    let mut backup_sink = FileSink::new(backup_config)?;
+    let backup_sink = FileSink::new(backup_config)?;
     println!("备用 File Sink: 已就绪");
 
     // 3. 配置主 Console Sink（包装为会故障的 Sink）
@@ -304,7 +312,7 @@ fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 包装为会故障的 Sink（在第 5 次写入后故障）
-    let mut primary_sink = FailingSink::new(Box::new(console_sink), 5, "Console");
+    let primary_sink = FailingSink::new(Box::new(console_sink), 5, "Console");
 
     // 4. 创建测试日志
     let test_records: Vec<LogRecord> = (1..=8)
@@ -466,7 +474,7 @@ fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 100,
         masking_enabled: false,
     };
-    let mut primary_sink = FileSink::new(primary_config)?;
+    let primary_sink = FileSink::new(primary_config)?;
 
     let fallback_config = FileSinkConfig {
         enabled: true,
@@ -485,7 +493,7 @@ fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 100,
         masking_enabled: false,
     };
-    let mut fallback_sink = FileSink::new(fallback_config)?;
+    let fallback_sink = FileSink::new(fallback_config)?;
 
     // 4. 模拟降级流程
     print_section("降级流程模拟");
