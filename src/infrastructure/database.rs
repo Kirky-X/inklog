@@ -420,6 +420,14 @@ impl Default for MockDatabaseAdapter {
     }
 }
 
+#[cfg(test)]
+impl MockDatabaseAdapter {
+    /// Returns the number of records stored (for test verification)
+    pub fn stored_count(&self) -> usize {
+        self.records.read().unwrap().len()
+    }
+}
+
 #[async_trait]
 impl Database for MockDatabaseAdapter {
     async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {

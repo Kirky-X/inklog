@@ -430,3 +430,59 @@ pub fn convert_logs_to_parquet(
 
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DatabaseSinkConfig;
+    use crate::infrastructure::database::MockDatabaseAdapter;
+    use crate::log_record::LogRecord;
+    use crate::metrics::Metrics;
+    use crate::sink::LogSink;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_convert_logs_to_parquet_empty() {
+        let logs: Vec<LogRecord> = vec![];
+        let config = DatabaseSinkConfig::default().parquet_config;
+        let result = convert_logs_to_parquet(&logs, &config);
+        assert!(result.is_ok());
+        // Empty log list produces a Parquet file with schema/metadata but no records
+        let bytes = result.unwrap();
+        assert!(!bytes.is_empty()); // Parquet writer adds schema overhead even for empty data
+    }
+
+    #[test]
+    fn test_convert_logs_to_parquet_non_empty() {
+        let log1 = LogRecord::default();
+        let mut log2 = LogRecord::default();
+        log2.message = "warn message".into();
+
+        let config = DatabaseSinkConfig::default().parquet_config;
+        let result = convert_logs_to_parquet(&[log1, log2], &config);
+        assert!(result.is_ok());
+        assert!(!result.unwrap().is_empty());
+    }
+
+    #[test]
+    #[ignore = "Requires multi-threaded tokio runtime for DatabaseSink construction"]
+    fn test_database_sink_write_with_mock_db() {
+        let mock_db = Arc::new(MockDatabaseAdapter::new());
+        let config = DatabaseSinkConfig::default();
+
+        let sink = DatabaseSink::new(&config, Some(mock_db.clone())).unwrap();
+
+        let metrics = Arc::new(Metrics::new());
+        sink.set_metrics(metrics.clone());
+
+        let record = LogRecord::default();
+        let result = sink.write(&record);
+        assert!(result.is_ok());
+
+        let flush_result = sink.flush();
+        assert!(flush_result.is_ok());
+
+        // Verify the mock DB received the record
+        assert_eq!(mock_db.stored_count(), 1);
+    }
+}
