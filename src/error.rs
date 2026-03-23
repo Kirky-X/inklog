@@ -102,6 +102,9 @@ pub enum InklogError {
     #[error("Database error: {0}")]
     DatabaseError(String),
 
+    #[error("Cache error: {0}")]
+    CacheError(String),
+
     #[error("Encryption error: {0}")]
     EncryptionError(String),
 
@@ -181,6 +184,9 @@ impl InklogError {
             }
             InklogError::DatabaseError(msg) => {
                 format!("Database error: {}", sanitize_message(msg))
+            }
+            InklogError::CacheError(msg) => {
+                format!("Cache error: {}", sanitize_message(msg))
             }
             InklogError::EncryptionError(msg) => {
                 format!("Encryption error: {}", sanitize_message(msg))

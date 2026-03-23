@@ -51,7 +51,7 @@ fn test_console_sink_format() {
         ..Default::default()
     };
     let template = LogTemplate::default();
-    let mut sink = ConsoleSink::new(config, template);
+    let sink = ConsoleSink::new(config, template);
     let record = LogRecord::new(Level::INFO, "test_target".into(), "test_message".into());
     assert!(sink.write(&record).is_ok());
 }
@@ -68,7 +68,7 @@ fn test_file_sink_rotation() {
         ..Default::default()
     };
 
-    let mut sink = inklog::sink::file::FileSink::new(config).expect("Failed to create FileSink");
+    let sink = inklog::sink::file::FileSink::new(config).expect("Failed to create FileSink");
 
     // Write enough data to trigger rotation
     for i in 0..10 {

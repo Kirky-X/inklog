@@ -19,13 +19,16 @@
 
 // ============ 通用集成测试 ============
 
+use inklog::sink::LogSink;
 use inklog::LoggerManager;
 use std::time::Duration;
 use tracing::{error, info};
 
 #[cfg(feature = "dbnexus")]
+#[allow(unused_imports)]
 use inklog::sink::database::DatabaseSink;
 #[cfg(feature = "dbnexus")]
+#[allow(unused_imports)]
 use inklog::sink::LogSink;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -406,6 +409,7 @@ use inklog::log_record::LogRecord as BatchLogRecord;
 #[cfg(feature = "dbnexus")]
 use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
 #[cfg(feature = "dbnexus")]
+#[allow(unused_imports)]
 use inklog::sink::LogSink as BatchLogSink;
 #[cfg(feature = "dbnexus")]
 use inklog::DatabaseSinkConfig as BatchDatabaseSinkConfig;
@@ -442,7 +446,7 @@ fn test_database_batch_write_dbnexus() {
         parquet_config: inklog::config::ParquetConfig::default(),
     };
 
-    let mut sink = BatchDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
+    let sink = BatchDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
 
     for i in 0..3 {
         let record = BatchLogRecord::new(
@@ -506,7 +510,7 @@ fn test_database_timeout_flush_dbnexus() {
         parquet_config: inklog::config::ParquetConfig::default(),
     };
 
-    let mut sink = BatchDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
+    let sink = BatchDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
 
     let record1 = BatchLogRecord::new(
         BatchLevel::INFO,
@@ -1192,7 +1196,7 @@ fn verify_file_sink_compression() {
         ..Default::default()
     };
 
-    let mut sink = VerifyFileSink::new(config).expect("Failed to create FileSink");
+    let sink = VerifyFileSink::new(config).expect("Failed to create FileSink");
     let record = VerifyLogRecord::new(
         VerifyLevel::INFO,
         "test".into(),
@@ -1219,7 +1223,8 @@ fn verify_file_sink_encryption() {
     let log_path = temp_dir.path().join("enc.log");
 
     // Use a proper base64-encoded 32-byte key (44 characters)
-    std::env::set_var("LOG_KEY", "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=");
+    // Uses mixed alphanumeric chars for sufficient entropy (>= 4.0)
+    std::env::set_var("LOG_KEY", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=");
 
     let config = VerifyFileSinkConfig {
         enabled: true,
@@ -1231,7 +1236,7 @@ fn verify_file_sink_encryption() {
         ..Default::default()
     };
 
-    let mut sink = VerifyFileSink::new(config).expect("Failed to create FileSink");
+    let sink = VerifyFileSink::new(config).expect("Failed to create FileSink");
     let record = VerifyLogRecord::new(VerifyLevel::INFO, "test".into(), "Secret message".into());
     sink.write(&record).expect("Failed to write log record");
 
@@ -1267,7 +1272,7 @@ fn verify_database_sink_sqlite() {
         ..Default::default()
     };
 
-    let mut sink = VerifyDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
+    let sink = VerifyDatabaseSink::new(&config).expect("Failed to create DatabaseSink");
 
     let record = VerifyLogRecord::new(VerifyLevel::INFO, "db_test".into(), "message to db".into());
     sink.write(&record)

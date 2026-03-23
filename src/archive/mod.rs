@@ -61,7 +61,6 @@ mod test_mock;
 #[cfg(all(test, feature = "aws"))]
 pub use test_mock::MockS3ArchiveManager;
 
-#[cfg(feature = "aws")]
 use crate::error::InklogError;
 #[cfg(feature = "aws")]
 use aws_config::meta::region::RegionProviderChain;
