@@ -1490,7 +1490,7 @@ mod tests {
         let mut state = ScheduleState::default();
 
         // Initially can run
-        let can_run_init = state.can_run_today();
+        let _can_run_init = state.can_run_today();
 
         // Start execution
         state.start_execution();
