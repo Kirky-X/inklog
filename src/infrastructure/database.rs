@@ -218,59 +218,62 @@ impl Database for DbNexusAdapter {
             return Ok(0);
         }
 
-        // 获取会话
+        // 获取写会话
         let session = self
             .pool
             .get_session("writer")
             .await
             .map_err(|e| InklogError::DatabaseError(format!("Failed to get session: {}", e)))?;
 
-        // 构建批量插入 SQL
-        // 注意：这里使用简化的实现，实际生产环境应该使用 Sea-ORM 的批量插入 API
-        let mut insert_count = 0;
+        // 构建所有记录的 INSERT SQL 语句
+        let sqls: Vec<String> = records
+            .iter()
+            .map(|record| {
+                let timestamp = record.timestamp.to_rfc3339();
+                let level = &record.level;
+                let target = &record.target;
+                let message = record.message.replace('\'', "''");
+                let fields_json =
+                    serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
+                let fields_escaped = fields_json.replace('\'', "''");
+                let file = record
+                    .file
+                    .as_ref()
+                    .map(|f| format!("'{}'", f.replace('\'', "''")))
+                    .unwrap_or_else(|| "NULL".to_string());
+                let line = record
+                    .line
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| "NULL".to_string());
+                let thread_id = &record.thread_id;
 
-        for record in records {
-            let timestamp = record.timestamp.to_rfc3339();
-            let level = &record.level;
-            let target = &record.target;
-            let message = record.message.replace("'", "''"); // SQL 转义
-            let fields_json =
-                serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
-            let fields_escaped = fields_json.replace("'", "''");
-            let file = record
-                .file
-                .as_ref()
-                .map(|f| format!("'{}'", f.replace("'", "''")))
-                .unwrap_or("NULL".to_string());
-            let line = record
-                .line
-                .map(|l| l.to_string())
-                .unwrap_or("NULL".to_string());
-            let thread_id = &record.thread_id;
+                format!(
+                    "INSERT INTO {} (timestamp, level, target, message, fields, file, line, thread_id) \
+                     VALUES ('{}', '{}', '{}', '{}', '{}', {}, {}, '{}')",
+                    self.table_name,
+                    timestamp,
+                    level,
+                    target.replace('\'', "''"),
+                    message,
+                    fields_escaped,
+                    file,
+                    line,
+                    thread_id.replace('\'', "''")
+                )
+            })
+            .collect();
 
-            let sql = format!(
-                "INSERT INTO {} (timestamp, level, target, message, fields, file, line, thread_id) VALUES ('{}', '{}', '{}', '{}', '{}', {}, {}, '{}')",
-                self.table_name,
-                timestamp,
-                level,
-                target.replace("'", "''"),
-                message,
-                fields_escaped,
-                file,
-                line,
-                thread_id.replace("'", "''")
-            );
+        // 在事务中执行全部语句——原子性：全部成功或全部失败
+        let sql_refs: Vec<&str> = sqls.iter().map(|s| s.as_str()).collect();
+        session
+            .batch_execute_in_transaction(sql_refs)
+            .await
+            .map_err(|e| {
+                tracing::error!("Batch insert failed, transaction rolled back: {}", e);
+                InklogError::DatabaseError(format!("Batch insert failed: {}", e))
+            })?;
 
-            match session.execute(&sql).await {
-                Ok(_) => insert_count += 1,
-                Err(e) => {
-                    tracing::error!("Failed to insert log record: {}", e);
-                    // 继续尝试插入其他记录
-                }
-            }
-        }
-
-        Ok(insert_count)
+        Ok(records.len())
     }
 
     async fn is_healthy(&self) -> bool {
@@ -488,6 +491,7 @@ mod tests {
     }
 
     #[cfg(not(feature = "dbnexus"))]
+    #[allow(deprecated)]
     #[tokio::test]
     async fn test_dbnexus_adapter_not_available_without_feature() {
         let result = DbNexusAdapter::new("test", 1).await;
