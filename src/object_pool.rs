@@ -1124,8 +1124,10 @@ mod tests {
         assert_eq!(record.level, "INFO");
 
         // put() returns a record to the pool
-        let mut record = LogRecord::default();
-        record.message = "test".to_string();
+        let record = LogRecord {
+            message: "test".to_string(),
+            ..Default::default()
+        };
         pool.put(record);
 
         // get() again — should return the pooled record

@@ -312,8 +312,8 @@ impl LoggerManager {
 
             config
         } else {
-            // 使用默认配置加载流程
-            InklogConfig::load_with_nested_env().unwrap_or_else(|_| InklogConfig::default())
+            // 使用 confers 自动生成的方法加载配置
+            InklogConfig::load_sync().unwrap_or_else(|_| InklogConfig::default())
         };
 
         // 注意：cache 和 database 依赖传递给 LoggerManager 内部使用
@@ -895,6 +895,33 @@ impl LoggerManager {
         #[allow(unused_variables)]
         let db_config = config.database_sink.clone();
 
+        // 确保 database 始终有效：如果配置了数据库但没有提供 DI 依赖，则创建默认实现
+        #[cfg(feature = "dbnexus")]
+        let database = {
+            match database {
+                Some(db) => Some(db),
+                None => {
+                    if let Some(ref cfg) = db_config {
+                        if cfg.enabled {
+                            // 获取当前 tokio runtime 并创建默认的 DbNexusAdapter
+                            let handle = tokio::runtime::Handle::current();
+                            let cfg_url = cfg.url.clone();
+                            let cfg_pool_size = cfg.pool_size;
+                            let adapter = handle.block_on(async {
+                                crate::infrastructure::DbNexusAdapter::new(&cfg_url, cfg_pool_size)
+                                    .await
+                            })?;
+                            Some(Arc::new(adapter) as Arc<dyn crate::infrastructure::Database>)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+            }
+        };
+
         // Thread 0: Console Sink (dedicated for lock-free hot path)
         let shutdown_console = shutdown_rx.clone();
         let metrics_console = metrics.clone();
@@ -1200,19 +1227,135 @@ impl LoggerManager {
                 metrics_db.active_workers.inc();
                 if let Some(cfg) = db_config {
                     if cfg.enabled {
-                        let cfg_clone = cfg.clone(); // Clone for recovery attempts
-                        if let Ok(sink_result) = DatabaseSink::new(&cfg, database.clone()) {
-                            let mut sink: DatabaseSink = sink_result;
-                            sink.set_metrics(metrics_db.clone());
-                            let mut consecutive_failures = 0;
-                            #[allow(unused_assignments)]
-                            let mut last_failure_time = None::<Instant>;
+                        if let Some(ref db) = database {
+                            // Clone once before the loop for recovery use
+                            let db_for_recovery = db.clone();
+                            if let Ok(sink_result) = DatabaseSink::new(db.clone()) {
+                                let mut sink: DatabaseSink = sink_result;
+                                sink.set_metrics(metrics_db.clone());
+                                let mut consecutive_failures = 0;
+                                #[allow(unused_assignments)]
+                                let mut last_failure_time = None::<Instant>;
 
-                            loop {
-                                if shutdown_db.try_recv().is_ok() {
-                                    // Drain with 30s timeout
-                                    let deadline = Instant::now() + Duration::from_secs(30);
-                                    while let Ok(record) = rx_db.try_recv() {
+                                loop {
+                                    if shutdown_db.try_recv().is_ok() {
+                                        // Drain with 30s timeout
+                                        let deadline = Instant::now() + Duration::from_secs(30);
+                                        while let Ok(record) = rx_db.try_recv() {
+                                            let latency = Utc::now()
+                                                .signed_duration_since(record.timestamp)
+                                                .to_std()
+                                                .unwrap_or(Duration::ZERO);
+                                            metrics_db.record_latency(latency);
+
+                                            // Retry logic
+                                            let mut attempts = 0;
+                                            let mut write_succeeded = false;
+                                            let write_result: Result<(), InklogError> =
+                                                sink.write(&record);
+                                            match write_result {
+                                                Ok(_) => {
+                                                    metrics_db.inc_logs_written();
+                                                    metrics_db
+                                                        .update_sink_health("database", true, None);
+                                                    consecutive_failures = 0;
+                                                    last_failure_time = None;
+                                                    write_succeeded = true;
+                                                }
+                                                Err(ref e) => {
+                                                    attempts += 1;
+                                                    consecutive_failures += 1;
+                                                    last_failure_time = Some(Instant::now());
+
+                                                    if attempts == 3 {
+                                                        metrics_db.inc_sink_error();
+                                                        let error_msg =
+                                                            crate::error::InklogError::to_string(e);
+                                                        metrics_db.update_sink_health(
+                                                            "database",
+                                                            false,
+                                                            Some(error_msg),
+                                                        );
+                                                        // Fallback to console
+                                                        if let Ok(cs) = console_sink_db.lock() {
+                                                            let _ = cs.write(&record);
+                                                        }
+                                                    } else {
+                                                        thread::sleep(Duration::from_millis(
+                                                            10 * attempts as u64,
+                                                        ));
+                                                    }
+                                                }
+                                            }
+
+                                            // Auto-recovery trigger
+                                            if !write_succeeded && consecutive_failures > 5 {
+                                                if let Some(last_failure) = last_failure_time {
+                                                    if last_failure.elapsed()
+                                                        > Duration::from_secs(60)
+                                                    {
+                                                        eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
+                                                        if let Ok(new_sink) = DatabaseSink::new(
+                                                            db_for_recovery.clone(),
+                                                        ) {
+                                                            sink = new_sink;
+                                                            sink.set_metrics(metrics_db.clone());
+                                                            consecutive_failures = 0;
+                                                            metrics_db.update_sink_health(
+                                                                "database", true, None,
+                                                            );
+                                                            eprintln!(
+                                                        "Database sink: Auto-recovery successful"
+                                                    );
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if Instant::now() > deadline {
+                                                break;
+                                            }
+                                        }
+                                        let _ = sink.shutdown();
+                                        break;
+                                    }
+
+                                    // Check for control messages
+                                    if let Ok(control_msg) = control_rx_db.try_recv() {
+                                        match control_msg {
+                                            SinkControlMessage::RecoverSink(sink_name)
+                                                if sink_name == "database" =>
+                                            {
+                                                eprintln!(
+                                                    "Database sink: Received recovery command"
+                                                );
+                                                // Attempt to recreate the sink
+                                                if let Ok(new_sink) =
+                                                    DatabaseSink::new(db_for_recovery.clone())
+                                                {
+                                                    sink = new_sink;
+                                                    sink.set_metrics(metrics_db.clone());
+                                                    consecutive_failures = 0;
+                                                    last_failure_time = None;
+                                                    metrics_db
+                                                        .update_sink_health("database", true, None);
+                                                    eprintln!(
+                                                        "Database sink: Successfully recovered"
+                                                    );
+                                                } else {
+                                                    eprintln!("Database sink: Recovery failed");
+                                                }
+                                            }
+                                            SinkControlMessage::GetStatus => {
+                                                // Status is already tracked in metrics
+                                            }
+                                            _ => {} // Ignore messages for other sinks
+                                        }
+                                    }
+
+                                    if let Ok(record) =
+                                        rx_db.recv_timeout(Duration::from_millis(100))
+                                    {
                                         let latency = Utc::now()
                                             .signed_duration_since(record.timestamp)
                                             .to_std()
@@ -1240,14 +1383,14 @@ impl LoggerManager {
 
                                                 if attempts == 3 {
                                                     metrics_db.inc_sink_error();
-                                                    let error_msg =
-                                                        crate::error::InklogError::to_string(e);
+                                                    let error_msg = format!("{e}");
                                                     metrics_db.update_sink_health(
                                                         "database",
                                                         false,
                                                         Some(error_msg),
                                                     );
-                                                    // Fallback to console
+
+                                                    // Fallback chain: DB -> File -> Console
                                                     if let Ok(cs) = console_sink_db.lock() {
                                                         let _ = cs.write(&record);
                                                     }
@@ -1265,10 +1408,9 @@ impl LoggerManager {
                                                 if last_failure.elapsed() > Duration::from_secs(60)
                                                 {
                                                     eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
-                                                    if let Ok(new_sink) = DatabaseSink::new(
-                                                        &cfg_clone.clone(),
-                                                        database.clone(),
-                                                    ) {
+                                                    if let Ok(new_sink) =
+                                                        DatabaseSink::new(db_for_recovery.clone())
+                                                    {
                                                         sink = new_sink;
                                                         sink.set_metrics(metrics_db.clone());
                                                         consecutive_failures = 0;
@@ -1282,114 +1424,10 @@ impl LoggerManager {
                                                 }
                                             }
                                         }
-
-                                        if Instant::now() > deadline {
-                                            break;
-                                        }
+                                    } else {
+                                        // Timeout, flush buffer
+                                        let _ = sink.flush();
                                     }
-                                    let _ = sink.shutdown();
-                                    break;
-                                }
-
-                                // Check for control messages
-                                if let Ok(control_msg) = control_rx_db.try_recv() {
-                                    match control_msg {
-                                        SinkControlMessage::RecoverSink(sink_name)
-                                            if sink_name == "database" =>
-                                        {
-                                            eprintln!("Database sink: Received recovery command");
-                                            // Attempt to recreate the sink
-                                            if let Ok(new_sink) = DatabaseSink::new(
-                                                &cfg_clone.clone(),
-                                                database.clone(),
-                                            ) {
-                                                sink = new_sink;
-                                                sink.set_metrics(metrics_db.clone());
-                                                consecutive_failures = 0;
-                                                last_failure_time = None;
-                                                metrics_db
-                                                    .update_sink_health("database", true, None);
-                                                eprintln!("Database sink: Successfully recovered");
-                                            } else {
-                                                eprintln!("Database sink: Recovery failed");
-                                            }
-                                        }
-                                        SinkControlMessage::GetStatus => {
-                                            // Status is already tracked in metrics
-                                        }
-                                        _ => {} // Ignore messages for other sinks
-                                    }
-                                }
-
-                                if let Ok(record) = rx_db.recv_timeout(Duration::from_millis(100)) {
-                                    let latency = Utc::now()
-                                        .signed_duration_since(record.timestamp)
-                                        .to_std()
-                                        .unwrap_or(Duration::ZERO);
-                                    metrics_db.record_latency(latency);
-
-                                    // Retry logic
-                                    let mut attempts = 0;
-                                    let mut write_succeeded = false;
-                                    let write_result: Result<(), InklogError> = sink.write(&record);
-                                    match write_result {
-                                        Ok(_) => {
-                                            metrics_db.inc_logs_written();
-                                            metrics_db.update_sink_health("database", true, None);
-                                            consecutive_failures = 0;
-                                            last_failure_time = None;
-                                            write_succeeded = true;
-                                        }
-                                        Err(ref e) => {
-                                            attempts += 1;
-                                            consecutive_failures += 1;
-                                            last_failure_time = Some(Instant::now());
-
-                                            if attempts == 3 {
-                                                metrics_db.inc_sink_error();
-                                                let error_msg = format!("{e}");
-                                                metrics_db.update_sink_health(
-                                                    "database",
-                                                    false,
-                                                    Some(error_msg),
-                                                );
-
-                                                // Fallback chain: DB -> File -> Console
-                                                if let Ok(cs) = console_sink_db.lock() {
-                                                    let _ = cs.write(&record);
-                                                }
-                                            } else {
-                                                thread::sleep(Duration::from_millis(
-                                                    10 * attempts as u64,
-                                                ));
-                                            }
-                                        }
-                                    }
-
-                                    // Auto-recovery trigger
-                                    if !write_succeeded && consecutive_failures > 5 {
-                                        if let Some(last_failure) = last_failure_time {
-                                            if last_failure.elapsed() > Duration::from_secs(60) {
-                                                eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
-                                                if let Ok(new_sink) = DatabaseSink::new(
-                                                    &cfg_clone.clone(),
-                                                    database.clone(),
-                                                ) {
-                                                    sink = new_sink;
-                                                    sink.set_metrics(metrics_db.clone());
-                                                    consecutive_failures = 0;
-                                                    metrics_db
-                                                        .update_sink_health("database", true, None);
-                                                    eprintln!(
-                                                        "Database sink: Auto-recovery successful"
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Timeout, flush buffer
-                                    let _ = sink.flush();
                                 }
                             }
                         }

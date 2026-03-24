@@ -22,6 +22,7 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
 
     let output_filename = output_file.to_str().unwrap_or("inklog_config.toml");
 
+    #[allow(unused_variables)]
     // Use confers to generate the template
     #[cfg(feature = "confers")]
     {

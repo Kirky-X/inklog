@@ -17,13 +17,7 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "dbnexus")]
 use anyhow::Result;
 #[cfg(feature = "dbnexus")]
-use dbnexus::pool::DbPool;
-#[cfg(feature = "dbnexus")]
-use once_cell::sync::Lazy;
-#[cfg(feature = "dbnexus")]
 use parking_lot::Mutex;
-#[cfg(feature = "dbnexus")]
-use sea_orm::{EntityTrait, Set};
 #[cfg(feature = "dbnexus")]
 use tokio::runtime::Handle;
 
@@ -48,26 +42,6 @@ const MIN_BATCH_SIZE: usize = 10;
 const MAX_BATCH_SIZE: usize = 1000;
 const ADAPTIVE_WINDOW_SIZE: usize = 10;
 
-#[cfg(feature = "dbnexus")]
-static DB_SHARED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(std::cmp::max(2, num_cpus::get()))
-        .thread_name("inklog-db-shared")
-        .enable_all()
-        .build()
-        .unwrap_or_else(|e| {
-            panic!(
-                "Failed to create shared tokio runtime for database sink: {}",
-                e
-            )
-        })
-});
-
-#[cfg(feature = "dbnexus")]
-fn get_db_runtime() -> &'static tokio::runtime::Runtime {
-    &DB_SHARED_RUNTIME
-}
-
 /// DatabaseSink 的可变内部状态
 #[cfg(feature = "dbnexus")]
 struct DatabaseSinkInner {
@@ -86,21 +60,53 @@ struct DatabaseSinkInner {
 pub struct DatabaseSink {
     /// 可变内部状态
     inner: Mutex<DatabaseSinkInner>,
-    /// 数据库连接池（只读）
-    pool: Option<Arc<DbPool>>,
+    /// 数据库实现（DI 模式）
+    /// 所有数据库操作通过此 trait 进行，完全符合 DI 架构要求
+    database: Arc<dyn crate::infrastructure::Database>,
     /// 数据脱敏器（只读）
     masker: Arc<DataMasker>,
     /// 停止标志
     stop: Arc<AtomicBool>,
-    /// 注入的数据库实现（DI 模式）
-    database: Option<Arc<dyn crate::infrastructure::Database>>,
 }
 
 #[cfg(feature = "dbnexus")]
 impl DatabaseSink {
-    pub fn new(
-        config: &crate::config::DatabaseSinkConfig,
-        database: Option<Arc<dyn crate::infrastructure::Database>>,
+    /// 创建 DatabaseSink（使用默认配置）
+    ///
+    /// # 参数
+    ///
+    /// * `database` - 必须提供数据库实现（DI 模式）
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 `Ok(Self)`，失败返回 `Err(InklogError)`
+    ///
+    /// # 架构说明
+    ///
+    /// 此方法完全依赖 `Database` trait，不持有任何具体的数据库连接池。
+    /// 这确保了代码完全符合 DI 架构要求，便于测试和替换实现。
+    pub fn new(database: Arc<dyn crate::infrastructure::Database>) -> Result<Self, InklogError> {
+        Self::new_with_config(database, None)
+    }
+
+    /// 创建 DatabaseSink（带配置参数）
+    ///
+    /// # 参数
+    ///
+    /// * `database` - 必须提供数据库实现（DI 模式）
+    /// * `config` - 可选的数据库配置，用于设置批处理参数
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 `Ok(Self)`，失败返回 `Err(InklogError)`
+    ///
+    /// # 架构说明
+    ///
+    /// 此方法用于测试场景，允许传入配置参数。
+    /// 在生产环境中，应使用 `new()` 方法遵循 DI 架构。
+    pub fn new_with_config(
+        database: Arc<dyn crate::infrastructure::Database>,
+        config: Option<crate::config::DatabaseSinkConfig>,
     ) -> Result<Self, InklogError> {
         let fallback_config = FileSinkConfig {
             enabled: true,
@@ -109,27 +115,18 @@ impl DatabaseSink {
         };
         let fallback_sink = FileSink::new(fallback_config).ok();
 
-        // 如果注入了 database，使用它；否则创建内部连接池
-        let pool = if database.is_some() {
-            None // 使用注入的 database，不需要内部 pool
-        } else {
-            Some(Arc::new(get_db_runtime().block_on(async {
-                let pool = dbnexus::DbPoolBuilder::new()
-                    .url(&config.url)
-                    .max_connections(config.pool_size)
-                    .build()
-                    .await
-                    .map_err(|e: dbnexus::DbError| InklogError::DatabaseError(e.to_string()))?;
-                Ok::<_, InklogError>(pool)
-            })?))
-        };
+        // 使用配置参数或默认值
+        let batch_size = config
+            .as_ref()
+            .map(|c| c.batch_size)
+            .unwrap_or(DEFAULT_BATCH_SIZE);
 
         let inner = DatabaseSinkInner {
-            buffer: Vec::with_capacity(DEFAULT_BATCH_SIZE),
+            buffer: Vec::with_capacity(batch_size),
             last_flush: Instant::now(),
             fallback_sink,
             circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),
-            current_batch_size: DEFAULT_BATCH_SIZE,
+            current_batch_size: batch_size,
             write_latencies: Vec::with_capacity(ADAPTIVE_WINDOW_SIZE),
             success_count: 0,
             failure_count: 0,
@@ -138,10 +135,9 @@ impl DatabaseSink {
 
         Ok(Self {
             inner: Mutex::new(inner),
-            pool,
+            database,
             masker: Arc::new(DataMasker::new()),
             stop: Arc::new(AtomicBool::new(false)),
-            database,
         })
     }
 
@@ -180,11 +176,7 @@ impl DatabaseSink {
         F: std::future::Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
-        if let Ok(handle) = Handle::try_current() {
-            handle.block_on(f)
-        } else {
-            get_db_runtime().block_on(f)
-        }
+        Handle::current().block_on(f)
     }
 }
 
@@ -263,106 +255,38 @@ impl DatabaseSink {
             metrics.set_db_batch_size(batch_size);
         }
 
-        // 优先使用注入的 database 实现
-        if let Some(ref database) = self.database {
-            let database_clone = database.clone();
-            let metrics_ref = inner.metrics.clone();
-            let records_clone = records.clone();
+        // 使用注入的 database 实现
+        // 所有数据库操作通过 Database trait 进行，完全符合 DI 架构要求
+        let database_clone = self.database.clone();
+        let metrics_ref = inner.metrics.clone();
+        let records_clone = records.clone();
 
-            let result = self.execute_async(async move {
-                match database_clone.insert_batch(&records_clone).await {
-                    Ok(written) => {
-                        if let Some(m) = &metrics_ref {
-                            m.add_db_batch_records_total(written);
-                            m.update_sink_health("database", true, None);
-                        }
-                        Ok(())
+        let result = self.execute_async(async move {
+            match database_clone.insert_batch(&records_clone).await {
+                Ok(written) => {
+                    if let Some(m) = &metrics_ref {
+                        m.add_db_batch_records_total(written);
+                        m.update_sink_health("database", true, None);
                     }
-                    Err(e) => {
-                        if let Some(m) = &metrics_ref {
-                            m.inc_sink_error();
-                            m.update_sink_health("database", false, Some(e.to_string()));
-                        }
-                        Err(e)
-                    }
+                    Ok(())
                 }
-            });
-
-            if let Err(e) = result {
-                inner.buffer = records;
-                return Err(e);
-            }
-        } else if let Some(ref pool) = self.pool {
-            let pool_clone = pool.clone();
-            let metrics_ref = inner.metrics.clone();
-            let records_for_async = records.clone();
-            let result = self.execute_async(async move {
-                match write_batch_to_db(&pool_clone, &records_for_async).await {
-                    Ok(written) => {
-                        if let Some(m) = &metrics_ref {
-                            m.add_db_batch_records_total(written);
-                            m.update_sink_health("database", true, None);
-                        }
-                        Ok(())
+                Err(e) => {
+                    if let Some(m) = &metrics_ref {
+                        m.inc_sink_error();
+                        m.update_sink_health("database", false, Some(e.to_string()));
                     }
-                    Err(e) => {
-                        if let Some(m) = &metrics_ref {
-                            m.inc_sink_error();
-                            m.update_sink_health("database", false, Some(e.to_string()));
-                        }
-                        Err(e)
-                    }
+                    Err(e)
                 }
-            });
-
-            if let Err(e) = result {
-                inner.buffer = records;
-                return Err(e);
             }
+        });
+
+        if let Err(e) = result {
+            inner.buffer = records;
+            return Err(e);
         }
 
         Ok(())
     }
-}
-
-#[cfg(feature = "dbnexus")]
-async fn write_batch_to_db(pool: &DbPool, records: &[LogRecord]) -> Result<usize, InklogError> {
-    if records.is_empty() {
-        return Ok(0);
-    }
-
-    let session = pool
-        .get_session("admin")
-        .await
-        .map_err(|e: dbnexus::DbError| InklogError::DatabaseError(e.to_string()))?;
-    let conn = session
-        .connection()
-        .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-    let mut models = Vec::with_capacity(records.len());
-    for record in records {
-        let fields_value = serde_json::to_string(&record.fields).ok();
-        models.push(crate::sink::entity::ActiveModel {
-            timestamp: Set(record.timestamp.naive_utc()),
-            level: Set(record.level.clone()),
-            target: Set(record.target.clone()),
-            message: Set(record.message.clone()),
-            fields: Set(fields_value),
-            file: Set(record.file.clone()),
-            line: Set(record.line.map(|line| line as i32)),
-            thread_id: Set(record.thread_id.clone()),
-            module_path: Set(None),
-            metadata: Set(None),
-            ..Default::default()
-        });
-    }
-
-    crate::sink::entity::Entity::insert_many(models)
-        .exec(conn)
-        .await
-        .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-    Ok(records.len())
 }
 
 /// Convert LogRecord to Parquet format
@@ -455,8 +379,10 @@ mod tests {
     #[test]
     fn test_convert_logs_to_parquet_non_empty() {
         let log1 = LogRecord::default();
-        let mut log2 = LogRecord::default();
-        log2.message = "warn message".into();
+        let log2 = LogRecord {
+            message: "warn message".into(),
+            ..Default::default()
+        };
 
         let config = DatabaseSinkConfig::default().parquet_config;
         let result = convert_logs_to_parquet(&[log1, log2], &config);
@@ -470,7 +396,7 @@ mod tests {
         let mock_db = Arc::new(MockDatabaseAdapter::new());
         let config = DatabaseSinkConfig::default();
 
-        let sink = DatabaseSink::new(&config, Some(mock_db.clone())).unwrap();
+        let sink = DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
 
         let metrics = Arc::new(Metrics::new());
         sink.set_metrics(metrics.clone());

@@ -1299,7 +1299,7 @@ mod tests {
         let taken = secret.take();
         assert_eq!(taken, Some("secret_value".to_string()));
         assert!(secret.is_none());
-        assert!(secret.is_some() == false);
+        assert!(secret.is_none());
     }
 
     #[test]
@@ -1446,9 +1446,8 @@ mod tests {
     fn test_schedule_state_can_run_today_on_fresh_state() {
         let state = ScheduleState::default();
         // On a fresh state (no locked_date), can_run_today should return true
-        let can_run = state.can_run_today();
-        // Fresh state has no locked_date, so it can run
-        assert!(can_run || !can_run); // Depends on current date - just ensure it doesn't panic
+        // Just ensure it doesn't panic
+        let _ = state.can_run_today();
     }
 
     #[test]
@@ -1462,8 +1461,10 @@ mod tests {
 
     #[test]
     fn test_schedule_state_mark_success_resets_failures() {
-        let mut state = ScheduleState::default();
-        state.consecutive_failures = 5;
+        let mut state = ScheduleState {
+            consecutive_failures: 5,
+            ..Default::default()
+        };
         state.mark_success();
         assert_eq!(state.consecutive_failures, 0);
         assert_eq!(state.last_run_status, Some(ArchiveStatus::Success));
@@ -1504,8 +1505,7 @@ mod tests {
         // After success, can_run_today depends on locked_date
         // Since we just ran today, it should return false
         // (the exact behavior depends on current date vs locked_date)
-        let can_run_after = state.can_run_today();
-        assert!(can_run_after || !can_run_after); // Just verify it doesn't panic
+        let _can_run_after = state.can_run_today();
     }
 
     // ========================================================================

@@ -150,7 +150,7 @@ impl ConfersAdapter {
     ///
     /// - `InklogError::ConfigError` - 配置加载或验证失败
     pub fn new() -> Result<Self, InklogError> {
-        let config = InklogConfig::load_with_nested_env()
+        let config = InklogConfig::load_sync()
             .map_err(|e| InklogError::ConfigError(format!("Failed to load config: {}", e)))?;
         Ok(Self { config })
     }
@@ -703,6 +703,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_mock_config_get_float() {
         let config = MockConfig::new()
             .with_value("ratio", "3.14159")
