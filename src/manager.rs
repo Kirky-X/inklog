@@ -192,7 +192,8 @@ pub struct LoggerManager {
 
 impl LoggerManager {
     pub async fn new() -> Result<Self, InklogError> {
-        Self::with_config(InklogConfig::default()).await
+        // 经过 DI 路径创建默认实例，行为与 builder().build() 一致
+        Self::with_dependencies(LoggerDependencies::default()).await
     }
 
     /// 完全依赖注入模式创建 LoggerManager
