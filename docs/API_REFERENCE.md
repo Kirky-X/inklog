@@ -15,7 +15,7 @@
   - [GlobalConfig](#globalconfig)
   - [ConsoleSinkConfig](#consolesinkconfig)
   - [FileSinkConfig](#filesinkconfig)
-  - [DatabaseConfig](#databaseconfig)
+  - [DatabaseSinkConfig](#databasesinkconfig)
   - [S3ArchiveConfig](#s3archiveconfig)
   - [HttpServerConfig](#httpserverconfig)
   - [PerformanceConfig](#performanceconfig)
@@ -1164,7 +1164,7 @@ pub struct InklogConfig {
     pub global: GlobalConfig,
     pub console_sink: Option<ConsoleSinkConfig>,
     pub file_sink: Option<FileSinkConfig>,
-    pub db_config: Option<DatabaseConfig>,
+    pub database_sink: Option<DatabaseSinkConfig>,
     pub s3_archive: Option<crate::archive::S3ArchiveConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
@@ -1178,12 +1178,12 @@ pub struct InklogConfig {
 | `global` | `GlobalConfig` | `default()` | 全局配置 |
 | `console_sink` | `Option<ConsoleSinkConfig>` | `Some(default())` | 控制台 Sink 配置 |
 | `file_sink` | `Option<FileSinkConfig>` | `None` | 文件 Sink 配置 |
-| `db_config` | `Option<DatabaseConfig>` | `None` | 数据库配置 |
+| `database_sink` | `Option<DatabaseSinkConfig>` | `None` | 数据库配置 |
 | `s3_archive` | `Option<S3ArchiveConfig>` | `None` | S3 归档配置（包含 ParquetConfig） |
 | `performance` | `PerformanceConfig` | `default()` | 性能配置 |
 | `http_server` | `Option<HttpServerConfig>` | `None` | HTTP 服务器配置 |
 
-**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseConfig` 和 `S3ArchiveConfig` 的内部字段。
+**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseSinkConfig` 和 `S3ArchiveConfig` 的内部字段。
 
 #### 方法
 
@@ -1227,7 +1227,7 @@ config.apply_env_overrides();
 
 ## 配置结构体
 
-### DatabaseConfig
+### DatabaseSinkConfig
 
 数据库配置结构体，用于配置数据库日志后端。
 
@@ -1258,9 +1258,9 @@ pub struct DatabaseConfig {
 
 #### 示例
 ```rust
-use inklog::config::DatabaseConfig;
+use inklog::config::DatabaseSinkConfig;
 
-let db_config = DatabaseConfig {
+let database_sink = DatabaseSinkConfig {
     enabled: true,
     url: "sqlite://logs.db".to_string(),
     batch_size: 100,

@@ -534,15 +534,16 @@ let _logger = LoggerManager::with_config(config).await?;
 #### 🗄️ 数据库日志
 
 ```rust
-use inklog::{DatabaseConfig, InklogConfig};
+use inklog::{DatabaseSinkConfig, InklogConfig};
 
 let config = InklogConfig {
-    db_config: Some(DatabaseConfig {
+    database_sink: Some(DatabaseSinkConfig {
         enabled: true,
         url: "postgresql://localhost/logs".to_string(),
         pool_size: 10,
         batch_size: 100,
         flush_interval_ms: 1000,
+        ..Default::default()
     }),
     ..Default::default()
 };

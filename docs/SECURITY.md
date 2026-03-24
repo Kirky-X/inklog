@@ -1975,7 +1975,7 @@ retention_days = 30
 max_total_size = "1GB"
 cleanup_interval_minutes = 60
 
-[db_config]
+[database_sink]
 enabled = true
 driver = "postgres"
 url = "postgres://inklog_writer:password@localhost/logs?sslmode=require"
