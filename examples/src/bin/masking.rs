@@ -21,7 +21,7 @@
 //! cargo run --bin masking
 //! ```
 
-use inklog::masking::DataMasker;
+use inklog::support::processing::DataMasker;
 use inklog_examples::common::{print_section, print_separator};
 use serde_json::json;
 use std::collections::HashMap;

@@ -30,11 +30,11 @@
 use chrono::Utc;
 use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 use inklog::log_record::LogRecord;
-use inklog::metrics::{SinkHealth, SinkStatus};
+use inklog::support::observability::{SinkHealth, SinkStatus};
 use inklog::sink::console::ConsoleSink;
 use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
-use inklog::template::LogTemplate;
+use inklog::support::processing::LogTemplate;
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
 use parking_lot::Mutex;
 use std::fs;

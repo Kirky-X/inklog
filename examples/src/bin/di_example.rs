@@ -15,9 +15,9 @@
 
 use std::sync::Arc;
 use inklog::{InklogContainer, LoggerDependencies, LoggerManager, InklogConfig};
-use inklog::infrastructure::{OxCacheAdapter, ConfersAdapter};
-use inklog::infrastructure::{Cache, Config, Database};
-use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::integrations::infra::{OxCacheAdapter, ConfersAdapter};
+use inklog::integrations::infra::{Cache, Config, Database};
+use inklog::integrations::infra::{MockCache, MockConfig, MockDatabaseAdapter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

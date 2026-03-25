@@ -61,7 +61,7 @@
 //! ```
 
 use anyhow::Result;
-use inklog::metrics::{Metrics, SinkStatus};
+use inklog::support::observability::{Metrics, SinkStatus};
 use inklog_examples::common::{print_section, print_separator};
 use serde::Serialize;
 use std::collections::HashMap;

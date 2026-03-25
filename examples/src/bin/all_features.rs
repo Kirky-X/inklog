@@ -12,7 +12,7 @@
 //! cargo run --bin all_features
 //! ```
 
-use inklog::{LoggerManager, masking::DataMasker, template::LogTemplate};
+use inklog::{LoggerManager, DataMasker, LogTemplate};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
