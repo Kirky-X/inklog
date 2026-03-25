@@ -125,45 +125,53 @@
 //! port = 8080
 //! ```
 
-pub mod archive;
-pub mod config;
-pub mod container;
-mod error;
-pub mod infrastructure;
-pub mod log_adapter;
 pub mod log_level;
-pub mod log_record;
-mod manager;
-pub mod masking;
-pub mod metrics;
-mod object_pool;
-pub mod sink;
-pub mod subscriber;
-pub mod template;
 pub mod validation;
 
-pub use config::{
-    ChannelStrategy, ConsoleSinkConfig, DatabaseSinkConfig, FileSinkConfig, InklogConfig,
-    PerformanceConfig,
+// Backwards compatibility - expose modules at root level
+pub use domain::config;
+pub use domain::types::log_record;
+#[cfg(feature = "aws")]
+pub use integrations::storage::archive;
+pub use support::io::sink;
+pub use support::processing::template;
+
+// Domain layer
+pub mod domain;
+
+// Support layer
+pub mod support;
+
+// Integrations layer
+pub mod integrations;
+
+// Re-export types from domain layer for backwards compatibility
+pub use domain::config::{
+    ChannelStrategy, ConsoleSinkConfig, DatabaseDriver, DatabaseSinkConfig, FileSinkConfig,
+    GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig, ParquetConfig,
+    PartitionStrategy, PerformanceConfig,
+};
+pub use domain::types::error::InklogError;
+pub use domain::types::log_record::LogRecord;
+
+pub use domain::core::{
+    InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,
 };
 
-pub use container::{InklogContainer, InklogContainerBuilder};
-
-pub use error::InklogError;
-pub use log_adapter::{LogAdapter, LogLogger};
 pub use log_level::LogLevel;
-pub use log_record::LogRecord;
-pub use manager::{LoggerBuilder, LoggerDependencies, LoggerManager};
-pub use metrics::{
+pub use support::io::{LogAdapter, LogLogger};
+pub use support::observability::{
     FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
 };
-pub use object_pool::{
-    get_log_record, get_string_buffer, put_log_record, put_string_buffer, ObjectPool,
+pub use support::processing::{
+    get_log_record, get_string_buffer, put_log_record, put_string_buffer, DataMasker, LogTemplate,
+    ObjectPool, ObjectPoolBuilder, ObjectPoolConfig, PoolMetrics, LOG_RECORD_POOL, STRING_POOL,
 };
-pub use template::LogTemplate;
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,
 };
 
 #[cfg(feature = "aws")]
-pub use archive::{ArchiveService, ArchiveServiceBuilder, S3ArchiveConfig, S3ArchiveManager};
+pub use integrations::storage::archive::{
+    ArchiveService, ArchiveServiceBuilder, S3ArchiveConfig, S3ArchiveManager,
+};

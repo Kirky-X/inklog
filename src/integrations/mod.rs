@@ -1,0 +1,9 @@
+// Copyright (c) 2026 Kirky.X
+//
+// Licensed under the MIT License
+// See LICENSE file in the project root for full license information.
+
+//! Integrations module - external service integrations.
+
+pub mod infra;
+pub mod storage;
