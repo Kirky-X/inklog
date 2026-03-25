@@ -497,9 +497,9 @@ impl LoggerManager {
                 info!("Initializing S3 archive service");
 
                 #[cfg(feature = "dbnexus")]
-                let db_conn: Option<dbnexus::pool::DbPool> =
+                let db_conn: Option<dbnexus::database::pool::DbPool> =
                     if let Some(ref db_cfg) = config.database_sink {
-                        use dbnexus::DbPoolBuilder;
+                        use dbnexus::database::pool::DbPoolBuilder;
                         let db_result = DbPoolBuilder::new()
                             .url(&db_cfg.url)
                             .max_connections(db_cfg.pool_size)

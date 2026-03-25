@@ -76,9 +76,9 @@ pub trait Database: Send + Sync {
 // ============================================================================
 
 #[cfg(feature = "dbnexus")]
-use dbnexus::config::DbConfig;
+use dbnexus::database::pool::DbPool;
 #[cfg(feature = "dbnexus")]
-use dbnexus::DbPool;
+use dbnexus::foundation::config::DbConfig;
 
 /// dbnexus 适配器
 ///
@@ -170,7 +170,7 @@ impl DbNexusAdapter {
             admin_role: "admin".to_string(),
             warmup_timeout: 30,
             warmup_retries: 3,
-            cache_config: dbnexus::config::CacheConfig::default(),
+            cache_config: dbnexus::foundation::config::CacheConfig::default(),
         };
 
         // 使用 DbPool::with_config 创建连接池
