@@ -8,5 +8,6 @@
 pub mod metrics;
 
 pub use metrics::{
-    FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
+    FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealth, SinkHealthMonitor,
+    SinkStatus,
 };
