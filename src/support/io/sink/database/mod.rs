@@ -178,7 +178,9 @@ impl DatabaseSink {
         F: std::future::Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
-        Handle::current().block_on(f)
+        // Use block_in_place to allow blocking in async context
+        // This is safe because we're not holding any async locks across the blocking call
+        tokio::task::block_in_place(|| Handle::current().block_on(f))
     }
 }
 
@@ -392,9 +394,8 @@ mod tests {
         assert!(!result.unwrap().is_empty());
     }
 
-    #[test]
-    #[ignore = "Requires multi-threaded tokio runtime for DatabaseSink construction"]
-    fn test_database_sink_write_with_mock_db() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_database_sink_write_with_mock_db() {
         let mock_db = Arc::new(MockDatabaseAdapter::new());
         let config = DatabaseSinkConfig::default();
 

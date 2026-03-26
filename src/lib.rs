@@ -78,7 +78,7 @@
 //! ```rust,ignore
 //! use std::sync::Arc;
 //! use inklog::{LoggerManager, LoggerDependencies, InklogContainer};
-//! use inklog::infrastructure::{OxCacheAdapter, ConfersAdapter};
+//! use inklog::integrations::infra::{OxCacheAdapter, ConfersAdapter};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -142,6 +142,9 @@ pub mod domain;
 // Support layer
 pub mod support;
 
+// Re-export masking for benchmarks
+pub use support::processing::masking;
+
 // Integrations layer
 pub mod integrations;
 
@@ -157,6 +160,10 @@ pub use domain::types::log_record::LogRecord;
 pub use domain::core::{
     InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,
 };
+
+// RecoveryLoggerManager 是 LoggerManager 的别名，用于恢复相关功能
+// @deprecated 使用 LoggerManager 替代
+pub use domain::core::LoggerManager as RecoveryLoggerManager;
 
 pub use log_level::LogLevel;
 pub use support::io::{LogAdapter, LogLogger};

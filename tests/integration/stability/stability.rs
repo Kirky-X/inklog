@@ -9,8 +9,11 @@ use std::time::{Duration, Instant};
 use tracing::{error, info};
 
 #[tokio::test]
-#[ignore] // Run manually: cargo test --test stability -- --ignored
+#[ignore = "Requires Docker database environment"]
 async fn test_long_running_stability() {
+    // Set up database environment variables for Docker
+    std::env::set_var("INKLOG_DATABASE_SINK_ENABLED", "false");
+
     let logger = LoggerManager::new()
         .await
         .expect("Failed to create LoggerManager");

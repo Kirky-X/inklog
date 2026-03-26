@@ -25,8 +25,8 @@
 //! ## 使用示例
 //!
 //! ```ignore
-//! use inklog::infrastructure::{Cache, Config, Database};
-//! use inklog::infrastructure::{OxCacheAdapter, ConfersAdapter, DbNexusAdapter};
+//! use inklog::integrations::infra::{Cache, Config, Database};
+//! use inklog::integrations::infra::{OxCacheAdapter, ConfersAdapter, DbNexusAdapter};
 //!
 //! async fn process_logs(
 //!     cache: &dyn Cache,

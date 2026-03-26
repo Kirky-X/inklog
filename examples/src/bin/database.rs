@@ -127,7 +127,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         // 创建 DbConfig（带权限配置）
-        let db_config = dbnexus::config::DbConfig {
+        let db_config = dbnexus::foundation::config::DbConfig {
             url: config.url.clone(),
             max_connections: config.pool_size,
             permissions_path: Some(perm_path.to_string()),
@@ -148,7 +148,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // 获取会话
-        let session: dbnexus::pool::Session = match pool.get_session("admin").await {
+        let session: dbnexus::database::pool::Session = match pool.get_session("admin").await {
             Ok(s) => {
                 println!("✓ 会话获取成功");
                 s
@@ -160,7 +160,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // 创建 logs 表
-        let create_result: dbnexus::error::DbResult<_> = session.execute_raw_ddl(
+        let create_result: dbnexus::foundation::error::DbResult<_> = session.execute_raw_ddl(
             "CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -206,7 +206,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
 
         // 查询验证
         print_section("查询验证");
-        let result: dbnexus::error::DbResult<_> = session
+        let result: dbnexus::foundation::error::DbResult<_> = session
             .execute_raw("SELECT COUNT(*) as count FROM logs")
             .await;
 
@@ -262,7 +262,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         // 创建 DbConfig（带权限配置）
-        let db_config = dbnexus::config::DbConfig {
+        let db_config = dbnexus::foundation::config::DbConfig {
             url: config.url.clone(),
             max_connections: config.pool_size,
             permissions_path: Some(perm_path.to_string()),
@@ -279,7 +279,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let session: dbnexus::pool::Session = match pool.get_session("admin").await {
+        let session: dbnexus::database::pool::Session = match pool.get_session("admin").await {
             Ok(s) => s,
             Err(e) => {
                 println!("✗ 会话获取失败: {:?}", e);
@@ -288,7 +288,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // 创建 logs 表
-        let _: dbnexus::error::DbResult<_> = session.execute_raw_ddl(
+        let _: dbnexus::foundation::error::DbResult<_> = session.execute_raw_ddl(
             "CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -355,7 +355,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // 统计总数
-        let result: dbnexus::error::DbResult<_> = session
+        let result: dbnexus::foundation::error::DbResult<_> = session
             .execute_raw("SELECT COUNT(*) as total FROM logs")
             .await;
 
@@ -388,7 +388,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         // 创建 DbConfig（带权限配置）
-        let db_config = dbnexus::config::DbConfig {
+        let db_config = dbnexus::foundation::config::DbConfig {
             url: "sqlite::memory:".to_string(),
             max_connections: 2,
             permissions_path: Some(perm_path.to_string()),
@@ -405,7 +405,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let session: dbnexus::pool::Session = match pool.get_session("admin").await {
+        let session: dbnexus::database::pool::Session = match pool.get_session("admin").await {
             Ok(s) => s,
             Err(e) => {
                 println!("✗ 会话获取失败: {:?}", e);
@@ -414,7 +414,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // 创建表
-        let _: dbnexus::error::DbResult<_> = session.execute_raw_ddl(
+        let _: dbnexus::foundation::error::DbResult<_> = session.execute_raw_ddl(
             "CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -456,7 +456,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
                 target,
                 message
             );
-            let _: dbnexus::error::DbResult<_> = session.execute_raw(&sql).await;
+            let _: dbnexus::foundation::error::DbResult<_> = session.execute_raw(&sql).await;
         }
         println!("✓ 已写入 {} 条测试数据\n", test_data.len());
 

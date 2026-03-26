@@ -13,8 +13,10 @@ use inklog::{
     template::LogTemplate,
     InklogConfig, LoggerManager,
 };
+#[cfg(feature = "dbnexus")]
 use rand::Rng;
 use rayon::prelude::*;
+#[cfg(feature = "dbnexus")]
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};

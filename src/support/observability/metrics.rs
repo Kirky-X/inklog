@@ -21,10 +21,10 @@
 //! - **直方图统计**：延迟分布统计
 //! - **Prometheus 兼容**：可直接与 Prometheus 集成
 //!
-// ## 使用示例
+//! ## 使用示例
 //!
 //! ```rust
-//! use inklog::metrics::{Metrics, SinkHealth, SinkStatus};
+//! use inklog::Metrics;
 //!
 //! let metrics = Metrics::new();
 //!
@@ -817,7 +817,8 @@ impl Default for FallbackConfig {
 /// ## 使用示例
 ///
 /// ```rust,no_run
-/// use inklog::metrics::{SinkHealthMonitor, FallbackConfig};
+/// use inklog::SinkHealthMonitor;
+/// use inklog::FallbackConfig;
 ///
 /// let config = FallbackConfig::default();
 /// let monitor = SinkHealthMonitor::new(config);
