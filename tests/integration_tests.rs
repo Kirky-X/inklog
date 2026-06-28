@@ -45,7 +45,6 @@ async fn test_e2e_logging() {
     }
 }
 
-#[cfg(feature = "confers")]
 #[tokio::test]
 async fn test_load_from_file() {
     use std::io::Write;
@@ -1316,12 +1315,8 @@ async fn verify_database_sink_sqlite() {
             .await
             .expect("Failed to connect to database");
         let logs = Entity::find().all(&db).await.expect("Failed to query logs");
-        // 注意：MockDatabaseAdapter 不会写入真实数据库，所以这里检查表是否存在
-        // 而不是检查记录数量
-        assert!(
-            logs.is_empty() || logs.len() >= 0,
-            "Database query should work"
-        );
+        // 注意：MockDatabaseAdapter 不会写入真实数据库，查询成功即表示表存在
+        let _ = logs;
     }
 }
 

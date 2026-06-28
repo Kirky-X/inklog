@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 use inklog::{InklogContainer, LoggerDependencies, LoggerManager, InklogConfig};
-use inklog::integrations::infra::{OxCacheAdapter, ConfersAdapter};
+use inklog::integrations::infra::{OxCacheAdapter, InklogConfigAdapter};
 use inklog::integrations::infra::{Cache, Config, Database};
 use inklog::integrations::infra::{MockCache, MockConfig, MockDatabaseAdapter};
 
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - 创建容器...");
     let _container = InklogContainer::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(ConfersAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
         .build()?;
     println!("   - 缓存实例: 已创建 (Arc<dyn Cache>)");
     println!("   - 配置实例: 已创建 (Arc<dyn Config>)");
@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n2. 使用 LoggerBuilder 注入依赖 (真实适配器):");
     let _logger = LoggerManager::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(ConfersAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
         .level("info")
         .console(true)
         .build()
@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n3. 使用 with_dependencies (真实适配器):");
     let deps = LoggerDependencies {
         cache: Some(Arc::new(OxCacheAdapter::new()?)),
-        config: Some(Arc::new(ConfersAdapter::from_config(InklogConfig::default()))),
+        config: Some(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default()))),
         ..Default::default()
     };
     let _logger = LoggerManager::with_dependencies(deps).await?;
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n4. 容器共享依赖实例演示 (真实适配器):");
     let container = InklogContainer::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(ConfersAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
         .build()?;
 
     // 获取共享的缓存实例
@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n5. 从容器创建多个 Logger:");
     let container = InklogContainer::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(ConfersAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
         .build()?;
 
     let _logger1 = container.create_logger().await?;
