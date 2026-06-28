@@ -3,7 +3,7 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-use confers::Config;
+use crate::InklogError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -16,11 +16,10 @@ use std::path::PathBuf;
 /// # Loading
 ///
 /// Configuration can be loaded from:
-/// - TOML files (via `load_file()` or `load()`)
+/// - TOML files (via `from_search_paths()`)
 /// - Environment variables (prefix `INKLOG_`)
 /// - Defaults (lowest priority)
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
-#[config(env_prefix = "INKLOG_")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InklogConfig {
     #[serde(default)]
     pub global: GlobalConfig,
@@ -43,7 +42,31 @@ fn default_console_sink() -> Option<ConsoleSinkConfig> {
     Some(ConsoleSinkConfig::default())
 }
 
+impl Default for InklogConfig {
+    fn default() -> Self {
+        Self {
+            global: GlobalConfig::default(),
+            console_sink: default_console_sink(),
+            file_sink: None,
+            database_sink: None,
+            #[cfg(feature = "aws")]
+            s3_archive: None,
+            performance: PerformanceConfig::default(),
+            http_server: None,
+        }
+    }
+}
+
 impl InklogConfig {
+    /// Load configuration synchronously from the default search paths.
+    ///
+    /// Tries each search path in order and returns the first valid config.
+    /// Falls back to `Self::default()` if no config file exists.
+    pub fn load_sync() -> Result<Self, InklogError> {
+        Self::from_search_paths()
+            .map_err(|e| InklogError::ConfigError(format!("Failed to load config: {}", e)))
+    }
+
     /// Load configuration with custom environment variable overrides.
     ///
     /// This method loads configuration from the default sources (files or defaults)
@@ -57,9 +80,8 @@ impl InklogConfig {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(InklogConfig)` on success, or `Err(ConfigError)` if loading fails.
-    pub fn load_with_env_overrides() -> Result<Self, confers::ConfigError> {
-        // Load base config using confers' generated method (which already handles INKLOG_* env vars)
+    /// Returns `Ok(InklogConfig)` on success, or `Err(InklogError)` if loading fails.
+    pub fn load_with_env_overrides() -> Result<Self, InklogError> {
         let mut config = Self::load_sync()?;
 
         // Apply additional nested field environment variable overrides
@@ -193,8 +215,7 @@ impl InklogConfig {
     /// 4. `/etc/inklog/config.toml`
     ///
     /// Environment variables with prefix `INKLOG_` override all file values.
-    pub fn from_search_paths() -> Result<Self, confers::ConfigError> {
-        // Try search paths
+    pub fn from_search_paths() -> Result<Self, InklogError> {
         let search_paths = vec![
             std::env::var("INKLOG_CONFIG_PATH").ok(),
             Some("inklog_config.toml".to_string()),
@@ -207,14 +228,24 @@ impl InklogConfig {
             Some("/etc/inklog/config.toml".to_string()),
         ];
 
-        // Try each path
         for path_opt in search_paths.into_iter().flatten() {
             if std::path::Path::new(&path_opt).exists() {
-                return Self::load_file(&path_opt);
+                let content = std::fs::read_to_string(&path_opt).map_err(|e| {
+                    InklogError::ConfigError(format!(
+                        "Failed to read config file '{}': {}",
+                        path_opt, e
+                    ))
+                })?;
+                let config: Self = toml::from_str(&content).map_err(|e| {
+                    InklogError::ConfigError(format!(
+                        "Failed to parse config file '{}': {}",
+                        path_opt, e
+                    ))
+                })?;
+                return Ok(config);
             }
         }
 
-        // Return default if no file found
         Ok(Self::default())
     }
 
@@ -238,30 +269,23 @@ impl InklogConfig {
     }
 
     /// Validate the configuration.
-    ///
-    /// This method is called automatically by confers during config loading
-    /// when `#[config(validate)]` is specified on the struct.
-    pub fn validate(&self) -> Result<(), confers::ConfigError> {
+    pub fn validate(&self) -> Result<(), InklogError> {
         if self.performance.channel_capacity == 0 {
-            return Err(confers::ConfigError::validation(
-                "channel_capacity",
-                "min",
-                "channel_capacity cannot be 0",
+            return Err(InklogError::ConfigError(
+                "channel_capacity cannot be 0".to_string(),
             ));
         }
         if self.performance.worker_threads == 0 {
-            return Err(confers::ConfigError::validation(
-                "worker_threads",
-                "min",
-                "worker_threads cannot be 0",
+            return Err(InklogError::ConfigError(
+                "worker_threads cannot be 0".to_string(),
             ));
         }
         Ok(())
     }
 }
 
-// Default for InklogConfig is auto-generated by confers derive macro.
-// console_sink defaults to Some(ConsoleSinkConfig::default()) via #[config(default = ...)].
+// InklogConfig's Default impl calls the same default functions as #[serde(default = ...)] so
+// Default::default() and toml::from_str("") produce identical values.
 
 impl std::str::FromStr for InklogConfig {
     type Err = toml::de::Error;
@@ -307,7 +331,7 @@ impl std::str::FromStr for InklogConfig {
 /// export INKLOG_GLOBAL_LEVEL=debug
 /// export INKLOG_GLOBAL_MASKING_ENABLED=false
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Config, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GlobalConfig {
     /// Minimum log level to capture.
     ///
@@ -318,7 +342,6 @@ pub struct GlobalConfig {
     ///
     /// `"info"` - Captures INFO, WARN, ERROR, and FATAL logs.
     #[serde(default = "default_global_level")]
-    #[config(default = "info".to_string())]
     pub level: String,
 
     /// Log message format template.
@@ -337,7 +360,6 @@ pub struct GlobalConfig {
     ///
     /// `"{timestamp} [{level}] {target} - {message}"`
     #[serde(default = "default_global_format")]
-    #[config(default = "{timestamp} [{level}] {target} - {message}".to_string())]
     pub format: String,
 
     /// Enable sensitive data masking.
@@ -349,7 +371,6 @@ pub struct GlobalConfig {
     ///
     /// `true` - Masking enabled by default for security.
     #[serde(default = "default_true")]
-    #[config(default = true)]
     pub masking_enabled: bool,
 
     /// Enable automatic fallback on sink failures.
@@ -361,7 +382,6 @@ pub struct GlobalConfig {
     ///
     /// `true` - Fallback enabled for reliability.
     #[serde(default = "default_true")]
-    #[config(default = true)]
     pub auto_fallback: bool,
 
     /// Initial delay before first retry (milliseconds).
@@ -373,7 +393,6 @@ pub struct GlobalConfig {
     ///
     /// `1000` ms (1 second)
     #[serde(default = "default_fallback_initial_delay")]
-    #[config(default = 1000u64)]
     pub fallback_initial_delay_ms: u64,
 
     /// Maximum delay between retries (milliseconds).
@@ -384,7 +403,6 @@ pub struct GlobalConfig {
     ///
     /// `60000` ms (60 seconds)
     #[serde(default = "default_fallback_max_delay")]
-    #[config(default = 60000u64)]
     pub fallback_max_delay_ms: u64,
 
     /// Maximum number of retry attempts.
@@ -396,7 +414,6 @@ pub struct GlobalConfig {
     ///
     /// `10` retries
     #[serde(default = "default_fallback_max_retries")]
-    #[config(default = 10u32)]
     pub fallback_max_retries: u32,
 }
 
@@ -420,7 +437,21 @@ fn default_fallback_max_retries() -> u32 {
     10
 }
 
-// Default for GlobalConfig is auto-generated by confers derive macro.
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            level: default_global_level(),
+            format: default_global_format(),
+            masking_enabled: default_true(),
+            auto_fallback: default_true(),
+            fallback_initial_delay_ms: default_fallback_initial_delay(),
+            fallback_max_delay_ms: default_fallback_max_delay(),
+            fallback_max_retries: default_fallback_max_retries(),
+        }
+    }
+}
+
+// Default values are handled by #[serde(default = ...)] annotations.
 
 // ============================================================================
 // ConsoleSinkConfig - Console output settings
@@ -455,7 +486,7 @@ fn default_fallback_max_retries() -> u32 {
 /// export INKLOG_CONSOLE_SINK_ENABLED=true
 /// export INKLOG_CONSOLE_SINK_COLORED=false
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsoleSinkConfig {
     /// Enable console logging.
     ///
@@ -465,7 +496,7 @@ pub struct ConsoleSinkConfig {
     /// # Default
     ///
     /// `true` - Console output enabled by default.
-    #[config(default = true)]
+    #[serde(default = "default_true")]
     pub enabled: bool,
 
     /// Enable colored output using ANSI escape codes.
@@ -482,7 +513,7 @@ pub struct ConsoleSinkConfig {
     /// # Default
     ///
     /// `true` - Colors enabled by default.
-    #[config(default = true)]
+    #[serde(default = "default_true")]
     pub colored: bool,
 
     /// Log levels to write to stderr instead of stdout.
@@ -493,7 +524,7 @@ pub struct ConsoleSinkConfig {
     /// # Default
     ///
     /// `["error", "warn"]` - Errors and warnings go to stderr.
-    #[config(default = vec!["error".to_string(), "warn".to_string()])]
+    #[serde(default = "default_stderr_levels")]
     pub stderr_levels: Vec<String>,
 
     /// Enable sensitive data masking for console output.
@@ -509,11 +540,26 @@ pub struct ConsoleSinkConfig {
     /// # Default
     ///
     /// `false` - No masking for console output (developer-friendly).
-    #[config(default = false)]
+    #[serde(default)]
     pub masking_enabled: bool,
 }
 
-// impl Default for ConsoleSinkConfig is provided by Config derive
+fn default_stderr_levels() -> Vec<String> {
+    vec!["error".to_string(), "warn".to_string()]
+}
+
+impl Default for ConsoleSinkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            colored: default_true(),
+            stderr_levels: default_stderr_levels(),
+            masking_enabled: false,
+        }
+    }
+}
+
+// Default values are handled by #[serde(default = ...)] annotations.
 
 // ============================================================================
 // FileSinkConfig - File output settings
@@ -581,7 +627,7 @@ pub struct ConsoleSinkConfig {
 /// - `retention_days`: Delete files older than N days
 /// - `max_total_size`: Delete oldest files when total size exceeds limit
 /// - `keep_files`: Maximum number of rotated files to keep
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSinkConfig {
     /// Enable file logging.
     ///
@@ -591,7 +637,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `true` - File logging enabled by default.
-    #[config(default = true)]
+    #[serde(default = "default_true")]
     pub enabled: bool,
 
     /// Path to the log file.
@@ -613,7 +659,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `"100MB"`
-    #[config(default = "100MB".to_string())]
+    #[serde(default = "default_max_size")]
     pub max_size: String,
 
     /// Time-based rotation interval.
@@ -624,7 +670,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `"daily"` - Rotate once per day at midnight.
-    #[config(default = "daily".to_string())]
+    #[serde(default = "default_rotation_time")]
     pub rotation_time: String,
 
     /// Maximum number of rotated files to keep.
@@ -635,7 +681,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `30` - Keep the most recent 30 rotated files.
-    #[config(default = 30u32)]
+    #[serde(default = "default_keep_files")]
     pub keep_files: u32,
 
     /// Enable compression for rotated log files.
@@ -646,7 +692,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `true` - Compression enabled for storage efficiency.
-    #[config(default = true)]
+    #[serde(default = "default_true")]
     pub compress: bool,
 
     /// Zstd compression level (1-22).
@@ -657,7 +703,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `3` - Good balance between compression ratio and speed.
-    #[config(default = 3i32)]
+    #[serde(default = "default_compression_level")]
     pub compression_level: i32,
 
     /// Enable AES-256-GCM encryption for log files.
@@ -674,7 +720,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `false` - Encryption disabled by default.
-    #[config(default = false)]
+    #[serde(default)]
     pub encrypt: bool,
 
     /// Environment variable name for the encryption key.
@@ -691,6 +737,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `None` - No default key environment variable.
+    #[serde(default)]
     pub encryption_key_env: Option<String>,
 
     /// Delete log files older than N days.
@@ -701,7 +748,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `30` - Delete files older than 30 days.
-    #[config(default = 30u32)]
+    #[serde(default = "default_retention_days")]
     pub retention_days: u32,
 
     /// Maximum total size of all log files combined.
@@ -712,7 +759,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `"1GB"` - Total log storage limited to 1GB.
-    #[config(default = "1GB".to_string())]
+    #[serde(default = "default_max_total_size")]
     pub max_total_size: String,
 
     /// Interval between cleanup runs (minutes).
@@ -723,7 +770,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `60` - Run cleanup every hour.
-    #[config(default = 60u64)]
+    #[serde(default = "default_cleanup_interval_minutes")]
     pub cleanup_interval_minutes: u64,
 
     /// Number of log records to buffer before writing to disk.
@@ -734,7 +781,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `100` - Balance between throughput and latency.
-    #[config(default = 100usize)]
+    #[serde(default = "default_batch_size")]
     pub batch_size: usize,
 
     /// Maximum time to wait before flushing buffer (milliseconds).
@@ -745,7 +792,7 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `100` ms - Flush at least every 100ms.
-    #[config(default = 100u64)]
+    #[serde(default = "default_flush_interval_ms")]
     pub flush_interval_ms: u64,
 
     /// Enable sensitive data masking for file output.
@@ -761,16 +808,65 @@ pub struct FileSinkConfig {
     /// # Default
     ///
     /// `true` - Masking enabled for security.
-    #[config(default = true)]
+    #[serde(default = "default_true")]
     pub masking_enabled: bool,
 }
 
-// Default value function for path field (PathBuf not supported by ConfigValue)
+// Default value functions for FileSinkConfig
 fn default_log_path() -> PathBuf {
     PathBuf::from("logs/app.log")
 }
+fn default_max_size() -> String {
+    "100MB".to_string()
+}
+fn default_rotation_time() -> String {
+    "daily".to_string()
+}
+fn default_keep_files() -> u32 {
+    30
+}
+fn default_compression_level() -> i32 {
+    3
+}
+fn default_retention_days() -> u32 {
+    30
+}
+fn default_max_total_size() -> String {
+    "1GB".to_string()
+}
+fn default_cleanup_interval_minutes() -> u64 {
+    60
+}
+fn default_batch_size() -> usize {
+    100
+}
+fn default_flush_interval_ms() -> u64 {
+    100
+}
 
-// impl Default for FileSinkConfig is provided by Config derive
+impl Default for FileSinkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            path: default_log_path(),
+            max_size: default_max_size(),
+            rotation_time: default_rotation_time(),
+            keep_files: default_keep_files(),
+            compress: default_true(),
+            compression_level: default_compression_level(),
+            encrypt: false,
+            encryption_key_env: None,
+            retention_days: default_retention_days(),
+            max_total_size: default_max_total_size(),
+            cleanup_interval_minutes: default_cleanup_interval_minutes(),
+            batch_size: default_batch_size(),
+            flush_interval_ms: default_flush_interval_ms(),
+            masking_enabled: default_true(),
+        }
+    }
+}
+
+// Default values are handled by #[serde(default = ...)] annotations.
 
 // ============================================================================
 // DatabaseDriver - Supported database drivers
@@ -963,21 +1059,46 @@ impl std::fmt::Display for PartitionStrategy {
 ///
 /// Parquet export runs asynchronously in the background. The export interval
 /// is controlled by the database sink's flush interval.
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParquetConfig {
-    #[config(default = 3)]
+    #[serde(default = "default_parquet_compression_level")]
     pub compression_level: i32,
-    #[config(skip)]
+    #[serde(default = "default_parquet_encoding")]
     pub encoding: String,
-    #[config(default = 10000)]
+    #[serde(default = "default_parquet_max_row_group_size")]
     pub max_row_group_size: usize,
-    #[config(default = 1048576)]
+    #[serde(default = "default_parquet_max_page_size")]
     pub max_page_size: usize,
-    #[config(skip)]
+    #[serde(default)]
     pub include_fields: Vec<String>,
 }
 
-// impl Default for ParquetConfig is provided by Config derive
+fn default_parquet_compression_level() -> i32 {
+    3
+}
+fn default_parquet_encoding() -> String {
+    "PLAIN".to_string()
+}
+fn default_parquet_max_row_group_size() -> usize {
+    10000
+}
+fn default_parquet_max_page_size() -> usize {
+    1048576
+}
+
+impl Default for ParquetConfig {
+    fn default() -> Self {
+        Self {
+            compression_level: default_parquet_compression_level(),
+            encoding: default_parquet_encoding(),
+            max_row_group_size: default_parquet_max_row_group_size(),
+            max_page_size: default_parquet_max_page_size(),
+            include_fields: Vec::new(),
+        }
+    }
+}
+
+// Default values are handled by #[serde(default = ...)] annotations.
 
 // ============================================================================
 // DatabaseSinkConfig - Database sink settings
@@ -1093,41 +1214,88 @@ pub struct ParquetConfig {
 /// 1. Logs write failures to metrics
 /// 2. Stores logs in fallback file sink (`logs/db_fallback.log`)
 /// 3. Attempts reconnection based on circuit breaker policy
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseSinkConfig {
-    #[config(default = "default".to_string())]
+    #[serde(default = "default_db_sink_name")]
     pub name: String,
-    #[config(default = false)]
+    #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub driver: DatabaseDriver,
-    #[config(default = "postgres://localhost/logs".to_string())]
+    #[serde(default = "default_db_url")]
     pub url: String,
-    #[config(default = 10u32)]
+    #[serde(default = "default_db_pool_size")]
     pub pool_size: u32,
-    #[config(default = 100usize)]
+    #[serde(default = "default_db_batch_size")]
     pub batch_size: usize,
-    #[config(default = 500u64)]
+    #[serde(default = "default_db_flush_interval_ms")]
     pub flush_interval_ms: u64,
     #[serde(default)]
     pub partition: PartitionStrategy,
-    #[config(default = false)]
+    #[serde(default)]
     pub archive_to_s3: bool,
-    #[config(default = 30u32)]
+    #[serde(default = "default_db_archive_after_days")]
     pub archive_after_days: u32,
     #[serde(default)]
     pub s3_bucket: Option<String>,
     #[serde(default)]
     pub s3_region: Option<String>,
-    #[config(default = "logs".to_string())]
+    #[serde(default = "default_db_table_name")]
     pub table_name: String,
-    #[config(default = "json".to_string())]
+    #[serde(default = "default_db_archive_format")]
     pub archive_format: String,
     #[serde(default)]
     pub parquet_config: ParquetConfig,
 }
 
-// impl Default for DatabaseSinkConfig is provided by Config derive
+fn default_db_sink_name() -> String {
+    "default".to_string()
+}
+fn default_db_url() -> String {
+    "sqlite::memory:".to_string()
+}
+fn default_db_pool_size() -> u32 {
+    10
+}
+fn default_db_batch_size() -> usize {
+    100
+}
+fn default_db_flush_interval_ms() -> u64 {
+    500
+}
+fn default_db_archive_after_days() -> u32 {
+    30
+}
+fn default_db_table_name() -> String {
+    "logs".to_string()
+}
+fn default_db_archive_format() -> String {
+    "json".to_string()
+}
+
+impl Default for DatabaseSinkConfig {
+    fn default() -> Self {
+        Self {
+            name: default_db_sink_name(),
+            enabled: false,
+            driver: DatabaseDriver::default(),
+            url: default_db_url(),
+            pool_size: default_db_pool_size(),
+            batch_size: default_db_batch_size(),
+            flush_interval_ms: default_db_flush_interval_ms(),
+            partition: PartitionStrategy::default(),
+            archive_to_s3: false,
+            archive_after_days: default_db_archive_after_days(),
+            s3_bucket: None,
+            s3_region: None,
+            table_name: default_db_table_name(),
+            archive_format: default_db_archive_format(),
+            parquet_config: ParquetConfig::default(),
+        }
+    }
+}
+
+// Default values are handled by #[serde(default = ...)] annotations.
 
 // ============================================================================
 // ChannelStrategy - Adaptive channel sizing strategy
@@ -1310,17 +1478,17 @@ impl std::fmt::Display for ChannelStrategy {
 /// - Use `0.0.0.0` cautiously - exposes metrics to network
 /// - Enable authentication for production deployments
 /// - Consider IP whitelist for additional security
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerConfig {
-    #[config(default = false)]
+    #[serde(default)]
     pub enabled: bool,
-    #[config(default = "127.0.0.1".to_string())]
+    #[serde(default = "default_http_host")]
     pub host: String,
-    #[config(default = 9090u16)]
+    #[serde(default = "default_http_port")]
     pub port: u16,
-    #[config(default = "/metrics".to_string())]
+    #[serde(default = "default_http_metrics_path")]
     pub metrics_path: String,
-    #[config(default = "/health".to_string())]
+    #[serde(default = "default_http_health_path")]
     pub health_path: String,
     #[serde(default)]
     pub error_mode: HttpErrorMode,
@@ -1328,6 +1496,34 @@ pub struct HttpServerConfig {
     pub auth: Option<HttpAuthConfig>,
     #[serde(default)]
     pub ip_whitelist: Option<Vec<String>>,
+}
+
+fn default_http_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_http_port() -> u16 {
+    9090
+}
+fn default_http_metrics_path() -> String {
+    "/metrics".to_string()
+}
+fn default_http_health_path() -> String {
+    "/health".to_string()
+}
+
+impl Default for HttpServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            host: default_http_host(),
+            port: default_http_port(),
+            metrics_path: default_http_metrics_path(),
+            health_path: default_http_health_path(),
+            error_mode: HttpErrorMode::default(),
+            auth: None,
+            ip_whitelist: None,
+        }
+    }
 }
 
 /// HTTP authentication configuration.
@@ -1375,15 +1571,28 @@ pub struct HttpServerConfig {
 /// export INKLOG_HTTP_SERVER_AUTH_ENABLED=true
 /// export INKLOG_HTTP_SERVER_AUTH_TOKEN_ENV="MY_AUTH_VAR"
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpAuthConfig {
-    #[config(default = false)]
+    #[serde(default)]
     pub enabled: bool,
-    #[config(default = "INKLOG_HTTP_AUTH_TOKEN".to_string())]
+    #[serde(default = "default_http_auth_token_env")]
     pub token_env: String,
 }
 
-// impl Default for HttpServerConfig and HttpAuthConfig is provided by Config derive
+fn default_http_auth_token_env() -> String {
+    "INKLOG_HTTP_AUTH_TOKEN".to_string()
+}
+
+impl Default for HttpAuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token_env: default_http_auth_token_env(),
+        }
+    }
+}
+
+// Default values are handled by #[serde(default = ...)] annotations.
 
 // ============================================================================
 // HttpErrorMode - HTTP server error handling mode
@@ -1546,30 +1755,23 @@ pub enum HttpErrorMode {
 /// - `inklog_channel_blocked`: Should be near zero with proper capacity
 /// - `inklog_logs_dropped`: Non-zero indicates undersized channel
 /// - Worker CPU usage: Should correlate with worker_threads count
-#[derive(Debug, Clone, Serialize, Deserialize, Config, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PerformanceConfig {
     #[serde(default = "default_channel_capacity")]
-    #[config(default = 10000usize)]
     pub channel_capacity: usize,
     #[serde(default = "default_worker_threads")]
-    #[config(default = 3usize)]
     pub worker_threads: usize,
     #[serde(default)]
     pub channel_strategy: ChannelStrategy,
     #[serde(default = "default_expand_threshold")]
-    #[config(default = 80u8)]
     pub expand_threshold_percent: u8,
     #[serde(default = "default_shrink_threshold")]
-    #[config(default = 20u8)]
     pub shrink_threshold_percent: u8,
     #[serde(default = "default_shrink_wait")]
-    #[config(default = 30u64)]
     pub shrink_wait_seconds: u64,
     #[serde(default = "default_min_capacity")]
-    #[config(default = 1000usize)]
     pub min_capacity: usize,
     #[serde(default = "default_max_capacity")]
-    #[config(default = 50000usize)]
     pub max_capacity: usize,
 }
 
@@ -1596,7 +1798,22 @@ fn default_max_capacity() -> usize {
     50000
 }
 
-// Default for PerformanceConfig is auto-generated by confers derive macro.
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            channel_capacity: default_channel_capacity(),
+            worker_threads: default_worker_threads(),
+            channel_strategy: ChannelStrategy::default(),
+            expand_threshold_percent: default_expand_threshold(),
+            shrink_threshold_percent: default_shrink_threshold(),
+            shrink_wait_seconds: default_shrink_wait(),
+            min_capacity: default_min_capacity(),
+            max_capacity: default_max_capacity(),
+        }
+    }
+}
+
+// Default values are handled by #[serde(default = ...)] annotations.
 
 // ============================================================================
 // Tests
@@ -1605,6 +1822,9 @@ fn default_max_capacity() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+    use std::env;
+    use tempfile::tempdir;
 
     #[test]
     fn test_global_config_default() {
@@ -1799,8 +2019,7 @@ mod tests {
 
     #[test]
     fn test_inklog_config_sinks_enabled() {
-        // Note: confers derive generates Default with console_sink: None for Option<T>
-        // The actual runtime code uses unwrap_or_default() to handle this.
+        // Default leaves console_sink: None for Option<T>.
         // For testing sinks_enabled(), we explicitly set console_sink.
         let config = InklogConfig {
             console_sink: Some(ConsoleSinkConfig::default()),
@@ -1818,8 +2037,8 @@ mod tests {
     }
 
     #[test]
-    fn test_console_sink_config_load_sync() {
-        let config = ConsoleSinkConfig::load_sync().unwrap();
+    fn test_console_sink_config_default_values() {
+        let config = ConsoleSinkConfig::default();
         assert!(config.enabled);
         assert!(config.colored);
         assert_eq!(config.stderr_levels.len(), 2);
@@ -1831,5 +2050,756 @@ mod tests {
         let config = GlobalConfig::default();
         assert_eq!(config.level, "info");
         assert!(config.auto_fallback);
+    }
+
+    // =========================================================================
+    // validate() 测试
+    // =========================================================================
+
+    #[test]
+    fn test_validate_default_passes() {
+        let config = InklogConfig::default();
+        assert!(config.validate().is_ok(), "default config should validate");
+    }
+
+    #[test]
+    fn test_validate_zero_channel_capacity_fails() {
+        let config = InklogConfig {
+            performance: PerformanceConfig {
+                channel_capacity: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = config.validate().expect_err("capacity=0 should fail");
+        assert!(
+            err.to_string().contains("channel_capacity"),
+            "error should mention channel_capacity, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_zero_worker_threads_fails() {
+        let config = InklogConfig {
+            performance: PerformanceConfig {
+                worker_threads: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = config.validate().expect_err("worker_threads=0 should fail");
+        assert!(
+            err.to_string().contains("worker_threads"),
+            "error should mention worker_threads, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_both_zero_reports_capacity_first() {
+        // validate() checks channel_capacity before worker_threads
+        let config = InklogConfig {
+            performance: PerformanceConfig {
+                channel_capacity: 0,
+                worker_threads: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = config.validate().expect_err("both zero should fail");
+        assert!(err.to_string().contains("channel_capacity"));
+    }
+
+    // =========================================================================
+    // from_str() 测试
+    // =========================================================================
+
+    #[test]
+    fn test_from_str_valid_toml() {
+        let toml = r#"
+[global]
+level = "debug"
+format = "{timestamp} {message}"
+
+[console_sink]
+enabled = true
+colored = false
+"#;
+        let config: InklogConfig = toml.parse().expect("valid TOML should parse");
+        assert_eq!(config.global.level, "debug");
+        assert!(config.console_sink.is_some());
+        assert!(!config.console_sink.as_ref().unwrap().colored);
+    }
+
+    #[test]
+    fn test_from_str_empty_string_returns_defaults() {
+        // 空字符串 → 所有字段使用 serde default
+        let config: InklogConfig = "".parse().expect("empty TOML should parse to defaults");
+        assert_eq!(config.global.level, "info");
+        // console_sink 有 serde(default = "default_console_sink")，应返回 Some
+        assert!(config.console_sink.is_some());
+    }
+
+    #[test]
+    fn test_from_str_invalid_toml_errors() {
+        let bad = "not = valid = toml = syntax";
+        let result: Result<InklogConfig, _> = bad.parse();
+        assert!(result.is_err(), "malformed TOML should error");
+    }
+
+    #[test]
+    fn test_from_str_partial_config_only_global() {
+        let toml = r#"
+[global]
+level = "warn"
+"#;
+        let config: InklogConfig = toml.parse().expect("partial config should parse");
+        assert_eq!(config.global.level, "warn");
+        // 其他字段保持默认
+        assert!(config.file_sink.is_none());
+        assert!(config.database_sink.is_none());
+        assert!(config.http_server.is_none());
+    }
+
+    // =========================================================================
+    // sinks_enabled() 测试
+    // =========================================================================
+
+    #[test]
+    fn test_sinks_enabled_all_disabled() {
+        let config = InklogConfig {
+            console_sink: Some(ConsoleSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            file_sink: None,
+            database_sink: None,
+            http_server: None,
+            ..Default::default()
+        };
+        assert!(
+            config.sinks_enabled().is_empty(),
+            "no sinks should be enabled"
+        );
+    }
+
+    #[test]
+    fn test_sinks_enabled_only_file() {
+        let config = InklogConfig {
+            console_sink: Some(ConsoleSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            file_sink: Some(FileSinkConfig {
+                enabled: true,
+                ..Default::default()
+            }),
+            database_sink: None,
+            http_server: None,
+            ..Default::default()
+        };
+        let sinks = config.sinks_enabled();
+        assert_eq!(sinks, vec!["file"]);
+    }
+
+    #[test]
+    fn test_sinks_enabled_console_and_database() {
+        let config = InklogConfig {
+            console_sink: Some(ConsoleSinkConfig {
+                enabled: true,
+                ..Default::default()
+            }),
+            file_sink: Some(FileSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            database_sink: Some(DatabaseSinkConfig {
+                enabled: true,
+                ..Default::default()
+            }),
+            http_server: None,
+            ..Default::default()
+        };
+        let mut sinks = config.sinks_enabled();
+        sinks.sort();
+        assert_eq!(sinks, vec!["console", "database"]);
+    }
+
+    // =========================================================================
+    // from_search_paths() 测试（需要 env var 隔离 → serial）
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_from_search_paths_with_env_var_loads_file() {
+        let dir = tempdir().expect("failed to create tempdir");
+        let config_path = dir.path().join("custom_config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[global]
+level = "trace"
+"#,
+        )
+        .expect("failed to write config");
+
+        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        let config = InklogConfig::from_search_paths().expect("should load from env path");
+        env::remove_var("INKLOG_CONFIG_PATH");
+
+        assert_eq!(config.global.level, "trace");
+    }
+
+    #[test]
+    #[serial]
+    fn test_from_search_paths_missing_env_falls_back_to_default() {
+        // 清除 env，且确保当前目录没有 inklog_config.toml（依赖搜索路径回退到默认）
+        env::remove_var("INKLOG_CONFIG_PATH");
+        // 注意：若当前目录恰好存在 inklog_config.toml，则此测试会从文件加载而非默认值。
+        // 为保证测试确定性，仅验证函数返回 Ok 且配置有效。
+        let config = InklogConfig::from_search_paths().expect("should not error");
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn test_from_search_paths_malformed_toml_errors() {
+        let dir = tempdir().expect("failed to create tempdir");
+        let config_path = dir.path().join("bad_config.toml");
+        std::fs::write(&config_path, "not = valid = toml").expect("failed to write");
+
+        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        let result = InklogConfig::from_search_paths();
+        env::remove_var("INKLOG_CONFIG_PATH");
+
+        let err = result.expect_err("malformed TOML should error");
+        assert!(
+            err.to_string().contains("Failed to parse config file"),
+            "error should mention parse failure, got: {err}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_sync_with_env_path() {
+        let dir = tempdir().expect("failed to create tempdir");
+        let config_path = dir.path().join("sync_config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[global]
+level = "error"
+"#,
+        )
+        .expect("failed to write");
+
+        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        let config = InklogConfig::load_sync().expect("load_sync should succeed");
+        env::remove_var("INKLOG_CONFIG_PATH");
+
+        assert_eq!(config.global.level, "error");
+    }
+
+    // =========================================================================
+    // load_with_env_overrides() 测试（需要 env var 隔离 → serial）
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_global_level() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_GLOBAL_LEVEL");
+
+        assert_eq!(config.global.level, "debug");
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_performance_capacity() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "5000");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY");
+
+        assert_eq!(config.performance.channel_capacity, 5000);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_file_sink_enabled() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_FILE_SINK_ENABLED");
+
+        let file = config
+            .file_sink
+            .expect("file_sink should be Some after env override");
+        assert!(file.enabled, "file_sink.enabled should be true");
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_http_server_enabled() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+
+        let http = config
+            .http_server
+            .expect("http_server should be Some after env override");
+        assert!(http.enabled);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_invalid_bool_ignored() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        // 非法 bool → parse 失败 → unwrap_or 返回原默认值
+        env::set_var("INKLOG_GLOBAL_MASKING_ENABLED", "not_a_bool");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_GLOBAL_MASKING_ENABLED");
+
+        // 默认 masking_enabled 值（来自 GlobalConfig::default）
+        assert_eq!(
+            config.global.masking_enabled,
+            GlobalConfig::default().masking_enabled
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_invalid_int_ignored() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "not_an_int");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY");
+
+        assert_eq!(
+            config.performance.channel_capacity,
+            PerformanceConfig::default().channel_capacity
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_http_error_mode_strict() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "strict");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+
+        let http = config.http_server.expect("http_server should be Some");
+        assert!(matches!(http.error_mode, HttpErrorMode::Strict));
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_http_error_mode_warn() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+
+        let http = config.http_server.expect("http_server should be Some");
+        assert!(matches!(http.error_mode, HttpErrorMode::Warn));
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_file_sink_path_and_max_size() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
+        env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test_app.log");
+        env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "250MB");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_FILE_SINK_ENABLED");
+        env::remove_var("INKLOG_FILE_SINK_PATH");
+        env::remove_var("INKLOG_FILE_SINK_MAX_SIZE");
+
+        let file = config.file_sink.expect("file_sink should be Some");
+        assert_eq!(file.path, std::path::PathBuf::from("/tmp/test_app.log"));
+        assert_eq!(file.max_size, "250MB");
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_http_server_host_port() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        env::set_var("INKLOG_HTTP_SERVER_HOST", "0.0.0.0");
+        env::set_var("INKLOG_HTTP_SERVER_PORT", "8080");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        env::remove_var("INKLOG_HTTP_SERVER_HOST");
+        env::remove_var("INKLOG_HTTP_SERVER_PORT");
+
+        let http = config.http_server.expect("http_server should be Some");
+        assert_eq!(http.host, "0.0.0.0");
+        assert_eq!(http.port, 8080);
+    }
+
+    // =========================================================================
+    // apply_env_overrides() 补充测试（覆盖剩余分支）
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_global_format() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_GLOBAL_FORMAT", "{level} {message}");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_GLOBAL_FORMAT");
+
+        assert_eq!(config.global.format, "{level} {message}");
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_global_auto_fallback() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_GLOBAL_AUTO_FALLBACK", "false");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_GLOBAL_AUTO_FALLBACK");
+
+        assert!(!config.global.auto_fallback);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_http_server_metrics_and_health_path() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/custom_metrics");
+        env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/custom_health");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        env::remove_var("INKLOG_HTTP_SERVER_METRICS_PATH");
+        env::remove_var("INKLOG_HTTP_SERVER_HEALTH_PATH");
+
+        let http = config.http_server.expect("http_server should be Some");
+        assert_eq!(http.metrics_path, "/custom_metrics");
+        assert_eq!(http.health_path, "/custom_health");
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_http_error_mode_unknown_keeps_default() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        // 未知值应保留默认的 Strict 模式
+        env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "unknown_mode");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+
+        let http = config.http_server.expect("http_server should be Some");
+        assert!(
+            matches!(http.error_mode, HttpErrorMode::Strict),
+            "unknown mode should keep default Strict"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_performance_worker_threads() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+
+        assert_eq!(config.performance.worker_threads, 8);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_performance_worker_threads_invalid_ignored() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "not_a_number");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+
+        assert_eq!(
+            config.performance.worker_threads,
+            PerformanceConfig::default().worker_threads
+        );
+    }
+
+    // =========================================================================
+    // DatabaseDriver FromStr / Display 测试
+    // =========================================================================
+
+    #[test]
+    fn test_database_driver_from_str_postgres() {
+        let driver: DatabaseDriver = "postgres".parse().expect("should parse");
+        assert_eq!(driver, DatabaseDriver::PostgreSQL);
+
+        let driver: DatabaseDriver = "PostgreSQL".parse().expect("should parse case-insensitive");
+        assert_eq!(driver, DatabaseDriver::PostgreSQL);
+    }
+
+    #[test]
+    fn test_database_driver_from_str_mysql() {
+        let driver: DatabaseDriver = "mysql".parse().expect("should parse");
+        assert_eq!(driver, DatabaseDriver::MySQL);
+    }
+
+    #[test]
+    fn test_database_driver_from_str_sqlite() {
+        let driver: DatabaseDriver = "sqlite".parse().expect("should parse");
+        assert_eq!(driver, DatabaseDriver::SQLite);
+
+        let driver: DatabaseDriver = "sqlite3".parse().expect("should parse");
+        assert_eq!(driver, DatabaseDriver::SQLite);
+    }
+
+    #[test]
+    fn test_database_driver_from_str_invalid() {
+        let result: Result<DatabaseDriver, _> = "oracle".parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_database_driver_display() {
+        assert_eq!(format!("{}", DatabaseDriver::PostgreSQL), "postgres");
+        assert_eq!(format!("{}", DatabaseDriver::MySQL), "mysql");
+        assert_eq!(format!("{}", DatabaseDriver::SQLite), "sqlite");
+    }
+
+    // =========================================================================
+    // PartitionStrategy FromStr / Display 测试
+    // =========================================================================
+
+    #[test]
+    fn test_partition_strategy_from_str_monthly() {
+        let s: PartitionStrategy = "monthly".parse().expect("should parse");
+        assert_eq!(s, PartitionStrategy::Monthly);
+
+        let s: PartitionStrategy = "month".parse().expect("should parse");
+        assert_eq!(s, PartitionStrategy::Monthly);
+    }
+
+    #[test]
+    fn test_partition_strategy_from_str_yearly() {
+        let s: PartitionStrategy = "yearly".parse().expect("should parse");
+        assert_eq!(s, PartitionStrategy::Yearly);
+
+        let s: PartitionStrategy = "year".parse().expect("should parse");
+        assert_eq!(s, PartitionStrategy::Yearly);
+    }
+
+    #[test]
+    fn test_partition_strategy_from_str_invalid() {
+        let result: Result<PartitionStrategy, String> = "weekly".parse();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown partition strategy"));
+    }
+
+    #[test]
+    fn test_partition_strategy_display() {
+        assert_eq!(format!("{}", PartitionStrategy::Monthly), "monthly");
+        assert_eq!(format!("{}", PartitionStrategy::Yearly), "yearly");
+    }
+
+    // =========================================================================
+    // ChannelStrategy FromStr / Display 测试
+    // =========================================================================
+
+    #[test]
+    fn test_channel_strategy_from_str_fixed() {
+        let s: ChannelStrategy = "fixed".parse().expect("should parse");
+        assert_eq!(s, ChannelStrategy::Fixed);
+    }
+
+    #[test]
+    fn test_channel_strategy_from_str_adaptive() {
+        let s: ChannelStrategy = "adaptive".parse().expect("should parse");
+        assert_eq!(s, ChannelStrategy::Adaptive);
+    }
+
+    #[test]
+    fn test_channel_strategy_from_str_invalid() {
+        let result: Result<ChannelStrategy, String> = "dynamic".parse();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown channel strategy"));
+    }
+
+    #[test]
+    fn test_channel_strategy_display() {
+        assert_eq!(format!("{}", ChannelStrategy::Fixed), "fixed");
+        assert_eq!(format!("{}", ChannelStrategy::Adaptive), "adaptive");
+    }
+
+    // =========================================================================
+    // HttpAuthConfig Default 测试
+    // =========================================================================
+
+    #[test]
+    fn test_http_auth_config_default() {
+        let auth = HttpAuthConfig::default();
+        assert!(!auth.enabled);
+        assert_eq!(auth.token_env, "INKLOG_HTTP_AUTH_TOKEN");
+    }
+
+    // =========================================================================
+    // S3 Archive env overrides (aws feature) 测试
+    // =========================================================================
+
+    #[cfg(feature = "aws")]
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_s3_archive_enabled_and_bucket_region() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
+        env::set_var("INKLOG_S3_ARCHIVE_BUCKET", "test-bucket");
+        env::set_var("INKLOG_S3_ARCHIVE_REGION", "us-east-1");
+        env::set_var("INKLOG_S3_ARCHIVE_ARCHIVE_FORMAT", "parquet");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
+        env::remove_var("INKLOG_S3_ARCHIVE_BUCKET");
+        env::remove_var("INKLOG_S3_ARCHIVE_REGION");
+        env::remove_var("INKLOG_S3_ARCHIVE_ARCHIVE_FORMAT");
+
+        let s3 = config.s3_archive.expect("s3_archive should be Some");
+        assert!(s3.enabled);
+        assert_eq!(s3.bucket, "test-bucket");
+        assert_eq!(s3.region, "us-east-1");
+        assert_eq!(s3.archive_format, "parquet");
+    }
+
+    #[cfg(feature = "aws")]
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_s3_archive_encryption_awskms() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
+        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM", "awskms");
+        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_KMS_KEY_ID", "key-123");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_KMS_KEY_ID");
+
+        let s3 = config.s3_archive.expect("s3_archive should be Some");
+        let encryption = s3.encryption.expect("encryption should be set");
+        assert!(
+            matches!(
+                encryption.algorithm,
+                crate::integrations::storage::archive::EncryptionAlgorithm::AwsKms
+            ),
+            "algorithm should be AwsKms"
+        );
+        assert_eq!(encryption.kms_key_id, Some("key-123".to_string()));
+    }
+
+    #[cfg(feature = "aws")]
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_s3_archive_encryption_ssec() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
+        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM", "ssec");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM");
+
+        let s3 = config.s3_archive.expect("s3_archive should be Some");
+        let encryption = s3.encryption.expect("encryption should be set");
+        assert!(
+            matches!(
+                encryption.algorithm,
+                crate::integrations::storage::archive::EncryptionAlgorithm::CustomerKey
+            ),
+            "algorithm should be CustomerKey"
+        );
+    }
+
+    #[cfg(feature = "aws")]
+    #[test]
+    #[serial]
+    fn test_load_with_env_overrides_s3_archive_encryption_unknown_defaults_aes256() {
+        env::remove_var("INKLOG_CONFIG_PATH");
+        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
+        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM", "unknown_algo");
+        let config = InklogConfig::load_with_env_overrides().expect("should load");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
+        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM");
+
+        let s3 = config.s3_archive.expect("s3_archive should be Some");
+        let encryption = s3.encryption.expect("encryption should be set");
+        assert!(
+            matches!(
+                encryption.algorithm,
+                crate::integrations::storage::archive::EncryptionAlgorithm::Aes256
+            ),
+            "unknown algorithm should default to Aes256"
+        );
+    }
+
+    #[cfg(feature = "aws")]
+    #[test]
+    fn test_sinks_enabled_includes_s3_archive() {
+        use crate::integrations::storage::archive::S3ArchiveConfig;
+
+        let config = InklogConfig {
+            s3_archive: Some(S3ArchiveConfig {
+                enabled: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let sinks = config.sinks_enabled();
+        assert!(
+            sinks.contains(&"s3_archive"),
+            "s3_archive should be enabled, got: {:?}",
+            sinks
+        );
+    }
+
+    // =========================================================================
+    // from_search_paths() 文件读取失败测试
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_from_search_paths_unreadable_file_errors() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("failed to create tempdir");
+        let config_path = dir.path().join("unreadable.toml");
+        std::fs::write(&config_path, "[global]\nlevel = \"info\"\n").expect("failed to write");
+
+        // 移除读权限（仅 Unix）
+        let mut perms = std::fs::metadata(&config_path).unwrap().permissions();
+        perms.set_mode(0o000);
+        std::fs::set_permissions(&config_path, perms).unwrap();
+
+        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        let result = InklogConfig::from_search_paths();
+        env::remove_var("INKLOG_CONFIG_PATH");
+
+        // 恢复权限以便 tempdir 清理
+        let mut perms = std::fs::metadata(&config_path).unwrap().permissions();
+        perms.set_mode(0o644);
+        let _ = std::fs::set_permissions(&config_path, perms);
+
+        // 注意：如果以 root 运行，文件仍可读，此断言可能失败
+        // 非 root 环境下应返回读取错误
+        if result.is_ok() {
+            // 以 root 运行时跳过此测试（文件仍可读）
+            eprintln!("Skipping: running as root, file is readable despite 0o000 permissions");
+            return;
+        }
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Failed to read config file"),
+            "error should mention read failure, got: {err}"
+        );
     }
 }

@@ -76,13 +76,13 @@ pub trait Config: Send + Sync {
 }
 
 // ============================================================================
-// ConfersAdapter - confers 适配器实现
+// InklogConfigAdapter - InklogConfig 配置适配器实现
 // ============================================================================
 
 use crate::InklogConfig;
 use crate::InklogError;
 
-/// confers 适配器
+/// InklogConfig 配置适配器
 ///
 /// 将 `InklogConfig` 适配为 `Config` trait。
 /// 使用点分隔的键路径访问嵌套配置字段。
@@ -113,10 +113,10 @@ use crate::InklogError;
 /// # 示例
 ///
 /// ```ignore
-/// use inklog::infrastructure::config::{Config, ConfersAdapter};
+/// use inklog::infrastructure::config::{Config, InklogConfigAdapter};
 ///
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let config = ConfersAdapter::new()?;
+///     let config = InklogConfigAdapter::new()?;
 ///     
 ///     let level = config.get_string("global.level");
 ///     let port = config.get_int("http_server.port");
@@ -125,12 +125,12 @@ use crate::InklogError;
 ///     Ok(())
 /// }
 /// ```
-pub struct ConfersAdapter {
+pub struct InklogConfigAdapter {
     config: InklogConfig,
 }
 
-impl ConfersAdapter {
-    /// 创建新的 confers 适配器
+impl InklogConfigAdapter {
+    /// 创建新的配置适配器
     ///
     /// 从搜索路径加载配置文件，并应用环境变量覆盖。
     ///
@@ -167,10 +167,10 @@ impl ConfersAdapter {
     ///
     /// ```ignore
     /// use inklog::config::InklogConfig;
-    /// use inklog::infrastructure::config::ConfersAdapter;
+    /// use inklog::infrastructure::config::InklogConfigAdapter;
     ///
     /// let inklog_config = InklogConfig::default();
-    /// let adapter = ConfersAdapter::from_config(inklog_config);
+    /// let adapter = InklogConfigAdapter::from_config(inklog_config);
     /// ```
     pub fn from_config(config: InklogConfig) -> Self {
         Self { config }
@@ -191,25 +191,25 @@ impl ConfersAdapter {
     }
 }
 
-impl std::convert::AsRef<InklogConfig> for ConfersAdapter {
+impl std::convert::AsRef<InklogConfig> for InklogConfigAdapter {
     fn as_ref(&self) -> &InklogConfig {
         &self.config
     }
 }
 
-impl std::convert::AsMut<InklogConfig> for ConfersAdapter {
+impl std::convert::AsMut<InklogConfig> for InklogConfigAdapter {
     fn as_mut(&mut self) -> &mut InklogConfig {
         &mut self.config
     }
 }
 
-impl Default for ConfersAdapter {
+impl Default for InklogConfigAdapter {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| Self::from_config(InklogConfig::default()))
     }
 }
 
-impl Config for ConfersAdapter {
+impl Config for InklogConfigAdapter {
     fn get_string(&self, key: &str) -> Option<String> {
         match key {
             // Global config
@@ -545,13 +545,13 @@ mod tests {
     use crate::InklogConfig;
 
     // ============================================================================
-    // ConfersAdapter 测试
+    // InklogConfigAdapter 测试
     // ============================================================================
 
     #[test]
-    fn test_confers_adapter_from_default_config() {
+    fn test_inklog_config_adapter_from_default_config() {
         let config = InklogConfig::default();
-        let adapter = ConfersAdapter::from_config(config);
+        let adapter = InklogConfigAdapter::from_config(config);
 
         // 测试默认值
         assert_eq!(adapter.get_string("global.level"), Some("info".to_string()));
@@ -560,11 +560,11 @@ mod tests {
     }
 
     #[test]
-    fn test_confers_adapter_get_string() {
+    fn test_inklog_config_adapter_get_string() {
         let mut config = InklogConfig::default();
         config.global.level = "debug".to_string();
 
-        let adapter = ConfersAdapter::from_config(config);
+        let adapter = InklogConfigAdapter::from_config(config);
 
         assert_eq!(
             adapter.get_string("global.level"),
@@ -574,9 +574,9 @@ mod tests {
     }
 
     #[test]
-    fn test_confers_adapter_get_int() {
+    fn test_inklog_config_adapter_get_int() {
         let config = InklogConfig::default();
-        let adapter = ConfersAdapter::from_config(config);
+        let adapter = InklogConfigAdapter::from_config(config);
 
         // worker_threads 默认是 3
         assert_eq!(adapter.get_int("performance.worker_threads"), Some(3));
@@ -586,9 +586,9 @@ mod tests {
     }
 
     #[test]
-    fn test_confers_adapter_get_bool() {
+    fn test_inklog_config_adapter_get_bool() {
         let config = InklogConfig::default();
-        let adapter = ConfersAdapter::from_config(config);
+        let adapter = InklogConfigAdapter::from_config(config);
 
         // global.auto_fallback 默认是 true
         assert_eq!(adapter.get_bool("global.auto_fallback"), Some(true));
@@ -598,17 +598,19 @@ mod tests {
     }
 
     #[test]
-    fn test_confers_adapter_file_sink() {
-        let mut config = InklogConfig::default();
-        config.file_sink = Some(crate::FileSinkConfig {
-            enabled: true,
-            path: std::path::PathBuf::from("/var/log/app.log"),
-            max_size: "200MB".to_string(),
-            compress: true,
+    fn test_inklog_config_adapter_file_sink() {
+        let config = InklogConfig {
+            file_sink: Some(crate::FileSinkConfig {
+                enabled: true,
+                path: std::path::PathBuf::from("/var/log/app.log"),
+                max_size: "200MB".to_string(),
+                compress: true,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
 
-        let adapter = ConfersAdapter::from_config(config);
+        let adapter = InklogConfigAdapter::from_config(config);
 
         assert_eq!(adapter.get_bool("file_sink.enabled"), Some(true));
         assert_eq!(
@@ -623,16 +625,18 @@ mod tests {
     }
 
     #[test]
-    fn test_confers_adapter_http_server() {
-        let mut config = InklogConfig::default();
-        config.http_server = Some(crate::HttpServerConfig {
-            enabled: true,
-            host: "0.0.0.0".to_string(),
-            port: 9090,
+    fn test_inklog_config_adapter_http_server() {
+        let config = InklogConfig {
+            http_server: Some(crate::HttpServerConfig {
+                enabled: true,
+                host: "0.0.0.0".to_string(),
+                port: 9090,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
 
-        let adapter = ConfersAdapter::from_config(config);
+        let adapter = InklogConfigAdapter::from_config(config);
 
         assert_eq!(adapter.get_bool("http_server.enabled"), Some(true));
         assert_eq!(
@@ -753,5 +757,346 @@ mod tests {
         let final_value = config.get_int("counter");
         assert!(final_value.is_some());
         assert!((0..10).contains(&final_value.unwrap()));
+    }
+
+    // ============================================================================
+    // InklogConfigAdapter 补充测试 - 覆盖剩余 get_string 分支
+    // ============================================================================
+
+    #[test]
+    fn test_adapter_inner_and_inner_mut() {
+        let config = InklogConfig::default();
+        let mut adapter = InklogConfigAdapter::from_config(config);
+
+        // inner() 返回底层配置引用
+        assert_eq!(adapter.inner().global.level, "info");
+
+        // inner_mut() 返回可变引用
+        adapter.inner_mut().global.level = "debug".to_string();
+        assert_eq!(adapter.inner().global.level, "debug");
+    }
+
+    #[test]
+    fn test_adapter_as_ref_as_mut() {
+        let config = InklogConfig::default();
+        let mut adapter = InklogConfigAdapter::from_config(config);
+
+        // AsRef<InklogConfig>
+        let ref_config: &InklogConfig = AsRef::as_ref(&adapter);
+        assert_eq!(ref_config.global.level, "info");
+
+        // AsMut<InklogConfig>
+        let mut_config: &mut InklogConfig = AsMut::as_mut(&mut adapter);
+        mut_config.global.level = "warn".to_string();
+        assert_eq!(AsRef::<InklogConfig>::as_ref(&adapter).global.level, "warn");
+    }
+
+    #[test]
+    fn test_adapter_default() {
+        // Default impl 调用 new()，失败时回退到 from_config(default)
+        let adapter = InklogConfigAdapter::default();
+        // 应该至少能获取到默认配置值
+        assert_eq!(adapter.get_string("global.level"), Some("info".to_string()));
+    }
+
+    #[test]
+    fn test_adapter_global_fallback_fields() {
+        let config = InklogConfig::default();
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(
+            adapter.get_string("global.fallback_initial_delay_ms"),
+            Some("1000".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("global.fallback_max_delay_ms"),
+            Some("60000".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("global.fallback_max_retries"),
+            Some("10".to_string())
+        );
+
+        // get_int 应该能解析这些数值
+        assert_eq!(
+            adapter.get_int("global.fallback_initial_delay_ms"),
+            Some(1000)
+        );
+        assert_eq!(adapter.get_int("global.fallback_max_retries"), Some(10));
+    }
+
+    #[test]
+    fn test_adapter_console_sink_all_fields() {
+        let config = InklogConfig {
+            console_sink: Some(crate::ConsoleSinkConfig {
+                enabled: true,
+                colored: false,
+                stderr_levels: vec!["error".to_string(), "fatal".to_string()],
+                masking_enabled: true,
+            }),
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_bool("console_sink.enabled"), Some(true));
+        assert_eq!(adapter.get_bool("console_sink.colored"), Some(false));
+        assert_eq!(
+            adapter.get_string("console_sink.stderr_levels"),
+            Some("error,fatal".to_string())
+        );
+        assert_eq!(adapter.get_bool("console_sink.masking_enabled"), Some(true));
+    }
+
+    #[test]
+    fn test_adapter_console_sink_none_returns_none() {
+        let config = InklogConfig {
+            console_sink: None,
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_string("console_sink.enabled"), None);
+        assert_eq!(adapter.get_string("console_sink.colored"), None);
+        assert_eq!(adapter.get_string("console_sink.stderr_levels"), None);
+        assert_eq!(adapter.get_string("console_sink.masking_enabled"), None);
+    }
+
+    #[test]
+    fn test_adapter_file_sink_all_fields() {
+        let config = InklogConfig {
+            file_sink: Some(crate::FileSinkConfig {
+                enabled: true,
+                path: std::path::PathBuf::from("/var/log/app.log"),
+                max_size: "200MB".to_string(),
+                rotation_time: "hourly".to_string(),
+                keep_files: 7,
+                compress: false,
+                compression_level: 5,
+                encrypt: true,
+                encryption_key_env: Some("MY_KEY".to_string()),
+                retention_days: 14,
+                max_total_size: "2GB".to_string(),
+                cleanup_interval_minutes: 30,
+                batch_size: 200,
+                flush_interval_ms: 50,
+                masking_enabled: false,
+            }),
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(
+            adapter.get_string("file_sink.rotation_time"),
+            Some("hourly".to_string())
+        );
+        assert_eq!(adapter.get_int("file_sink.keep_files"), Some(7));
+        assert_eq!(adapter.get_int("file_sink.compression_level"), Some(5));
+        assert_eq!(adapter.get_bool("file_sink.encrypt"), Some(true));
+        assert_eq!(adapter.get_int("file_sink.retention_days"), Some(14));
+        assert_eq!(
+            adapter.get_string("file_sink.max_total_size"),
+            Some("2GB".to_string())
+        );
+        assert_eq!(
+            adapter.get_int("file_sink.cleanup_interval_minutes"),
+            Some(30)
+        );
+        assert_eq!(adapter.get_int("file_sink.batch_size"), Some(200));
+        assert_eq!(adapter.get_int("file_sink.flush_interval_ms"), Some(50));
+        assert_eq!(adapter.get_bool("file_sink.masking_enabled"), Some(false));
+        assert_eq!(
+            adapter.get_string("file_sink.encryption_key_env"),
+            Some("MY_KEY".to_string())
+        );
+    }
+
+    #[test]
+    fn test_adapter_file_sink_none_returns_none() {
+        let config = InklogConfig {
+            file_sink: None,
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_string("file_sink.enabled"), None);
+        assert_eq!(adapter.get_string("file_sink.encryption_key_env"), None);
+        assert_eq!(adapter.get_int("file_sink.batch_size"), None);
+    }
+
+    #[test]
+    fn test_adapter_database_sink_all_fields() {
+        let config = InklogConfig {
+            database_sink: Some(crate::DatabaseSinkConfig {
+                enabled: true,
+                url: "postgres://localhost/logs".to_string(),
+                pool_size: 20,
+                batch_size: 500,
+                flush_interval_ms: 250,
+                table_name: "app_logs".to_string(),
+                archive_format: "parquet".to_string(),
+                s3_bucket: Some("my-bucket".to_string()),
+                s3_region: Some("us-west-2".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_bool("database_sink.enabled"), Some(true));
+        assert_eq!(adapter.get_int("database_sink.pool_size"), Some(20));
+        assert_eq!(adapter.get_int("database_sink.batch_size"), Some(500));
+        assert_eq!(
+            adapter.get_int("database_sink.flush_interval_ms"),
+            Some(250)
+        );
+        assert_eq!(
+            adapter.get_string("database_sink.table_name"),
+            Some("app_logs".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("database_sink.archive_format"),
+            Some("parquet".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("database_sink.s3_bucket"),
+            Some("my-bucket".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("database_sink.s3_region"),
+            Some("us-west-2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_adapter_database_sink_none_returns_none() {
+        let config = InklogConfig {
+            database_sink: None,
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_string("database_sink.enabled"), None);
+        assert_eq!(adapter.get_string("database_sink.url"), None);
+        assert_eq!(adapter.get_string("database_sink.s3_bucket"), None);
+    }
+
+    #[test]
+    fn test_adapter_http_server_all_fields() {
+        let config = InklogConfig {
+            http_server: Some(crate::HttpServerConfig {
+                enabled: true,
+                host: "0.0.0.0".to_string(),
+                port: 8080,
+                metrics_path: "/custom_metrics".to_string(),
+                health_path: "/custom_health".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(
+            adapter.get_string("http_server.metrics_path"),
+            Some("/custom_metrics".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("http_server.health_path"),
+            Some("/custom_health".to_string())
+        );
+        assert_eq!(adapter.get_int("http_server.port"), Some(8080));
+    }
+
+    #[test]
+    fn test_adapter_http_server_none_returns_none() {
+        let config = InklogConfig {
+            http_server: None,
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_string("http_server.enabled"), None);
+        assert_eq!(adapter.get_string("http_server.metrics_path"), None);
+        assert_eq!(adapter.get_string("http_server.health_path"), None);
+    }
+
+    #[test]
+    fn test_adapter_get_float() {
+        let config = InklogConfig::default();
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        // fallback_initial_delay_ms = 1000, 可解析为 f64
+        assert_eq!(
+            adapter.get_float("global.fallback_initial_delay_ms"),
+            Some(1000.0)
+        );
+        // 不存在的键 → None
+        assert_eq!(adapter.get_float("nonexistent.key"), None);
+    }
+
+    #[test]
+    fn test_adapter_get_int_invalid_returns_none() {
+        let config = InklogConfig::default();
+        // global.level = "info"，无法解析为 i64
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_int("global.level"), None);
+    }
+
+    #[cfg(feature = "aws")]
+    #[test]
+    fn test_adapter_s3_archive_fields() {
+        use crate::integrations::storage::archive::S3ArchiveConfig;
+
+        let config = InklogConfig {
+            s3_archive: Some(S3ArchiveConfig {
+                enabled: true,
+                bucket: "test-bucket".to_string(),
+                region: "us-east-1".to_string(),
+                prefix: "logs/".to_string(),
+                archive_interval_days: 7,
+                archive_format: "parquet".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_bool("s3_archive.enabled"), Some(true));
+        assert_eq!(
+            adapter.get_string("s3_archive.bucket"),
+            Some("test-bucket".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("s3_archive.region"),
+            Some("us-east-1".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("s3_archive.prefix"),
+            Some("logs/".to_string())
+        );
+        assert_eq!(adapter.get_int("s3_archive.archive_interval_days"), Some(7));
+        assert_eq!(
+            adapter.get_string("s3_archive.archive_format"),
+            Some("parquet".to_string())
+        );
+    }
+
+    #[cfg(feature = "aws")]
+    #[test]
+    fn test_adapter_s3_archive_none_returns_none() {
+        let config = InklogConfig::default();
+        let adapter = InklogConfigAdapter::from_config(config);
+
+        assert_eq!(adapter.get_string("s3_archive.enabled"), None);
+        assert_eq!(adapter.get_string("s3_archive.bucket"), None);
     }
 }
