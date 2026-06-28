@@ -845,4 +845,112 @@ mod tests {
             );
         }
     }
+
+    // === LogVisitor record_f64 测试 ===
+    // 通过 tracing 事件携带 f64 字段，验证 LogRecord::from_event 正确记录 f64 值
+
+    #[test]
+    fn test_log_record_from_event_with_f64_field() {
+        use std::sync::{Arc, Mutex};
+        use tracing::subscriber::with_default;
+        use tracing_subscriber::layer::Context;
+        use tracing_subscriber::prelude::*;
+        use tracing_subscriber::Layer;
+
+        // 自定义捕获层：记录 on_event 产生的 LogRecord
+        struct CaptureLayer(Arc<Mutex<Option<LogRecord>>>);
+
+        impl<S: tracing::Subscriber> Layer<S> for CaptureLayer {
+            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+                let record = LogRecord::from_event(event);
+                *self.0.lock().unwrap() = Some(record);
+            }
+        }
+
+        let captured: Arc<Mutex<Option<LogRecord>>> = Arc::new(Mutex::new(None));
+        let layer = CaptureLayer(captured.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        // 发送带有 f64 字段的 tracing 事件
+        with_default(registry, || {
+            tracing::info!(
+                target: "test::f64",
+                message = "f64 field test",
+                ratio = std::f64::consts::PI,
+                count = 42i64,
+            );
+        });
+
+        let record = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("should capture record");
+        assert_eq!(record.message, "f64 field test");
+        assert_eq!(record.target, "test::f64");
+
+        // 验证 f64 字段被正确记录为 Number
+        let ratio = record
+            .fields
+            .get("ratio")
+            .expect("ratio field should exist");
+        assert_eq!(ratio.as_f64(), Some(std::f64::consts::PI));
+
+        // 验证 i64 字段也被正确记录
+        let count = record
+            .fields
+            .get("count")
+            .expect("count field should exist");
+        assert_eq!(count.as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_log_record_from_event_with_multiple_f64_fields() {
+        use std::sync::{Arc, Mutex};
+        use tracing::subscriber::with_default;
+        use tracing_subscriber::layer::Context;
+        use tracing_subscriber::prelude::*;
+        use tracing_subscriber::Layer;
+
+        struct CaptureLayer(Arc<Mutex<Option<LogRecord>>>);
+
+        impl<S: tracing::Subscriber> Layer<S> for CaptureLayer {
+            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+                let record = LogRecord::from_event(event);
+                *self.0.lock().unwrap() = Some(record);
+            }
+        }
+
+        let captured: Arc<Mutex<Option<LogRecord>>> = Arc::new(Mutex::new(None));
+        let layer = CaptureLayer(captured.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::warn!(
+                target: "test::multi_f64",
+                message = "multiple f64 fields",
+                temperature = 36.5f64,
+                humidity = 0.75f64,
+            );
+        });
+
+        let record = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("should capture record");
+        assert_eq!(record.level, "WARN");
+
+        let temp = record
+            .fields
+            .get("temperature")
+            .expect("temperature should exist");
+        assert_eq!(temp.as_f64(), Some(36.5));
+
+        let humidity = record
+            .fields
+            .get("humidity")
+            .expect("humidity should exist");
+        assert_eq!(humidity.as_f64(), Some(0.75));
+    }
 }

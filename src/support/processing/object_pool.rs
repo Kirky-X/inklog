@@ -104,7 +104,7 @@ pub struct PoolMetrics {
 pub struct ObjectPool<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
-    V: oxcache::Cacheable + Send + Sync + Clone + 'static,
+    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
 {
     /// The underlying oxcache async cache
     cache: Arc<Cache<K, V>>,
@@ -117,7 +117,7 @@ where
 impl<K, V> ObjectPool<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
-    V: oxcache::Cacheable + Send + Sync + Clone + 'static,
+    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
 {
     /// Create a new object pool with default configuration (capacity: 1024)
     pub fn new() -> Self {
@@ -323,7 +323,7 @@ where
 impl<K, V> Default for ObjectPool<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
-    V: oxcache::Cacheable + Send + Sync + Clone + 'static,
+    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
         Self::new()
@@ -335,7 +335,7 @@ where
 pub struct ObjectPoolBuilder<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
-    V: oxcache::Cacheable + Send + Sync + Clone + 'static,
+    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
 {
     /// Maximum capacity of the pool
     capacity: usize,
@@ -349,7 +349,7 @@ where
 impl<K, V> ObjectPoolBuilder<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
-    V: oxcache::Cacheable + Send + Sync + Clone + 'static,
+    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
 {
     /// Create a new builder with default configuration
     pub fn new() -> Self {
@@ -389,7 +389,7 @@ where
 impl<K, V> Default for ObjectPoolBuilder<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
-    V: oxcache::Cacheable + Send + Sync + Clone + 'static,
+    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
         Self::new()
@@ -1134,5 +1134,38 @@ mod tests {
         let record2 = pool.get();
         // Message may be reset or retained depending on pool behavior
         assert_eq!(record2.level, "INFO");
+    }
+
+    // ============================================================================
+    // 并发测试
+    // ============================================================================
+
+    #[test]
+    fn test_thread_local_pool_concurrent_isolation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        // ThreadLocalLogRecordPool 每个线程有独立 pool，不依赖 SHARED_RUNTIME
+        let pool = Arc::new(ThreadLocalLogRecordPool::new(10));
+        let total_gets = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let pool_clone = Arc::clone(&pool);
+            let counter_clone = Arc::clone(&total_gets);
+            handles.push(thread::spawn(move || {
+                for _ in 0..5 {
+                    let _record = pool_clone.get();
+                    counter_clone.fetch_add(1, Ordering::Relaxed);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().expect("thread should not panic");
+        }
+
+        // 4 线程 × 5 次 get = 20 次
+        assert_eq!(total_gets.load(Ordering::Relaxed), 20);
     }
 }

@@ -127,4 +127,64 @@ mod tests {
         assert!(LogLevel::Info <= LogLevel::Warn);
         assert!(LogLevel::Trace < LogLevel::Fatal);
     }
+
+    #[test]
+    fn test_as_str_all_variants() {
+        assert_eq!(LogLevel::Trace.as_str(), "TRACE");
+        assert_eq!(LogLevel::Debug.as_str(), "DEBUG");
+        assert_eq!(LogLevel::Info.as_str(), "INFO");
+        assert_eq!(LogLevel::Warn.as_str(), "WARN");
+        assert_eq!(LogLevel::Error.as_str(), "ERROR");
+        assert_eq!(LogLevel::Fatal.as_str(), "FATAL");
+    }
+
+    #[test]
+    fn test_as_short_str_all_variants() {
+        assert_eq!(LogLevel::Trace.as_short_str(), "TRC");
+        assert_eq!(LogLevel::Debug.as_short_str(), "DBG");
+        assert_eq!(LogLevel::Info.as_short_str(), "INF");
+        assert_eq!(LogLevel::Warn.as_short_str(), "WRN");
+        assert_eq!(LogLevel::Error.as_short_str(), "ERR");
+        assert_eq!(LogLevel::Fatal.as_short_str(), "FTL");
+    }
+
+    #[test]
+    fn test_display_matches_as_str() {
+        for level in [
+            LogLevel::Trace,
+            LogLevel::Debug,
+            LogLevel::Info,
+            LogLevel::Warn,
+            LogLevel::Error,
+            LogLevel::Fatal,
+        ] {
+            assert_eq!(format!("{}", level), level.as_str());
+        }
+    }
+
+    #[test]
+    fn test_from_str_trait_valid() {
+        let level: LogLevel = "debug".parse().expect("valid level should parse");
+        assert_eq!(level, LogLevel::Debug);
+
+        let level: LogLevel = "WARNING".parse().expect("WARNING should parse to Warn");
+        assert_eq!(level, LogLevel::Warn);
+
+        let level: LogLevel = "CRITICAL".parse().expect("CRITICAL should parse to Fatal");
+        assert_eq!(level, LogLevel::Fatal);
+    }
+
+    #[test]
+    fn test_from_str_trait_invalid_returns_error() {
+        let result: Result<LogLevel, _> = "invalid_level".parse();
+        let err = result.expect_err("invalid level should error");
+        assert!(format!("{}", err).contains("Unknown log level"));
+        assert!(format!("{}", err).contains("invalid_level"));
+    }
+
+    #[test]
+    fn test_from_str_trait_empty_string() {
+        let result: Result<LogLevel, _> = "".parse();
+        assert!(result.is_err());
+    }
 }

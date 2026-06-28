@@ -8,10 +8,10 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-/// Generate configuration using confers library
+/// Generate configuration template
 ///
-/// This function uses confers::ConfersCli::generate() to generate configuration templates
-/// with four levels: minimal, full, database, and file
+/// Generates configuration templates with four levels: minimal, full, database, and file.
+/// Templates are hardcoded TOML strings.
 pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
     // Determine output path
     let output_file = if output_path.is_dir() {
@@ -20,56 +20,27 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
         output_path.to_path_buf()
     };
 
-    let output_filename = output_file.to_str().unwrap_or("inklog_config.toml");
+    let config_content = match config_type {
+        "minimal" => generate_minimal_config(),
+        "full" => generate_full_config(),
+        "database" => generate_database_config(),
+        "file" => generate_file_config(),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unknown config type: {}. Use: minimal, full, database, file",
+                config_type
+            ))
+        }
+    };
 
-    #[allow(unused_variables)]
-    // Use confers to generate the template
-    #[cfg(feature = "confers")]
-    {
-        // Use custom templates for inklog-specific output
-        let config_content = match config_type {
-            "minimal" => generate_minimal_config(),
-            "full" => generate_full_config(),
-            "database" => generate_database_config(),
-            "file" => generate_file_config(),
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unknown config type: {}. Use: minimal, full, documentation, database, file",
-                    config_type
-                ))
-            }
-        };
+    let mut file = File::create(&output_file)
+        .with_context(|| format!("Failed to create config file: {}", output_file.display()))?;
 
-        let mut file = File::create(&output_file)
-            .with_context(|| format!("Failed to create config file: {}", output_file.display()))?;
+    file.write_all(config_content.as_bytes())
+        .with_context(|| "Failed to write config content")?;
 
-        file.write_all(config_content.as_bytes())
-            .with_context(|| "Failed to write config content")?;
-
-        println!("Generated config file: {}", output_filename);
-        Ok(())
-    }
-
-    // Fallback to hardcoded templates when confers is not available
-    #[cfg(not(feature = "confers"))]
-    {
-        let config_content = match config_type {
-            "minimal" => generate_minimal_config(),
-            "full" => generate_full_config(),
-            "database" => generate_database_config(),
-            "file" => generate_file_config(),
-            _ => return Err(anyhow::anyhow!("Unknown config type: {}", config_type)),
-        };
-
-        let mut file = File::create(&output_file)
-            .with_context(|| format!("Failed to create config file: {}", output_file.display()))?;
-
-        file.write_all(config_content.as_bytes())
-            .with_context(|| "Failed to write config content")?;
-
-        println!("Generated config file: {}", output_file.display());
-        Ok(())
-    }
+    println!("Generated config file: {}", output_file.display());
+    Ok(())
 }
 
 /// Generate minimal configuration template

@@ -280,4 +280,142 @@ mod tests {
         let result = sanitizer.sanitize("Hello\x00World");
         assert!(result.contains("\\x00"));
     }
+
+    #[test]
+    fn test_default_log_sanitizer() {
+        let sanitizer = LogSanitizer::default();
+        let result = sanitizer.sanitize("test\nmessage");
+        assert!(result.contains("\\n"));
+        assert!(!result.contains('\n'));
+    }
+
+    #[test]
+    fn test_strict_escape_mode() {
+        let config = SanitizerConfig {
+            mode: EscapeMode::Strict,
+            custom_replacements: Vec::new(),
+            ..Default::default()
+        };
+        let sanitizer = LogSanitizer::with_config(config);
+
+        let result = sanitizer.sanitize("Hello\nWorld");
+        assert!(result.contains("\\u000a"));
+        assert!(!result.contains('\n'));
+    }
+
+    #[test]
+    fn test_escape_strict_with_backslash_and_quote() {
+        let config = SanitizerConfig {
+            mode: EscapeMode::Strict,
+            custom_replacements: Vec::new(),
+            ..Default::default()
+        };
+        let sanitizer = LogSanitizer::with_config(config);
+
+        let result = sanitizer.sanitize("path\\to\"file");
+        assert!(result.contains("\\u005c"));
+        assert!(result.contains("\\u0022"));
+        // The raw backslash and quote should be replaced by escape sequences
+        // Note: escape sequences themselves contain backslashes, so we verify
+        // the escape sequences are present rather than checking for absence of '\'
+        assert!(!result.contains("\""));
+    }
+
+    #[test]
+    fn test_escape_strict_preserves_printable() {
+        let config = SanitizerConfig {
+            mode: EscapeMode::Strict,
+            custom_replacements: Vec::new(),
+            ..Default::default()
+        };
+        let sanitizer = LogSanitizer::with_config(config);
+
+        let result = sanitizer.sanitize("Hello World 123");
+        assert_eq!(result, "Hello World 123");
+    }
+
+    #[test]
+    fn test_escape_minimal_with_newline_tab_carriage_return() {
+        let config = SanitizerConfig {
+            mode: EscapeMode::Minimal,
+            custom_replacements: Vec::new(),
+            ..Default::default()
+        };
+        let sanitizer = LogSanitizer::with_config(config);
+
+        let result = sanitizer.sanitize("line1\nline2\r\ttabbed");
+        assert_eq!(result, "line1\\nline2\\r\\ttabbed");
+        assert!(!result.contains('\n'));
+        assert!(!result.contains('\r'));
+        assert!(!result.contains('\t'));
+    }
+
+    #[test]
+    fn test_escape_json_all_special_chars() {
+        let config = SanitizerConfig {
+            mode: EscapeMode::JsonSafe,
+            custom_replacements: Vec::new(),
+            ..Default::default()
+        };
+        let sanitizer = LogSanitizer::with_config(config);
+
+        let input = "quote\"backslash\\newline\ncarriage\rtab\t";
+        let result = sanitizer.sanitize(input);
+        assert!(result.contains("\\\""));
+        assert!(result.contains("\\\\"));
+        assert!(result.contains("\\n"));
+        assert!(result.contains("\\r"));
+        assert!(result.contains("\\t"));
+        assert!(!result.contains('\n'));
+        assert!(!result.contains('\r'));
+        assert!(!result.contains('\t'));
+    }
+
+    #[test]
+    fn test_escape_json_control_character() {
+        let config = SanitizerConfig {
+            mode: EscapeMode::JsonSafe,
+            custom_replacements: Vec::new(),
+            ..Default::default()
+        };
+        let sanitizer = LogSanitizer::with_config(config);
+
+        let result = sanitizer.sanitize("null\x00byte");
+        assert!(result.contains("\\u0000"));
+    }
+
+    #[test]
+    fn test_add_pattern() {
+        let mut sanitizer = LogSanitizer::new();
+        let pattern = Regex::new(r"SECRET-\d+").expect("valid regex");
+        sanitizer.add_pattern(pattern, "[SECRET]".to_string());
+
+        let result = sanitizer.sanitize("found SECRET-12345 here");
+        assert!(result.contains("[SECRET]"));
+        assert!(!result.contains("SECRET-12345"));
+    }
+
+    #[test]
+    fn test_add_replacement() {
+        let mut sanitizer = LogSanitizer::new();
+        sanitizer.add_replacement("foo".to_string(), "bar".to_string());
+
+        let result = sanitizer.sanitize("hello foo world");
+        assert!(result.contains("bar"));
+        assert!(!result.contains("foo"));
+    }
+
+    #[test]
+    fn test_add_pattern_and_replacement_combined() {
+        let mut sanitizer = LogSanitizer::new();
+        let pattern = Regex::new(r"\bPHONE-\d+\b").expect("valid regex");
+        sanitizer.add_pattern(pattern, "[PHONE]".to_string());
+        sanitizer.add_replacement("internal".to_string(), "external".to_string());
+
+        let result = sanitizer.sanitize("call PHONE-555 internal line");
+        assert!(result.contains("[PHONE]"));
+        assert!(result.contains("external"));
+        assert!(!result.contains("PHONE-555"));
+        assert!(!result.contains("internal"));
+    }
 }

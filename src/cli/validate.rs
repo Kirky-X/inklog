@@ -17,28 +17,7 @@ pub fn validate_config(config_path: &PathBuf) -> Result<()> {
         ));
     }
 
-    #[cfg(feature = "confers")]
-    {
-        // Use confers for validation when feature is enabled
-        validate_with_confers(config_path)
-    }
-
-    #[cfg(not(feature = "confers"))]
-    {
-        // Fallback to manual TOML parsing
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
-
-        validate_toml_content(&content, config_path)?;
-
-        println!("✓ Configuration file is valid");
-        Ok(())
-    }
-}
-
-#[cfg(feature = "confers")]
-fn validate_with_confers(config_path: &PathBuf) -> Result<()> {
-    // Use TOML parsing for validation
+    // Manual TOML parsing and validation
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
 
@@ -559,4 +538,302 @@ pub fn check_prerequisites() {
     }
 
     println!("\nPrerequisites check complete.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    fn write_config(content: &str) -> NamedTempFile {
+        let file = NamedTempFile::new().expect("failed to create temp file");
+        std::fs::write(file.path(), content).expect("failed to write config");
+        file
+    }
+
+    #[test]
+    fn test_validate_config_nonexistent_file() {
+        let path = PathBuf::from("/nonexistent/path/config.toml");
+        let result = validate_config(&path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_validate_config_valid_minimal() {
+        let content = r#"
+[global]
+level = "info"
+format = "{timestamp} [{level}] {message}"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_console_section() {
+        // Covers get_table for "console" section
+        let content = r#"
+[console]
+enabled = true
+colored = true
+stderr_levels = ["error", "warn"]
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_console_sink_naming() {
+        // Covers get_table for "console_sink" naming convention
+        let content = r#"
+[console_sink]
+enabled = true
+colored = false
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_file_section() {
+        // Covers get_table for "file" section
+        let content = r#"
+[file]
+enabled = true
+path = "logs/app.log"
+max_size = "100MB"
+keep_files = 5
+retention_days = 30
+compress = true
+encrypt = false
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_file_sink_naming() {
+        // Covers get_table for "file_sink" naming convention
+        let content = r#"
+[file_sink]
+enabled = true
+path = "logs/app.log"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_database_section() {
+        // Covers get_table for "database" section
+        let content = r#"
+[database]
+enabled = true
+driver = "sqlite"
+url = "sqlite://test.db"
+pool_size = 10
+batch_size = 100
+table_name = "logs"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_db_config_naming() {
+        // Covers get_table for "db_config" naming convention
+        let content = r#"
+[db_config]
+enabled = true
+driver = "postgres"
+url = "postgres://localhost/db"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_http_section() {
+        // Covers get_table for "http" section
+        let content = r#"
+[http]
+enabled = true
+port = 8080
+host = "0.0.0.0"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_http_server_naming() {
+        // Covers get_table for "http_server" naming convention
+        let content = r#"
+[http_server]
+enabled = true
+port = 9090
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_s3_section() {
+        // Covers get_table for "s3" section
+        let content = r#"
+[s3]
+enabled = true
+bucket = "my-bucket"
+region = "us-east-1"
+archive_interval_days = 7
+max_file_size_mb = 100
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_s3_archive_naming() {
+        // Covers get_table for "s3_archive" naming convention
+        let content = r#"
+[s3_archive]
+enabled = true
+bucket = "my-bucket"
+region = "us-west-2"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_performance_section() {
+        let content = r#"
+[performance]
+channel_capacity = 10000
+worker_threads = 4
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_log_level() {
+        let content = r#"
+[global]
+level = "invalid"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid log level"));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_database_driver() {
+        let content = r#"
+[database]
+driver = "invalid_driver"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid database driver"));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_database_url() {
+        let content = r#"
+[database]
+url = "invalid://url"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid database URL"));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_http_port() {
+        let content = r#"
+[http]
+port = 99999
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("port"));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_toml() {
+        let content = "not valid toml {{{";
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_config_file_sink_encrypt_without_key_env() {
+        let content = r#"
+[file]
+encrypt = true
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("encryption_key_env"));
+    }
+
+    #[test]
+    fn test_validate_config_file_sink_encrypt_with_empty_key_env() {
+        let content = r#"
+[file]
+encrypt = true
+encryption_key_env = ""
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("encryption_key_env is empty"));
+    }
+
+    #[test]
+    fn test_validate_config_file_sink_encrypt_with_valid_key_env() {
+        let content = r#"
+[file]
+encrypt = true
+encryption_key_env = "LOG_ENCRYPTION_KEY"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
 }

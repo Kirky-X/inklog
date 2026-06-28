@@ -78,7 +78,7 @@
 //! ```rust,ignore
 //! use std::sync::Arc;
 //! use inklog::{LoggerManager, LoggerDependencies, InklogContainer};
-//! use inklog::integrations::infra::{OxCacheAdapter, ConfersAdapter};
+//! use inklog::infrastructure::{OxCacheAdapter, InklogConfigAdapter};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -89,13 +89,13 @@
 //!     // 方式 2: 使用 Builder 模式注入依赖
 //!     let logger = LoggerManager::builder()
 //!         .cache(Arc::new(OxCacheAdapter::new()?))
-//!         .config(Arc::new(ConfersAdapter::new()?))
+//!         .config(Arc::new(InklogConfigAdapter::new()?))
 //!         .build().await?;
 //!     
 //!     // 方式 3: 使用 with_dependencies
 //!     let deps = LoggerDependencies {
 //!         cache: Some(Arc::new(OxCacheAdapter::new()?)),
-//!         config: Some(Arc::new(ConfersAdapter::new()?)),
+//!         config: Some(Arc::new(InklogConfigAdapter::new()?)),
 //!         ..Default::default()
 //!     };
 //!     let logger = LoggerManager::with_dependencies(deps).await?;
@@ -160,10 +160,6 @@ pub use domain::types::log_record::LogRecord;
 pub use domain::core::{
     InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,
 };
-
-// RecoveryLoggerManager 是 LoggerManager 的别名，用于恢复相关功能
-// @deprecated 使用 LoggerManager 替代
-pub use domain::core::LoggerManager as RecoveryLoggerManager;
 
 pub use log_level::LogLevel;
 pub use support::io::{LogAdapter, LogLogger};

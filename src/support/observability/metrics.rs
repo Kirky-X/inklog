@@ -1478,6 +1478,130 @@ mod sink_health_monitor_tests {
             FallbackState::Active
         );
     }
+
+    #[test]
+    fn test_default_sink_health_monitor() {
+        let monitor = SinkHealthMonitor::default();
+        assert_eq!(monitor.get_fallback_state("any"), FallbackState::Active);
+    }
+
+    #[test]
+    fn test_recovery_from_active_state() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        let action = monitor.check_and_fallback("database", true, None);
+        assert!(matches!(action, FallbackAction::None));
+    }
+
+    #[test]
+    fn test_recovery_wait_from_recovering_state() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..3 {
+            let _ = monitor.check_and_fallback("database", false, Some("Error"));
+        }
+        let action = monitor.check_and_fallback("database", true, None);
+        assert!(matches!(action, FallbackAction::AttemptRecovery { .. }));
+        let action = monitor.check_and_fallback("database", true, None);
+        assert!(matches!(action, FallbackAction::Wait { .. }));
+    }
+
+    #[test]
+    fn test_determine_fallback_target_file_space() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..3 {
+            let _ = monitor.check_and_fallback("file", false, Some("No space left"));
+        }
+        let state = monitor.get_fallback_state("file");
+        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "console"));
+    }
+
+    #[test]
+    fn test_determine_fallback_target_file_full() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..3 {
+            let _ = monitor.check_and_fallback("file", false, Some("storage full"));
+        }
+        let state = monitor.get_fallback_state("file");
+        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "console"));
+    }
+
+    #[test]
+    fn test_determine_fallback_target_file_other_error() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..3 {
+            let _ = monitor.check_and_fallback("file", false, Some("permission denied"));
+        }
+        let state = monitor.get_fallback_state("file");
+        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "console"));
+    }
+
+    #[test]
+    fn test_determine_fallback_target_s3() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..3 {
+            let _ = monitor.check_and_fallback("s3", false, Some("Connection refused"));
+        }
+        let state = monitor.get_fallback_state("s3");
+        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "local"));
+    }
+
+    #[test]
+    fn test_determine_fallback_target_s3_archive() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..3 {
+            let _ = monitor.check_and_fallback("s3_archive", false, Some("Timeout"));
+        }
+        let state = monitor.get_fallback_state("s3_archive");
+        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "local"));
+    }
+
+    #[test]
+    fn test_determine_fallback_target_unknown_sink() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..3 {
+            let _ = monitor.check_and_fallback("custom_sink", false, Some("Unknown failure"));
+        }
+        let state = monitor.get_fallback_state("custom_sink");
+        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "console"));
+    }
+
+    #[test]
+    fn test_fallback_action_sink_name_all_variants() {
+        let fallback = FallbackAction::Fallback {
+            sink_name: "db".to_string(),
+            target: "file".to_string(),
+            reason: "err".to_string(),
+        };
+        assert_eq!(fallback.sink_name(), Some("db"));
+
+        let recovery = FallbackAction::AttemptRecovery {
+            sink_name: "db".to_string(),
+            attempt: 1,
+            delay_ms: 100,
+        };
+        assert_eq!(recovery.sink_name(), Some("db"));
+
+        let wait = FallbackAction::Wait {
+            sink_name: "db".to_string(),
+            remaining_ms: 100,
+        };
+        assert_eq!(wait.sink_name(), Some("db"));
+
+        let queue = FallbackAction::LocalQueue {
+            sink_name: "s3".to_string(),
+            reason: "err".to_string(),
+        };
+        assert_eq!(queue.sink_name(), Some("s3"));
+    }
+
+    #[test]
+    fn test_log_event_truncation() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        for _ in 0..(102 * 3) {
+            let _ = monitor.check_and_fallback("database", false, Some("Error"));
+        }
+        let events = monitor.get_fallback_events(200);
+        assert_eq!(events.len(), 100);
+    }
 }
 
 #[cfg(test)]
@@ -1791,5 +1915,126 @@ mod metrics_tests {
         };
         assert_eq!(event.sink_name, "database");
         assert!(matches!(event.from_state, FallbackState::Active));
+    }
+
+    #[test]
+    fn test_sink_health_default() {
+        let health = SinkHealth::default();
+        assert!(matches!(health.status, SinkStatus::NotStarted));
+        assert!(health.last_error.is_none());
+        assert_eq!(health.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn test_lock_contention_metrics() {
+        let metrics = Metrics::new();
+        assert_eq!(metrics.lock_contention(), 0);
+        metrics.inc_lock_contention();
+        metrics.inc_lock_contention();
+        assert_eq!(metrics.lock_contention(), 2);
+    }
+
+    #[test]
+    fn test_update_sink_health_unhealthy_no_error() {
+        let metrics = Metrics::new();
+        metrics.update_sink_health("file", false, None);
+        let health = metrics.sink_health();
+        let h = health.get("file").expect("sink health should exist");
+        assert!(matches!(&h.status, SinkStatus::Unhealthy { error } if error == "Unknown error"));
+        assert_eq!(h.consecutive_failures, 1);
+    }
+
+    #[test]
+    fn test_update_sink_health_consecutive_failures() {
+        let metrics = Metrics::new();
+        metrics.update_sink_health("file", false, Some("err1".to_string()));
+        let health = metrics.sink_health();
+        let h = health.get("file").expect("should exist");
+        assert_eq!(h.consecutive_failures, 1);
+        metrics.update_sink_health("file", false, Some("err2".to_string()));
+        let health = metrics.sink_health();
+        let h = health.get("file").expect("should exist");
+        assert_eq!(h.consecutive_failures, 2);
+        metrics.update_sink_health("file", true, None);
+        let health = metrics.sink_health();
+        let h = health.get("file").expect("should exist");
+        assert_eq!(h.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn test_sink_started() {
+        let metrics = Metrics::new();
+        metrics.sink_started("console");
+        let health = metrics.sink_health();
+        let h = health.get("console").expect("sink should be started");
+        assert!(matches!(h.status, SinkStatus::Healthy));
+        assert_eq!(h.consecutive_failures, 0);
+        assert!(h.last_error.is_none());
+    }
+
+    #[test]
+    fn test_sink_degraded() {
+        let metrics = Metrics::new();
+        metrics.sink_degraded("file", "slow disk".to_string());
+        let health = metrics.sink_health();
+        let h = health.get("file").expect("sink should exist");
+        assert!(matches!(&h.status, SinkStatus::Degraded { reason } if reason == "slow disk"));
+        assert_eq!(h.last_error, Some("slow disk".to_string()));
+    }
+
+    #[test]
+    fn test_get_status_all_healthy() {
+        let metrics = Metrics::new();
+        metrics.sink_started("console");
+        metrics.sink_started("file");
+        let status = metrics.get_status(0, 100);
+        assert!(matches!(status.overall_status, SinkStatus::Healthy));
+    }
+
+    #[test]
+    fn test_get_status_with_unhealthy() {
+        let metrics = Metrics::new();
+        metrics.sink_started("console");
+        metrics.update_sink_health("file", false, Some("disk error".to_string()));
+        let status = metrics.get_status(0, 100);
+        assert!(
+            matches!(status.overall_status, SinkStatus::Unhealthy { error } if error.contains("disk error"))
+        );
+    }
+
+    #[test]
+    fn test_get_status_with_degraded() {
+        let metrics = Metrics::new();
+        metrics.sink_started("console");
+        metrics.sink_degraded("file", "slow disk".to_string());
+        let status = metrics.get_status(0, 100);
+        assert!(
+            matches!(status.overall_status, SinkStatus::Degraded { reason } if reason.contains("slow disk"))
+        );
+    }
+
+    #[test]
+    fn test_export_prometheus_with_uptime() {
+        let metrics = Metrics::new();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let output = metrics.export_prometheus();
+        assert!(output.contains("inklog_uptime_seconds"));
+    }
+
+    #[test]
+    fn test_export_prometheus_with_sink_health() {
+        let metrics = Metrics::new();
+        metrics.sink_started("console");
+        metrics.update_sink_health("file", false, Some("err".to_string()));
+        let output = metrics.export_prometheus();
+        assert!(output.contains("inklog_sink_healthy{sink=\"console\"} 1"));
+        assert!(output.contains("inklog_sink_healthy{sink=\"file\"} 0"));
+    }
+
+    #[test]
+    fn test_histogram_percentile_last_bucket() {
+        let histogram = Histogram::new(vec![100, 500, 1000]);
+        histogram.record(2000);
+        assert_eq!(histogram.p99(), 1000);
     }
 }

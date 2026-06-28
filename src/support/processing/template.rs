@@ -430,6 +430,27 @@ mod tests {
     }
 
     #[test]
+    fn test_literal_closing_brace_outside_placeholder() {
+        // Test the branch where a '}' is encountered outside a placeholder (line 204)
+        let template = LogTemplate::new("test} {message}");
+        let record = create_test_record();
+        let output = template.render(&record);
+        assert!(output.contains("test}"));
+        assert!(output.contains("Test message"));
+    }
+
+    #[test]
+    fn test_multiple_literal_closing_braces() {
+        // Multiple literal } outside placeholders
+        let template = LogTemplate::new("} {message} } end");
+        let record = create_test_record();
+        let output = template.render(&record);
+        assert!(output.starts_with("}"));
+        assert!(output.contains("Test message"));
+        assert!(output.contains("} end"));
+    }
+
+    #[test]
     fn test_multiple_timestamps() {
         let template = LogTemplate::new("{timestamp} - {timestamp}");
         let record = create_test_record();

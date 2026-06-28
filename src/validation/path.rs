@@ -126,7 +126,7 @@ impl PathValidator {
         }
 
         if !self.config.allow_symlinks {
-            if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(metadata) = std::fs::symlink_metadata(path) {
                 if metadata.file_type().is_symlink() {
                     return ValidationResult::invalid("Symlinks are not allowed");
                 }
@@ -250,5 +250,240 @@ mod tests {
 
         assert!(validator.validate(Path::new("logs/app.log")).valid);
         assert!(validator.validate(Path::new("/var/log/app.log")).valid);
+    }
+
+    #[test]
+    fn test_validation_result_valid() {
+        let result = ValidationResult::valid();
+        assert!(result.valid);
+        assert!(result.error.is_none());
+        assert!(result.sanitized_path.is_none());
+    }
+
+    #[test]
+    fn test_validation_result_invalid() {
+        let result = ValidationResult::invalid("test error message");
+        assert!(!result.valid);
+        assert_eq!(result.error.as_ref().unwrap(), "test error message");
+        assert!(result.sanitized_path.is_none());
+    }
+
+    #[test]
+    fn test_validation_result_sanitized() {
+        let path = PathBuf::from("/safe/path/file.log");
+        let result = ValidationResult::sanitized(path.clone());
+        assert!(result.valid);
+        assert!(result.error.is_none());
+        assert_eq!(result.sanitized_path.as_ref().unwrap(), &path);
+    }
+
+    #[test]
+    fn test_path_validator_default() {
+        let validator = PathValidator::default();
+        let result = validator.validate(Path::new("safe/path.log"));
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_path_validator_with_config() {
+        let config = PathValidatorConfig {
+            allow_absolute: false,
+            base_dir: None,
+            allow_symlinks: true,
+            deny_components: vec![],
+        };
+        let validator = PathValidator::with_config(config);
+        // With empty deny_components, paths that would normally be denied are now valid
+        assert!(validator.validate(Path::new("etc/passwd")).valid);
+    }
+
+    #[test]
+    fn test_validate_and_sanitize_valid() {
+        let validator = PathValidator::new();
+        let result = validator.validate_and_sanitize(Path::new("logs/app.log"));
+        assert!(result.valid);
+        assert!(result.sanitized_path.is_some());
+        let sanitized = result.sanitized_path.unwrap();
+        assert!(sanitized.to_string_lossy().contains("app.log"));
+    }
+
+    #[test]
+    fn test_validate_and_sanitize_invalid() {
+        let validator = PathValidator::new();
+        let result = validator.validate_and_sanitize(Path::new("../etc/passwd"));
+        assert!(!result.valid);
+        assert!(result.error.is_some());
+        assert!(result.sanitized_path.is_none());
+    }
+
+    #[test]
+    fn test_validate_and_sanitize_removes_parent_dir() {
+        let validator = PathValidator::new();
+        // This path has no ".." so it passes validation, then sanitize removes parent dirs
+        let result = validator.validate_and_sanitize(Path::new("foo/../bar"));
+        // Wait - "foo/../bar" contains ".." so it will be rejected by validate()
+        assert!(!result.valid);
+    }
+
+    #[test]
+    fn test_sanitize_with_curdir_only() {
+        let validator = PathValidator::new();
+        let sanitized = validator.sanitize(Path::new("././foo"));
+        assert_eq!(sanitized.to_string_lossy(), "foo");
+    }
+
+    #[test]
+    fn test_sanitize_empty_path() {
+        let validator = PathValidator::new();
+        let sanitized = validator.sanitize(Path::new(""));
+        assert_eq!(sanitized.to_string_lossy(), "");
+    }
+
+    #[test]
+    fn test_base_dir_validation_inside() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let base_dir = temp_dir.path().to_path_buf();
+        let nested_dir = base_dir.join("logs");
+        std::fs::create_dir_all(&nested_dir).expect("failed to create nested dir");
+        let log_file = nested_dir.join("app.log");
+        std::fs::write(&log_file, "test").expect("failed to write file");
+
+        let config = PathValidatorConfig {
+            allow_absolute: true,
+            base_dir: Some(base_dir.clone()),
+            allow_symlinks: false,
+            deny_components: vec![],
+        };
+        let validator = PathValidator::with_config(config);
+        let result = validator.validate(&log_file);
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_base_dir_validation_outside() {
+        let base_temp = tempfile::tempdir().expect("failed to create base temp dir");
+        let outside_temp = tempfile::tempdir().expect("failed to create outside temp dir");
+        let base_dir = base_temp.path().to_path_buf();
+        // Create a file in a completely different temp directory (outside base_dir)
+        let outside_file = outside_temp.path().join("outside.log");
+        std::fs::write(&outside_file, "test").expect("failed to write file");
+
+        let config = PathValidatorConfig {
+            allow_absolute: true,
+            base_dir: Some(base_dir.clone()),
+            allow_symlinks: false,
+            deny_components: vec![],
+        };
+        let validator = PathValidator::with_config(config);
+        let result = validator.validate(&outside_file);
+        assert!(!result.valid);
+        assert!(result.error.as_ref().unwrap().contains("base directory"));
+    }
+
+    #[test]
+    fn test_symlink_detection_with_real_symlink() {
+        // Fixed: std::fs::symlink_metadata() does NOT follow symlinks, so
+        // metadata.file_type().is_symlink() correctly detects symlinks.
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let target_file = temp_dir.path().join("target.log");
+        std::fs::write(&target_file, "test").expect("failed to write target");
+        let symlink_path = temp_dir.path().join("link.log");
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target_file, &symlink_path)
+                .expect("failed to create symlink");
+        }
+
+        let config = PathValidatorConfig {
+            allow_absolute: true,
+            base_dir: None,
+            allow_symlinks: false,
+            deny_components: vec![],
+        };
+        let validator = PathValidator::with_config(config);
+
+        #[cfg(unix)]
+        {
+            let result = validator.validate(&symlink_path);
+            // Now symlinks ARE detected and rejected
+            assert!(!result.valid, "Symlink should be detected and rejected");
+            assert!(result
+                .error
+                .as_ref()
+                .is_some_and(|m| m.contains("Symlinks are not allowed")));
+        }
+    }
+
+    #[test]
+    fn test_symlink_allowed() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let target_file = temp_dir.path().join("target.log");
+        std::fs::write(&target_file, "test").expect("failed to write target");
+        let symlink_path = temp_dir.path().join("link.log");
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target_file, &symlink_path)
+                .expect("failed to create symlink");
+        }
+
+        let config = PathValidatorConfig {
+            allow_absolute: true,
+            base_dir: None,
+            allow_symlinks: true,
+            deny_components: vec![],
+        };
+        let validator = PathValidator::with_config(config);
+
+        #[cfg(unix)]
+        {
+            let result = validator.validate(&symlink_path);
+            assert!(result.valid);
+        }
+    }
+
+    #[test]
+    fn test_absolute_path_allowed_by_default() {
+        let validator = PathValidator::new();
+        // Default config allows absolute paths
+        let result = validator.validate(Path::new("/var/log/app.log"));
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_dangerous_component_passwd() {
+        let validator = PathValidator::new();
+        let result = validator.validate(Path::new("/some/passwd/file"));
+        assert!(!result.valid);
+        assert!(result
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Dangerous path component"));
+    }
+
+    #[test]
+    fn test_dangerous_component_shadow() {
+        let validator = PathValidator::new();
+        let result = validator.validate(Path::new("/etc/shadow"));
+        assert!(!result.valid);
+        assert!(result
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Dangerous path component"));
+    }
+
+    #[test]
+    fn test_dangerous_component_git() {
+        let validator = PathValidator::new();
+        let result = validator.validate(Path::new("project/.git/config"));
+        assert!(!result.valid);
+        assert!(result
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Dangerous path component"));
     }
 }

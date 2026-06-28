@@ -461,6 +461,15 @@ mod tests {
     }
 
     #[test]
+    fn test_mask_bank_card_short_input() {
+        // Test the else branch when bank_card.len() <= 4
+        assert_eq!(mask_bank_card("123"), "123");
+        assert_eq!(mask_bank_card("1234"), "1234");
+        assert_eq!(mask_bank_card("ab"), "ab");
+        assert_eq!(mask_bank_card(""), "");
+    }
+
+    #[test]
     fn test_data_masker() {
         let masker = DataMasker::new();
 
