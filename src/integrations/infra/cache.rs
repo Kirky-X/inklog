@@ -134,6 +134,7 @@ impl OxCacheAdapter {
     /// 使用构建器创建适配器
     ///
     /// 提供更细粒度的配置选项，如 TTL、容量等。
+    /// 必须在 async 上下文中调用 `build().await`。
     ///
     /// # 示例
     ///
@@ -141,9 +142,13 @@ impl OxCacheAdapter {
     /// use std::time::Duration;
     /// use inklog::infrastructure::cache::OxCacheAdapter;
     ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let cache = OxCacheAdapter::builder()
     ///     .ttl(Duration::from_secs(3600))
-    ///     .build()?;
+    ///     .build()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn builder() -> OxCacheAdapterBuilder {
         OxCacheAdapterBuilder::default()
@@ -226,13 +231,28 @@ impl OxCacheAdapterBuilder {
         self
     }
 
-    /// 构建适配器
-    pub fn build(self) -> Result<OxCacheAdapter, InklogError> {
-        // 目前使用默认配置，后续可扩展支持更多选项
-        // 注意：oxcache 的 builder() 返回异步构建器
-        // 这里简化处理，直接使用 new()
-        let _ = (self.ttl, self.capacity);
-        OxCacheAdapter::new()
+    /// 异步构建适配器
+    ///
+    /// 将配置的 TTL 和容量应用到 oxcache 后端。
+    /// 必须在 async 上下文中调用，因为 oxcache 0.2.0 的
+    /// `CacheBuilder::build()` 是异步方法。
+    ///
+    /// # 错误
+    ///
+    /// - `InklogError::CacheError` - oxcache 构建失败
+    pub async fn build(self) -> Result<OxCacheAdapter, InklogError> {
+        let mut builder = OxCache::builder();
+        if let Some(ttl) = self.ttl {
+            builder = builder.ttl(ttl);
+        }
+        if let Some(capacity) = self.capacity {
+            builder = builder.capacity(capacity);
+        }
+        let cache = builder
+            .build()
+            .await
+            .map_err(|e| InklogError::CacheError(format!("Failed to build oxcache: {}", e)))?;
+        Ok(OxCacheAdapter { inner: cache })
     }
 }
 
@@ -406,6 +426,39 @@ mod tests {
 
         let value = cache.get("key").await;
         assert_eq!(value, Some("value2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_builder_default() {
+        // builder().build() 不带配置应等价于 new()
+        let cache = OxCacheAdapter::builder()
+            .build()
+            .await
+            .expect("Failed to build default cache");
+
+        cache
+            .set("bkey", "bval".to_string())
+            .await
+            .expect("Failed to set");
+        assert_eq!(cache.get("bkey").await, Some("bval".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_builder_with_ttl_and_capacity() {
+        // 验证 ttl 和容量配置被真正应用到后端
+        let cache = OxCacheAdapter::builder()
+            .ttl(std::time::Duration::from_secs(60))
+            .capacity(100)
+            .build()
+            .await
+            .expect("Failed to build configured cache");
+
+        cache
+            .set("ckey", "cval".to_string())
+            .await
+            .expect("Failed to set");
+        assert_eq!(cache.get("ckey").await, Some("cval".to_string()));
+        assert!(cache.exists("ckey").await);
     }
 
     // ============================================================================

@@ -14,7 +14,7 @@
 //! | Trait | 描述 | 适配器 | Mock 实现 |
 //! |-------|------|--------|-----------|
 //! | [`Cache`] | 缓存操作 | `OxCacheAdapter` | `MockCache` |
-//! | [`Config`] | 配置访问 | `ConfersAdapter` | `MockConfig` |
+//! | [`Config`] | 配置访问 | `InklogConfigAdapter` | `MockConfig` |
 //! | [`Database`] | 数据库操作 | `DbNexusAdapter` | `MockDatabaseAdapter` |
 //!
 //! ## 设计原则
@@ -25,8 +25,8 @@
 //! ## 使用示例
 //!
 //! ```ignore
-//! use inklog::integrations::infra::{Cache, Config, Database};
-//! use inklog::integrations::infra::{OxCacheAdapter, ConfersAdapter, DbNexusAdapter};
+//! use inklog::infrastructure::{Cache, Config, Database};
+//! use inklog::infrastructure::{OxCacheAdapter, InklogConfigAdapter, DbNexusAdapter};
 //!
 //! async fn process_logs(
 //!     cache: &dyn Cache,
@@ -53,7 +53,7 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let cache = OxCacheAdapter::new()?;
-//!     let config = ConfersAdapter::new()?;
+//!     let config = InklogConfigAdapter::new()?;
 //!     let db = DbNexusAdapter::new("postgres://localhost/logs", 10).await?;
 //!     
 //!     process_logs(&cache, &config, &db).await
@@ -63,7 +63,7 @@
 //! ## 条件编译
 //!
 //! - `DbNexusAdapter` 需要启用 `dbnexus` feature
-//! - `OxCacheAdapter`、`ConfersAdapter` 默认可用
+//! - `OxCacheAdapter`、`InklogConfigAdapter` 默认可用
 
 pub mod cache;
 pub mod config;
@@ -76,7 +76,7 @@ pub use database::Database;
 
 // 适配器导出
 pub use cache::OxCacheAdapter;
-pub use config::ConfersAdapter;
+pub use config::InklogConfigAdapter;
 
 #[cfg(feature = "dbnexus")]
 pub use database::DbNexusAdapter;

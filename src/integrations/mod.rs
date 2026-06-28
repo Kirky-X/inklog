@@ -6,4 +6,5 @@
 //! Integrations module - external service integrations.
 
 pub mod infra;
+pub mod kit;
 pub mod storage;

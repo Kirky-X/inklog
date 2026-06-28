@@ -854,7 +854,7 @@ impl S3ArchiveManager {
             start_date.month()
         );
         let filename = format!(
-            "logs_{}_{}_{}.parquet.{}",
+            "logs_{}_{}_{}.{}",
             start_date.format("%Y%m%d_%H%M%S"),
             end_date.format("%Y%m%d_%H%M%S"),
             metadata.record_count,
@@ -930,15 +930,16 @@ impl S3ArchiveManager {
 
                 let params = BrotliEncoderParams {
                     quality: 6,
-                    // 启用多线程支持
+                    // 写入 Brotli magic header，便于解压工具识别格式
                     magic_number: true,
                     ..Default::default()
                 };
 
                 let mut input = std::io::Cursor::new(data);
                 let mut output = Vec::new();
-                let mut compressor =
-                    CompressorReader::new(&mut input, 4096, params.quality as u32, 22);
+                // 使用 with_params 而非 new，确保 params（包含 magic_number）真正生效
+                // CompressorReader::new 仅接受 quality 和 lgwin，会忽略 params 的其他字段
+                let mut compressor = CompressorReader::with_params(&mut input, 4096, &params);
                 compressor
                     .read_to_end(&mut output)
                     .map_err(InklogError::IoError)?;
@@ -1630,5 +1631,639 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("dont_serialize_me"));
         assert!(json.contains("AwsKms"));
+    }
+
+    use chrono::{Duration, TimeZone, Utc};
+
+    // ========================================================================
+    // SecretString Serialization / Clone / Drop Tests
+    // ========================================================================
+
+    #[test]
+    fn test_secret_string_serialize_always_produces_null() {
+        // Security property: a secret must never be serialized to its plaintext.
+        let secret = SecretString::new("topsecret".to_string());
+        let json = serde_json::to_string(&secret).expect("serialize");
+        assert_eq!(json, "null");
+    }
+
+    #[test]
+    fn test_secret_string_serialize_default_produces_null() {
+        let secret: SecretString = SecretString::default();
+        let json = serde_json::to_string(&secret).expect("serialize");
+        assert_eq!(json, "null");
+    }
+
+    #[test]
+    fn test_secret_string_deserialize_from_null_is_none() {
+        let secret: SecretString = serde_json::from_str("null").expect("deserialize");
+        assert!(secret.is_none());
+        assert!(secret.as_str_safe().is_none());
+    }
+
+    #[test]
+    fn test_secret_string_deserialize_from_string_is_some() {
+        let secret: SecretString = serde_json::from_str("\"decoded_value\"").expect("deserialize");
+        assert!(secret.is_some());
+        assert_eq!(secret.as_str_safe(), Some("decoded_value"));
+    }
+
+    #[test]
+    fn test_secret_string_roundtrip_loses_value() {
+        // Security property: serialize → deserialize must NOT recover the
+        // original plaintext (secrets must not leave the process via serde).
+        let original = SecretString::new("never_persist_me".to_string());
+        let json = serde_json::to_string(&original).expect("serialize");
+        let restored: SecretString = serde_json::from_str(&json).expect("deserialize");
+        assert!(restored.is_none());
+        assert!(!json.contains("never_persist_me"));
+    }
+
+    #[test]
+    fn test_secret_string_clone_preserves_value() {
+        let secret = SecretString::new("cloned_value".to_string());
+        let cloned = secret.clone();
+        assert_eq!(cloned.as_str_safe(), Some("cloned_value"));
+        // Original remains intact after cloning.
+        assert_eq!(secret.as_str_safe(), Some("cloned_value"));
+    }
+
+    #[test]
+    fn test_secret_string_take_from_default_returns_none() {
+        let mut secret: SecretString = SecretString::default();
+        assert_eq!(secret.take(), None);
+    }
+
+    #[test]
+    fn test_secret_string_drop_does_not_panic_after_take() {
+        // Drop zeroizes the inner value; ensure dropping an emptied/taken
+        // SecretString does not panic.
+        let mut secret = SecretString::new("ephemeral".to_string());
+        let _ = secret.take();
+        drop(secret);
+    }
+
+    // ========================================================================
+    // CompressionType Tests
+    // ========================================================================
+
+    #[test]
+    fn test_compression_type_deserialize_roundtrip_all_variants() {
+        for original in [
+            CompressionType::None,
+            CompressionType::Gzip,
+            CompressionType::Zstd,
+            CompressionType::Lz4,
+            CompressionType::Brotli,
+        ] {
+            let json = serde_json::to_string(&original).expect("serialize");
+            let restored: CompressionType = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(restored, original, "roundtrip failed for {:?}", original);
+        }
+    }
+
+    #[test]
+    fn test_compression_type_partial_eq_distinct_variants() {
+        assert_ne!(CompressionType::None, CompressionType::Gzip);
+        assert_ne!(CompressionType::Zstd, CompressionType::Lz4);
+        assert_ne!(CompressionType::Brotli, CompressionType::Zstd);
+        assert_eq!(CompressionType::Zstd, CompressionType::Zstd);
+    }
+
+    // ========================================================================
+    // StorageClass Tests
+    // ========================================================================
+
+    #[test]
+    fn test_storage_class_all_variants_serialize_distinctly() {
+        let variants = [
+            StorageClass::Standard,
+            StorageClass::IntelligentTiering,
+            StorageClass::StandardIa,
+            StorageClass::OnezoneIa,
+            StorageClass::Glacier,
+            StorageClass::GlacierDeepArchive,
+            StorageClass::ReducedRedundancy,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for v in &variants {
+            let json = serde_json::to_string(v).expect("serialize");
+            assert!(seen.insert(json), "duplicate serialization for {:?}", v);
+        }
+    }
+
+    #[test]
+    fn test_storage_class_deserialize_roundtrip_all_variants() {
+        for original in [
+            StorageClass::Standard,
+            StorageClass::IntelligentTiering,
+            StorageClass::StandardIa,
+            StorageClass::OnezoneIa,
+            StorageClass::Glacier,
+            StorageClass::GlacierDeepArchive,
+            StorageClass::ReducedRedundancy,
+        ] {
+            let json = serde_json::to_string(&original).expect("serialize");
+            let restored: StorageClass = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(restored, original);
+        }
+    }
+
+    // ========================================================================
+    // EncryptionAlgorithm Tests
+    // ========================================================================
+
+    #[test]
+    fn test_encryption_algorithm_serialization_all_variants() {
+        assert!(serde_json::to_string(&EncryptionAlgorithm::Aes256)
+            .unwrap()
+            .contains("Aes256"));
+        assert!(serde_json::to_string(&EncryptionAlgorithm::AwsKms)
+            .unwrap()
+            .contains("AwsKms"));
+        assert!(serde_json::to_string(&EncryptionAlgorithm::CustomerKey)
+            .unwrap()
+            .contains("CustomerKey"));
+    }
+
+    #[test]
+    fn test_encryption_algorithm_deserialize_roundtrip() {
+        for original in [
+            EncryptionAlgorithm::Aes256,
+            EncryptionAlgorithm::AwsKms,
+            EncryptionAlgorithm::CustomerKey,
+        ] {
+            let json = serde_json::to_string(&original).unwrap();
+            let restored: EncryptionAlgorithm = serde_json::from_str(&json).unwrap();
+            // EncryptionAlgorithm does not derive PartialEq, so compare via Debug.
+            assert_eq!(format!("{:?}", restored), format!("{:?}", original));
+        }
+    }
+
+    // ========================================================================
+    // ArchiveStatus Tests
+    // ========================================================================
+
+    #[test]
+    fn test_archive_status_default_is_in_progress() {
+        assert_eq!(ArchiveStatus::default(), ArchiveStatus::InProgress);
+    }
+
+    #[test]
+    fn test_archive_status_serialization_all_variants() {
+        assert!(serde_json::to_string(&ArchiveStatus::InProgress)
+            .unwrap()
+            .contains("InProgress"));
+        assert!(serde_json::to_string(&ArchiveStatus::Success)
+            .unwrap()
+            .contains("Success"));
+        assert!(serde_json::to_string(&ArchiveStatus::FailedLocal)
+            .unwrap()
+            .contains("FailedLocal"));
+        assert!(serde_json::to_string(&ArchiveStatus::Failed)
+            .unwrap()
+            .contains("Failed"));
+    }
+
+    #[test]
+    fn test_archive_status_deserialize_roundtrip() {
+        for original in [
+            ArchiveStatus::InProgress,
+            ArchiveStatus::Success,
+            ArchiveStatus::FailedLocal,
+            ArchiveStatus::Failed,
+        ] {
+            let json = serde_json::to_string(&original).unwrap();
+            let restored: ArchiveStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, original);
+        }
+    }
+
+    // ========================================================================
+    // S3ArchiveConfig Serialization / Default Tests
+    // ========================================================================
+
+    #[test]
+    fn test_s3_archive_config_serialization_excludes_credentials() {
+        let config = S3ArchiveConfig {
+            access_key_id: SecretString::new("AKIAEXAMPLE".to_string()),
+            secret_access_key: SecretString::new("supersecret".to_string()),
+            session_token: SecretString::new("sessiontoken".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(!json.contains("AKIAEXAMPLE"));
+        assert!(!json.contains("supersecret"));
+        assert!(!json.contains("sessiontoken"));
+        // Non-sensitive fields still present.
+        assert!(json.contains("logs-archive"));
+        assert!(json.contains("us-east-1"));
+    }
+
+    #[test]
+    fn test_s3_archive_config_deserialize_uses_serde_default_for_missing_fields() {
+        // Container-level #[serde(default)] calls S3ArchiveConfig::default() and
+        // overwrites only the present fields. Omitted fields must take defaults.
+        let json = r#"{"enabled": true, "bucket": "my-bucket"}"#;
+        let config: S3ArchiveConfig = serde_json::from_str(json).expect("deserialize");
+        assert!(config.enabled);
+        assert_eq!(config.bucket, "my-bucket");
+        // Defaults applied for omitted fields:
+        assert_eq!(config.region, "us-east-1");
+        assert_eq!(config.archive_interval_days, 7);
+        assert_eq!(config.local_retention_days, 30);
+        assert_eq!(config.compression, CompressionType::Zstd);
+        assert_eq!(config.storage_class, StorageClass::Standard);
+        assert_eq!(config.prefix, "logs/");
+        assert_eq!(config.archive_format, "json");
+        assert!(config.encryption.is_none());
+        assert!(config.access_key_id.is_none());
+    }
+
+    #[test]
+    fn test_s3_archive_config_roundtrip_preserves_non_secret_fields() {
+        let config = S3ArchiveConfig {
+            enabled: true,
+            bucket: "roundtrip-bucket".to_string(),
+            region: "ap-southeast-2".to_string(),
+            archive_interval_days: 14,
+            local_retention_days: 60,
+            compression: CompressionType::Gzip,
+            storage_class: StorageClass::IntelligentTiering,
+            prefix: "custom/prefix/".to_string(),
+            force_path_style: true,
+            skip_bucket_validation: true,
+            max_file_size_mb: 250,
+            archive_format: "parquet".to_string(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let restored: S3ArchiveConfig = serde_json::from_str(&json).expect("deserialize");
+        assert!(restored.enabled);
+        assert_eq!(restored.bucket, "roundtrip-bucket");
+        assert_eq!(restored.region, "ap-southeast-2");
+        assert_eq!(restored.archive_interval_days, 14);
+        assert_eq!(restored.local_retention_days, 60);
+        assert_eq!(restored.compression, CompressionType::Gzip);
+        assert_eq!(restored.storage_class, StorageClass::IntelligentTiering);
+        assert_eq!(restored.prefix, "custom/prefix/");
+        assert!(restored.force_path_style);
+        assert!(restored.skip_bucket_validation);
+        assert_eq!(restored.max_file_size_mb, 250);
+        assert_eq!(restored.archive_format, "parquet");
+    }
+
+    #[test]
+    fn test_s3_archive_config_validate_security_disabled_no_credentials_is_ok() {
+        // enabled=false → the missing-credentials warning branch is skipped; still Ok.
+        let config = S3ArchiveConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(config.validate_security().is_ok());
+    }
+
+    // ========================================================================
+    // EncryptionConfig Tests
+    // ========================================================================
+
+    #[test]
+    fn test_encryption_config_serialization_includes_algorithm_and_kms_key() {
+        let config = EncryptionConfig {
+            algorithm: EncryptionAlgorithm::AwsKms,
+            kms_key_id: Some("arn:aws:kms:us-east-1:123:key/abc".to_string()),
+            customer_key: SecretString::new("hidden_customer_key".to_string()),
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(json.contains("AwsKms"));
+        assert!(json.contains("arn:aws:kms:us-east-1:123:key/abc"));
+        assert!(!json.contains("hidden_customer_key"));
+    }
+
+    #[test]
+    fn test_encryption_config_deserialization() {
+        let json = r#"{"algorithm":"Aes256","kms_key_id":null,"customer_key":null}"#;
+        let config: EncryptionConfig = serde_json::from_str(json).expect("deserialize");
+        // EncryptionAlgorithm does not derive PartialEq, so compare via Debug.
+        assert_eq!(format!("{:?}", config.algorithm), "Aes256");
+        assert!(config.kms_key_id.is_none());
+        assert!(config.customer_key.is_none());
+    }
+
+    // ========================================================================
+    // ArchiveMetadata Edge-Case Tests
+    // ========================================================================
+
+    #[test]
+    fn test_archive_metadata_mark_success_zero_compressed_sets_ratio_one() {
+        let metadata = ArchiveMetadata::new(10, 100, "zstd");
+        // compressed_size stays 0 → ratio must be 1.0, not infinity.
+        let marked = metadata.mark_success();
+        assert_eq!(marked.status, ArchiveStatus::Success);
+        assert!((marked.compression_ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_archive_metadata_with_tag_chains_multiple_tags() {
+        let metadata = ArchiveMetadata::new(5, 500, "lz4")
+            .with_tag("automated")
+            .with_tag("daily")
+            .with_tag("production");
+        assert_eq!(metadata.tags, vec!["automated", "daily", "production"]);
+    }
+
+    #[test]
+    fn test_archive_metadata_new_default_optional_fields() {
+        let metadata = ArchiveMetadata::new(1, 1, "none");
+        assert!(metadata.start_date.is_none());
+        assert!(metadata.end_date.is_none());
+        assert!(metadata.compression_type.is_none());
+        assert!(metadata.storage_class.is_none());
+        assert!(metadata.parquet_version.is_none());
+        assert_eq!(metadata.row_group_count, 0);
+        assert_eq!(metadata.archive_version, "1.0");
+        assert!(metadata.tags.is_empty());
+        assert_eq!(metadata.s3_key, "");
+        assert_eq!(metadata.status, ArchiveStatus::InProgress);
+    }
+
+    // ========================================================================
+    // ScheduleState can_run_today Branch Tests
+    // ========================================================================
+
+    #[test]
+    fn test_schedule_state_can_run_today_false_when_locked_today_and_running() {
+        let state = ScheduleState {
+            locked_date: Some(Utc::now().date_naive()),
+            is_running: true,
+            ..Default::default()
+        };
+        assert!(!state.can_run_today());
+    }
+
+    #[test]
+    fn test_schedule_state_can_run_today_true_when_locked_today_not_running() {
+        let state = ScheduleState {
+            locked_date: Some(Utc::now().date_naive()),
+            is_running: false,
+            ..Default::default()
+        };
+        assert!(state.can_run_today());
+    }
+
+    #[test]
+    fn test_schedule_state_can_run_today_true_when_locked_different_day() {
+        let state = ScheduleState {
+            locked_date: Some(Utc::now().date_naive() - Duration::days(1)),
+            is_running: true,
+            ..Default::default()
+        };
+        assert!(state.can_run_today());
+    }
+
+    // ========================================================================
+    // S3ArchiveManager — local, no-network tests (requires `aws` feature)
+    // -----------------------------------------------------------------------
+    // The manager is constructed with explicit dummy credentials AND
+    // skip_bucket_validation=true. Providing an explicit credentials_provider
+    // short-circuits the default AWS credential chain (so no IMDS / network),
+    // and skipping bucket validation avoids the only network call in `new()`.
+    // This lets us exercise the pure helper methods (key generation, extension
+    // mapping, compress/decompress roundtrips, storage-class mapping) locally.
+    // ========================================================================
+
+    #[cfg(feature = "aws")]
+    fn base_test_config() -> S3ArchiveConfig {
+        S3ArchiveConfig {
+            enabled: true,
+            bucket: "inklog-test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            access_key_id: SecretString::new("AKIATESTDUMMY".to_string()),
+            secret_access_key: SecretString::new("dummysecretkey".to_string()),
+            skip_bucket_validation: true,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(feature = "aws")]
+    async fn make_manager(config: S3ArchiveConfig) -> S3ArchiveManager {
+        S3ArchiveManager::new(config)
+            .await
+            .expect("constructing a test S3ArchiveManager must not require network access")
+    }
+
+    #[cfg(feature = "aws")]
+    fn sample_data() -> Vec<u8> {
+        // Repetitive, highly compressible payload (>1KB so compression has effect).
+        b"inklog archive compression roundtrip sample line\n".repeat(50)
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_get_compression_extension_all_variants() {
+        for (compression, expected) in [
+            (CompressionType::None, "parquet"),
+            (CompressionType::Gzip, "parquet.gz"),
+            (CompressionType::Zstd, "parquet.zst"),
+            (CompressionType::Lz4, "parquet.lz4"),
+            (CompressionType::Brotli, "parquet.br"),
+        ] {
+            let mut cfg = base_test_config();
+            cfg.compression = compression.clone();
+            let manager = make_manager(cfg).await;
+            assert_eq!(
+                manager.get_compression_extension(),
+                expected,
+                "mismatch for {:?}",
+                compression
+            );
+        }
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_generate_s3_key_format() {
+        let manager = make_manager(base_test_config()).await; // prefix "logs/", Zstd
+        let start = chrono::Utc.with_ymd_and_hms(2026, 3, 15, 1, 0, 0).unwrap();
+        let end = chrono::Utc.with_ymd_and_hms(2026, 3, 15, 2, 0, 0).unwrap();
+        let metadata = ArchiveMetadata::new(42, 1024, "database_logs");
+        let key = manager.generate_s3_key(&start, &end, &metadata);
+        // Verify the meaningful structural pieces (date partitioning, prefix
+        // trim, count interpolation). We intentionally do NOT assert the exact
+        // full string to avoid locking in the current extension behaviour.
+        assert!(key.starts_with("logs/2026/03/"));
+        assert!(key.contains("logs_20260315_010000_20260315_020000_42"));
+        assert!(key.ends_with(".zst"));
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_generate_s3_key_trims_trailing_slash_from_prefix() {
+        let mut cfg = base_test_config();
+        cfg.prefix = "myarchive/".to_string();
+        cfg.compression = CompressionType::None;
+        let manager = make_manager(cfg).await;
+        let when = chrono::Utc.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap();
+        let metadata = ArchiveMetadata::new(7, 100, "manual");
+        let key = manager.generate_s3_key(&when, &when, &metadata);
+        // Trailing slash must be trimmed so we don't get "myarchive//2026/01/...".
+        assert!(key.starts_with("myarchive/2026/01/"));
+        assert!(!key.contains("//"));
+        assert!(key.contains("_7."));
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_compress_decompress_roundtrip_none() {
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::None;
+        let manager = make_manager(cfg).await;
+        let data = sample_data();
+        let compressed = manager.compress_data(data.clone()).await.expect("compress");
+        assert_eq!(compressed, data, "None compression must be identity");
+        let decompressed = manager
+            .decompress_data(compressed)
+            .await
+            .expect("decompress");
+        assert_eq!(decompressed, data);
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_compress_decompress_roundtrip_zstd() {
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::Zstd;
+        let manager = make_manager(cfg).await;
+        let data = sample_data();
+        let compressed = manager.compress_data(data.clone()).await.expect("compress");
+        assert_ne!(compressed, data, "zstd should change the bytes");
+        let decompressed = manager
+            .decompress_data(compressed)
+            .await
+            .expect("decompress");
+        assert_eq!(decompressed, data);
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_compress_decompress_roundtrip_gzip() {
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::Gzip;
+        let manager = make_manager(cfg).await;
+        let data = sample_data();
+        let compressed = manager.compress_data(data.clone()).await.expect("compress");
+        assert_ne!(compressed, data);
+        let decompressed = manager
+            .decompress_data(compressed)
+            .await
+            .expect("decompress");
+        assert_eq!(decompressed, data);
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_compress_decompress_roundtrip_lz4() {
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::Lz4;
+        let manager = make_manager(cfg).await;
+        let data = sample_data();
+        let compressed = manager.compress_data(data.clone()).await.expect("compress");
+        assert_ne!(compressed, data);
+        let decompressed = manager
+            .decompress_data(compressed)
+            .await
+            .expect("decompress");
+        assert_eq!(decompressed, data);
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_compress_decompress_roundtrip_brotli() {
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::Brotli;
+        let manager = make_manager(cfg).await;
+        let data = sample_data();
+        let compressed = manager.compress_data(data.clone()).await.expect("compress");
+        assert_ne!(compressed, data);
+        let decompressed = manager
+            .decompress_data(compressed)
+            .await
+            .expect("decompress");
+        assert_eq!(decompressed, data);
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_get_aws_storage_class_mapping() {
+        use aws_sdk_s3::types::StorageClass as AwsSc;
+        // Note: GlacierDeepArchive maps to AwsSc::DeepArchive (S3 SDK name).
+        for (sc, expected) in [
+            (StorageClass::Standard, AwsSc::Standard),
+            (StorageClass::IntelligentTiering, AwsSc::IntelligentTiering),
+            (StorageClass::StandardIa, AwsSc::StandardIa),
+            (StorageClass::OnezoneIa, AwsSc::OnezoneIa),
+            (StorageClass::Glacier, AwsSc::Glacier),
+            (StorageClass::GlacierDeepArchive, AwsSc::DeepArchive),
+            (StorageClass::ReducedRedundancy, AwsSc::ReducedRedundancy),
+        ] {
+            let mut cfg = base_test_config();
+            cfg.storage_class = sc.clone();
+            let manager = make_manager(cfg).await;
+            assert_eq!(
+                manager.get_aws_storage_class(),
+                expected,
+                "mismatch for {:?}",
+                sc
+            );
+        }
+    }
+
+    // ========================================================================
+    // MockS3ArchiveManager Tests (requires `aws` feature)
+    // ========================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_mock_archive_logs_returns_mock_url() {
+        let mock = MockS3ArchiveManager::default();
+        let metadata = ArchiveMetadata::new(1, 10, "mock");
+        let now = Utc::now();
+        let key = mock
+            .archive_logs(vec![1, 2, 3], now, now, metadata)
+            .await
+            .expect("mock archive must not fail");
+        assert!(key.starts_with("mock://"), "got: {}", key);
+        assert!(key.contains("parquet"), "got: {}", key);
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_mock_list_archives_returns_empty() {
+        let mock = MockS3ArchiveManager::default();
+        let result = mock
+            .list_archives(None, None, None)
+            .await
+            .expect("mock list must not fail");
+        assert!(result.is_empty());
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_mock_restore_archive_returns_empty() {
+        let mock = MockS3ArchiveManager::default();
+        let data = mock
+            .restore_archive("any-key")
+            .await
+            .expect("mock restore must not fail");
+        assert!(data.is_empty());
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_mock_delete_archive_succeeds() {
+        let mock = MockS3ArchiveManager::default();
+        mock.delete_archive("any-key")
+            .await
+            .expect("mock delete must not fail");
     }
 }

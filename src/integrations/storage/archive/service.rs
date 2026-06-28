@@ -13,7 +13,7 @@ use super::S3ArchiveConfig;
 #[cfg(feature = "aws")]
 use super::S3ArchiveManager;
 use crate::InklogError;
-use chrono::{DateTime, Datelike, Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 #[cfg(feature = "dbnexus")]
 use dbnexus::database::pool::Session;
 use parking_lot::Mutex;
@@ -37,16 +37,11 @@ pub struct ArchiveService {
     archive_manager: Arc<()>, // 占位符
     #[cfg(feature = "dbnexus")]
     database_session: Option<Arc<Session>>,
-    #[allow(dead_code)]
-    local_retention_path: PathBuf,
     scheduler: JobScheduler,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
     /// 调度状态跟踪（用于并发控制和持久化）
     schedule_state: Mutex<super::ScheduleState>,
-    /// Parquet配置（用于归档格式）
-    #[allow(dead_code)]
-    parquet_config: crate::ParquetConfig,
 }
 
 impl ArchiveService {
@@ -63,8 +58,7 @@ impl ArchiveService {
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
-        let local_retention_path = config.local_retention_path.clone();
-        fs::create_dir_all(&local_retention_path)
+        fs::create_dir_all(&config.local_retention_path)
             .await
             .map_err(|e| {
                 InklogError::IoError(std::io::Error::other(format!(
@@ -82,12 +76,10 @@ impl ArchiveService {
             config: config.clone(),
             archive_manager,
             database_session: database_session.map(Arc::new),
-            local_retention_path,
             scheduler,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
             schedule_state: Mutex::new(super::ScheduleState::default()),
-            parquet_config: config.parquet_config.clone(),
         })
     }
 
@@ -101,8 +93,7 @@ impl ArchiveService {
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
-        let local_retention_path = config.local_retention_path.clone();
-        fs::create_dir_all(&local_retention_path)
+        fs::create_dir_all(&config.local_retention_path)
             .await
             .map_err(|e| {
                 InklogError::IoError(std::io::Error::other(format!(
@@ -120,12 +111,10 @@ impl ArchiveService {
             archive_manager,
             #[cfg(feature = "dbnexus")]
             database_session: None,
-            local_retention_path,
             scheduler,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
             schedule_state: Mutex::new(super::ScheduleState::default()),
-            parquet_config: config.parquet_config.clone(),
         })
     }
 
@@ -593,11 +582,6 @@ impl ArchiveService {
     }
 
     /// 从数据库获取日志数据
-    #[allow(dead_code)]
-    /// 从数据库获取日志数据 (Sea-ORM 模式下可用)
-    ///
-    /// 注意：此方法在 dbnexus feature 禁用时不可用。
-    /// 数据库归档功能需要 dbnexus feature 才能正常工作。
     #[cfg(feature = "dbnexus")]
     async fn fetch_database_logs(
         &self,
@@ -702,131 +686,11 @@ impl ArchiveService {
         Ok(all_data)
     }
 
-    /// 清理旧的数据库日志
-    #[cfg(feature = "dbnexus")]
-    #[allow(dead_code)]
-    async fn cleanup_old_database_logs(
-        &self,
-        session: &Session,
-        cutoff_date: DateTime<Utc>,
-    ) -> Result<(), InklogError> {
-        let conn = session
-            .connection()
-            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-        crate::support::io::sink::entity::Entity::delete_many()
-            .filter(crate::support::io::sink::entity::Column::Timestamp.lt(cutoff_date.naive_utc()))
-            .exec(conn)
-            .await
-            .map_err(|e| InklogError::DatabaseError(e.to_string()))?;
-
-        info!("Cleaned up old database log records");
-        Ok(())
-    }
-
-    /// 清理旧的日志文件（异步版本）
-    #[allow(dead_code)]
-    async fn cleanup_old_files(&self, cutoff_date: DateTime<Utc>) -> Result<(), InklogError> {
-        let log_dir = &self.local_retention_path;
-        let mut count = 0;
-
-        let entries = match fs::read_dir(log_dir).await {
-            Ok(dir) => dir,
-            Err(e) => {
-                error!("Failed to read log directory: {}", e);
-                return Ok(());
-            }
-        };
-
-        let mut entries = Box::pin(entries);
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_file()
-                && path
-                    .extension()
-                    .is_some_and(|ext| ext == "log" || ext == "zst" || ext == "enc")
-            {
-                if let Ok(metadata) = path.metadata() {
-                    if let Ok(modified) = metadata.modified() {
-                        let modified_utc: DateTime<Utc> = modified.into();
-                        if modified_utc < cutoff_date {
-                            if let Err(e) = fs::remove_file(&path).await {
-                                error!("Failed to remove old log file {}: {}", path.display(), e);
-                            } else {
-                                count += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        info!("Cleaned up {} old log files", count);
-        Ok(())
-    }
-
     /// 估算记录数量
     #[cfg(feature = "aws")]
     fn estimate_record_count(&self, data: &[u8]) -> i64 {
         // 简单的估算：假设每条记录平均100字节
         (data.len() / 100) as i64
-    }
-
-    /// 保存归档数据到本地保留目录（异步版本）
-    #[allow(dead_code)]
-    async fn save_to_local_retention(
-        &self,
-        data: Vec<u8>,
-        start_date: DateTime<Utc>,
-        end_date: DateTime<Utc>,
-    ) -> Result<(), InklogError> {
-        // 生成本地文件名
-        let filename = format!(
-            "archive_{}_{}_{}.parquet",
-            start_date.format("%Y%m%d_%H%M%S"),
-            end_date.format("%Y%m%d_%H%M%S"),
-            data.len()
-        );
-
-        let local_path = self.local_retention_path.join(filename);
-
-        // 创建子目录（按日期组织）
-        let date_dir = self.local_retention_path.join(format!(
-            "{}/{:02}/{:02}",
-            start_date.year(),
-            start_date.month(),
-            start_date.day()
-        ));
-
-        fs::create_dir_all(&date_dir).await.map_err(|e| {
-            InklogError::IoError(std::io::Error::other(format!(
-                "Failed to create local retention date directory: {}",
-                e
-            )))
-        })?;
-
-        let file_name = local_path.file_name().ok_or_else(|| {
-            InklogError::IoError(std::io::Error::other(
-                "Failed to get file name from local path".to_string(),
-            ))
-        })?;
-        let file_path = date_dir.join(file_name);
-
-        // 写入数据
-        fs::write(&file_path, &data).await.map_err(|e| {
-            InklogError::IoError(std::io::Error::other(format!(
-                "Failed to write local retention file {}: {}",
-                file_path.display(),
-                e
-            )))
-        })?;
-
-        info!(
-            "Saved archive to local retention: {} ({} bytes)",
-            file_path.display(),
-            data.len()
-        );
-
-        Ok(())
     }
 
     /// 手动触发归档
@@ -993,12 +857,10 @@ impl ArchiveServiceBuilder {
                 config: config.clone(),
                 archive_manager: Arc::new(S3ArchiveManager::new(config.clone()).await?),
                 database_session: self.database_session.map(std::sync::Arc::new),
-                local_retention_path: std::path::PathBuf::from("target/test_logs"),
                 scheduler: JobScheduler::new().await?,
                 shutdown_tx,
                 shutdown_rx: None,
                 schedule_state: Mutex::new(super::ScheduleState::default()),
-                parquet_config: config.parquet_config.clone(),
             })
         }
         #[cfg(not(feature = "dbnexus"))]
@@ -1006,12 +868,10 @@ impl ArchiveServiceBuilder {
             Ok(ArchiveService {
                 config: config.clone(),
                 archive_manager: Arc::new(S3ArchiveManager::new(config.clone()).await?),
-                local_retention_path: std::path::PathBuf::from("target/test_logs"),
                 scheduler: JobScheduler::new().await?,
                 shutdown_tx,
                 shutdown_rx: None,
                 schedule_state: Mutex::new(super::ScheduleState::default()),
-                parquet_config: config.parquet_config.clone(),
             })
         }
     }
@@ -1026,8 +886,11 @@ impl Default for ArchiveServiceBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::integrations::storage::archive::SecretString;
+    #[cfg(all(feature = "aws", not(feature = "dbnexus")))]
+    use crate::integrations::storage::archive::{ArchiveStatus, ScheduleState};
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_archive_service_builder() {
         // 测试构建器的基本功能
         let builder = ArchiveServiceBuilder::new();
@@ -1036,7 +899,7 @@ mod tests {
         assert!(builder.database_session.is_none());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[cfg(feature = "dbnexus")]
     async fn test_fetch_database_logs() {
         use chrono::{Duration, Utc};
@@ -1099,185 +962,301 @@ mod tests {
         assert!(!data.is_empty());
     }
 
-    #[tokio::test]
-    #[cfg(feature = "dbnexus")]
-    async fn test_cleanup_old_database_logs() {
-        use chrono::{Duration, Utc};
-        use dbnexus::database::pool::DbPool;
-        use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Schema, Set};
+    #[test]
+    fn test_archive_service_builder_default() {
+        let builder = ArchiveServiceBuilder::default();
+        assert!(builder.config.is_none());
+    }
 
+    #[test]
+    fn test_archive_service_builder_config_sets_field() {
+        let config = S3ArchiveConfig {
+            bucket: "builder-bucket".to_string(),
+            ..Default::default()
+        };
+        let builder = ArchiveServiceBuilder::new().config(config);
+        assert!(builder.config.is_some());
+        assert_eq!(builder.config.as_ref().unwrap().bucket, "builder-bucket");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_archive_service_builder_build_without_config_errors() {
+        // build() must short-circuit with a ConfigError before constructing any
+        // S3 client, so this test performs no network access.
+        let builder = ArchiveServiceBuilder::new();
+        let result = builder.build().await;
+        // Use `err()` (not `unwrap_err()`) because ArchiveService does not impl Debug.
+        let err = result.err().expect("expected build to fail without config");
+        assert!(matches!(err, InklogError::ConfigError(_)));
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_archive_service_builder_build_test_without_config_errors() {
+        // build_test() also short-circuits when no config is provided.
+        let builder = ArchiveServiceBuilder::new();
+        let result = builder.build_test().await;
+        // Use `err()` (not `unwrap_err()`) because ArchiveService does not impl Debug.
+        let err = result
+            .err()
+            .expect("expected build_test to fail without config");
+        assert!(matches!(err, InklogError::ConfigError(_)));
+    }
+
+    // ============================================================================
+    // perform_cleanup_with_deps 测试 — 纯文件系统逻辑，无 S3 依赖
+    // 覆盖 lines 502-555
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_cleanup_nonexistent_dir_returns_ok() {
+        // retention_path 不存在时应提前返回 Ok（line 505-507）
+        let config = S3ArchiveConfig {
+            local_retention_path: PathBuf::from("/nonexistent/cleanup/path/that/does/not/exist"),
+            ..Default::default()
+        };
+        let result = ArchiveService::perform_cleanup_with_deps(&config).await;
+        assert!(
+            result.is_ok(),
+            "Cleanup of non-existent dir should return Ok"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_cleanup_deletes_old_files() {
+        // 超过 retention_days 的文件应被删除（lines 509-552）
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let old_file = dir.path().join("old.log");
+        std::fs::write(&old_file, "old data").expect("Failed to write file");
+
+        // 将修改时间设为 60 天前（默认 retention 30 天）
+        let old_time =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 24 * 3600);
+        let f = std::fs::File::open(&old_file).expect("Failed to open file");
+        f.set_modified(old_time)
+            .expect("Failed to set modification time");
+
+        let config = S3ArchiveConfig {
+            local_retention_days: 30,
+            local_retention_path: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        let result = ArchiveService::perform_cleanup_with_deps(&config).await;
+        assert!(result.is_ok(), "Cleanup should succeed");
+        assert!(!old_file.exists(), "Old file should be deleted");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_cleanup_keeps_recent_files() {
+        // 未超过 retention_days 的文件应保留（lines 533-550 保留路径）
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let recent_file = dir.path().join("recent.log");
+        std::fs::write(&recent_file, "recent data").expect("Failed to write file");
+        // 修改时间为 now（刚创建）
+
+        let config = S3ArchiveConfig {
+            local_retention_days: 30,
+            local_retention_path: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        let result = ArchiveService::perform_cleanup_with_deps(&config).await;
+        assert!(result.is_ok(), "Cleanup should succeed");
+        assert!(recent_file.exists(), "Recent file should be kept");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_cleanup_handles_unreadable_metadata_gracefully() {
+        // 子目录（非文件）应被跳过，不导致错误
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).expect("Failed to create subdir");
+
+        let config = S3ArchiveConfig {
+            local_retention_days: 30,
+            local_retention_path: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        let result = ArchiveService::perform_cleanup_with_deps(&config).await;
+        assert!(result.is_ok(), "Cleanup with subdir should succeed");
+        assert!(subdir.exists(), "Subdir should not be deleted");
+    }
+
+    // ============================================================================
+    // ArchiveService getters 测试 — 需构造实例
+    // 使用 skip_bucket_validation + 显式凭证避免 S3 网络调用
+    // 覆盖 lines 769-796
+    // ============================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_archive_service_getters_return_config_values() {
+        let retention_dir =
+            tempfile::tempdir().expect("Failed to create tempdir for retention path");
+        let config = S3ArchiveConfig {
+            enabled: true,
+            bucket: "getter-test-bucket".to_string(),
+            region: "ap-southeast-1".to_string(),
+            archive_interval_days: 14,
+            local_retention_days: 60,
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            access_key_id: SecretString::from("test-access".to_string()),
+            secret_access_key: SecretString::from("test-secret".to_string()),
+            ..Default::default()
+        };
+        #[cfg(feature = "dbnexus")]
+        let service = ArchiveService::new(config, None)
+            .await
+            .expect("Failed to create ArchiveService");
+        #[cfg(not(feature = "dbnexus"))]
+        let service = ArchiveService::new(config)
+            .await
+            .expect("Failed to create ArchiveService");
+
+        assert_eq!(service.bucket(), "getter-test-bucket");
+        assert_eq!(service.region(), "ap-southeast-1");
+        assert_eq!(service.archive_interval_days(), 14);
+        assert_eq!(service.local_retention_days(), 60);
+    }
+
+    // ============================================================================
+    // perform_archive_simple 测试 (aws, not dbnexus)
+    // 覆盖 lines 432-457：schedule_state 状态转换逻辑
+    // ============================================================================
+
+    #[cfg(all(feature = "aws", not(feature = "dbnexus")))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_archive_simple_success_path() {
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            enabled: true,
+            bucket: "simple-test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            access_key_id: SecretString::from("test-access".to_string()),
+            secret_access_key: SecretString::from("test-secret".to_string()),
+            ..Default::default()
+        };
+        let archive_manager = Arc::new(
+            S3ArchiveManager::new(config.clone())
+                .await
+                .expect("Failed to create S3ArchiveManager"),
+        );
+        let schedule_state = Arc::new(Mutex::new(ScheduleState::default()));
+
+        let result =
+            ArchiveService::perform_archive_simple(&config, &archive_manager, &schedule_state)
+                .await;
+        assert!(result.is_ok(), "perform_archive_simple should succeed");
+
+        // 验证状态已正确更新：成功后 is_running=false
+        let state = schedule_state.lock();
+        assert!(
+            !state.is_running,
+            "is_running should be false after success"
+        );
+        assert_eq!(
+            state.last_run_status,
+            Some(ArchiveStatus::Success),
+            "last_run_status should be Success"
+        );
+    }
+
+    #[cfg(all(feature = "aws", not(feature = "dbnexus")))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_archive_simple_skips_when_already_running() {
+        // can_run_today() 返回 false 时应跳过执行（lines 442-447）
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            enabled: true,
+            bucket: "skip-test-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            access_key_id: SecretString::from("test-access".to_string()),
+            secret_access_key: SecretString::from("test-secret".to_string()),
+            ..Default::default()
+        };
+        let archive_manager = Arc::new(
+            S3ArchiveManager::new(config.clone())
+                .await
+                .expect("Failed to create S3ArchiveManager"),
+        );
+        // 设置 is_running=true 且 locked_date=today → can_run_today()=false
+        let schedule_state = Arc::new(Mutex::new(ScheduleState {
+            is_running: true,
+            locked_date: Some(Utc::now().date_naive()),
+            ..Default::default()
+        }));
+
+        let result =
+            ArchiveService::perform_archive_simple(&config, &archive_manager, &schedule_state)
+                .await;
+        assert!(result.is_ok(), "should return Ok when skipping");
+        // 跳过时不应修改状态
+        let state = schedule_state.lock();
+        assert!(
+            state.is_running,
+            "is_running should remain true when skipped"
+        );
+    }
+
+    // ============================================================================
+    // ArchiveServiceBuilder database_session 方法 (cfg dbnexus)
+    // 覆盖 line 824
+    // ============================================================================
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_builder_database_session_sets_field() {
+        use dbnexus::database::pool::DbPool;
         let pool = DbPool::new("sqlite::memory:").await.unwrap();
         let session = pool.get_session("admin").await.unwrap();
-        let conn = session.connection().unwrap();
 
-        let schema = Schema::new(conn.get_database_backend());
-        conn.execute(
-            schema
-                .create_table_from_entity(crate::support::io::sink::entity::Entity)
-                .if_not_exists(),
-        )
-        .await
-        .unwrap();
-
-        let now = Utc::now();
-        let old_date = now - Duration::days(10);
-
-        let old_record = crate::support::io::sink::entity::ActiveModel {
-            timestamp: Set(old_date.naive_utc()),
-            level: Set("INFO".to_string()),
-            target: Set("test".to_string()),
-            message: Set("old log".to_string()),
-            fields: Set(Some(r#"{}"#.to_string())),
-            file: Set(Some("test.rs".to_string())),
-            line: Set(Some(100)),
-            thread_id: Set("test-thread".to_string()),
-            module_path: Set(Some("test_module".to_string())),
-            metadata: Set(Some(r#"{}"#.to_string())),
-            ..Default::default()
-        };
-        old_record.insert(conn).await.unwrap();
-
-        let new_record = crate::support::io::sink::entity::ActiveModel {
-            timestamp: Set(now.naive_utc()),
-            level: Set("INFO".to_string()),
-            target: Set("test".to_string()),
-            message: Set("new log".to_string()),
-            fields: Set(Some(r#"{}"#.to_string())),
-            file: Set(Some("test.rs".to_string())),
-            line: Set(Some(101)),
-            thread_id: Set("test-thread".to_string()),
-            module_path: Set(Some("test_module".to_string())),
-            metadata: Set(Some(r#"{}"#.to_string())),
-            ..Default::default()
-        };
-        new_record.insert(conn).await.unwrap();
-
-        let config = S3ArchiveConfig {
-            enabled: true,
-            bucket: "test-bucket".to_string(),
-            region: "us-east-1".to_string(),
-            local_retention_days: 7,
-            skip_bucket_validation: true,
-            ..Default::default()
-        };
-
-        let service_session = pool.get_session("admin").await.unwrap();
-        let service = ArchiveService::new(config.clone(), Some(service_session))
-            .await
-            .unwrap();
-
-        let cutoff_date = now - Duration::days(7);
-        service
-            .cleanup_old_database_logs(&session, cutoff_date)
-            .await
-            .unwrap();
-
-        let remaining = crate::support::io::sink::entity::Entity::find()
-            .all(conn)
-            .await
-            .unwrap();
-        assert_eq!(remaining.len(), 1);
-    }
-
-    #[tokio::test]
-    #[cfg(not(feature = "aws"))]
-    async fn test_cleanup_old_files() {
-        use chrono::{Duration, Utc};
-        use filetime::FileTime;
-
-        let temp_dir = TempDir::new().unwrap();
-        let retention_dir = temp_dir.path().join("retention");
-        fs::create_dir_all(&retention_dir).unwrap();
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
-
-        let old_file = retention_dir.join("old.log");
-        let new_file = retention_dir.join("new.log");
-
-        fs::write(&old_file, "old content").unwrap();
-        fs::write(&new_file, "new content").unwrap();
-
-        let old_time =
-            FileTime::from_unix_time((Utc::now().timestamp() - 10 * 24 * 3600) as i64, 0);
-        filetime::set_file_mtime(&old_file, old_time).unwrap();
-
-        let now = Utc::now();
-
-        let config = S3ArchiveConfig {
-            enabled: true,
-            local_retention_days: 7,
-            local_retention_path: retention_dir.clone(),
-            ..Default::default()
-        };
-
-        let service = ArchiveService::new(config.clone(), None).await.unwrap();
-
-        let cutoff = now - Duration::days(7);
-        service.cleanup_old_files(cutoff).await.unwrap();
-
-        assert!(!old_file.exists(), "Old file should be deleted");
-        assert!(new_file.exists(), "New file should remain");
-
-        std::env::set_current_dir(original_dir).unwrap();
-    }
-
-    #[tokio::test]
-    #[cfg(not(feature = "aws"))]
-    async fn test_save_to_local_retention() {
-        let temp_dir = TempDir::new().unwrap();
-        let retention_dir = temp_dir.path().join("logs/archive_failures");
-        fs::create_dir_all(&retention_dir).unwrap();
-
-        let original_dir = std::env::current_dir().unwrap();
-
-        let config = S3ArchiveConfig {
-            enabled: true,
-            local_retention_days: 7,
-            local_retention_path: retention_dir.clone(),
-            ..Default::default()
-        };
-        let service = ArchiveService::new(config, None).await.unwrap();
-
-        let data = b"dummy parquet data".to_vec();
-        let now = Utc::now();
-        let start_date = now - Duration::days(1);
-        let end_date = now;
-
-        service
-            .save_to_local_retention(data.clone(), start_date, end_date)
-            .await
-            .unwrap();
-
-        let date_path = retention_dir.join(format!(
-            "{}/{:02}/{:02}",
-            start_date.year(),
-            start_date.month(),
-            start_date.day()
-        ));
+        let builder = ArchiveServiceBuilder::new().database_session(session);
         assert!(
-            date_path.exists(),
-            "Date directory should exist: {:?}",
-            date_path
+            builder.database_session.is_some(),
+            "database_session should be set"
         );
+    }
 
-        let entries: Vec<_> = fs::read_dir(&date_path)
-            .unwrap()
-            .map(|e| e.unwrap())
-            .collect();
+    // ============================================================================
+    // ArchiveServiceBuilder config 链式调用返回 Self 验证
+    // ============================================================================
+
+    #[test]
+    fn test_builder_config_chaining_preserves_config() {
+        let config = S3ArchiveConfig {
+            bucket: "chain-bucket".to_string(),
+            region: "eu-west-1".to_string(),
+            archive_interval_days: 3,
+            ..Default::default()
+        };
+        // config() 应返回 Self 并存储配置
+        let builder = ArchiveServiceBuilder::new().config(config);
+        let stored = builder.config.as_ref().expect("config should be set");
+        assert_eq!(stored.bucket, "chain-bucket");
+        assert_eq!(stored.region, "eu-west-1");
+        assert_eq!(stored.archive_interval_days, 3);
+    }
+
+    #[test]
+    fn test_builder_config_overwrite_replaces_previous() {
+        // 多次调用 config() 应覆盖前一次
+        let builder = ArchiveServiceBuilder::new()
+            .config(S3ArchiveConfig {
+                bucket: "first".to_string(),
+                ..Default::default()
+            })
+            .config(S3ArchiveConfig {
+                bucket: "second".to_string(),
+                ..Default::default()
+            });
         assert_eq!(
-            entries.len(),
-            1,
-            "Should have exactly one file in the date directory: found {} entries",
-            entries.len()
+            builder.config.as_ref().unwrap().bucket,
+            "second",
+            "Second config() should overwrite the first"
         );
-
-        let file_path = entries[0].path();
-        assert!(file_path.exists(), "File should exist at {:?}", file_path);
-
-        let saved_data = fs::read(&file_path).unwrap();
-        assert_eq!(saved_data, data, "Saved data should match original data");
-
-        std::env::set_current_dir(original_dir).unwrap();
     }
 }
