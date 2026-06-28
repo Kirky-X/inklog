@@ -12,7 +12,7 @@
 //! `InklogContainer` 是应用级依赖注入容器，统一管理所有底层依赖实例：
 //!
 //! - **Cache**: 缓存服务（OxCacheAdapter）
-//! - **Config**: 配置服务（ConfersAdapter）
+//! - **Config**: 配置服务（InklogConfigAdapter）
 //! - **Database**: 数据库服务（DbNexusAdapter，需要 `dbnexus` feature）
 //!
 //! ## 设计原则
@@ -62,14 +62,14 @@
 //!
 //! ```ignore
 //! use inklog::InklogContainer;
-//! use inklog::infrastructure::{OxCacheAdapter, ConfersAdapter};
+//! use inklog::infrastructure::{OxCacheAdapter, InklogConfigAdapter};
 //! use std::sync::Arc;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let container = InklogContainer::builder()
 //!         .cache(Arc::new(OxCacheAdapter::new()?))
-//!         .config(Arc::new(ConfersAdapter::new()?))
+//!         .config(Arc::new(InklogConfigAdapter::new()?))
 //!         .build()?;
 //!     
 //!     let logger = container.create_logger().await?;
@@ -84,7 +84,7 @@ use crate::domain::core::manager::{LoggerDependencies, LoggerManager};
 use crate::integrations::infra::cache::MockCache;
 #[cfg(feature = "dbnexus")]
 use crate::integrations::infra::Database;
-use crate::integrations::infra::{Cache, ConfersAdapter, Config, OxCacheAdapter};
+use crate::integrations::infra::{Cache, Config, InklogConfigAdapter, OxCacheAdapter};
 use crate::InklogConfig;
 use crate::InklogError;
 
@@ -142,7 +142,7 @@ impl InklogContainer {
     /// 使用默认配置创建所有依赖实例：
     ///
     /// - **Cache**: `OxCacheAdapter::new()`
-    /// - **Config**: `ConfersAdapter::new()`（从搜索路径加载配置）
+    /// - **Config**: `InklogConfigAdapter::new()`（从搜索路径加载配置）
     /// - **Database**: `None`（未配置）
     ///
     /// # 返回
@@ -163,7 +163,7 @@ impl InklogContainer {
     /// ```
     pub fn new() -> Result<Self, InklogError> {
         let cache = Arc::new(OxCacheAdapter::new()?);
-        let config = Arc::new(ConfersAdapter::new()?);
+        let config = Arc::new(InklogConfigAdapter::new()?);
 
         Ok(Self {
             cache,
@@ -195,7 +195,7 @@ impl InklogContainer {
     /// ```
     pub fn from_config(config: InklogConfig) -> Result<Self, InklogError> {
         let cache = Arc::new(OxCacheAdapter::new()?);
-        let config = Arc::new(ConfersAdapter::from_config(config));
+        let config = Arc::new(InklogConfigAdapter::from_config(config));
 
         Ok(Self {
             cache,
@@ -213,12 +213,12 @@ impl InklogContainer {
     ///
     /// ```ignore
     /// use inklog::InklogContainer;
-    /// use inklog::infrastructure::{OxCacheAdapter, ConfersAdapter};
+    /// use inklog::infrastructure::{OxCacheAdapter, InklogConfigAdapter};
     /// use std::sync::Arc;
     ///
     /// let container = InklogContainer::builder()
     ///     .cache(Arc::new(OxCacheAdapter::new()?))
-    ///     .config(Arc::new(ConfersAdapter::new()?))
+    ///     .config(Arc::new(InklogConfigAdapter::new()?))
     ///     .build()?;
     /// ```
     pub fn builder() -> InklogContainerBuilder {
@@ -358,12 +358,12 @@ impl std::fmt::Debug for InklogContainer {
 ///
 /// ```ignore
 /// use inklog::InklogContainer;
-/// use inklog::infrastructure::{OxCacheAdapter, ConfersAdapter};
+/// use inklog::infrastructure::{OxCacheAdapter, InklogConfigAdapter};
 /// use std::sync::Arc;
 ///
 /// let container = InklogContainer::builder()
 ///     .cache(Arc::new(OxCacheAdapter::new()?))
-///     .config(Arc::new(ConfersAdapter::new()?))
+///     .config(Arc::new(InklogConfigAdapter::new()?))
 ///     .build()?;
 /// ```
 #[derive(Default)]
@@ -416,7 +416,7 @@ impl InklogContainerBuilder {
     /// 未设置的依赖将使用默认实现：
     ///
     /// - **Cache**: `OxCacheAdapter::new()`
-    /// - **Config**: `ConfersAdapter::new()`
+    /// - **Config**: `InklogConfigAdapter::new()`
     /// - **Database**: `None`
     ///
     /// # 返回
@@ -428,7 +428,7 @@ impl InklogContainerBuilder {
         });
 
         let config = self.config.unwrap_or_else(|| {
-            Arc::new(ConfersAdapter::new().expect("Failed to create default config"))
+            Arc::new(InklogConfigAdapter::new().expect("Failed to create default config"))
         });
 
         Ok(InklogContainer {
@@ -447,7 +447,7 @@ impl InklogContainerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integrations::infra::{ConfersAdapter, OxCacheAdapter};
+    use crate::integrations::infra::{InklogConfigAdapter, OxCacheAdapter};
     use serial_test::serial;
 
     #[test]
@@ -483,7 +483,7 @@ mod tests {
             .cache(Arc::new(
                 OxCacheAdapter::new().expect("Failed to create cache"),
             ))
-            .config(Arc::new(ConfersAdapter::from_config(
+            .config(Arc::new(InklogConfigAdapter::from_config(
                 InklogConfig::default(),
             )))
             .build();
@@ -497,7 +497,7 @@ mod tests {
             .cache(Arc::new(
                 OxCacheAdapter::new().expect("Failed to create cache"),
             ))
-            .config(Arc::new(ConfersAdapter::from_config(
+            .config(Arc::new(InklogConfigAdapter::from_config(
                 InklogConfig::default(),
             )))
             .build()
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn test_container_config_shared() {
         let config = InklogConfig::default();
-        let adapter = ConfersAdapter::from_config(config);
+        let adapter = InklogConfigAdapter::from_config(config);
 
         let container = InklogContainer::builder()
             .cache(Arc::new(
@@ -548,7 +548,7 @@ mod tests {
             .cache(Arc::new(
                 OxCacheAdapter::new().expect("Failed to create cache"),
             ))
-            .config(Arc::new(ConfersAdapter::from_config(
+            .config(Arc::new(InklogConfigAdapter::from_config(
                 InklogConfig::default(),
             )))
             .build()
@@ -564,7 +564,7 @@ mod tests {
             .cache(Arc::new(
                 OxCacheAdapter::new().expect("Failed to create cache"),
             ))
-            .config(Arc::new(ConfersAdapter::from_config(
+            .config(Arc::new(InklogConfigAdapter::from_config(
                 InklogConfig::default(),
             )))
             .build()
@@ -581,7 +581,7 @@ mod tests {
         // 验证 MockCache 可以用于 DI 容器
         let container = InklogContainer::builder()
             .cache(Arc::new(MockCache::new()))
-            .config(Arc::new(ConfersAdapter::from_config(
+            .config(Arc::new(InklogConfigAdapter::from_config(
                 InklogConfig::default(),
             )))
             .build();
@@ -594,7 +594,7 @@ mod tests {
         // 验证 MockCache 在容器中的操作
         let container = InklogContainer::builder()
             .cache(Arc::new(MockCache::new()))
-            .config(Arc::new(ConfersAdapter::from_config(
+            .config(Arc::new(InklogConfigAdapter::from_config(
                 InklogConfig::default(),
             )))
             .build()
@@ -616,5 +616,24 @@ mod tests {
         // 测试删除
         assert!(cache.delete("test_key").await);
         assert!(!cache.exists("test_key").await);
+    }
+
+    #[test]
+    fn test_container_builder_new() {
+        // 直接调用 InklogContainerBuilder::new()（覆盖 new 方法体）
+        let builder = InklogContainerBuilder::new();
+        let container = builder.build();
+        assert!(container.is_ok());
+    }
+
+    #[test]
+    fn test_container_builder_new_equals_default() {
+        // new() 内部调用 default()，两者应等价
+        let from_new = InklogContainerBuilder::new();
+        let from_default = InklogContainerBuilder::default();
+
+        // 两者都能成功构建
+        assert!(from_new.build().is_ok());
+        assert!(from_default.build().is_ok());
     }
 }

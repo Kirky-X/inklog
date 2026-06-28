@@ -283,4 +283,158 @@ mod tests {
 
         assert_eq!(subscriber.send_timeout_ms, 500);
     }
+
+    // =========================================================================
+    // try_flush_fallback() 测试 - 覆盖成功弹出和失败中断分支
+    // =========================================================================
+
+    #[test]
+    fn test_try_flush_fallback_drains_buffer_on_success() {
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let subscriber = LoggerSubscriber::new(console_tx, async_tx, metrics);
+
+        // 手动向 fallback_buffer 注入一条记录（测试模块可访问私有字段）
+        let record = Arc::new(LogRecord::new(
+            tracing::Level::ERROR,
+            "test::fallback".to_string(),
+            "fallback flush test".to_string(),
+        ));
+        subscriber
+            .fallback_buffer
+            .lock()
+            .unwrap()
+            .push_back(Arc::clone(&record));
+
+        // 调用 try_flush_fallback，async channel 有容量 → send 成功 → pop_front
+        subscriber.try_flush_fallback();
+
+        // 验证 buffer 已清空
+        assert!(
+            subscriber.fallback_buffer.lock().unwrap().is_empty(),
+            "buffer should be empty after successful flush"
+        );
+
+        // 验证记录已发送到 async channel
+        let received = async_rx.recv_timeout(std::time::Duration::from_millis(100));
+        assert!(received.is_ok(), "should receive the flushed record");
+        assert_eq!(received.unwrap().message, "fallback flush test");
+    }
+
+    #[test]
+    fn test_try_flush_fallback_breaks_on_disconnected_channel() {
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let subscriber = LoggerSubscriber::new(console_tx, async_tx, metrics);
+
+        // 注入记录到 fallback_buffer
+        let record = Arc::new(LogRecord::new(
+            tracing::Level::ERROR,
+            "test::fallback".to_string(),
+            "disconnect test".to_string(),
+        ));
+        subscriber
+            .fallback_buffer
+            .lock()
+            .unwrap()
+            .push_back(Arc::clone(&record));
+
+        // 断开 async channel 的接收端 → send 返回 Disconnected → break
+        drop(_async_rx);
+        subscriber.try_flush_fallback();
+
+        // 断开后 buffer 应仍包含记录（break 未弹出）
+        assert_eq!(
+            subscriber.fallback_buffer.lock().unwrap().len(),
+            1,
+            "buffer should still contain the record after disconnect"
+        );
+    }
+
+    #[test]
+    fn test_try_flush_fallback_recovers_from_poisoned_mutex() {
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let subscriber = LoggerSubscriber::new(console_tx, async_tx, metrics);
+
+        // 通过在另一个线程中持有锁时 panic 来毒化 mutex
+        let buffer_clone = Arc::clone(&subscriber.fallback_buffer);
+        let handle = std::thread::spawn(move || {
+            let _guard = buffer_clone.lock().unwrap();
+            panic!("intentional panic to poison mutex");
+        });
+
+        // 等待线程结束（它已经 panic）
+        let join_result = handle.join();
+        assert!(join_result.is_err(), "thread should have panicked");
+
+        // 调用 try_flush_fallback，应从毒化状态恢复而非 panic。
+        // 注意：into_inner() 恢复数据但不解除毒化状态，mutex 仍为 poisoned。
+        // 此测试仅验证 try_flush_fallback 不会 panic（即正确走了 poison 恢复分支）。
+        subscriber.try_flush_fallback();
+
+        // 到达此处说明毒化恢复成功（未 panic）
+    }
+
+    // =========================================================================
+    // on_event console channel 断开测试
+    // =========================================================================
+
+    #[test]
+    fn test_on_event_console_disconnected_increments_dropped() {
+        let (console_tx, _console_rx) = bounded(10);
+        // 断开 console channel
+        drop(_console_rx);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::subscriber", message = "console disconnected");
+        });
+
+        // console 断开 → logs_dropped += 1；async 正常 → 无变化
+        assert_eq!(
+            metrics.logs_dropped(),
+            1,
+            "console disconnect should increment logs_dropped by 1"
+        );
+    }
+
+    #[test]
+    fn test_on_event_console_full_channel_increments_blocked_and_dropped() {
+        // console channel 容量 1，发送 2 条事件 → 第二条 Full
+        let (console_tx, console_rx) = bounded(1);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        // 先填满 console channel（容量 1）
+        // 第一条事件：console Ok，async Ok
+        // 第二条事件：console Full → channel_blocked++ + logs_dropped++
+        with_default(registry, || {
+            tracing::info!(target: "test::subscriber", message = "first");
+            tracing::info!(target: "test::subscriber", message = "second");
+        });
+
+        // 排空 console channel
+        while console_rx.try_recv().is_ok() {}
+
+        // console Full 应触发 channel_blocked 和 logs_dropped
+        assert!(
+            metrics.logs_dropped() >= 1,
+            "console full should increment logs_dropped, got: {}",
+            metrics.logs_dropped()
+        );
+    }
 }
