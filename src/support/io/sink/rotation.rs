@@ -393,4 +393,225 @@ mod tests {
         assert!(path.to_str().unwrap().contains("app_"));
         assert!(path.to_str().unwrap().ends_with(".log"));
     }
+
+    #[test]
+    fn test_size_based_rotation_name() {
+        let strategy = SizeBasedRotation::new(1000);
+        assert_eq!(strategy.name(), "size_based");
+    }
+
+    #[test]
+    fn test_size_based_rotation_clone_boxed() {
+        let strategy = SizeBasedRotation::new(1000);
+        let cloned = strategy.clone_boxed();
+        assert_eq!(cloned.name(), "size_based");
+
+        let context = create_context(1500, 0);
+        let result = cloned.should_rotate(&context);
+        assert!(result.should_rotate);
+    }
+
+    #[test]
+    fn test_time_based_rotation_name() {
+        let strategy = TimeBasedRotation::from_interval_string("daily").unwrap();
+        assert_eq!(strategy.name(), "time_based");
+    }
+
+    #[test]
+    fn test_time_based_rotation_clone_boxed() {
+        let strategy = TimeBasedRotation::from_interval_string("hourly").unwrap();
+        let cloned = strategy.clone_boxed();
+        assert_eq!(cloned.name(), "time_based");
+
+        let context = create_context(100, 7200);
+        let result = cloned.should_rotate(&context);
+        assert!(result.should_rotate);
+    }
+
+    #[test]
+    fn test_time_based_rotation_from_interval_string_weekly() {
+        let strategy = TimeBasedRotation::from_interval_string("weekly").unwrap();
+        assert_eq!(strategy.interval_secs(), 604800);
+    }
+
+    #[test]
+    fn test_time_based_rotation_from_interval_string_monthly() {
+        let strategy = TimeBasedRotation::from_interval_string("monthly").unwrap();
+        assert_eq!(strategy.interval_secs(), 2592000);
+    }
+
+    #[test]
+    fn test_time_based_rotation_from_interval_string_error() {
+        let result = TimeBasedRotation::from_interval_string("invalid");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("Unknown rotation interval"));
+        assert!(err_msg.contains("invalid"));
+    }
+
+    #[test]
+    fn test_time_based_rotation_interval_secs() {
+        let strategy = TimeBasedRotation::new(1800, "custom".to_string());
+        assert_eq!(strategy.interval_secs(), 1800);
+    }
+
+    #[test]
+    fn test_time_based_rotation_from_interval_string_hourly() {
+        let strategy = TimeBasedRotation::from_interval_string("hourly").unwrap();
+        assert_eq!(strategy.interval_secs(), 3600);
+    }
+
+    #[test]
+    fn test_time_based_rotation_should_rotate_reason() {
+        let strategy = TimeBasedRotation::from_interval_string("daily").unwrap();
+        let context = create_context(100, 86400);
+        let result = strategy.should_rotate(&context);
+        assert!(result.should_rotate);
+        assert!(result.reason.unwrap().contains("daily"));
+        assert!(result.new_path.is_some());
+    }
+
+    #[test]
+    fn test_time_based_rotation_should_not_rotate() {
+        let strategy = TimeBasedRotation::from_interval_string("daily").unwrap();
+        let context = create_context(100, 3600);
+        let result = strategy.should_rotate(&context);
+        assert!(!result.should_rotate);
+        assert!(result.reason.is_none());
+        assert!(result.new_path.is_none());
+    }
+
+    #[test]
+    fn test_composite_rotation_name() {
+        let composite = CompositeRotation::new(vec![]);
+        assert_eq!(composite.name(), "composite");
+    }
+
+    #[test]
+    fn test_composite_rotation_clone_boxed() {
+        let mut composite = CompositeRotation::new(vec![]);
+        composite.add(SizeBasedRotation::new(1000));
+
+        let cloned = composite.clone_boxed();
+        assert_eq!(cloned.name(), "composite");
+
+        let context = create_context(1500, 0);
+        let result = cloned.should_rotate(&context);
+        assert!(result.should_rotate);
+    }
+
+    #[test]
+    fn test_composite_rotation_clone_boxed_with_multiple_strategies() {
+        let mut composite = CompositeRotation::new(vec![]);
+        composite.add(SizeBasedRotation::new(1000));
+        composite.add(TimeBasedRotation::from_interval_string("daily").unwrap());
+
+        let cloned = composite.clone_boxed();
+        let context = create_context(1500, 0);
+        let result = cloned.should_rotate(&context);
+        assert!(result.should_rotate);
+    }
+
+    #[test]
+    fn test_composite_rotation_debug() {
+        let mut composite = CompositeRotation::new(vec![]);
+        composite.add(SizeBasedRotation::new(1000));
+        composite.add(TimeBasedRotation::from_interval_string("daily").unwrap());
+
+        let debug_str = format!("{:?}", composite);
+        assert!(debug_str.contains("CompositeRotation"));
+        assert!(debug_str.contains("strategies_count"));
+        assert!(debug_str.contains("2"));
+    }
+
+    #[test]
+    fn test_composite_rotation_generate_next_path_empty() {
+        let composite = CompositeRotation::new(vec![]);
+        let context = create_context(100, 0);
+        let base_path = PathBuf::from("/var/log/app.log");
+        let path = composite.generate_next_path(&base_path, &context);
+        assert_eq!(path, base_path);
+    }
+
+    #[test]
+    fn test_composite_rotation_generate_next_path_with_strategy() {
+        let mut composite = CompositeRotation::new(vec![]);
+        composite.add(SizeBasedRotation::new(1000));
+        let context = create_context(100, 0);
+        let base_path = PathBuf::from("/var/log/app.log");
+        let path = composite.generate_next_path(&base_path, &context);
+        assert!(path.to_str().unwrap().contains("app_"));
+        assert!(path.to_str().unwrap().ends_with(".log"));
+    }
+
+    #[test]
+    fn test_composite_rotation_should_not_rotate_empty() {
+        let composite = CompositeRotation::new(vec![]);
+        let context = create_context(1500, 86400);
+        let result = composite.should_rotate(&context);
+        assert!(!result.should_rotate);
+    }
+
+    #[test]
+    fn test_parse_size_without_suffix() {
+        assert_eq!(parse_size("1024").unwrap(), 1024);
+        assert_eq!(parse_size("512").unwrap(), 512);
+    }
+
+    #[test]
+    fn test_parse_size_with_whitespace() {
+        assert_eq!(parse_size("  100MB  ").unwrap(), 100 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_parse_size_invalid_number() {
+        let result = parse_size("abcMB");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid size number"));
+    }
+
+    #[test]
+    fn test_size_based_rotation_should_not_rotate() {
+        let strategy = SizeBasedRotation::new(1000);
+        let context = create_context(500, 0);
+        let result = strategy.should_rotate(&context);
+        assert!(!result.should_rotate);
+        assert!(result.reason.is_none());
+        assert!(result.new_path.is_none());
+    }
+
+    #[test]
+    fn test_size_based_rotation_from_size_string_kb() {
+        let strategy = SizeBasedRotation::from_size_string("500KB").unwrap();
+        assert_eq!(strategy.max_size(), 500 * 1024);
+    }
+
+    #[test]
+    fn test_size_based_rotation_from_size_string_b() {
+        let strategy = SizeBasedRotation::from_size_string("100B").unwrap();
+        assert_eq!(strategy.max_size(), 100);
+    }
+
+    #[test]
+    fn test_size_based_rotation_from_size_string_invalid() {
+        let result = SizeBasedRotation::from_size_string("invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rotation_result_default() {
+        let result = RotationResult::default();
+        assert!(!result.should_rotate);
+        assert!(result.reason.is_none());
+        assert!(result.new_path.is_none());
+    }
+
+    #[test]
+    fn test_generate_next_path_no_extension() {
+        let strategy = SizeBasedRotation::new(1000);
+        let context = create_context(100, 0);
+        let path = strategy.generate_next_path(&PathBuf::from("/var/log/app"), &context);
+        assert!(path.to_str().unwrap().contains("app_"));
+        assert!(path.to_str().unwrap().ends_with(".log"));
+    }
 }

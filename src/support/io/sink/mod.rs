@@ -3,7 +3,6 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-pub mod async_file;
 pub mod circuit_breaker;
 pub mod compression;
 pub mod console;
@@ -60,5 +59,53 @@ pub trait LogSink: Send + Sync {
     /// Check if there is sufficient disk space for writing.
     fn check_disk_space(&self) -> Result<bool, InklogError> {
         Ok(true) // 默认返回有足够空间
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test struct that uses default trait method implementations
+    struct DummySink;
+
+    impl LogSink for DummySink {
+        fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            Ok(())
+        }
+        fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+        fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_default_is_healthy() {
+        let sink = DummySink;
+        assert!(sink.is_healthy());
+    }
+
+    #[test]
+    fn test_default_start_rotation_timer() {
+        let sink = DummySink;
+        // Just verify it doesn't panic
+        sink.start_rotation_timer();
+    }
+
+    #[test]
+    fn test_default_stop_rotation_timer() {
+        let sink = DummySink;
+        // Just verify it doesn't panic
+        sink.stop_rotation_timer();
+    }
+
+    #[test]
+    fn test_default_check_disk_space() {
+        let sink = DummySink;
+        let result = sink.check_disk_space();
+        assert!(result.is_ok());
+        assert!(result.unwrap());
     }
 }

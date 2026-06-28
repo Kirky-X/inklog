@@ -559,28 +559,6 @@ impl FileSink {
         self.inner.write().timer_handle = Some(timer_handle);
     }
 
-    /// 停止轮转定时器
-    ///
-    /// 在 sink 关闭时调用，确保定时器线程正确停止。
-    /// 此方法是优雅关闭流程的一部分。
-    ///
-    /// # Notes
-    ///
-    /// - 设置 shutdown_flag 以信号通知线程停止
-    /// - 等待 timer_handle 线程完成
-    /// - 清理 rotation_timer 状态
-    #[allow(dead_code)]
-    fn stop_rotation_timer(&self) {
-        // Signal shutdown to the timer thread
-        self.shutdown_flag.store(true, Ordering::Relaxed);
-
-        let mut inner = self.inner.write();
-        if let Some(handle) = inner.timer_handle.take() {
-            let _ = handle.join();
-        }
-        inner.rotation_timer = None;
-    }
-
     /// 批量刷新缓冲区到文件
     fn flush_batch_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
         if inner.batch_buffer.is_empty() {
@@ -1092,7 +1070,10 @@ mod tests {
     use super::*;
     use crate::FileSinkConfig;
     use crate::LogRecord;
+    use base64::Engine;
+    use chrono::Timelike;
     use chrono::Utc;
+    use serial_test::serial;
     use std::collections::HashMap;
     use tempfile::tempdir;
 
@@ -1463,5 +1444,962 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 生成测试用的 32 字节加密密钥（base64 编码），用于加密相关测试
+    #[allow(dead_code)]
+    fn make_test_key() -> (Vec<u8>, String) {
+        let key_bytes: Vec<u8> = vec![
+            0x3a, 0x7b, 0x9c, 0x1d, 0x4e, 0x8f, 0x2c, 0x6b, 0x9a, 0x3d, 0x8e, 0x1f, 0x4a, 0x7d,
+            0x2e, 0x6f, 0x9b, 0x3c, 0x8d, 0x1e, 0x4b, 0x6a, 0x2b, 0x6c, 0x9f, 0x3a, 0x8b, 0x1c,
+            0x4d, 0x7e, 0x2f, 0x6a,
+        ];
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key_bytes);
+        (key_bytes, key_b64)
+    }
+
+    // ==================== parse_size 边界测试 ====================
+
+    #[test]
+    fn test_parse_size_tb() {
+        assert_eq!(FileSink::parse_size("1TB"), Some(1024 * 1024 * 1024 * 1024));
+        assert_eq!(
+            FileSink::parse_size("2TB"),
+            Some(2 * 1024 * 1024 * 1024 * 1024)
+        );
+    }
+
+    #[test]
+    fn test_parse_size_decimal_rejected() {
+        // 小数应被拒绝（parse::<u64> 不支持小数）
+        assert_eq!(FileSink::parse_size("1.5MB"), None);
+        assert_eq!(FileSink::parse_size("0.5"), None);
+    }
+
+    #[test]
+    fn test_parse_size_negative_rejected() {
+        // 负数应被拒绝
+        assert_eq!(FileSink::parse_size("-100"), None);
+    }
+
+    // ==================== calculate_next_rotation_time 测试 ====================
+
+    #[test]
+    fn test_calculate_next_rotation_time_hourly() {
+        let now = Utc::now();
+        let result = FileSink::calculate_next_rotation_time("hourly");
+        assert!(result.is_some());
+        let next = result.unwrap();
+        assert!(next > now);
+        // hourly 应该是大约 1 小时后（允许 1 分钟误差）
+        let diff = next - now;
+        assert!(
+            diff.num_minutes() >= 59 && diff.num_minutes() <= 61,
+            "hourly rotation should be ~60 minutes away, got {}",
+            diff.num_minutes()
+        );
+    }
+
+    #[test]
+    fn test_calculate_next_rotation_time_daily() {
+        let now = Utc::now();
+        let result = FileSink::calculate_next_rotation_time("daily");
+        assert!(result.is_some());
+        let next = result.unwrap();
+        // daily 应该是明天的 00:00:00
+        assert_eq!(next.hour(), 0);
+        assert_eq!(next.minute(), 0);
+        assert_eq!(next.second(), 0);
+        assert!(next > now);
+    }
+
+    #[test]
+    fn test_calculate_next_rotation_time_weekly() {
+        let now = Utc::now();
+        let result = FileSink::calculate_next_rotation_time("weekly");
+        assert!(result.is_some());
+        let next = result.unwrap();
+        assert_eq!(next.hour(), 0);
+        assert_eq!(next.minute(), 0);
+        assert_eq!(next.second(), 0);
+        assert!(next > now);
+    }
+
+    #[test]
+    fn test_calculate_next_rotation_time_monthly() {
+        let result = FileSink::calculate_next_rotation_time("monthly");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_calculate_next_rotation_time_invalid_defaults_to_daily() {
+        let result = FileSink::calculate_next_rotation_time("invalid_interval");
+        assert!(result.is_some());
+        // 无效配置应回退到 daily 行为
+        let next = result.unwrap();
+        assert_eq!(next.hour(), 0);
+        assert_eq!(next.minute(), 0);
+        assert_eq!(next.second(), 0);
+    }
+
+    // ==================== update_next_rotation_time_inner 测试 ====================
+
+    #[test]
+    fn test_update_next_rotation_time_inner_sets_value() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            rotation_time: "hourly".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        inner.next_rotation_time = None;
+        sink.update_next_rotation_time_inner(&mut inner);
+        assert!(inner.next_rotation_time.is_some());
+    }
+
+    // ==================== should_rotate_by_time_inner 测试 ====================
+
+    #[test]
+    fn test_should_rotate_by_time_inner_no_next_time() {
+        // next_rotation_time 为 None，last_rotation_date 也为 None → 不轮转
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            rotation_time: "daily".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let inner = sink.inner.read();
+        let result = sink.should_rotate_by_time_inner(&inner);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_should_rotate_by_time_inner_past_next_time() {
+        // next_rotation_time 在过去 → 应轮转
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            rotation_time: "daily".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        inner.next_rotation_time = Some(Utc::now() - chrono::Duration::hours(1));
+        let result = sink.should_rotate_by_time_inner(&inner);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_should_rotate_by_time_inner_future_next_time() {
+        // next_rotation_time 在未来 → 不轮转
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            rotation_time: "daily".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::hours(1));
+        let result = sink.should_rotate_by_time_inner(&inner);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_should_rotate_by_time_inner_daily_date_change() {
+        // daily + last_rotation_date 为昨天 → 应轮转（即便 next_time 在未来）
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            rotation_time: "daily".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let yesterday = Utc::now().date_naive().num_days_from_ce() - 1;
+        inner.last_rotation_date = Some(yesterday);
+        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::days(1));
+        let result = sink.should_rotate_by_time_inner(&inner);
+        assert!(result);
+    }
+
+    // ==================== open_file_inner 测试 ====================
+
+    #[test]
+    fn test_open_file_inner_creates_nested_directory() {
+        let temp_dir = tempdir().unwrap();
+        let nested = temp_dir.path().join("nested").join("deep");
+        let log_path = nested.join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.open_file_inner(&mut inner);
+        assert!(result.is_ok());
+        assert!(inner.current_file.is_some());
+        assert!(log_path.exists());
+    }
+
+    #[test]
+    fn test_open_file_inner_detects_existing_size() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let existing = "existing content\n";
+        std::fs::write(&log_path, existing).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.open_file_inner(&mut inner);
+        assert!(result.is_ok());
+        // current_size 应反映已有文件大小
+        assert_eq!(inner.current_size, existing.len() as u64);
+    }
+
+    // ==================== flush_batch_inner 测试 ====================
+
+    #[test]
+    fn test_flush_batch_inner_empty_buffer_noop() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+        let result = sink.flush_batch_inner(&mut inner);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_flush_batch_inner_writes_records_to_file() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+
+        inner.batch_buffer.push(create_test_record("Message 1"));
+        inner.batch_buffer.push(create_test_record("Message 2"));
+
+        let result = sink.flush_batch_inner(&mut inner);
+        assert!(result.is_ok());
+        assert!(inner.batch_buffer.is_empty());
+
+        drop(inner);
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("Message 1"));
+        assert!(content.contains("Message 2"));
+    }
+
+    #[test]
+    fn test_flush_batch_inner_increments_current_size() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+
+        let initial_size = inner.current_size;
+        inner.batch_buffer.push(create_test_record("Test message"));
+        sink.flush_batch_inner(&mut inner).unwrap();
+        assert!(inner.current_size > initial_size);
+    }
+
+    // ==================== check_rotation_inner 测试 ====================
+
+    #[test]
+    fn test_check_rotation_inner_no_rotation_needed() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            max_size: "1MB".to_string(),
+            rotation_time: "daily".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+        inner.current_size = 100; // 远小于 1MB
+        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::days(1));
+
+        let result = sink.check_rotation_inner(&mut inner);
+        assert!(result.is_ok());
+        assert_eq!(inner.sequence, 0); // 未轮转
+    }
+
+    #[test]
+    fn test_check_rotation_inner_by_size_triggers_rotation() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            max_size: "100".to_string(), // 极小限制
+            rotation_time: "daily".to_string(),
+            compress: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+        // 文件需有内容才能被 rotate 重命名
+        std::fs::write(sink.config.path.clone(), "x").unwrap();
+        inner.current_size = 200; // 超过 100
+        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::days(1));
+
+        let result = sink.check_rotation_inner(&mut inner);
+        assert!(result.is_ok());
+        assert_eq!(inner.sequence, 1); // 已轮转
+    }
+
+    // ==================== rotate_inner 测试 ====================
+
+    #[test]
+    fn test_rotate_inner_renames_original_file() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            compress: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+        std::fs::write(&log_path, "test content").unwrap();
+
+        let result = sink.rotate_inner(&mut inner);
+        assert!(result.is_ok());
+        // 轮转后原路径应被重新创建（open_file_inner 在 rotate 末尾被调用）
+        assert!(log_path.exists());
+        // 目录下应至少有 2 个文件（重命名的旧文件 + 新文件）
+        let count = std::fs::read_dir(temp_dir.path()).unwrap().count();
+        assert!(count >= 2);
+    }
+
+    #[test]
+    fn test_rotate_inner_increments_sequence() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            compress: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+
+        let initial = inner.sequence;
+        sink.rotate_inner(&mut inner).unwrap();
+        assert_eq!(inner.sequence, initial + 1);
+        sink.rotate_inner(&mut inner).unwrap();
+        assert_eq!(inner.sequence, initial + 2);
+    }
+
+    #[test]
+    fn test_rotate_inner_resets_current_size() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            compress: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+        inner.current_size = 5000;
+
+        sink.rotate_inner(&mut inner).unwrap();
+        assert_eq!(inner.current_size, 0);
+    }
+
+    #[test]
+    fn test_rotate_inner_updates_next_rotation_time() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            rotation_time: "hourly".to_string(),
+            compress: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+        inner.next_rotation_time = None;
+
+        sink.rotate_inner(&mut inner).unwrap();
+        // 轮转应更新 next_rotation_time
+        assert!(inner.next_rotation_time.is_some());
+    }
+
+    // ==================== compress_file 测试 ====================
+
+    #[test]
+    fn test_compress_file_roundtrip() {
+        let temp_dir = tempdir().unwrap();
+        let original_path = temp_dir.path().join("test.log");
+        let original_content = b"This is test content for compression. Hello World!";
+        std::fs::write(&original_path, original_content).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            compress: true,
+            compression_level: 3,
+            encrypt: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.compress_file(&original_path);
+        assert!(result.is_ok());
+        let compressed_path = result.unwrap();
+        assert_eq!(compressed_path.extension().unwrap(), "zst");
+        assert!(compressed_path.exists());
+        // 原文件应被删除
+        assert!(!original_path.exists());
+
+        // 解压验证内容一致
+        let compressed_file = std::fs::File::open(&compressed_path).unwrap();
+        let mut decoder = zstd::stream::Decoder::new(compressed_file).unwrap();
+        let mut decompressed = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
+        assert_eq!(decompressed, original_content);
+    }
+
+    #[test]
+    fn test_compress_file_nonexistent_input_returns_error() {
+        let temp_dir = tempdir().unwrap();
+        let nonexistent = temp_dir.path().join("nonexistent.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            compress: true,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.compress_file(&nonexistent);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn test_compress_file_with_encryption_roundtrip() {
+        let temp_dir = tempdir().unwrap();
+        let original_path = temp_dir.path().join("test.log");
+        let original_content = b"Sensitive log content that needs encryption";
+        std::fs::write(&original_path, original_content).unwrap();
+
+        let (key_bytes, key_b64) = make_test_key();
+        std::env::set_var("TEST_COMPRESS_ENC_KEY", &key_b64);
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            compress: true,
+            compression_level: 3,
+            encrypt: true,
+            encryption_key_env: Some("TEST_COMPRESS_ENC_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.compress_file(&original_path);
+        assert!(result.is_ok(), "compress_file failed: {:?}", result.err());
+        let encrypted_path = result.unwrap();
+        assert_eq!(encrypted_path.extension().unwrap(), "enc");
+        assert!(encrypted_path.exists());
+
+        // 解密：前 12 字节是 nonce，其余是 ciphertext
+        let encrypted_data = std::fs::read(&encrypted_path).unwrap();
+        assert!(encrypted_data.len() > 12);
+        use aes_gcm::{Aes256Gcm, Nonce};
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
+        let nonce = Nonce::from_slice(&encrypted_data[..12]);
+        let ciphertext = &encrypted_data[12..];
+        let decrypted_compressed = cipher.decrypt(nonce, ciphertext).unwrap();
+
+        // 解压
+        let mut decoder = zstd::stream::Decoder::new(&decrypted_compressed[..]).unwrap();
+        let mut decompressed = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
+        assert_eq!(decompressed, original_content);
+
+        std::env::remove_var("TEST_COMPRESS_ENC_KEY");
+    }
+
+    // ==================== encrypt_file 测试 ====================
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_roundtrip() {
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("test.log");
+        let output_path = temp_dir.path().join("test.log.enc");
+        let original_content = b"Secret log content for encryption test";
+        std::fs::write(&input_path, original_content).unwrap();
+
+        let (key_bytes, key_b64) = make_test_key();
+        std::env::set_var("TEST_ENC_KEY_RT", &key_b64);
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_ENC_KEY_RT".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(result.is_ok(), "encrypt_file failed: {:?}", result.err());
+        assert!(output_path.exists());
+
+        // 解密验证
+        let encrypted_data = std::fs::read(&output_path).unwrap();
+        assert!(encrypted_data.len() > 12);
+        use aes_gcm::{Aes256Gcm, Nonce};
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
+        let nonce = Nonce::from_slice(&encrypted_data[..12]);
+        let ciphertext = &encrypted_data[12..];
+        let decrypted = cipher.decrypt(nonce, ciphertext).unwrap();
+        assert_eq!(decrypted, original_content);
+
+        std::env::remove_var("TEST_ENC_KEY_RT");
+    }
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_missing_key_returns_error() {
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("input.log");
+        let output_path = temp_dir.path().join("output.log.enc");
+        std::fs::write(&input_path, "content").unwrap();
+        std::env::remove_var("TEST_MISSING_ENC_KEY_VAR");
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_MISSING_ENC_KEY_VAR".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_nonexistent_input_returns_error() {
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("nonexistent.log");
+        let output_path = temp_dir.path().join("output.log.enc");
+
+        let (_key_bytes, key_b64) = make_test_key();
+        std::env::set_var("TEST_ENC_KEY_NI", &key_b64);
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_ENC_KEY_NI".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(result.is_err());
+        std::env::remove_var("TEST_ENC_KEY_NI");
+    }
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_invalid_base64_key_returns_error() {
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("input.log");
+        let output_path = temp_dir.path().join("output.log.enc");
+        std::fs::write(&input_path, "content").unwrap();
+        // 长度 >= 16 但不是有效 base64
+        std::env::set_var("TEST_INVALID_B64_KEY", "not_valid_base64!!!*@$");
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_INVALID_B64_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(result.is_err());
+        std::env::remove_var("TEST_INVALID_B64_KEY");
+    }
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_wrong_length_key_returns_error() {
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("input.log");
+        let output_path = temp_dir.path().join("output.log.enc");
+        std::fs::write(&input_path, "content").unwrap();
+        // 解码后 16 字节（非 32），但 base64 字符串长度 >= 16
+        let short_key = base64::engine::general_purpose::STANDARD.encode(b"1234567890123456");
+        std::env::set_var("TEST_WRONG_LEN_KEY", &short_key);
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_WRONG_LEN_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("32 bytes"));
+        std::env::remove_var("TEST_WRONG_LEN_KEY");
+    }
+
+    // ==================== perform_cleanup 测试 ====================
+
+    #[test]
+    fn test_perform_cleanup_removes_excess_by_total_size() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+        // 创建 5 个文件，每个 1KB，总大小 5KB 超过 1KB 限制
+        for i in 0..5 {
+            let p = dir.path().join(format!("test_{}.log", i));
+            std::fs::write(&p, "x".repeat(1024)).unwrap();
+        }
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            max_size: "1MB".to_string(),
+            rotation_time: "daily".to_string(),
+            keep_files: 2,
+            compress: false,
+            compression_level: 3,
+            encrypt: false,
+            encryption_key_env: None,
+            retention_days: 30,
+            max_total_size: "1KB".to_string(),
+            cleanup_interval_minutes: 60,
+            batch_size: 100,
+            flush_interval_ms: 100,
+            masking_enabled: true,
+        };
+
+        let result = FileSink::perform_cleanup(&config, &dir.path().join("test.log"));
+        assert!(result.is_ok());
+        // 应删除了部分文件（5KB 超过 1KB，需删除 ~4KB ≈ 4 个文件）
+        let remaining = std::fs::read_dir(dir.path()).unwrap().count();
+        assert!(
+            remaining < 5,
+            "expected some files removed, got {}",
+            remaining
+        );
+    }
+
+    #[test]
+    fn test_perform_cleanup_empty_directory() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            max_total_size: "1GB".to_string(),
+            ..Default::default()
+        };
+        let result = FileSink::perform_cleanup(&config, &dir.path().join("test.log"));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_perform_cleanup_nonexistent_parent_returns_error() {
+        let dir = tempdir().unwrap();
+        let nonexistent_parent = dir.path().join("does_not_exist");
+        let log_path = nonexistent_parent.join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            max_total_size: "1GB".to_string(),
+            ..Default::default()
+        };
+        // parent 目录不存在 → read_dir 失败
+        let result = FileSink::perform_cleanup(&config, &log_path);
+        assert!(result.is_err());
+    }
+
+    // ==================== Clone / Debug / is_healthy / flush / shutdown 测试 ====================
+
+    #[test]
+    fn test_file_sink_clone_produces_independent_instance() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            max_size: "1MB".to_string(),
+            rotation_time: "daily".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let cloned = sink.clone();
+        // Clone 后应为新实例：current_file 为 None、size/sequence 归零
+        assert!(cloned.inner.read().current_file.is_none());
+        assert_eq!(cloned.inner.read().current_size, 0);
+        assert_eq!(cloned.inner.read().sequence, 0);
+        // 配置应相同
+        assert_eq!(sink.config.path, cloned.config.path);
+        assert_eq!(sink.config.max_size, cloned.config.max_size);
+    }
+
+    #[test]
+    fn test_file_sink_debug_format_contains_key_fields() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let debug_str = format!("{:?}", sink);
+        assert!(debug_str.contains("FileSink"));
+        assert!(debug_str.contains("path"));
+        assert!(debug_str.contains("current_size"));
+    }
+
+    #[test]
+    fn test_file_sink_is_healthy_false_without_file() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        assert!(!sink.is_healthy());
+    }
+
+    #[test]
+    fn test_file_sink_is_healthy_true_with_file() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        {
+            let mut inner = sink.inner.write();
+            sink.open_file_inner(&mut inner).unwrap();
+        }
+        assert!(sink.is_healthy());
+    }
+
+    #[test]
+    fn test_file_sink_flush_writes_buffered_records() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        {
+            let mut inner = sink.inner.write();
+            sink.open_file_inner(&mut inner).unwrap();
+            inner.batch_buffer.push(create_test_record("Flush test"));
+        }
+        let result = sink.flush();
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("Flush test"));
+    }
+
+    #[test]
+    fn test_file_sink_flush_without_file_succeeds() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        // 未打开文件，flush 应仍成功（空操作）
+        let result = sink.flush();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_file_sink_shutdown_flushes_remaining_data() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        {
+            let mut inner = sink.inner.write();
+            sink.open_file_inner(&mut inner).unwrap();
+            inner.batch_buffer.push(create_test_record("Shutdown test"));
+        }
+        let result = sink.shutdown();
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("Shutdown test"));
+    }
+
+    // ==================== LogSink::write 测试 ====================
+
+    #[test]
+    fn test_write_multiple_records_all_persisted() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            batch_size: 2, // 小批量触发刷新
+            flush_interval_ms: 1000,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        for i in 0..5 {
+            let record = create_test_record(&format!("Message {}", i));
+            sink.write(&record).unwrap();
+        }
+        sink.flush().unwrap();
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        for i in 0..5 {
+            assert!(content.contains(&format!("Message {}", i)));
+        }
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_write_with_masking_disabled_preserves_sensitive_value() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            masking_enabled: false,
+            batch_size: 1,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let record = LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "test".to_string(),
+            // 值需 >= 16 字符才会被 generic_secret 规则匹配
+            message: "password=secret1234567890".to_string(),
+            fields: HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "t1".to_string(),
+        };
+        sink.write(&record).unwrap();
+        sink.flush().unwrap();
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            content.contains("secret1234567890"),
+            "masking disabled should preserve original value"
+        );
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_write_with_masking_enabled_redacts_sensitive_value() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            masking_enabled: true,
+            batch_size: 1,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let record = LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "test".to_string(),
+            // 值 19 字符 >= 16，会被 generic_secret 规则匹配
+            message: "password=secret1234567890".to_string(),
+            fields: HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "t1".to_string(),
+        };
+        sink.write(&record).unwrap();
+        sink.flush().unwrap();
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            !content.contains("secret1234567890"),
+            "masking enabled should redact sensitive value"
+        );
+        assert!(
+            content.contains("***REDACTED***"),
+            "masked output should contain REDACTED marker"
+        );
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_write_appends_to_existing_file() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        // 预先写入内容
+        std::fs::write(&log_path, "pre-existing line\n").unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            batch_size: 1,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        sink.write(&create_test_record("Appended message")).unwrap();
+        sink.flush().unwrap();
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.starts_with("pre-existing line"));
+        assert!(content.contains("Appended message"));
+        sink.shutdown().unwrap();
     }
 }

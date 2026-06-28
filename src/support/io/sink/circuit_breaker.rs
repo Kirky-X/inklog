@@ -296,4 +296,94 @@ mod tests {
         assert_eq!(cb.config().failure_threshold, 10);
         assert_eq!(cb.config().success_threshold, 5);
     }
+
+    #[test]
+    fn test_circuit_breaker_config_default() {
+        let config = CircuitBreakerConfig::default();
+        assert_eq!(config.failure_threshold, 5);
+        assert_eq!(config.success_threshold, 3);
+        assert_eq!(config.timeout, StdDuration::from_secs(30));
+    }
+
+    #[test]
+    fn test_record_success_on_open_state() {
+        // Test the unexpected success on Open state - should reset to Closed
+        let mut cb = CircuitBreaker::new(2, StdDuration::from_secs(60), 3);
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+
+        // record_success on Open state should reset to Closed
+        cb.record_success();
+        assert_eq!(cb.state(), CircuitState::Closed);
+        assert_eq!(cb.failure_count(), 0);
+    }
+
+    #[test]
+    fn test_record_failure_on_half_open_state() {
+        // Test failure on HalfOpen state - should transition back to Open
+        let mut cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 3);
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(cb.can_execute()); // triggers transition to HalfOpen
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+
+        // record_failure on HalfOpen should transition back to Open
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+    }
+
+    #[test]
+    fn test_record_failure_on_open_state() {
+        // Test failure on Open state - should stay Open and update failure time
+        let mut cb = CircuitBreaker::new(2, StdDuration::from_secs(60), 3);
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+        assert_eq!(cb.failure_count(), 2);
+
+        // record_failure on Open state should stay Open
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+        assert_eq!(cb.failure_count(), 3);
+    }
+
+    #[test]
+    fn test_record_success_on_closed_state() {
+        // Test success on Closed state - should reset failure count
+        let mut cb = CircuitBreaker::new(3, StdDuration::from_secs(60), 3);
+        cb.record_failure();
+        assert_eq!(cb.failure_count(), 1);
+
+        cb.record_success();
+        assert_eq!(cb.state(), CircuitState::Closed);
+        assert_eq!(cb.failure_count(), 0);
+    }
+
+    #[test]
+    fn test_half_open_can_execute() {
+        // Verify HalfOpen state allows execution
+        let mut cb = CircuitBreaker::new(1, StdDuration::from_millis(50), 2);
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(cb.can_execute()); // triggers transition to HalfOpen
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+
+        // In HalfOpen state, can_execute should return true
+        assert!(cb.can_execute());
+    }
+
+    #[test]
+    fn test_open_state_can_execute_before_timeout() {
+        // In Open state before timeout, can_execute should return false
+        let mut cb = CircuitBreaker::new(1, StdDuration::from_secs(60), 2);
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+        assert!(!cb.can_execute());
+    }
 }

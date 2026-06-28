@@ -375,4 +375,106 @@ mod tests {
         assert!(!adapter.enabled(&debug_meta));
         assert!(!adapter.enabled(&trace_meta));
     }
+
+    #[test]
+    fn test_log_adapter_console_disconnected_channel() {
+        // Test the console Disconnected branch (lines 104-106)
+        let (console_tx, _cr) = bounded(10);
+        let (async_tx, _ar) = bounded(10);
+        drop(_cr); // Disconnect console channel
+        drop(_ar); // Disconnect async channel
+        let metrics = Arc::new(Metrics::new());
+
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics.clone());
+
+        log::set_max_level(log::LevelFilter::Info);
+        let metadata = log::Metadata::builder()
+            .target("test::adapter")
+            .level(Level::Info)
+            .build();
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!("console disconnected"))
+            .build();
+
+        // Should not panic; disconnected console channel drops log and increments metric
+        adapter.log(&record);
+
+        // Both channels are disconnected, so 2 drops (one per channel)
+        assert_eq!(metrics.logs_dropped(), 2);
+    }
+
+    #[test]
+    fn test_log_logger_new() {
+        let (console_tx, _) = bounded(10);
+        let (async_tx, _) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+        let logger = LogLogger::new(adapter, LevelFilter::Info);
+        // Just verify creation succeeds - we can't directly access private fields
+        // but the fact that it compiles and runs is sufficient
+        let _ = logger;
+    }
+
+    #[test]
+    fn test_log_logger_enabled() {
+        let (console_tx, _) = bounded(10);
+        let (async_tx, _) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+        let logger = LogLogger::new(adapter, LevelFilter::Info);
+
+        log::set_max_level(log::LevelFilter::Info);
+        let info_meta = log::Metadata::builder()
+            .target("test")
+            .level(Level::Info)
+            .build();
+        let debug_meta = log::Metadata::builder()
+            .target("test")
+            .level(Level::Debug)
+            .build();
+
+        assert!(logger.enabled(&info_meta));
+        assert!(!logger.enabled(&debug_meta));
+    }
+
+    #[test]
+    fn test_log_logger_log() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+        let logger = LogLogger::new(adapter, LevelFilter::Info);
+
+        log::set_max_level(log::LevelFilter::Info);
+        let metadata = log::Metadata::builder()
+            .target("test::logger")
+            .level(Level::Info)
+            .build();
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!("via LogLogger"))
+            .build();
+
+        logger.log(&record);
+
+        // Verify the record was sent through both channels
+        let console_received = console_rx.recv().unwrap();
+        assert_eq!(console_received.message, "via LogLogger");
+
+        let async_received = async_rx.recv().unwrap();
+        assert_eq!(async_received.message, "via LogLogger");
+    }
+
+    #[test]
+    fn test_log_logger_flush() {
+        let (console_tx, _) = bounded(10);
+        let (async_tx, _) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let adapter = LogAdapter::new(console_tx, async_tx, metrics);
+        let logger = LogLogger::new(adapter, LevelFilter::Info);
+
+        // flush() is a no-op, just verify it doesn't panic
+        logger.flush();
+    }
 }

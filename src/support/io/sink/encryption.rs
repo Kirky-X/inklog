@@ -196,4 +196,70 @@ mod tests {
         assert_ne!(salt1, salt2); // 盐值应该不同
         assert_ne!(key1, key2); // 由于盐值不同，密钥也应该不同
     }
+
+    #[test]
+    fn test_get_encryption_key_from_password() {
+        // Test PBKDF2 password derivation branch (1-127 chars)
+        std::env::set_var("INKLOG_TEST_KEY", "my_password");
+        let result = get_encryption_key("INKLOG_TEST_KEY");
+        std::env::remove_var("INKLOG_TEST_KEY");
+        assert!(result.is_ok());
+        let key = result.unwrap();
+        assert_eq!(key.len(), 32);
+    }
+
+    #[test]
+    fn test_get_encryption_key_base64_wrong_length() {
+        // Base64 decodes successfully but length is not 32 bytes
+        // Use a valid Base64 string that decodes to 16 bytes (not 32)
+        use base64::{engine::general_purpose, Engine as _};
+        let key_16_bytes = [0u8; 16];
+        let b64 = general_purpose::STANDARD.encode(key_16_bytes);
+        std::env::set_var("INKLOG_TEST_KEY", &b64);
+        let result = get_encryption_key("INKLOG_TEST_KEY");
+        std::env::remove_var("INKLOG_TEST_KEY");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("32 bytes") || err_msg.contains("256 bits"));
+    }
+
+    #[test]
+    fn test_get_encryption_key_too_long_input() {
+        // Input longer than 127 bytes should return error
+        let long_password = "a".repeat(128);
+        std::env::set_var("INKLOG_TEST_KEY", &long_password);
+        let result = get_encryption_key("INKLOG_TEST_KEY");
+        std::env::remove_var("INKLOG_TEST_KEY");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("32 bytes") || err_msg.contains("password"));
+    }
+
+    #[test]
+    fn test_get_encryption_key_empty_string() {
+        // Empty string should return error (is_empty check)
+        std::env::set_var("INKLOG_TEST_KEY", "");
+        let result = get_encryption_key("INKLOG_TEST_KEY");
+        std::env::remove_var("INKLOG_TEST_KEY");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_derive_key_with_empty_password() {
+        // Empty password should still work (PBKDF2 allows it)
+        let result = derive_key_from_password("", Some(b"salt"));
+        assert!(result.is_ok());
+        let (key, _) = result.unwrap();
+        assert_eq!(key.len(), 32);
+    }
+
+    #[test]
+    fn test_derive_key_with_long_salt() {
+        let long_salt = vec![0u8; 64];
+        let result = derive_key_from_password("password", Some(&long_salt));
+        assert!(result.is_ok());
+        let (key, salt) = result.unwrap();
+        assert_eq!(key.len(), 32);
+        assert_eq!(salt.len(), 64);
+    }
 }

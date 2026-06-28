@@ -248,4 +248,81 @@ mod tests {
         assert!(removed.is_some());
         assert!(!registry.has_sink("file"));
     }
+
+    #[test]
+    fn test_registry_default() {
+        let registry = SinkRegistry::default();
+        assert_eq!(registry.list_sinks().len(), 0);
+        assert!(!registry.has_sink("file"));
+    }
+
+    #[test]
+    fn test_registry_clear() {
+        let mut registry = SinkRegistry::new();
+
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test1.log"),
+            ..Default::default()
+        };
+        registry.register(FileSinkFactory::new(config));
+
+        assert_eq!(registry.list_sinks().len(), 1);
+
+        registry.clear();
+        assert_eq!(registry.list_sinks().len(), 0);
+        assert!(!registry.has_sink("file"));
+    }
+
+    #[test]
+    fn test_registry_unregister_nonexistent() {
+        let mut registry = SinkRegistry::new();
+        let removed = registry.unregister("nonexistent");
+        assert!(removed.is_none());
+    }
+
+    #[test]
+    fn test_registry_get_metadata_nonexistent() {
+        let registry = SinkRegistry::new();
+        assert!(registry.get_metadata("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_registry_create_after_unregister() {
+        let mut registry = SinkRegistry::new();
+
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+
+        registry.register(FileSinkFactory::new(config));
+        let _ = registry.unregister("file");
+
+        // Creating after unregister should fail
+        let result = registry.create("file");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_sink_factory_metadata() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let factory = FileSinkFactory::new(config);
+        let metadata = factory.metadata();
+        assert_eq!(metadata.name, "File Sink");
+        assert!(metadata.description.contains("rotation"));
+        assert!(metadata.features.contains(&"rotation".to_string()));
+        assert!(metadata.features.contains(&"compression".to_string()));
+        assert!(metadata.features.contains(&"encryption".to_string()));
+        assert!(metadata.features.contains(&"batching".to_string()));
+        assert!(metadata.config_schema.is_none());
+    }
 }

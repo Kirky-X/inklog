@@ -461,4 +461,109 @@ mod tests {
         sink.flush().unwrap();
         sink.shutdown().unwrap();
     }
+
+    #[test]
+    fn test_channel_buffered_config_default() {
+        let config = ChannelBufferedConfig::default();
+        assert_eq!(config.channel_capacity, 10_000);
+        assert_eq!(config.flush_batch_size, 1000);
+        assert_eq!(config.flush_interval_ms, 100);
+        assert_eq!(config.backpressure_strategy, BackpressureStrategy::Block);
+    }
+
+    #[test]
+    fn test_backpressure_strategy_default() {
+        assert_eq!(BackpressureStrategy::default(), BackpressureStrategy::Block);
+    }
+
+    #[test]
+    fn test_channel_buffered_metrics_default() {
+        let metrics = ChannelBufferedMetrics::default();
+        assert_eq!(metrics.channel_capacity, 0);
+        assert_eq!(metrics.channel_len, 0);
+        assert_eq!(metrics.bytes_written, 0);
+        assert_eq!(metrics.flush_count, 0);
+        assert_eq!(metrics.dropped_count, 0);
+    }
+
+    #[test]
+    fn test_open_file_creates_parent_directory() {
+        let dir = TempDir::new().unwrap();
+        // Use a nested path that doesn't exist yet
+        let nested_path = dir.path().join("nested").join("subdir").join("test.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: nested_path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 8,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 4,
+            flush_interval_ms: 50,
+        };
+        let tmpl = LogTemplate::default();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+
+        // Write a record to verify the file was created
+        let rec = make_record("nested-dir-test");
+        sink.write(&rec).unwrap();
+        sink.flush().unwrap();
+        sink.shutdown().unwrap();
+
+        // Verify the file exists
+        assert!(nested_path.exists());
+    }
+
+    #[test]
+    fn test_write_with_block_strategy_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("block_test.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 8,
+            flush_interval_ms: 10,
+        };
+        let tmpl = LogTemplate::default();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+
+        // Write a single record
+        let rec = make_record("block-strategy-test");
+        sink.write(&rec).unwrap();
+        sink.flush().unwrap();
+        sink.shutdown().unwrap();
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(data.contains("block-strategy-test"));
+    }
+
+    #[test]
+    fn test_metrics_reflects_config() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("metrics_config.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 16,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 4,
+            flush_interval_ms: 10,
+        };
+        let tmpl = LogTemplate::default();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
+
+        let m = sink.metrics();
+        assert_eq!(m.channel_capacity, 16);
+
+        sink.shutdown().unwrap();
+    }
 }

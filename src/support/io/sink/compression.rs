@@ -348,4 +348,183 @@ mod tests {
         assert_eq!(gzip.extension(), "gz");
         assert_eq!(gzip.name(), "gzip");
     }
+
+    #[test]
+    fn test_zstd_default_level() {
+        let zstd = ZstdCompression::default();
+        assert_eq!(zstd.level(), 3);
+        assert_eq!(zstd.name(), "zstd");
+    }
+
+    #[test]
+    fn test_zstd_compress_empty_data() {
+        let strategy = ZstdCompression::new(3);
+        let compressed = strategy.compress(b"").unwrap();
+        let decompressed = strategy.decompress(&compressed).unwrap();
+        assert!(decompressed.is_empty());
+    }
+
+    #[test]
+    fn test_zstd_decompress_invalid_data_errors() {
+        let strategy = ZstdCompression::new(3);
+        let invalid_data = b"not valid zstd data";
+        let result = strategy.decompress(invalid_data);
+        assert!(matches!(result, Err(InklogError::CompressionError(_))));
+    }
+
+    #[test]
+    fn test_no_compression_default_and_compress_file() {
+        let strategy = NoCompression;
+        assert_eq!(strategy.name(), "none");
+        let path = Path::new("/tmp/nonexistent_file_for_test");
+        let result = strategy.compress_file(path, 3);
+        assert_eq!(result.unwrap(), path.to_path_buf());
+    }
+
+    #[test]
+    fn test_gzip_compress_empty_data() {
+        let strategy = GzipCompression::new(6);
+        let compressed = strategy.compress(b"").unwrap();
+        let decompressed = strategy.decompress(&compressed).unwrap();
+        assert!(decompressed.is_empty());
+    }
+
+    #[test]
+    fn test_gzip_decompress_invalid_data_errors() {
+        let strategy = GzipCompression::new(6);
+        let invalid_data = b"not valid gzip data";
+        let result = strategy.decompress(invalid_data);
+        assert!(matches!(result, Err(InklogError::CompressionError(_))));
+    }
+
+    #[test]
+    fn test_gzip_default_level() {
+        let gzip = GzipCompression::default();
+        assert_eq!(gzip.level(), 6);
+    }
+
+    #[test]
+    fn test_compress_string_function() {
+        let data = "Hello, compression!";
+        let compressed = compress_string(data, 3).unwrap();
+        assert!(!compressed.is_empty());
+        let decompressed = zstd::decode_all(&compressed[..]).unwrap();
+        assert_eq!(data.as_bytes(), decompressed);
+    }
+
+    #[test]
+    fn test_compress_data_empty() {
+        let compressed = compress_data(b"", 3).unwrap();
+        let decompressed = zstd::decode_all(&compressed[..]).unwrap();
+        assert!(decompressed.is_empty());
+    }
+
+    #[test]
+    fn test_compress_file_legacy_function() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let file_path = temp.path().join("legacy_input.log");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "test log line 1").unwrap();
+        writeln!(file, "test log line 2").unwrap();
+        drop(file);
+
+        let compressed_path = compress_file(&file_path, 3).unwrap();
+        assert!(compressed_path.extension().unwrap_or_default() == "zst");
+        assert!(!file_path.exists(), "Original file should be removed");
+        assert!(compressed_path.exists(), "Compressed file should exist");
+
+        let compressed_bytes = std::fs::read(&compressed_path).unwrap();
+        let decompressed = zstd::decode_all(&compressed_bytes[..]).unwrap();
+        let text = String::from_utf8(decompressed).unwrap();
+        assert!(text.contains("test log line 1"));
+        assert!(text.contains("test log line 2"));
+    }
+
+    #[test]
+    fn test_zstd_compress_file_via_strategy() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let file_path = temp.path().join("strategy_input.log");
+        let mut file = File::create(&file_path).unwrap();
+        file.write_all(b"strategy compression test data").unwrap();
+        drop(file);
+
+        let strategy = ZstdCompression::new(3);
+        let compressed_path = strategy.compress_file(&file_path, 5).unwrap();
+        assert_eq!(compressed_path.extension().unwrap_or_default(), "zst");
+        assert!(!file_path.exists(), "Original should be removed");
+        assert!(compressed_path.exists());
+
+        let compressed_bytes = std::fs::read(&compressed_path).unwrap();
+        let decompressed = zstd::decode_all(&compressed_bytes[..]).unwrap();
+        assert_eq!(decompressed, b"strategy compression test data");
+    }
+
+    #[test]
+    fn test_zstd_compress_file_open_missing_errors() {
+        let strategy = ZstdCompression::new(3);
+        let result = strategy.compress_file(Path::new("/nonexistent/path/file.log"), 3);
+        assert!(matches!(result, Err(InklogError::IoError(_))));
+    }
+
+    #[test]
+    fn test_gzip_compress_file_via_strategy() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let file_path = temp.path().join("gzip_input.log");
+        let mut file = File::create(&file_path).unwrap();
+        file.write_all(b"gzip strategy compression test").unwrap();
+        drop(file);
+
+        let strategy = GzipCompression::new(6);
+        let compressed_path = strategy.compress_file(&file_path, 9).unwrap();
+        assert_eq!(compressed_path.extension().unwrap_or_default(), "gz");
+        assert!(!file_path.exists(), "Original should be removed");
+        assert!(compressed_path.exists());
+
+        let compressed_bytes = std::fs::read(&compressed_path).unwrap();
+        let mut decoder = flate2::read::GzDecoder::new(&compressed_bytes[..]);
+        let mut decompressed = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
+        assert_eq!(decompressed, b"gzip strategy compression test");
+    }
+
+    #[test]
+    fn test_gzip_compress_file_missing_input_errors() {
+        let strategy = GzipCompression::new(6);
+        let result = strategy.compress_file(Path::new("/nonexistent/gzip_input.log"), 6);
+        assert!(matches!(result, Err(InklogError::IoError(_))));
+    }
+
+    #[test]
+    fn test_zstd_large_data_roundtrip() {
+        let strategy = ZstdCompression::new(9);
+        let data: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
+        let compressed = strategy.compress(&data).unwrap();
+        assert!(
+            compressed.len() < data.len(),
+            "Should compress repetitive data"
+        );
+        let decompressed = strategy.decompress(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_gzip_with_level_zero() {
+        let strategy = GzipCompression::new(0);
+        let data = b"data at level 0";
+        let compressed = strategy.compress(data).unwrap();
+        let decompressed = strategy.decompress(&compressed).unwrap();
+        assert_eq!(data.to_vec(), decompressed);
+    }
+
+    #[test]
+    fn test_zstd_with_max_level() {
+        let strategy = ZstdCompression::new(22);
+        let data = b"max level compression test";
+        let compressed = strategy.compress(data).unwrap();
+        let decompressed = strategy.decompress(&compressed).unwrap();
+        assert_eq!(data.to_vec(), decompressed);
+    }
 }
