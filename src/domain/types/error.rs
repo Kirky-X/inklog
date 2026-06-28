@@ -133,14 +133,6 @@ pub enum InklogError {
     Unknown(String),
 }
 
-#[cfg(feature = "confers")]
-impl From<confers::error::ConfigError> for InklogError {
-    fn from(err: confers::error::ConfigError) -> Self {
-        InklogError::ConfigError(err.to_string())
-    }
-}
-
-#[cfg(feature = "confers")]
 impl From<toml::de::Error> for InklogError {
     fn from(err: toml::de::Error) -> Self {
         InklogError::ConfigError(err.to_string())
@@ -306,6 +298,117 @@ mod tests {
             !msg.contains("mysecretpassword") || msg.contains("***"),
             "Message: {}",
             msg
+        );
+    }
+
+    #[test]
+    fn test_safe_message_all_variants() {
+        // 验证所有错误变体的 safe_message() 都返回正确前缀
+        assert!(InklogError::ConfigError("x".into())
+            .safe_message()
+            .contains("Configuration error:"));
+        assert!(InklogError::DatabaseError("x".into())
+            .safe_message()
+            .contains("Database error:"));
+        assert!(InklogError::CacheError("x".into())
+            .safe_message()
+            .contains("Cache error:"));
+        assert!(InklogError::EncryptionError("x".into())
+            .safe_message()
+            .contains("Encryption error:"));
+        assert!(InklogError::Shutdown("x".into())
+            .safe_message()
+            .contains("Shutdown error:"));
+        assert!(InklogError::ChannelError("x".into())
+            .safe_message()
+            .contains("Channel error:"));
+        assert!(InklogError::S3Error("x".into())
+            .safe_message()
+            .contains("S3 error:"));
+        assert!(InklogError::ArchiveError("x".into())
+            .safe_message()
+            .contains("Archive error:"));
+        assert!(InklogError::CompressionError("x".into())
+            .safe_message()
+            .contains("Compression error:"));
+        assert!(InklogError::RuntimeError("x".into())
+            .safe_message()
+            .contains("Runtime error:"));
+        assert!(InklogError::Unknown("x".into())
+            .safe_message()
+            .contains("Unknown error:"));
+    }
+
+    #[test]
+    fn test_safe_message_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let error = InklogError::IoError(io_err);
+        let msg = error.safe_message();
+        assert!(msg.contains("IO error:"));
+        assert!(msg.contains("file missing"));
+    }
+
+    #[test]
+    fn test_safe_message_serialization_error() {
+        let json_err = serde_json::from_str::<String>("invalid").unwrap_err();
+        let error = InklogError::SerializationError(json_err);
+        let msg = error.safe_message();
+        assert!(msg.contains("Serialization error:"));
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let inklog_err: InklogError = io_err.into();
+        assert!(matches!(inklog_err, InklogError::IoError(_)));
+    }
+
+    #[test]
+    fn test_from_serde_json_error() {
+        let json_err = serde_json::from_str::<i32>("not a number").unwrap_err();
+        let inklog_err: InklogError = json_err.into();
+        assert!(matches!(inklog_err, InklogError::SerializationError(_)));
+    }
+
+    #[test]
+    fn test_from_toml_de_error() {
+        let toml_err: toml::de::Error =
+            toml::from_str::<toml::Value>("invalid = = toml").unwrap_err();
+        let inklog_err: InklogError = toml_err.into();
+        assert!(matches!(inklog_err, InklogError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_email() {
+        let error = InklogError::ConfigError("Contact admin@example.com for help".to_string());
+        let msg = error.safe_message();
+        assert!(!msg.contains("admin@example.com"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_phone() {
+        let error = InklogError::ConfigError("Call 13812345678 for support".to_string());
+        let msg = error.safe_message();
+        assert!(!msg.contains("13812345678"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_credit_card() {
+        let error = InklogError::ConfigError("Card: 4111111111111111".to_string());
+        let msg = error.safe_message();
+        assert!(!msg.contains("4111111111111111"));
+    }
+
+    #[test]
+    fn test_error_display_format() {
+        // 验证 Display trait 实现
+        assert_eq!(
+            InklogError::ConfigError("test".into()).to_string(),
+            "Configuration error: test"
+        );
+        assert_eq!(
+            InklogError::ChannelError("closed".into()).to_string(),
+            "Channel error: closed"
         );
     }
 }

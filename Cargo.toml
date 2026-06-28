@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Kirky-X/inklog"
 
 [package.metadata.docs.rs]
-features = ["default", "aws", "http", "cli", "confers"]
+features = ["default", "aws", "http", "cli"]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
@@ -16,8 +16,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\"))"] }
 
 [features]
-default = ["aws", "http", "cli", "confers"]
-confers = []
+default = ["aws", "http", "cli"]
 dbnexus = ["dep:dbnexus", "dep:sea-orm"]
 http = ["dep:axum"]
 test-local = []
@@ -41,7 +40,7 @@ regex = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = { version = "0.9" }
-confers = { path = "/home/dev/projects/confers", features = ["cli", "snapshot", "validation"] }
+trait-kit = "0.1.0"
 validator = { version = "0.19", features = ["derive"] }
 thiserror = "2.0"
 anyhow = "1.0"
@@ -57,7 +56,7 @@ nix = { version = "0.31", features = ["fs"] }
 bytes = "1.11"
 dirs = "6.0"
 parking_lot = "0.12"
-oxcache = { path = "/home/dev/projects/oxcache" }
+oxcache = { version = "0.2.0", features = ["macros"] }
 moka = { version = "0.12", default-features = false, features = ["sync"] }
 dashmap = "6.1"
 zstd = "0.13"
@@ -67,7 +66,7 @@ base64 = "0.22"
 parquet = { version = "57.3", features = ["async"] }
 arrow-array = "57.3"
 arrow-schema = "57.3"
-dbnexus = { path = "/home/dev/projects/dbnexus", default-features = false, features = ["sqlite", "sql-parser", "config-env", "macros", "permission"], optional = true }
+dbnexus = { version = "0.2.0", default-features = false, features = ["sqlite", "sql-parser", "config-env", "macros", "permission"], optional = true }
 sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio-native-tls", "with-chrono"], optional = true }
 aws-sdk-s3 = { version = "1.127.0", features = ["rt-tokio"], optional = true }
 aws-config = { version = "1.8.15", features = ["behavior-version-latest", "rt-tokio"], optional = true }
