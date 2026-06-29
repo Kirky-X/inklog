@@ -127,3 +127,32 @@ path = "src/bin/metrics.rs"
 [[bin]]
 name = "circuit_breaker"
 path = "src/bin/circuit_breaker.rs"
+
+# Layer 2 公共 API 补全示例
+[[bin]]
+name = "log_level"
+path = "src/bin/log_level.rs"
+
+[[bin]]
+name = "channel_strategy"
+path = "src/bin/channel_strategy.rs"
+
+[[bin]]
+name = "http_auth"
+path = "src/bin/http_auth.rs"
+
+[[bin]]
+name = "env_overrides"
+path = "src/bin/env_overrides.rs"
+
+[[bin]]
+name = "config_inspect"
+path = "src/bin/config_inspect.rs"
+
+[[bin]]
+name = "parquet_archive"
+path = "src/bin/parquet_archive.rs"
+
+[[bin]]
+name = "database_pg_mysql"
+path = "src/bin/database_pg_mysql.rs"

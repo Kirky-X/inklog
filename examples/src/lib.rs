@@ -36,6 +36,16 @@
 //! - `metrics`: 指标收集与健康监控示例
 //! - `circuit_breaker`: 熔断器示例
 //!
+//! ## Layer 2 - 公共 API 补全示例
+//!
+//! - `log_level`: LogLevel 类型解析/比较/Display 示例
+//! - `channel_strategy`: 自适应 Channel 策略（ChannelStrategy::Adaptive + 阈值参数）
+//! - `http_auth`: HTTP 认证/IP 白名单（HttpAuthConfig, ip_whitelist）
+//! - `env_overrides`: 环境变量覆盖加载（load_with_env_overrides()）
+//! - `config_inspect`: 配置检查（sinks_enabled()、LoggerManager::load()）
+//! - `parquet_archive`: Parquet 归档（ParquetConfig + convert_logs_to_parquet()）
+//! - `database_pg_mysql`: PostgreSQL/MySQL 数据库驱动配置示例
+//!
 //! ## 运行示例
 //!
 //! ```bash
@@ -64,6 +74,16 @@
 //! cargo run --bin fallback
 //! cargo run --bin metrics
 //! cargo run --bin circuit_breaker
+//!
+//! # Layer 2 公共 API 补全示例
+//! cargo run --bin log_level
+//! cargo run --bin channel_strategy
+//! cargo run --bin http_auth
+//! cargo run --bin env_overrides
+//! cargo run --bin config_inspect
+//! cargo run --bin database_pg_mysql
+//! # Parquet 归档示例需要 dbnexus feature
+//! cargo run --bin parquet_archive --features dbnexus
 //! ```
 //!
 //! ## 现有 binary（保留）
