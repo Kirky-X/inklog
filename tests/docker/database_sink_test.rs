@@ -24,13 +24,15 @@ async fn setup_adapter(url: &str) -> DbNexusAdapter {
     let adapter = DbNexusAdapter::with_table_name(url, 3, "logs")
         .await
         .expect("Failed to create DbNexusAdapter");
+    // 使用 `execute_raw_ddl` 执行 DDL：dbnexus 启用 sql-parser feature 后，
+    // `execute_raw` 会拦截 DDL 语句，必须用 `execute_raw_ddl` 通道（仅限 admin）。
     let session = adapter
         .pool()
         .get_session("admin")
         .await
         .expect("Failed to get session");
     session
-        .execute_raw(super::CREATE_TABLE_SQL)
+        .execute_raw_ddl(super::CREATE_TABLE_SQL)
         .await
         .expect("Failed to create table");
     adapter
@@ -56,7 +58,7 @@ async fn setup_sink(url: &str, batch_size: usize, flush_interval_ms: u64) -> Dat
     DatabaseSink::new_with_config(db, Some(config)).expect("Failed to create DatabaseSink")
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_create_and_shutdown() {
     let url = match get_test_db_url_or_skip() {
@@ -69,7 +71,7 @@ async fn test_database_sink_create_and_shutdown() {
     assert!(result.is_ok(), "shutdown 应成功: {:?}", result.err());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_write_below_batch_threshold() {
     let url = match get_test_db_url_or_skip() {
@@ -88,7 +90,7 @@ async fn test_database_sink_write_below_batch_threshold() {
     sink.shutdown().expect("shutdown should succeed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_write_triggers_batch_flush() {
     let url = match get_test_db_url_or_skip() {
@@ -106,7 +108,7 @@ async fn test_database_sink_write_triggers_batch_flush() {
     sink.shutdown().expect("shutdown should succeed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_flush_interval_triggers() {
     let url = match get_test_db_url_or_skip() {
@@ -124,7 +126,7 @@ async fn test_database_sink_flush_interval_triggers() {
     sink.shutdown().expect("shutdown should succeed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_high_volume_adjust_batch_size_up() {
     let url = match get_test_db_url_or_skip() {
@@ -144,7 +146,7 @@ async fn test_database_sink_high_volume_adjust_batch_size_up() {
     sink.shutdown().expect("shutdown should succeed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_multiple_levels() {
     let url = match get_test_db_url_or_skip() {
@@ -164,7 +166,7 @@ async fn test_database_sink_multiple_levels() {
     sink.shutdown().expect("shutdown should succeed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_double_shutdown_safe() {
     let url = match get_test_db_url_or_skip() {
@@ -180,7 +182,7 @@ async fn test_database_sink_double_shutdown_safe() {
     let _ = sink.shutdown();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_flush_empty_buffer() {
     let url = match get_test_db_url_or_skip() {
@@ -194,7 +196,7 @@ async fn test_database_sink_flush_empty_buffer() {
     sink.shutdown().expect("shutdown should succeed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_database_sink_default_config() {
     let url = match get_test_db_url_or_skip() {

@@ -22,13 +22,15 @@ async fn setup_sink(url: &str, batch_size: usize) -> DatabaseSink {
     let adapter = DbNexusAdapter::with_table_name(url, 5, "logs")
         .await
         .expect("Failed to create DbNexusAdapter");
+    // 使用 `execute_raw_ddl` 执行 DDL：dbnexus 启用 sql-parser feature 后，
+    // `execute_raw` 会拦截 DDL 语句，必须用 `execute_raw_ddl` 通道（仅限 admin）。
     let session = adapter
         .pool()
         .get_session("admin")
         .await
         .expect("Failed to get session");
     session
-        .execute_raw(super::CREATE_TABLE_SQL)
+        .execute_raw_ddl(super::CREATE_TABLE_SQL)
         .await
         .expect("Failed to create table");
 
@@ -49,7 +51,7 @@ async fn setup_sink(url: &str, batch_size: usize) -> DatabaseSink {
     DatabaseSink::new_with_config(db, Some(config)).expect("Failed to create DatabaseSink")
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_lifecycle_init_write_flush_shutdown() {
     let url = match get_test_db_url_or_skip() {
@@ -68,7 +70,7 @@ async fn test_lifecycle_init_write_flush_shutdown() {
     sink.shutdown().expect("shutdown: should succeed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_lifecycle_write_after_flush() {
     let url = match get_test_db_url_or_skip() {
@@ -101,7 +103,7 @@ async fn test_lifecycle_write_after_flush() {
     sink.shutdown().expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_lifecycle_concurrent_writes() {
     let url = match get_test_db_url_or_skip() {
@@ -113,7 +115,12 @@ async fn test_lifecycle_concurrent_writes() {
     let sink = Arc::new(sink);
     let sink_clone = sink.clone();
 
-    let handle = std::thread::spawn(move || {
+    // 用 `tokio::spawn` 替代 `std::thread::spawn`：
+    // 1. AGENTS.md 禁止 `std::thread`（用 tokio tasks）
+    // 2. `DatabaseSink::write` 内部用 `tokio::task::block_in_place` + `Handle::current()`，
+    //    `std::thread::spawn` 创建的线程无 tokio runtime 上下文，会 panic
+    //    ("there is no reactor running")
+    let handle = tokio::spawn(async move {
         for i in 0..10 {
             let record = make_log_record("INFO", "concurrent", &format!("thread1-{}", i));
             let _ = sink_clone.write(&record);
@@ -125,12 +132,12 @@ async fn test_lifecycle_concurrent_writes() {
         let _ = sink.write(&record);
     }
 
-    handle.join().expect("thread should complete");
+    handle.await.expect("tokio task should complete");
     sink.flush().expect("flush after concurrent");
     sink.shutdown().expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_lifecycle_flush_repeatedly() {
     let url = match get_test_db_url_or_skip() {
@@ -156,7 +163,7 @@ async fn test_lifecycle_flush_repeatedly() {
     sink.shutdown().expect("shutdown");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_lifecycle_shutdown_drains_buffer() {
     let url = match get_test_db_url_or_skip() {

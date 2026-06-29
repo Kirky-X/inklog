@@ -62,6 +62,26 @@ pub const CREATE_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS logs ( \
     thread_id TEXT NOT NULL \
 )";
 
+/// 构造指定表名的建表 DDL（兼容 SQLite/PostgreSQL/MySQL）。
+///
+/// `CREATE_TABLE_SQL` 固定建 `logs` 表；当测试需要其他表名（如 `logs_single`）
+/// 时用本函数生成对应 DDL，再通过 `execute_raw_ddl` 执行。
+pub fn create_table_sql(table_name: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS {} ( \
+            timestamp TEXT NOT NULL, \
+            level TEXT NOT NULL, \
+            target TEXT NOT NULL, \
+            message TEXT NOT NULL, \
+            fields TEXT NOT NULL, \
+            file TEXT, \
+            line INTEGER, \
+            thread_id TEXT NOT NULL \
+        )",
+        table_name
+    )
+}
+
 /// 统计 logs 表行数的 SQL（兼容 SQLite/PostgreSQL/MySQL）。
 pub const COUNT_TABLE_SQL: &str = "SELECT COUNT(*) FROM logs";
 
