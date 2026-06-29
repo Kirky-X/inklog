@@ -3047,4 +3047,529 @@ worker_threads = 1
         // 验证：manager 正常 shutdown，console worker 处理了记录不 panic
         // （console 输出到 stdout，无法直接验证内容，但 worker 不 panic 即为成功）
     }
+
+    // ============================================================================
+    // HTTP 服务器 start_http_server 测试
+    //
+    // start_http_server 内部的 auth_middleware / subtle_constant_time_compare /
+    // parse_cidr / health_status_getter / 路由 handler 均为局部函数和闭包，
+    // 无法直接单元测试，因此通过启动真实 HTTP 服务器并发送请求来覆盖。
+    // ============================================================================
+
+    /// 查找可用的本地端口用于 HTTP 测试（TOCTOU 风险在串行测试中可接受）
+    #[cfg(feature = "http")]
+    fn find_available_http_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("Failed to bind to find available port");
+        let port = listener
+            .local_addr()
+            .expect("Failed to get local addr")
+            .port();
+        drop(listener);
+        port
+    }
+
+    /// 轮询 HTTP 服务器直到可达或超时（约 2 秒）
+    #[cfg(feature = "http")]
+    async fn wait_for_http_server(host: &str, port: u16) -> bool {
+        let url = format!("http://{}:{}", host, port);
+        for _ in 0..80 {
+            if reqwest::get(&url).await.is_ok() {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        false
+    }
+
+    /// 构建基础的 HTTP 测试配置（无 auth、无 IP 白名单、Warn 模式）
+    #[cfg(feature = "http")]
+    fn http_test_config(port: u16) -> InklogConfig {
+        InklogConfig {
+            http_server: Some(crate::HttpServerConfig {
+                enabled: true,
+                host: "127.0.0.1".to_string(),
+                port,
+                error_mode: crate::HttpErrorMode::Warn,
+                ..Default::default()
+            }),
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// 构建启用 Bearer Token 认证的 HTTP 测试配置
+    #[cfg(feature = "http")]
+    fn http_test_config_with_auth(port: u16, token_env: &str) -> InklogConfig {
+        let mut config = http_test_config(port);
+        let http = config
+            .http_server
+            .as_mut()
+            .expect("http_server should be set");
+        http.auth = Some(crate::HttpAuthConfig {
+            enabled: true,
+            token_env: token_env.to_string(),
+        });
+        config
+    }
+
+    /// 构建带 IP 白名单的 HTTP 测试配置
+    #[cfg(feature = "http")]
+    fn http_test_config_with_whitelist(port: u16, whitelist: Vec<String>) -> InklogConfig {
+        let mut config = http_test_config(port);
+        let http = config
+            .http_server
+            .as_mut()
+            .expect("http_server should be set");
+        http.ip_whitelist = Some(whitelist);
+        config
+    }
+
+    /// Warn 模式：HTTP 服务器启动失败时记录警告但继续返回 Ok(manager)
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_with_config_http_warn_mode_continues_on_startup_error() {
+        // 使用无效主机名触发 start_http_server 中 addr.parse() 失败
+        // Warn 模式应记录警告但继续返回 Ok(manager)
+        let config = InklogConfig {
+            http_server: Some(crate::HttpServerConfig {
+                enabled: true,
+                host: "invalid host with spaces".to_string(),
+                port: 9090,
+                error_mode: crate::HttpErrorMode::Warn,
+                ..Default::default()
+            }),
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Warn mode should return Ok despite HTTP server startup error");
+        let _ = manager.shutdown();
+    }
+
+    /// Strict 模式：无效主机名导致 addr.parse() 失败时，错误应传播给调用者
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_with_config_http_strict_mode_returns_error_on_invalid_host() {
+        let config = InklogConfig {
+            http_server: Some(crate::HttpServerConfig {
+                enabled: true,
+                host: "invalid host with spaces".to_string(),
+                port: 9091,
+                error_mode: crate::HttpErrorMode::Strict,
+                ..Default::default()
+            }),
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match LoggerManager::with_config(config).await {
+            Err(InklogError::ConfigError(msg)) => {
+                assert!(
+                    msg.contains("Invalid HTTP server address"),
+                    "Error should mention invalid HTTP server address, got: {}",
+                    msg
+                );
+            }
+            Err(other) => panic!("Expected ConfigError, got {:?}", other),
+            Ok(_) => panic!("Strict mode should return Err on invalid HTTP address"),
+        }
+    }
+
+    /// /health 端点返回 200 和 JSON 格式的健康状态
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_health_endpoint_returns_json() {
+        let port = find_available_http_port();
+        let manager = LoggerManager::with_config(http_test_config(port))
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable on port {}",
+            port
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "health endpoint should return 200"
+        );
+        let body: serde_json::Value = resp.json().await.expect("body should be JSON");
+        assert!(body.is_object(), "health response should be a JSON object");
+        assert!(
+            body.get("overall_status").is_some(),
+            "health response should contain overall_status field"
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// /metrics 端点返回 200 和 Prometheus 格式文本
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_metrics_endpoint_returns_prometheus() {
+        let port = find_available_http_port();
+        let manager = LoggerManager::with_config(http_test_config(port))
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable on port {}",
+            port
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/metrics", port))
+            .await
+            .expect("GET /metrics should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "metrics endpoint should return 200"
+        );
+        let body = resp.text().await.expect("body should be text");
+        assert!(
+            body.contains("# HELP") && body.contains("inklog_"),
+            "metrics response should be in Prometheus format, got: {}",
+            body
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// 自定义 health_path 和 metrics_path 应生效，默认路径不再可访问
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_custom_paths_work() {
+        let port = find_available_http_port();
+        let mut config = http_test_config(port);
+        {
+            let http = config
+                .http_server
+                .as_mut()
+                .expect("http_server should be set");
+            http.health_path = "/custom-health".to_string();
+            http.metrics_path = "/custom-metrics".to_string();
+        }
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        // 自定义路径应返回 200
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/custom-health", port))
+            .await
+            .expect("GET /custom-health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "custom health path should return 200"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/custom-metrics", port))
+            .await
+            .expect("GET /custom-metrics should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "custom metrics path should return 200"
+        );
+        // 默认路径应返回 404
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::NOT_FOUND,
+            "default health path should return 404 when customized"
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// auth 禁用时，无 Authorization header 也能访问
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_auth_disabled_allows_access_without_header() {
+        let port = find_available_http_port();
+        let manager = LoggerManager::with_config(http_test_config(port))
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "auth disabled should allow access without Authorization header"
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// auth 启用但 token 环境变量未设置时返回 500
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_auth_missing_token_env_returns_500() {
+        let port = find_available_http_port();
+        // 使用唯一的环境变量名，确保它未设置
+        let token_env = "INKLOG_TEST_TOKEN_MISSING_ENV_VAR";
+        std::env::remove_var(token_env);
+        let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "missing token env should return 500"
+        );
+        let body = resp.text().await.expect("body should be text");
+        assert!(
+            body.contains("Auth token not configured"),
+            "response should explain token misconfiguration, got: {}",
+            body
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// auth 启用且 Bearer token 正确时返回 200
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_auth_valid_token_returns_200() {
+        let port = find_available_http_port();
+        let token_env = "INKLOG_TEST_TOKEN_VALID";
+        let token_value = "secret-token-12345";
+        std::env::set_var(token_env, token_value);
+        let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let client = reqwest::Client::builder()
+            .build()
+            .expect("Failed to build reqwest client");
+        let resp = client
+            .get(format!("http://127.0.0.1:{}/health", port))
+            .bearer_auth(token_value)
+            .send()
+            .await
+            .expect("Request with valid token should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "valid Bearer token should return 200"
+        );
+        let _ = manager.shutdown();
+        std::env::remove_var(token_env);
+    }
+
+    /// auth 启用但 Bearer token 错误时返回 401
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_auth_invalid_token_returns_401() {
+        let port = find_available_http_port();
+        let token_env = "INKLOG_TEST_TOKEN_INVALID";
+        std::env::set_var(token_env, "correct-secret");
+        let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let client = reqwest::Client::builder()
+            .build()
+            .expect("Failed to build reqwest client");
+        let resp = client
+            .get(format!("http://127.0.0.1:{}/health", port))
+            .bearer_auth("wrong-secret")
+            .send()
+            .await
+            .expect("Request with invalid token should still get a response");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "invalid Bearer token should return 401"
+        );
+        let body = resp.text().await.expect("body should be text");
+        assert!(
+            body.contains("Invalid token"),
+            "response should indicate invalid token, got: {}",
+            body
+        );
+        let _ = manager.shutdown();
+        std::env::remove_var(token_env);
+    }
+
+    /// auth 启用但缺少 Authorization header 时返回 401
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_auth_missing_header_returns_401() {
+        let port = find_available_http_port();
+        let token_env = "INKLOG_TEST_TOKEN_MISSING_HEADER";
+        std::env::set_var(token_env, "some-secret");
+        let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("Request without header should still get a response");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "missing Authorization header should return 401"
+        );
+        let body = resp.text().await.expect("body should be text");
+        assert!(
+            body.contains("Missing or invalid Authorization header"),
+            "response should indicate missing header, got: {}",
+            body
+        );
+        let _ = manager.shutdown();
+        std::env::remove_var(token_env);
+    }
+
+    /// IP 白名单精确匹配 127.0.0.1 时允许访问
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_ip_whitelist_allows_exact_match() {
+        let port = find_available_http_port();
+        let config = http_test_config_with_whitelist(port, vec!["127.0.0.1".to_string()]);
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "exact IP match in whitelist should allow access"
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// IP 白名单不匹配客户端 IP 时返回 403
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_ip_whitelist_rejects_non_match() {
+        let port = find_available_http_port();
+        // 白名单仅包含一个不可能匹配 127.0.0.1 的地址
+        let config = http_test_config_with_whitelist(port, vec!["10.0.0.1".to_string()]);
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should still get a response");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "non-matching IP should be forbidden"
+        );
+        let body = resp.text().await.expect("body should be text");
+        assert!(
+            body.contains("IP not in whitelist"),
+            "response should indicate IP rejection, got: {}",
+            body
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// IP 白名单通配符格式 "127.0.*" 匹配客户端 IP
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_ip_whitelist_allows_wildcard() {
+        let port = find_available_http_port();
+        let config = http_test_config_with_whitelist(port, vec!["127.0.*".to_string()]);
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "wildcard 127.0.* should match 127.0.0.1"
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// IP 白名单 CIDR 格式 "127.0.0.0/8" 匹配客户端 IP
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_ip_whitelist_allows_cidr() {
+        let port = find_available_http_port();
+        let config = http_test_config_with_whitelist(port, vec!["127.0.0.0/8".to_string()]);
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable"
+        );
+        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+            .await
+            .expect("GET /health should succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "CIDR 127.0.0.0/8 should contain 127.0.0.1"
+        );
+        let _ = manager.shutdown();
+    }
 }
