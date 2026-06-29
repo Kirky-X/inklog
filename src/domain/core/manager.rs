@@ -58,7 +58,6 @@ struct WorkerParams {
     config: InklogConfig,
     receiver: Receiver<Arc<LogRecord>>,
     console_receiver: Receiver<Arc<LogRecord>>,
-    shutdown_rx: Receiver<()>,
     control_rx: Receiver<SinkControlMessage>,
     control_tx: Sender<SinkControlMessage>,
     metrics: Arc<Metrics>,
@@ -69,6 +68,10 @@ struct WorkerParams {
     #[cfg(feature = "dbnexus")]
     database: Option<Arc<dyn Database>>,
 }
+
+/// `start_workers` 返回值类型别名，避免 clippy `type_complexity` 警告。
+/// 第一项为 worker 线程句柄，第二项为每个 worker 对应的 shutdown 信号 sender。
+type WorkerStartResult = Result<(Vec<JoinHandle<()>>, Vec<Sender<()>>), InklogError>;
 
 /// LoggerManager 的依赖集合
 ///
@@ -158,7 +161,7 @@ pub struct LoggerManager {
     config: InklogConfig,
     sender: Sender<Arc<LogRecord>>,
     console_sender: Sender<Arc<LogRecord>>,
-    shutdown_tx: Sender<()>,
+    shutdown_txs: Vec<Sender<()>>,
     #[allow(dead_code)]
     console_sink: Arc<Mutex<ConsoleSink>>,
     metrics: Arc<Metrics>,
@@ -455,7 +458,6 @@ impl LoggerManager {
         let metrics = Arc::new(Metrics::new());
         let (sender, receiver) = bounded(config.performance.channel_capacity);
         let (console_sender, console_receiver) = bounded(config.performance.channel_capacity);
-        let (shutdown_tx, shutdown_rx) = bounded(1);
         let (control_tx, control_rx) = bounded(10); // Control channel for recovery commands
         let effective_capacity = Arc::new(AtomicUsize::new(config.performance.channel_capacity));
 
@@ -484,11 +486,10 @@ impl LoggerManager {
         };
         let error_sink = Arc::new(Mutex::new(FileSink::new(error_sink_config).ok()));
 
-        let handles = Self::start_workers(WorkerParams {
+        let (handles, shutdown_txs) = Self::start_workers(WorkerParams {
             config: config.clone(),
             receiver,
             console_receiver,
-            shutdown_rx,
             control_rx,
             control_tx: control_tx.clone(),
             metrics: metrics.clone(),
@@ -570,7 +571,7 @@ impl LoggerManager {
             config,
             sender,
             console_sender,
-            shutdown_tx,
+            shutdown_txs,
             console_sink,
             metrics,
             worker_handles: Mutex::new(handles),
@@ -590,7 +591,7 @@ impl LoggerManager {
             config,
             sender,
             console_sender,
-            shutdown_tx,
+            shutdown_txs,
             console_sink,
             metrics,
             worker_handles: Mutex::new(handles),
@@ -905,12 +906,11 @@ impl LoggerManager {
         }
     }
 
-    fn start_workers(params: WorkerParams) -> Result<Vec<JoinHandle<()>>, InklogError> {
+    fn start_workers(params: WorkerParams) -> WorkerStartResult {
         let WorkerParams {
             config,
             receiver,
             console_receiver,
-            shutdown_rx,
             control_rx,
             control_tx,
             metrics,
@@ -955,7 +955,10 @@ impl LoggerManager {
         };
 
         // Thread 0: Console Sink (dedicated for lock-free hot path)
-        let shutdown_console = shutdown_rx.clone();
+        // 每个 worker 拥有独立的 shutdown channel，确保广播信号能被每个 worker 接收
+        // （MPMC channel 的 send() 只能被一个 receiver 消费，共享 channel 会导致
+        // 只有首个 worker 收到信号、其余 worker 死循环）
+        let (shutdown_tx_console, shutdown_console) = bounded(1);
         let metrics_console = metrics.clone();
         let console_sink_console = console_sink.clone();
         let handle_console = thread::spawn(move || {
@@ -1035,7 +1038,7 @@ impl LoggerManager {
 
         // Thread 1: File Sink
         let rx_file = receiver.clone();
-        let shutdown_file = shutdown_rx.clone();
+        let (shutdown_tx_file, shutdown_file) = bounded(1);
         let metrics_file = metrics.clone();
         let console_sink_file = console_sink.clone();
         let control_rx_file = control_rx.clone();
@@ -1245,7 +1248,7 @@ impl LoggerManager {
         #[cfg(feature = "dbnexus")]
         let rx_db = receiver.clone();
         #[cfg(feature = "dbnexus")]
-        let shutdown_db = shutdown_rx.clone();
+        let (shutdown_tx_db, shutdown_db) = bounded(1);
         #[cfg(feature = "dbnexus")]
         let metrics_db = metrics.clone();
         #[cfg(feature = "dbnexus")]
@@ -1473,7 +1476,7 @@ impl LoggerManager {
         let _handle_db = thread::spawn(|| {});
 
         // Health Check Thread
-        let shutdown_health = shutdown_rx.clone();
+        let (shutdown_tx_health, shutdown_health) = bounded(1);
         let metrics_health = metrics.clone();
         let effective_capacity_health = effective_capacity.clone();
         let handle_health = thread::spawn(move || {
@@ -1585,7 +1588,18 @@ impl LoggerManager {
         #[cfg(not(feature = "dbnexus"))]
         let handles = vec![handle_console, handle_file, handle_health];
 
-        Ok(handles)
+        // shutdown_txs 与 handles 一一对应，保持 cfg 一致性
+        #[cfg(feature = "dbnexus")]
+        let shutdown_txs = vec![
+            shutdown_tx_console,
+            shutdown_tx_file,
+            shutdown_tx_db,
+            shutdown_tx_health,
+        ];
+        #[cfg(not(feature = "dbnexus"))]
+        let shutdown_txs = vec![shutdown_tx_console, shutdown_tx_file, shutdown_tx_health];
+
+        Ok((handles, shutdown_txs))
     }
 
     pub fn get_health_status(&self) -> HealthStatus {
@@ -1624,7 +1638,13 @@ impl LoggerManager {
     }
 
     pub fn shutdown(&self) -> Result<(), InklogError> {
-        let _ = self.shutdown_tx.send(());
+        // 向所有 worker 广播 shutdown 信号。每个 worker 持有独立的 channel receiver，
+        // 必须逐个 send 才能确保全部收到（MPMC channel 的 send 仅被一个 receiver 消费）。
+        // 历史缺陷：原先使用单一 `shutdown_tx`，send 一次只能让首个 worker 退出，
+        // 其余 worker 进入死循环，导致进程无法退出（PID 20848 等挂起问题）。
+        for tx in &self.shutdown_txs {
+            let _ = tx.send(());
+        }
 
         // 关闭HTTP服务器
         #[cfg(feature = "http")]
@@ -1660,6 +1680,18 @@ impl LoggerManager {
         }
 
         Ok(())
+    }
+}
+
+/// 资源释放兜底：调用方未显式 `shutdown()` 时也确保 worker 线程退出。
+///
+/// 历史缺陷：原实现无 `Drop`，测试若忘记调用 `shutdown()`，4 个 worker 线程
+/// 会因全局 subscriber 持有 `sender.clone()` 永不 disconnect 而死循环，
+/// 最终导致进程挂起（tarpaulin 单元测试运行后 PID 不退出）。
+impl Drop for LoggerManager {
+    fn drop(&mut self) {
+        // shutdown() 幂等：已 shutdown 时 worker_handles 已 take 为空，会快速返回
+        let _ = self.shutdown();
     }
 }
 
