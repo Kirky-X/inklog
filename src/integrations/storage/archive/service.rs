@@ -887,7 +887,7 @@ impl Default for ArchiveServiceBuilder {
 mod tests {
     use super::*;
     use crate::integrations::storage::archive::SecretString;
-    #[cfg(all(feature = "aws", not(feature = "dbnexus")))]
+    #[cfg(feature = "aws")]
     use crate::integrations::storage::archive::{ArchiveStatus, ScheduleState};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1257,6 +1257,312 @@ mod tests {
             builder.config.as_ref().unwrap().bucket,
             "second",
             "Second config() should overwrite the first"
+        );
+    }
+
+    // ============================================================================
+    // ArchiveService::new() 错误路径
+    // 覆盖 line 64: create_dir_all 失败时的 IoError
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_archive_service_new_with_invalid_path_returns_io_error() {
+        // local_retention_path 指向文件下方时，create_dir_all 应失败
+        let temp_file = tempfile::NamedTempFile::new().expect("Failed to create temp file");
+        let invalid_path = temp_file.path().join("subdir");
+
+        let config = S3ArchiveConfig {
+            local_retention_path: invalid_path,
+            skip_bucket_validation: true,
+            ..Default::default()
+        };
+
+        #[cfg(feature = "dbnexus")]
+        let result = ArchiveService::new(config, None).await;
+        #[cfg(not(feature = "dbnexus"))]
+        let result = ArchiveService::new(config).await;
+
+        let err = result
+            .err()
+            .expect("expected new() to fail with invalid path");
+        assert!(
+            matches!(err, InklogError::IoError(_)),
+            "expected IoError, got {:?}",
+            err
+        );
+    }
+
+    // ============================================================================
+    // ArchiveService::stop() 测试
+    // 覆盖 lines 557-564: stop() 方法
+    // ============================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_archive_service_stop_sends_shutdown_signal() {
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            ..Default::default()
+        };
+
+        #[cfg(feature = "dbnexus")]
+        let mut service = ArchiveService::new(config, None)
+            .await
+            .expect("Failed to create ArchiveService");
+        #[cfg(not(feature = "dbnexus"))]
+        let mut service = ArchiveService::new(config)
+            .await
+            .expect("Failed to create ArchiveService");
+
+        // 取出 shutdown_rx 以验证信号接收
+        let mut shutdown_rx = service
+            .shutdown_rx
+            .take()
+            .expect("shutdown_rx should be Some");
+
+        // stop() 应发送关闭信号并返回 Ok
+        service.stop().await.expect("stop() should succeed");
+
+        // 验证信号已收到
+        let signal = shutdown_rx.recv().await;
+        assert_eq!(signal, Some(()), "should receive shutdown signal");
+    }
+
+    // ============================================================================
+    // ArchiveService::start() 错误路径
+    // 覆盖 lines 128-130: shutdown_rx 已被 take 时的错误
+    // ============================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_archive_service_start_with_shutdown_rx_taken_returns_error() {
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            ..Default::default()
+        };
+
+        #[cfg(feature = "dbnexus")]
+        let mut service = ArchiveService::new(config, None)
+            .await
+            .expect("Failed to create ArchiveService");
+        #[cfg(not(feature = "dbnexus"))]
+        let mut service = ArchiveService::new(config)
+            .await
+            .expect("Failed to create ArchiveService");
+
+        // 模拟 shutdown_rx 已被 take 的状态
+        service.shutdown_rx = None;
+
+        let result = service.start().await;
+        let err = result
+            .err()
+            .expect("expected start() to fail when shutdown_rx is None");
+        assert!(
+            matches!(err, InklogError::ConfigError(ref msg) if msg.contains("Shutdown receiver already taken")),
+            "expected ConfigError about shutdown receiver, got {:?}",
+            err
+        );
+    }
+
+    // ============================================================================
+    // perform_archive_with_deps 测试 (需要 aws + dbnexus)
+    // 覆盖 lines 295-430 中的无数据库路径
+    // ============================================================================
+
+    #[cfg(all(feature = "aws", feature = "dbnexus"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_archive_with_deps_skips_when_already_running() {
+        // can_run_today() 返回 false 时应跳过执行（lines 306-309）
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            ..Default::default()
+        };
+        let archive_manager = Arc::new(
+            S3ArchiveManager::new(config.clone())
+                .await
+                .expect("Failed to create S3ArchiveManager"),
+        );
+        // 设置 is_running=true 且 locked_date=today → can_run_today()=false
+        let schedule_state = Arc::new(Mutex::new(ScheduleState {
+            is_running: true,
+            locked_date: Some(Utc::now().date_naive()),
+            ..Default::default()
+        }));
+
+        let result = ArchiveService::perform_archive_with_deps(
+            &config,
+            &archive_manager,
+            None,
+            &schedule_state,
+        )
+        .await;
+        assert!(result.is_ok(), "should return Ok when skipping");
+        // 跳过时不应修改状态
+        let state = schedule_state.lock();
+        assert!(
+            state.is_running,
+            "is_running should remain true when skipped"
+        );
+    }
+
+    #[cfg(all(feature = "aws", feature = "dbnexus"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_perform_archive_with_deps_no_db_session_marks_success() {
+        // 无 db_session 时 log_records 为空，应标记成功（lines 328-333）
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            ..Default::default()
+        };
+        let archive_manager = Arc::new(
+            S3ArchiveManager::new(config.clone())
+                .await
+                .expect("Failed to create S3ArchiveManager"),
+        );
+        let schedule_state = Arc::new(Mutex::new(ScheduleState::default()));
+
+        let result = ArchiveService::perform_archive_with_deps(
+            &config,
+            &archive_manager,
+            None,
+            &schedule_state,
+        )
+        .await;
+        assert!(result.is_ok(), "should succeed with no db session");
+
+        // 验证状态已标记为成功
+        let state = schedule_state.lock();
+        assert!(
+            !state.is_running,
+            "is_running should be false after success"
+        );
+        assert_eq!(
+            state.last_run_status,
+            Some(ArchiveStatus::Success),
+            "last_run_status should be Success"
+        );
+    }
+
+    // ============================================================================
+    // retry_with_backoff 测试 (需要 dbnexus)
+    // 覆盖 lines 472-500: 重试逻辑
+    // ============================================================================
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_retry_with_backoff_succeeds_on_first_attempt() {
+        // 首次尝试即成功，不应有任何延迟（lines 478-485）
+        let result: Result<i32, InklogError> =
+            ArchiveService::retry_with_backoff(|| async { Ok(42) }).await;
+        assert_eq!(result.unwrap(), 42, "should return value on first attempt");
+    }
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_retry_with_backoff_exhausts_retries() {
+        // 始终失败，应在 max_retries (3) 次后返回错误（lines 486-498）
+        // 注意：此测试有 ~7s 延迟（1+2+4 秒退避）
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc as StdArc;
+        let counter = StdArc::new(AtomicU32::new(0));
+
+        let result: Result<i32, InklogError> = {
+            let counter = counter.clone();
+            ArchiveService::retry_with_backoff(move || {
+                let c = counter.clone();
+                async move {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    Err(InklogError::S3Error("always fails".to_string()))
+                }
+            })
+            .await
+        };
+
+        assert!(
+            result.is_err(),
+            "should return error after exhausting retries"
+        );
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            4,
+            "should attempt 1 initial + 3 retries = 4 total"
+        );
+    }
+
+    // ============================================================================
+    // estimate_record_count 测试 (需要 aws)
+    // 覆盖 lines 689-694
+    // ============================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_estimate_record_count() {
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            ..Default::default()
+        };
+        #[cfg(feature = "dbnexus")]
+        let service = ArchiveService::new(config, None)
+            .await
+            .expect("Failed to create ArchiveService");
+        #[cfg(not(feature = "dbnexus"))]
+        let service = ArchiveService::new(config)
+            .await
+            .expect("Failed to create ArchiveService");
+
+        // 100 字节 → 1 条记录（每条记录假设 100 字节）
+        assert_eq!(service.estimate_record_count(&[0u8; 100]), 1);
+        // 250 字节 → 2 条记录
+        assert_eq!(service.estimate_record_count(&[0u8; 250]), 2);
+        // 0 字节 → 0 条记录
+        assert_eq!(service.estimate_record_count(&[]), 0);
+        // 99 字节 → 0 条记录（整数除法）
+        assert_eq!(service.estimate_record_count(&[0u8; 99]), 0);
+    }
+
+    // ============================================================================
+    // archive_now 错误路径测试 (需要 aws)
+    // 覆盖 lines 712-714: 无日志数据时的错误
+    // ============================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_archive_now_returns_error_when_no_log_data() {
+        // archive_interval_days=0 时，日期范围为 [now, now)，无文件匹配
+        // fetch_file_logs 返回空 → archive_now 返回 S3Error
+        let retention_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config = S3ArchiveConfig {
+            archive_interval_days: 0,
+            local_retention_path: retention_dir.path().to_path_buf(),
+            skip_bucket_validation: true,
+            ..Default::default()
+        };
+        #[cfg(feature = "dbnexus")]
+        let service = ArchiveService::new(config, None)
+            .await
+            .expect("Failed to create ArchiveService");
+        #[cfg(not(feature = "dbnexus"))]
+        let service = ArchiveService::new(config)
+            .await
+            .expect("Failed to create ArchiveService");
+
+        let result = service.archive_now().await;
+        let err = result
+            .err()
+            .expect("expected archive_now to fail with no data");
+        assert!(
+            matches!(err, InklogError::S3Error(ref msg) if msg.contains("No log data")),
+            "expected S3Error about no log data, got {:?}",
+            err
         );
     }
 }

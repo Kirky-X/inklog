@@ -2266,4 +2266,162 @@ mod tests {
             .await
             .expect("mock delete must not fail");
     }
+
+    // ========================================================================
+    // S3ArchiveManager — calculate_checksum Tests (requires `aws` feature)
+    // Covers lines 624-629: SHA256 checksum calculation
+    // ========================================================================
+
+    #[cfg(feature = "aws")]
+    #[test]
+    fn test_calculate_checksum_known_value() {
+        // SHA256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        let checksum = S3ArchiveManager::calculate_checksum(b"hello");
+        assert_eq!(
+            checksum, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            "SHA256 of 'hello' must match known value"
+        );
+    }
+
+    #[cfg(feature = "aws")]
+    #[test]
+    fn test_calculate_checksum_empty_data() {
+        // SHA256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let checksum = S3ArchiveManager::calculate_checksum(&[]);
+        assert_eq!(
+            checksum, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "SHA256 of empty data must match known value"
+        );
+    }
+
+    // ========================================================================
+    // S3ArchiveManager — decompress_data error path Tests
+    // Covers error branches in decompress_data (lines 1088-1127)
+    // ========================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_decompress_data_invalid_zstd_returns_compression_error() {
+        let manager = make_manager(base_test_config()).await; // Zstd
+        let invalid_data = vec![0xFF, 0xFE, 0xFD, 0xFC];
+        let result = manager.decompress_data(invalid_data).await;
+        let err = result.err().expect("invalid zstd data should fail");
+        assert!(
+            matches!(err, InklogError::CompressionError(_)),
+            "expected CompressionError, got {:?}",
+            err
+        );
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_decompress_data_invalid_gzip_returns_error() {
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::Gzip;
+        let manager = make_manager(cfg).await;
+        let invalid_data = vec![0xFF, 0xFE, 0xFD, 0xFC];
+        let result = manager.decompress_data(invalid_data).await;
+        assert!(result.is_err(), "invalid gzip data should fail");
+    }
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_decompress_data_invalid_brotli_returns_error() {
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::Brotli;
+        let manager = make_manager(cfg).await;
+        let invalid_data = vec![0xFF, 0xFE, 0xFD, 0xFC];
+        let result = manager.decompress_data(invalid_data).await;
+        assert!(result.is_err(), "invalid brotli data should fail");
+    }
+
+    // ========================================================================
+    // S3ArchiveManager — compress_data large data parallel path Test
+    // Covers lines 893-908: zstd parallel compression for data > 1MB
+    // ========================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_compress_data_zstd_large_data_exercises_parallel_path() {
+        // Data > 1MB triggers the parallel zstd compression path (lines 893-908)
+        // The NbWorkers parameter may be unsupported depending on zstd build config,
+        // in which case set_parameter returns CompressionError("Unsupported parameter").
+        // We verify the parallel path is exercised by checking either success or the
+        // expected unsupported-parameter error.
+        let mut cfg = base_test_config();
+        cfg.compression = CompressionType::Zstd;
+        let manager = make_manager(cfg).await;
+        // 25000 * 46 bytes ≈ 1.15MB > 1MB threshold → triggers parallel path
+        let large_data = b"inklog parallel zstd compression test payload\n".repeat(25000);
+        assert!(large_data.len() > 1024 * 1024, "test data must exceed 1MB");
+        let result = manager.compress_data(large_data.clone()).await;
+        match result {
+            Ok(compressed) => {
+                // NbWorkers is supported → verify roundtrip
+                assert_ne!(compressed, large_data, "compressed data should differ");
+                let decompressed = manager
+                    .decompress_data(compressed)
+                    .await
+                    .expect("decompress should succeed");
+                assert_eq!(decompressed, large_data, "roundtrip must preserve data");
+            }
+            Err(e) => {
+                // NbWorkers unsupported → verify error type covers lines 897-903
+                assert!(
+                    matches!(e, InklogError::CompressionError(ref msg)
+                        if msg.contains("Unsupported parameter")),
+                    "expected CompressionError about unsupported parameter, got {:?}",
+                    e
+                );
+            }
+        }
+    }
+
+    // ========================================================================
+    // S3ArchiveManager — build_aws_config with endpoint_url Test
+    // Covers lines 556-558: endpoint_url configuration branch
+    // ========================================================================
+
+    #[cfg(feature = "aws")]
+    #[tokio::test]
+    async fn test_build_aws_config_with_endpoint_url() {
+        let mut cfg = base_test_config();
+        cfg.endpoint_url = Some("http://localhost:9000".to_string());
+        // Construction must succeed without network (skip_bucket_validation=true)
+        let manager = make_manager(cfg).await;
+        // Verify manager is functional
+        assert_eq!(manager.get_compression_extension(), "parquet.zst");
+    }
+
+    // ========================================================================
+    // validate_security additional branch Tests
+    // Covers branches not exercised by existing validate_security tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_security_with_credentials_and_enabled_skips_warn() {
+        // enabled=true WITH credentials → missing-credentials warn branch is skipped
+        let config = S3ArchiveConfig {
+            enabled: true,
+            access_key_id: SecretString::new("AKIATEST".to_string()),
+            secret_access_key: SecretString::new("secret".to_string()),
+            ..Default::default()
+        };
+        assert!(config.validate_security().is_ok());
+    }
+
+    #[test]
+    fn test_validate_security_with_encryption_but_no_customer_key() {
+        // encryption is Some but customer_key is None → inner if at line 348 is false
+        let config = S3ArchiveConfig {
+            enabled: true,
+            encryption: Some(EncryptionConfig {
+                algorithm: EncryptionAlgorithm::Aes256,
+                kms_key_id: None,
+                customer_key: SecretString::default(),
+            }),
+            ..Default::default()
+        };
+        assert!(config.validate_security().is_ok());
+    }
 }
