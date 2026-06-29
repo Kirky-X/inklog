@@ -1,7 +1,8 @@
 [package]
 name = "inklog"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
+rust-version = "1.85"
 authors = ["Kirky.X"]
 description = "Enterprise-grade Rust logging infrastructure"
 license = "MIT OR Apache-2.0"
@@ -38,9 +39,9 @@ owo-colors = { version = "4.3", features = ["supports-colors"] }
 regex = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = { version = "0.9" }
+toml = { version = "1.1" }
 trait-kit = "0.1.0"
-validator = { version = "0.19", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 thiserror = "2.0"
 anyhow = "1.0"
 num-traits = "0.2"
@@ -59,24 +60,24 @@ oxcache = { version = "0.2.0", features = ["macros"] }
 moka = { version = "0.12", default-features = false, features = ["sync"] }
 dashmap = "6.1"
 zstd = "0.13"
-aes-gcm = "0.10"
-rand = "0.9"
+aes-gcm = "0.11"
+rand = "0.10"
 base64 = "0.22"
-parquet = { version = "57.3", features = ["async"] }
-arrow-array = "57.3"
-arrow-schema = "57.3"
+parquet = { version = "59.0", features = ["async"] }
+arrow-array = "59.0"
+arrow-schema = "59.0"
 dbnexus = { version = "0.2.0", default-features = false, features = ["sqlite", "sql-parser", "config-env", "macros", "permission"], optional = true }
 sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio-native-tls", "with-chrono"], optional = true }
 flate2 = "1.1"
 brotli = "8.0"
 lz4 = "1.28"
-cron = "0.15"
+cron = "0.17"
 chrono-tz = "0.10"
 tokio-cron-scheduler = "0.15"
 zeroize = "1.8"
 zeroize_derive = "1.4"
-sha2 = "0.10"
-pbkdf2 = "0.12"
+sha2 = "0.11"
+pbkdf2 = "0.13"
 clap = { version = "4.6", features = ["derive", "env"], optional = true }
 glob = { version = "0.3", optional = true }
 ipnet = "2.12"
