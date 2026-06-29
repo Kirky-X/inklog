@@ -16,7 +16,6 @@
   - [ConsoleSinkConfig](#consolesinkconfig)
   - [FileSinkConfig](#filesinkconfig)
   - [DatabaseSinkConfig](#databasesinkconfig)
-  - [S3ArchiveConfig](#s3archiveconfig)
   - [HttpServerConfig](#httpserverconfig)
   - [PerformanceConfig](#performanceconfig)
   - [ParquetConfig](#parquetconfig)
@@ -333,81 +332,6 @@ logger.shutdown()?;
 
 ---
 
-##### `start_archive_service`
-
-启动 S3 归档服务（需要 `aws` 功能）。
-
-**签名**
-```rust
-#[cfg(feature = "aws")]
-pub async fn start_archive_service(&self) -> Result<(), InklogError>
-```
-
-**返回值**
-- `Ok(())` - 归档服务已启动
-- `Err(InklogError)` - 启动失败
-
-**示例**
-```rust
-#[cfg(feature = "aws")]
-{
-    logger.start_archive_service().await?;
-}
-```
-
----
-
-##### `stop_archive_service`
-
-停止 S3 归档服务（需要 `aws` 功能）。
-
-**签名**
-```rust
-#[cfg(feature = "aws")]
-pub async fn stop_archive_service(&self) -> Result<(), InklogError>
-```
-
-**返回值**
-- `Ok(())` - 归档服务已停止
-- `Err(InklogError)` - 停止失败
-
-**示例**
-```rust
-#[cfg(feature = "aws")]
-{
-    logger.stop_archive_service().await?;
-}
-```
-
----
-
-##### `trigger_archive`
-
-手动触发归档操作（需要 `aws` 功能）。
-
-**签名**
-```rust
-#[cfg(feature = "aws")]
-pub async fn trigger_archive(&self) -> Result<String, InklogError>
-```
-
-**返回值**
-- `Ok(String)` - 归档对象的键
-- `Err(InklogError)` - 归档失败
-
-**示例**
-```rust
-#[cfg(feature = "aws")]
-{
-    match logger.trigger_archive().await {
-        Ok(archive_key) => println!("归档完成: {}", archive_key),
-        Err(e) => println!("归档失败: {}", e),
-    }
-}
-```
-
----
-
 ##### `build_detached`
 
 构建 LoggerManager 但不安装全局订阅者。这主要用于测试和基准测试。
@@ -660,34 +584,6 @@ pub fn database(mut self, url: impl Into<String>) -> Self
 ```rust
 let builder = LoggerBuilder::new()
     .database("sqlite://logs/app.db");
-```
-
----
-
-##### `s3_archive`
-
-配置 S3 归档（需要 `aws` 功能）。
-
-**签名**
-```rust
-#[cfg(feature = "aws")]
-pub fn s3_archive(mut self, bucket: impl Into<String>, region: impl Into<String>) -> Self
-```
-
-**参数**
-- `bucket` - S3 存储桶名称
-- `region` - AWS 区域
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-#[cfg(feature = "aws")]
-{
-    let builder = LoggerBuilder::new()
-        .s3_archive("my-bucket", "us-west-2");
-}
 ```
 
 ---
@@ -1165,7 +1061,6 @@ pub struct InklogConfig {
     pub console_sink: Option<ConsoleSinkConfig>,
     pub file_sink: Option<FileSinkConfig>,
     pub database_sink: Option<DatabaseSinkConfig>,
-    pub s3_archive: Option<crate::archive::S3ArchiveConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
 }
@@ -1179,11 +1074,10 @@ pub struct InklogConfig {
 | `console_sink` | `Option<ConsoleSinkConfig>` | `Some(default())` | 控制台 Sink 配置 |
 | `file_sink` | `Option<FileSinkConfig>` | `None` | 文件 Sink 配置 |
 | `database_sink` | `Option<DatabaseSinkConfig>` | `None` | 数据库配置 |
-| `s3_archive` | `Option<S3ArchiveConfig>` | `None` | S3 归档配置（包含 ParquetConfig） |
 | `performance` | `PerformanceConfig` | `default()` | 性能配置 |
 | `http_server` | `Option<HttpServerConfig>` | `None` | HTTP 服务器配置 |
 
-**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseSinkConfig` 和 `S3ArchiveConfig` 的内部字段。
+**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseSinkConfig` 的内部字段。
 
 #### 方法
 
@@ -1422,83 +1316,6 @@ let file_config = FileSinkConfig {
 
 
 
-### S3ArchiveConfig
-
-S3 归档配置（需要 `aws` 功能）。
-
-#### 定义
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct S3ArchiveConfig {
-    pub enabled: bool,
-    pub bucket: String,
-    pub region: String,
-    pub archive_interval_days: u32,
-    pub local_retention_days: u32,
-    pub local_retention_path: PathBuf,
-    pub prefix: String,
-    pub compression: CompressionType,
-    pub storage_class: StorageClass,
-    pub max_file_size_mb: u32,
-    pub schedule_expression: Option<String>,
-    pub force_path_style: bool,
-    pub skip_bucket_validation: bool,
-    pub access_key_id: SecretString,
-    pub secret_access_key: SecretString,
-    pub session_token: Option<SecretString>,
-    pub endpoint_url: Option<String>,
-    pub encryption: Option<EncryptionConfig>,
-    pub archive_format: String,
-}
-```
-
-#### 字段说明
-
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `enabled` | `bool` | `false` | 是否启用 S3 归档 |
-| `bucket` | `String` | `"logs-archive"` | S3 存储桶名称 |
-| `region` | `String` | `"us-east-1"` | AWS 区域 |
-| `archive_interval_days` | `u32` | `7` | 归档间隔天数 |
-| `schedule_expression` | `Option<String>` | `None` | Cron 表达式用于定时归档 |
-| `local_retention_days` | `u32` | `30` | 本地保留天数 |
-| `local_retention_path` | `PathBuf` | `"logs/archive_failures"` | 本地保留路径 |
-| `prefix` | `String` | `"logs/"` | S3 对象键前缀 |
-| `compression` | `CompressionType` | `Zstd` | 压缩类型 |
-| `storage_class` | `StorageClass` | `Standard` | S3 存储类 |
-| `max_file_size_mb` | `u32` | `100` | 单个归档文件最大大小（MB） |
-| `force_path_style` | `bool` | `false` | 是否强制路径风格 |
-| `skip_bucket_validation` | `bool` | `false` | 是否跳过存储桶验证 |
-| `access_key_id` | `SecretString` | `default()` | AWS 访问密钥 ID |
-| `secret_access_key` | `SecretString` | `default()` | AWS 密钥访问密钥 |
-| `session_token` | `SecretString` | `default()` | AWS 会话令牌 |
-| `endpoint_url` | `Option<String>` | `None` | 自定义 S3 端点 URL |
-| `encryption` | `Option<EncryptionConfig>` | `None` | 服务器端加密配置 |
-| `archive_format` | `String` | `"json"` | 归档文件格式（`json` 或 `parquet`） |
-| `parquet_config` | `ParquetConfig` | `default()` | Parquet 导出配置 |
-
-**示例**
-```rust
-use inklog::S3ArchiveConfig;
-use inklog::archive::{CompressionType, StorageClass};
-
-let s3_config = S3ArchiveConfig {
-    enabled: true,
-    bucket: "my-log-bucket".to_string(),
-    region: "us-west-2".to_string(),
-    archive_interval_days: 7,
-    local_retention_days: 30,
-    prefix: "logs/".to_string(),
-    compression: CompressionType::Zstd,
-    storage_class: StorageClass::Standard,
-    max_file_size_mb: 100,
-    ..Default::default()
-};
-```
-
----
-
 ### HttpServerConfig
 
 HTTP 服务器配置（需要 `http` 功能）。
@@ -1711,9 +1528,6 @@ pub enum InklogError {
     #[error("Channel error: {0}")]
     ChannelError(String),
 
-    #[error("S3 error: {0}")]
-    S3Error(String),
-
     #[error("Compression error: {0}")]
     CompressionError(String),
 
@@ -1739,8 +1553,7 @@ pub enum InklogError {
 | `EncryptionError` | 加密/解密错误 |
 | `Shutdown` | 关闭过程中的错误 |
 | `ChannelError` | 通道通信错误 |
-| `S3Error` | AWS S3 操作错误 |
-| `CompressionError` | 压缩/解压错误 |
+| `CompressionError` | 压缩错误 |
 | `RuntimeError` | 运行时错误 |
 | `HttpServerError` | HTTP 服务器错误 |
 | `Unknown` | 未知错误 |
@@ -2198,12 +2011,6 @@ pub trait Config: Send + Sync {
 | `console_sink.colored` | bool | 是否彩色输出 |
 | `console_sink.stderr_levels` | String | stderr 日志级别 |
 | `console_sink.masking_enabled` | bool | 是否启用脱敏 |
-| `s3_archive.enabled` | bool | 是否启用 S3 归档 |
-| `s3_archive.bucket` | String | S3 存储桶 |
-| `s3_archive.region` | String | AWS 区域 |
-| `s3_archive.path_prefix` | String | 路径前缀 |
-| `s3_archive.retention_days` | i64 | 保留天数 |
-| `s3_archive.compression` | bool | 是否压缩 |
 
 **示例实现**
 ```rust

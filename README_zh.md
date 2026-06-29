@@ -51,7 +51,7 @@ Inklog 为企业级应用提供**全面**的日志解决方案：
 
 | ⚡ 高性能 | 🔒 安全优先 | 🌐 多目标输出 | 📊 可观测性 |
 |:---------:|:----------:|:--------------:|:--------:|
-| Tokio 异步 I/O | AES-256-GCM 加密 | 控制台、文件、数据库、S3 | 健康监控 |
+| Tokio 异步 I/O | AES-256-GCM 加密 | 控制台、文件、数据库 | 健康监控 |
 | 批量写入与压缩 | 密钥内存安全清除 | 自动轮转 | 指标与追踪 |
 
 ```rust
@@ -143,10 +143,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 🔍 | **压缩** | ZSTD、GZIP、Brotli、LZ4 支持 |
 | 🔒 | **加密** | AES-256-GCM 文件加密 |
 | 🗄️ | **数据库 Sink** | PostgreSQL、MySQL、SQLite (Sea-ORM) |
-| ☁️ | **S3 归档** | AWS SDK S3 云日志归档 |
 | 📊 | **Parquet 导出** | 分析就绪的日志格式 |
 | 🌐 | **HTTP 端点** | Axum 健康检查服务器 |
-| 📅 | **定时任务** | Cron 归档调度 |
 | 🔧 | **命令行工具** | 日志管理实用命令 |
 | 📝 | **TOML 配置** | 外部配置支持 |
 
@@ -308,29 +306,6 @@ let config = InklogConfig {
 let _logger = LoggerManager::with_config(config).await?;
 ```
 
-#### S3 云归档
-
-```rust
-use inklog::{InklogConfig, S3ArchiveConfig};
-
-let config = InklogConfig {
-    s3_archive: Some(S3ArchiveConfig {
-        enabled: true,
-        bucket: "my-log-bucket".to_string(),
-        region: "us-west-2".to_string(),
-        archive_interval_days: 7,
-        local_retention_days: 30,
-        prefix: "logs/".to_string(),
-        compression: inklog::archive::CompressionType::Zstd,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let manager = LoggerManager::with_config(config).await?;
-manager.start_archive_service().await?;
-```
-
 #### 自定义日志格式
 
 ```rust
@@ -358,17 +333,12 @@ let _logger = LoggerManager::with_config(config).await?;
 ### 默认功能
 
 ```toml
-inklog = "0.1"  # 包含: aws, http, cli
+inklog = "0.1"  # 包含: http, cli
 ```
 
 ### 可选功能
 
 ```toml
-# 云存储
-inklog = { version = "0.1", features = [
-    "aws",        # AWS S3 归档支持
-] }
-
 # HTTP 服务器
 inklog = { version = "0.1", features = [
     "http",       # Axum HTTP 健康端点
@@ -395,7 +365,6 @@ inklog = { version = "0.1", features = [
 
 | 功能 | 依赖 | 描述 |
 |---------|-------------|-------------|
-| **aws** | aws-sdk-s3, aws-config, aws-types | AWS S3 云归档 |
 | **http** | axum | HTTP 健康检查端点 |
 | **cli** | clap, glob, toml | 命令行工具 |
 | **confers** | confers, toml | 外部 TOML 配置支持 |
@@ -556,32 +525,6 @@ let _logger = LoggerManager::with_config(config).await?;
 <tr>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### ☁️ S3 云归档
-
-```rust
-use inklog::{InklogConfig, S3ArchiveConfig};
-
-let config = InklogConfig {
-    s3_archive: Some(S3ArchiveConfig {
-        enabled: true,
-        bucket: "my-log-bucket".to_string(),
-        region: "us-west-2".to_string(),
-        archive_interval_days: 7,
-        local_retention_days: 30,
-        prefix: "logs/".to_string(),
-        compression: inklog::archive::CompressionType::Zstd,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let manager = LoggerManager::with_config(config).await?;
-manager.start_archive_service().await?;
-```
-
-</td>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
 #### 🏥 HTTP 健康端点
 
 ```rust
@@ -713,7 +656,6 @@ log::info!("用户邮箱: user@example.com");
 │         存储与外部服务                      │
 │  - 文件系统                              │
 │  - 数据库 (PostgreSQL, MySQL, SQLite)   │
-│  - AWS S3 (云归档)                      │
 │  - Parquet (分析)                       │
 └───────────────────────────────────────────┘
 ```
@@ -750,7 +692,6 @@ log::info!("用户邮箱: user@example.com");
 **存储与外部服务层**
 - 本地文件系统访问
 - 通过 Sea-ORM 的数据库连接
-- AWS S3 云归档集成
 - 分析工作流的 Parquet 格式
 
 ---
@@ -811,7 +752,7 @@ std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
 cargo test --all-features
 
 # 使用特定功能运行测试
-cargo test --features "aws,http,cli"
+cargo test --features "http,cli"
 
 # 在发布模式下运行测试
 cargo test --release
@@ -979,7 +920,6 @@ Inklog 的实现离不开这些优秀的项目：
 - [tracing](https://github.com/tokio-rs/tracing) - Rust 结构化日志基础
 - [tokio](https://tokio.rs/) - Rust 异步运行时
 - [Sea-ORM](https://www.sea-ql.org/SeaORM/) - 异步 ORM
-- [AWS SDK for Rust](https://github.com/awslabs/aws-sdk-rust) - AWS S3 集成
 - [axum](https://github.com/tokio-rs/axum) - HTTP 端点 Web 框架
 - [serde](https://serde.rs/) - 序列化框架
 - 整个 Rust 生态系统的优秀工具和库

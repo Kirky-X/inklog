@@ -72,6 +72,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `write()`, `flush()`, `shutdown()` 等方法现在使用 `&self`
   - 自定义 Sink 实现需要使用内部可变性（RwLock/Mutex）
   - 所有内置 Sink 实现已更新
+- 移除 `aws` feature 和所有 S3/archive 相关代码
+- 移除 `aws-sdk-s3`、`aws-config`、`aws-types`、`aws-credential-types` 依赖
+- 从 `default` feature 中移除 `aws`
+- 移除 `InklogConfig.s3_archive` 配置字段
+- 移除 `InklogError::S3Error` 和 `InklogError::ArchiveError` 错误变体
+- 移除 `src/integrations/storage/archive/` 整个目录
+- 移除 `examples/src/bin/s3_archive.rs` 示例
+- 移除 `DatabaseSinkConfig` 中的 `archive_to_s3`、`archive_after_days`、`s3_bucket`、`s3_region` 字段
+
+### Migration
+
+- 使用 `default` feature 的用户不再获得 S3 归档能力
+- 使用 `aws` feature 的用户需要移除该 feature 引用
+- 配置文件中的 `[s3_archive]` 部分需要移除
+- `DatabaseSinkConfig` 中的 S3 相关字段需要移除
 
 ### Changed
 

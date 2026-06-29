@@ -51,7 +51,7 @@ Inklog provides a **comprehensive** logging solution for enterprise applications
 
 | ⚡ High Performance | 🔒 Security First | 🌐 Multi-Target | 📊 Observability |
 |:---------:|:----------:|:--------------:|:--------:|
-| Async I/O with Tokio | AES-256-GCM encryption | Console, File, DB, S3 | Health monitoring |
+| Async I/O with Tokio | AES-256-GCM encryption | Console, File, DB | Health monitoring |
 | Batch writes & compression | Zeroized secret memory | Automatic rotation | Metrics & tracing |
 
 ```rust
@@ -143,10 +143,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 🔍 | **Compression** | ZSTD, GZIP, Brotli, LZ4 support (`zstd`, `flate2`, etc.) |
 | 🔒 | **Encryption** | AES-256-GCM file encryption (`aes-gcm`) |
 | 🗄️ | **Database Sink** | PostgreSQL, MySQL, SQLite via Sea-ORM |
-| ☁️ | **S3 Archive** | Cloud log archival with AWS SDK S3 (`aws` feature) |
 | 📊 | **Parquet Export** | Analytics-ready log format (`parquet` feature) |
 | 🌐 | **HTTP Endpoint** | Axum-based health check server (`http` feature) |
-| 📅 | **Scheduled Tasks** | Cron-based archive scheduling |
 | 🔧 | **CLI Tools** | Utility commands for log management (`cli` feature) |
 | 📝 | **TOML Config** | External configuration support (`confers` feature) |
 
@@ -309,29 +307,6 @@ let config = InklogConfig {
 let _logger = LoggerManager::with_config(config).await?;
 ```
 
-#### S3 Cloud Archiving
-
-```rust
-use inklog::{InklogConfig, S3ArchiveConfig};
-
-let config = InklogConfig {
-    s3_archive: Some(S3ArchiveConfig {
-        enabled: true,
-        bucket: "my-log-bucket".to_string(),
-        region: "us-west-2".to_string(),
-        archive_interval_days: 7,
-        local_retention_days: 30,
-        prefix: "logs/".to_string(),
-        compression: inklog::archive::CompressionType::Zstd,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let manager = LoggerManager::with_config(config).await?;
-manager.start_archive_service().await?;
-```
-
 #### Custom Log Format
 
 ```rust
@@ -359,17 +334,12 @@ let _logger = LoggerManager::with_config(config).await?;
 ### Default Features
 
 ```toml
-inklog = "0.1"  # Includes: aws, http, cli
+inklog = "0.1"  # Includes: http, cli
 ```
 
 ### Optional Features
 
 ```toml
-# Cloud & Storage
-inklog = { version = "0.1", features = [
-    "aws",        # AWS S3 archive support
-] }
-
 # HTTP Server
 inklog = { version = "0.1", features = [
     "http",       # Axum HTTP health endpoint
@@ -396,7 +366,6 @@ inklog = { version = "0.1", features = [
 
 | Feature | Dependencies | Description |
 |---------|-------------|-------------|
-| **aws** | aws-sdk-s3, aws-config, aws-types | AWS S3 cloud archive |
 | **http** | axum | HTTP health check endpoint |
 | **cli** | clap, glob, toml | Command-line utilities |
 | **confers** | confers, toml | External TOML configuration support |
@@ -557,32 +526,6 @@ let _logger = LoggerManager::with_config(config).await?;
 <tr>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### ☁️ S3 Cloud Archive
-
-```rust
-use inklog::{InklogConfig, S3ArchiveConfig};
-
-let config = InklogConfig {
-    s3_archive: Some(S3ArchiveConfig {
-        enabled: true,
-        bucket: "my-log-bucket".to_string(),
-        region: "us-west-2".to_string(),
-        archive_interval_days: 7,
-        local_retention_days: 30,
-        prefix: "logs/".to_string(),
-        compression: inklog::archive::CompressionType::Zstd,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let manager = LoggerManager::with_config(config).await?;
-manager.start_archive_service().await?;
-```
-
-</td>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
 #### 🏥 HTTP Health Endpoint
 
 ```rust
@@ -714,7 +657,6 @@ log::info!("User email: user@example.com");
 │         Storage & External Services        │
 │  - Filesystem                          │
 │  - Database (PostgreSQL, MySQL, SQLite)  │
-│  - AWS S3 (cloud archive)              │
 │  - Parquet (analytics)                 │
 └───────────────────────────────────────────┘
 ```
@@ -751,7 +693,6 @@ log::info!("User email: user@example.com");
 **Storage & External Services Layer**
 - Local filesystem access
 - Database connectivity via Sea-ORM
-- AWS S3 integration for cloud archival
 - Parquet format for analytics workflows
 
 ---
@@ -812,7 +753,7 @@ std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
 cargo test --all-features
 
 # Run tests with specific features
-cargo test --features "aws,http,cli"
+cargo test --features "http,cli"
 
 # Run tests in release mode
 cargo test --release
@@ -980,7 +921,6 @@ Inklog wouldn't be possible without these amazing projects:
 - [tracing](https://github.com/tokio-rs/tracing) - The foundation of Rust structured logging
 - [tokio](https://tokio.rs/) - Async runtime for Rust
 - [Sea-ORM](https://www.sea-ql.org/SeaORM/) - Async ORM for database operations
-- [AWS SDK for Rust](https://github.com/awslabs/aws-sdk-rust) - AWS S3 integration
 - [axum](https://github.com/tokio-rs/axum) - Web framework for HTTP endpoints
 - [serde](https://serde.rs/) - Serialization framework
 - The entire Rust ecosystem for amazing tools and libraries

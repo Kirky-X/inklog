@@ -73,16 +73,16 @@ Inklog 是一个企业级 Rust 日志基础设施,为分布式和高性能环境
      └────────────┴──────────────────────┐
                   │                        │
                   ▼                        ▼
-           ┌────────────────────┐    ┌──────────────────┐
-           │   存储后端        │    │  归档服务        │
-           ├────────────────────┤    │                │
-           │  - 文件系统      │    │ - S3ArchiveManager│
-           │  - PostgreSQL     │    │ (AWS 特性)    │
-           │  - MySQL         │    │                │
-           │  - SQLite        │    │ - 定时调度       │
-           │                 │    │ - Parquet 导出   │
-           └────────────────────┘    └──────────────────┘
-                  │                        │
+           ┌────────────────────┐
+           │   存储后端        │
+           ├────────────────────┤
+           │  - 文件系统      │
+           │  - PostgreSQL     │
+           │  - MySQL         │
+           │  - SQLite        │
+           │                 │
+           └────────────────────┘
+                  │
                   └────────────┬───────────┘
                                │
                           ┌──────▼───────┐
@@ -111,8 +111,6 @@ pub struct LoggerManager {
     metrics: Arc<Metrics>,         // 健康监控
     worker_handles: Mutex<Vec<JoinHandle<()>>>, // 工作线程句柄
     control_tx: Sender<SinkControlMessage>, // 控制消息
-    #[cfg(feature = "aws")]
-    archive_service: Option<Arc<AsyncMutex<ArchiveService>>>,
     #[cfg(feature = "http")]
     http_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -126,7 +124,6 @@ pub struct LoggerManager {
 4. 启动 3 个工作线程 (文件、数据库、健康检查)
 5. 安装全局 tracing subscriber
 6. [可选] 启动 HTTP 健康检查服务器
-7. [可选] 初始化 S3 归档服务
 
 **工作线程**:
 
@@ -161,7 +158,6 @@ pub struct InklogConfig {
     pub console_sink: Option<ConsoleSinkConfig>,
     pub file_sink: Option<FileSinkConfig>,
     pub database_sink: Option<DatabaseSinkConfig>,
-    pub s3_archive: Option<S3ArchiveConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
 }
@@ -179,7 +175,6 @@ pub struct InklogConfig {
 - 文件路径不能为空
 - 数据库 URL 不能为空
 - 加密必须提供密钥环境变量
-- S3 bucket 和 region 必须配置
 
 ## 依赖注入架构
 
@@ -429,10 +424,6 @@ ConfersAdapter 支持完整的配置键映射：
 **控制台 Sink**:
 - `console_sink.enabled`、`console_sink.colored`
 - `console_sink.stderr_levels`、`console_sink.masking_enabled`
-
-**S3 归档**:
-- `s3_archive.enabled`、`s3_archive.bucket`、`s3_archive.region`
-- `s3_archive.path_prefix`、`s3_archive.retention_days`、`s3_archive.compression`
 
 ## Sink 系统
 
@@ -890,11 +881,7 @@ logs/
 ├── app_20250117_143022.log   # 已轮转日志
 ├── app_20250117_120000.log.zst  # 已压缩
 ├── app_20250116_080000.log.zst.enc  # 已加密
-├── error.log            # 内部错误日志
-└── archive/             # 本地归档目录
-    └── 2026/
-        └── 01/
-            └── archive_20250117.parquet
+└── error.log            # 内部错误日志
 ```
 
 **轮转策略**:
@@ -957,67 +944,6 @@ Entity::insert_many(active_models).exec(db).await
 Sea-ORM 批量 INSERT (单次事务)
   ↓
 清空缓冲区
-```
-
-### S3 云归档
-
-**归档架构**:
-```
-DatabaseSink/FileSink
-  ↓
-ArchiveService (tokio-cron-scheduler)
-  ↓
-每夜 02:00 执行归档任务
-  ├─ 从数据库查询日志
-  ├─ 转换为 Parquet/JSON
-  ├─ 上传到 S3 (multipart upload)
-  └─ 记录归档元数据
-  ↓
-S3 对象存储
-  ├─ 前缀: logs/YYYY/MM/
-  ├─ 文件名: logs_YYYYMMDD_HHMMSS.parquet
-  └─ 存储类别: Glacier (低成本长期存储)
-```
-
-**S3 配置**:
-```rust
-pub struct S3ArchiveConfig {
-    pub enabled: bool,
-    pub bucket: String,           // 存储桶名称
-    pub region: String,           // AWS 区域
-    pub archive_interval_days: u32, // 归档间隔
-    pub local_retention_days: u32,  // 本地保留
-    pub prefix: String,           // 对象键前缀
-    pub compression: CompressionType, // ZSTD/GZIP/LZ4/Brotli
-    pub storage_class: StorageClass, // Standard/IntelligentTiering/Glacier
-    pub encryption: Option<EncryptionConfig>,
-    pub max_file_size_mb: u64,
-}
-```
-
-**重试策略**:
-```rust
-async fn retry_with_backoff<T, F, Fut>(mut attempt: F) -> Result<T, InklogError>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, InklogError>>,
-{
-    let mut retries = 0;
-    let max_retries = 3;
-    let base_delay = Duration::from_secs(1);
-
-    loop {
-        match attempt().await {
-            Ok(result) => return Ok(result),
-            Err(e) if retries < max_retries => {
-                retries += 1;
-                let delay = base_delay * 2_u32.pow(retries - 1); // 1s, 2s, 4s
-                tokio::time::sleep(delay).await;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-}
 ```
 
 ## 安全架构
@@ -1304,14 +1230,6 @@ pub struct InklogConfig {
 | anyhow            | 1.x     | 错误上下文                     |
 
 ### 可选依赖 (特性门控)
-
-**AWS 特性** (`aws`):
-| 依赖                    | 用途                      |
-|-----------------------|--------------------------|
-| aws-sdk-s3            | S3 对象存储               |
-| aws-config             | AWS 配置加载             |
-| aws-types              | AWS 类型定义               |
-| tokio-cron-scheduler   | 定时归档调度             |
 
 **HTTP 特性** (`http`):
 | 依赖   | 用途              |
