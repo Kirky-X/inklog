@@ -2402,4 +2402,431 @@ mod tests {
         assert!(content.contains("Appended message"));
         sink.shutdown().unwrap();
     }
+
+    // ==================== rotation_time 分支覆盖测试 ====================
+
+    #[test]
+    fn test_file_sink_new_with_weekly_rotation() {
+        // 覆盖行 108: "weekly" => StdDuration::from_secs(604800)
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("weekly.log"),
+            rotation_time: "weekly".to_string(),
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        assert_eq!(sink.rotation_interval, StdDuration::from_secs(604800));
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_file_sink_new_with_monthly_rotation() {
+        // 覆盖行 109: "monthly" => StdDuration::from_secs(2592000)
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("monthly.log"),
+            rotation_time: "monthly".to_string(),
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        assert_eq!(sink.rotation_interval, StdDuration::from_secs(2592000));
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_file_sink_new_with_unknown_rotation_falls_back_to_daily() {
+        // 覆盖行 110: _ => StdDuration::from_secs(86400)（默认分支）
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("unknown.log"),
+            rotation_time: "unknown_interval".to_string(),
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        assert_eq!(sink.rotation_interval, StdDuration::from_secs(86400));
+        sink.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_file_sink_new_with_hourly_rotation() {
+        // 覆盖行 106: "hourly" => StdDuration::from_secs(3600)
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("hourly.log"),
+            rotation_time: "hourly".to_string(),
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        assert_eq!(sink.rotation_interval, StdDuration::from_secs(3600));
+        sink.shutdown().unwrap();
+    }
+
+    // ==================== get_encryption_key 错误路径测试 ====================
+
+    #[test]
+    #[serial]
+    fn test_get_encryption_key_invalid_base64() {
+        // 覆盖行 239-244: 无效 base64 解码错误
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("test.log"),
+            encryption_key_env: Some("TEST_INVALID_B64".to_string()),
+            ..Default::default()
+        };
+        // 设置非法 base64 字符串（长度足够但不是有效 base64）
+        std::env::set_var("TEST_INVALID_B64", "this_is_not_valid_base64!!!@#$");
+
+        let sink = create_test_file_sink(config);
+        let result = sink.get_encryption_key();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid base64 encoding"));
+
+        std::env::remove_var("TEST_INVALID_B64");
+    }
+
+    #[test]
+    #[serial]
+    fn test_get_encryption_key_wrong_byte_length() {
+        // 覆盖行 246-250: 解码后字节数不等于 32
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("test.log"),
+            encryption_key_env: Some("TEST_WRONG_LEN".to_string()),
+            ..Default::default()
+        };
+        // 16 字节（足够长，但解码后不是 32 字节）
+        std::env::set_var("TEST_WRONG_LEN", "YWJjZGVmZ2hpamtsbW5v"); // 16 字节
+
+        let sink = create_test_file_sink(config);
+        let result = sink.get_encryption_key();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("32 bytes"));
+
+        std::env::remove_var("TEST_WRONG_LEN");
+    }
+
+    // ==================== get_disk_space_info 错误路径测试 ====================
+
+    #[test]
+    fn test_get_disk_space_info_nonexistent_path() {
+        // 覆盖行 452-455: 路径不存在时返回错误
+        let config = FileSinkConfig {
+            enabled: true,
+            // 使用一个肯定不存在的父路径
+            path: PathBuf::from("/nonexistent_root_path_xyz/log.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.get_disk_space_info();
+        assert!(result.is_err());
+    }
+
+    // ==================== perform_cleanup 边界测试 ====================
+
+    #[test]
+    fn test_perform_cleanup_with_empty_directory() {
+        // 覆盖 perform_cleanup 在空目录中的行为
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("app.log");
+        // 创建空目录（无旧日志文件）
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            retention_days: 7,
+            max_total_size: "1GB".to_string(),
+            ..Default::default()
+        };
+        let result = FileSink::perform_cleanup(&config, &log_path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_perform_cleanup_removes_expired_files() {
+        // 覆盖 perform_cleanup 删除过期文件的行为
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("app.log");
+
+        // 创建一个"过期"的日志文件（修改时间为 30 天前）
+        let old_file = temp_dir.path().join("app_20250101_000000.log");
+        std::fs::write(&old_file, "old log content").unwrap();
+
+        // 设置文件修改时间为 30 天前
+        let old_time =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 24 * 60 * 60);
+        let _ = filetime::set_file_mtime(&old_file, filetime::FileTime::from_system_time(old_time));
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            retention_days: 7, // 保留 7 天，30 天前的文件应被删除
+            max_total_size: "1GB".to_string(),
+            keep_files: 0,
+            ..Default::default()
+        };
+        let result = FileSink::perform_cleanup(&config, &log_path);
+        assert!(result.is_ok());
+        // 过期文件应被删除
+        assert!(!old_file.exists(), "expired file should be removed");
+    }
+
+    // ==================== compress_file 测试 ====================
+
+    #[test]
+    fn test_compress_file_basic() {
+        // 覆盖 compress_file 基本压缩路径（不加密）
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("to_compress.log");
+        std::fs::write(&log_path, "some log content to compress\n").unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("active.log"),
+            compress: false, // compress_file 本身不依赖此标志，但配置需要
+            encrypt: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.compress_file(&log_path);
+        assert!(result.is_ok(), "compress_file should succeed");
+        let compressed_path = result.unwrap();
+        assert!(compressed_path.exists(), "compressed file should exist");
+        assert!(compressed_path.extension().map_or(false, |e| e == "zst"));
+        // 原文件应被删除（因为 encrypt=false）
+        assert!(
+            !log_path.exists(),
+            "original file should be removed after compression"
+        );
+    }
+
+    #[test]
+    fn test_compress_file_nonexistent_input() {
+        // 覆盖 compress_file 错误路径（输入文件不存在）
+        let temp_dir = tempdir().unwrap();
+        let nonexistent = temp_dir.path().join("does_not_exist.log");
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("active.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.compress_file(&nonexistent);
+        assert!(
+            result.is_err(),
+            "compress_file should fail for nonexistent input"
+        );
+    }
+
+    // ==================== encrypt_file 测试 ====================
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_basic() {
+        // 覆盖 encrypt_file 基本加密路径
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("to_encrypt.log");
+        let output_path = temp_dir.path().join("encrypted.log.enc");
+        std::fs::write(&input_path, "secret log content\n").unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("active.log"),
+            encryption_key_env: Some("TEST_ENCRYPT_KEY".to_string()),
+            ..Default::default()
+        };
+        // 设置有效密钥（32 字节，高熵）
+        std::env::set_var(
+            "TEST_ENCRYPT_KEY",
+            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
+        );
+
+        let sink = create_test_file_sink(config);
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(result.is_ok(), "encrypt_file should succeed");
+        assert!(output_path.exists(), "encrypted file should be created");
+        // 加密文件应大于 12 字节（nonce）+ 明文长度
+        let encrypted_size = std::fs::metadata(&output_path).unwrap().len();
+        assert!(
+            encrypted_size > 12,
+            "encrypted file should contain nonce + ciphertext"
+        );
+
+        std::env::remove_var("TEST_ENCRYPT_KEY");
+    }
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_missing_key_env() {
+        // 覆盖 encrypt_file 错误路径（密钥环境变量未设置）
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("to_encrypt.log");
+        let output_path = temp_dir.path().join("encrypted.log.enc");
+        std::fs::write(&input_path, "content\n").unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("active.log"),
+            encryption_key_env: Some("MISSING_ENCRYPT_KEY_ENV_VAR".to_string()),
+            ..Default::default()
+        };
+        std::env::remove_var("MISSING_ENCRYPT_KEY_ENV_VAR");
+
+        let sink = create_test_file_sink(config);
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(result.is_err(), "encrypt_file should fail without key");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Encryption key not found"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_nonexistent_input() {
+        // 覆盖 encrypt_file 错误路径（输入文件不存在）
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("does_not_exist.log");
+        let output_path = temp_dir.path().join("out.log.enc");
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("active.log"),
+            encryption_key_env: Some("TEST_ENCRYPT_KEY_2".to_string()),
+            ..Default::default()
+        };
+        std::env::set_var(
+            "TEST_ENCRYPT_KEY_2",
+            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
+        );
+
+        let sink = create_test_file_sink(config);
+        let result = sink.encrypt_file(&input_path, &output_path);
+        assert!(
+            result.is_err(),
+            "encrypt_file should fail for nonexistent input"
+        );
+
+        std::env::remove_var("TEST_ENCRYPT_KEY_2");
+    }
+
+    // ==================== compress_file with encryption 测试 ====================
+
+    #[test]
+    #[serial]
+    fn test_compress_file_with_encryption() {
+        // 覆盖 compress_file 的加密分支（行 640-652）
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("to_compress_enc.log");
+        std::fs::write(&log_path, "content to compress and encrypt\n").unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("active.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_COMPRESS_ENC_KEY".to_string()),
+            ..Default::default()
+        };
+        std::env::set_var(
+            "TEST_COMPRESS_ENC_KEY",
+            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
+        );
+
+        let sink = create_test_file_sink(config);
+        let result = sink.compress_file(&log_path);
+        assert!(
+            result.is_ok(),
+            "compress_file with encryption should succeed"
+        );
+        let encrypted_path = result.unwrap();
+        assert!(
+            encrypted_path.exists(),
+            "encrypted compressed file should exist"
+        );
+        assert!(encrypted_path.extension().map_or(false, |e| e == "enc"));
+
+        std::env::remove_var("TEST_COMPRESS_ENC_KEY");
+    }
+
+    // ==================== rotate_inner 测试 ====================
+
+    #[test]
+    fn test_rotate_inner_basic() {
+        // 覆盖 rotate_inner 基本轮转路径
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("rotate.log");
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            compress: false,
+            encrypt: false,
+            ..Default::default()
+        };
+        // 先创建文件并写入内容
+        std::fs::write(&log_path, "original content\n").unwrap();
+
+        let sink = FileSink::new(config).unwrap();
+        // 手动触发轮转
+        let mut inner = sink.inner.write();
+        let result = sink.rotate_inner(&mut inner);
+        assert!(result.is_ok(), "rotate_inner should succeed");
+        drop(inner);
+
+        sink.shutdown().unwrap();
+
+        // 原文件应被重命名（轮转后），新文件应被创建
+        let entries: Vec<_> = std::fs::read_dir(temp_dir.path()).unwrap().collect();
+        // 至少应该有轮转后的文件
+        assert!(
+            !entries.is_empty(),
+            "rotated file should exist in directory"
+        );
+    }
+
+    #[test]
+    fn test_rotate_inner_with_compression() {
+        // 覆盖 rotate_inner 的压缩分支（行 748-755）
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("rotate_compress.log");
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            compress: true,
+            encrypt: false,
+            compression_level: 3,
+            ..Default::default()
+        };
+        std::fs::write(&log_path, "content to be rotated and compressed\n").unwrap();
+
+        let sink = FileSink::new(config).unwrap();
+        let mut inner = sink.inner.write();
+        let result = sink.rotate_inner(&mut inner);
+        assert!(
+            result.is_ok(),
+            "rotate_inner with compression should succeed"
+        );
+        drop(inner);
+
+        // 给后台压缩线程一点时间完成
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        sink.shutdown().unwrap();
+
+        // 检查是否有 .zst 文件生成
+        let has_zst = std::fs::read_dir(temp_dir.path()).unwrap().any(|e| {
+            e.map_or(false, |entry| {
+                entry.path().extension().map_or(false, |ext| ext == "zst")
+            })
+        });
+        assert!(has_zst, "compressed rotated file (.zst) should exist");
+    }
 }

@@ -262,4 +262,21 @@ mod tests {
         assert_eq!(key.len(), 32);
         assert_eq!(salt.len(), 64);
     }
+
+    #[test]
+    fn test_get_encryption_key_long_non_base64_input() {
+        // 覆盖行 75-78: 长度 >= 128 且不是有效 Base64 时返回错误
+        // 使用 128 个 '!' 字符（非 Base64 字符），确保到达最后的 Err 分支
+        let long_non_base64 = "!".repeat(128);
+        std::env::set_var("INKLOG_TEST_KEY", &long_non_base64);
+        let result = get_encryption_key("INKLOG_TEST_KEY");
+        std::env::remove_var("INKLOG_TEST_KEY");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("32 bytes") || err_msg.contains("password"),
+            "error should mention 32 bytes or password, got: {}",
+            err_msg
+        );
+    }
 }
