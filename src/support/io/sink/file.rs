@@ -684,7 +684,7 @@ impl FileSink {
     /// 同步加密文件（可在后台线程调用）
     fn encrypt_file(&self, input_path: &PathBuf, output_path: &PathBuf) -> Result<(), InklogError> {
         use aes_gcm::{Aes256Gcm, Nonce};
-        use rand::RngCore;
+        use rand::Rng;
 
         // 获取密钥
         let key_bytes = self.get_encryption_key()?;
@@ -692,11 +692,11 @@ impl FileSink {
             .map_err(|e| InklogError::EncryptionError(format!("Invalid key: {}", e)))?;
 
         // 生成加密安全的随机 nonce
-        // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 OsRng 定期种子化
+        // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 SysRng 定期种子化
         // rand::rng() 返回 ThreadRng，它是密码学安全的
         let mut nonce_bytes = [0u8; 12];
         rand::rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         // 读取输入文件
         let input_data = fs::read(input_path).map_err(|e| {
@@ -705,7 +705,7 @@ impl FileSink {
         })?;
 
         // 加密
-        let ciphertext = cipher.encrypt(nonce, input_data.as_slice()).map_err(|e| {
+        let ciphertext = cipher.encrypt(&nonce, input_data.as_slice()).map_err(|e| {
             error!("Encryption failed: {}", e);
             InklogError::EncryptionError(e.to_string())
         })?;
@@ -1449,7 +1449,7 @@ mod tests {
     #[test]
     fn test_nonce_generation_unique() {
         // 测试每次生成的 nonce 都是唯一的
-        use rand::RngCore;
+        use rand::Rng;
 
         let mut nonces = Vec::new();
         for _ in 0..100 {
@@ -1970,9 +1970,10 @@ mod tests {
         assert!(encrypted_data.len() > 12);
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce = Nonce::from_slice(&encrypted_data[..12]);
+        let nonce_arr: [u8; 12] = encrypted_data[..12].try_into().unwrap();
+        let nonce = Nonce::from(nonce_arr);
         let ciphertext = &encrypted_data[12..];
-        let decrypted_compressed = cipher.decrypt(nonce, ciphertext).unwrap();
+        let decrypted_compressed = cipher.decrypt(&nonce, ciphertext).unwrap();
 
         // 解压
         let mut decoder = zstd::stream::Decoder::new(&decrypted_compressed[..]).unwrap();
@@ -2015,9 +2016,10 @@ mod tests {
         assert!(encrypted_data.len() > 12);
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce = Nonce::from_slice(&encrypted_data[..12]);
+        let nonce_arr: [u8; 12] = encrypted_data[..12].try_into().unwrap();
+        let nonce = Nonce::from(nonce_arr);
         let ciphertext = &encrypted_data[12..];
-        let decrypted = cipher.decrypt(nonce, ciphertext).unwrap();
+        let decrypted = cipher.decrypt(&nonce, ciphertext).unwrap();
         assert_eq!(decrypted, original_content);
 
         std::env::remove_var("TEST_ENC_KEY_RT");

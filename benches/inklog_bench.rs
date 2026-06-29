@@ -14,7 +14,7 @@ use inklog::{
     InklogConfig, LoggerManager,
 };
 #[cfg(feature = "dbnexus")]
-use rand::Rng;
+use rand::RngExt;
 use rayon::prelude::*;
 #[cfg(feature = "dbnexus")]
 use std::collections::HashMap;

@@ -144,7 +144,10 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     let key = get_encryption_key_cli(key_env)
         .with_context(|| format!("Failed to get encryption key from env var: {}", key_env))?;
 
-    let nonce = aes_gcm::Nonce::from_slice(&header[12..24]);
+    let nonce_arr: [u8; 12] = header[12..24]
+        .try_into()
+        .expect("nonce slice must be 12 bytes");
+    let nonce = aes_gcm::Nonce::from(nonce_arr);
 
     let mut ciphertext = Vec::new();
     file.read_to_end(&mut ciphertext)
@@ -153,7 +156,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     let cipher = Aes256Gcm::new((&key).into());
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
+        .decrypt(&nonce, ciphertext.as_ref())
         .map_err(|e| anyhow!("Decryption failed: {}", e))?;
 
     let mut output_file = File::create(output_path)
@@ -201,7 +204,7 @@ pub fn decrypt_file_compatible(
             return Err(anyhow!("File too small for V1 format"));
         }
         let nonce_slice: [u8; 12] = header[12..24].try_into().unwrap();
-        let nonce = aes_gcm::Nonce::from_slice(&nonce_slice);
+        let nonce = aes_gcm::Nonce::from(nonce_slice);
 
         let mut ciphertext = Vec::new();
         file.read_to_end(&mut ciphertext)
@@ -209,7 +212,7 @@ pub fn decrypt_file_compatible(
 
         let cipher = Aes256Gcm::new((&key).into());
         cipher
-            .decrypt(nonce, ciphertext.as_ref())
+            .decrypt(&nonce, ciphertext.as_ref())
             .map_err(|e| anyhow!("Decryption failed: {}", e))?
     } else {
         // Assume Legacy format (MAGIC + VER + NONCE + CIPHERTEXT)
@@ -220,7 +223,7 @@ pub fn decrypt_file_compatible(
 
         let mut nonce_bytes = [0u8; 12];
         nonce_bytes.copy_from_slice(&header[10..22]);
-        let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+        let nonce = aes_gcm::Nonce::from(nonce_bytes);
 
         let mut ciphertext = Vec::new();
         // If we read more than 22 bytes, the extras are part of the ciphertext
@@ -232,7 +235,7 @@ pub fn decrypt_file_compatible(
 
         let cipher = Aes256Gcm::new((&key).into());
         cipher
-            .decrypt(nonce, ciphertext.as_ref())
+            .decrypt(&nonce, ciphertext.as_ref())
             .map_err(|e| anyhow!("Decryption failed: {}", e))?
     };
 
@@ -425,7 +428,7 @@ mod tests {
     use super::*;
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::Aes256Gcm;
-    use rand::Rng;
+    use rand::RngExt;
     use std::io::Write;
 
     /// Generate a test key from a seed (allows deterministic or environment-based keys)
@@ -455,9 +458,9 @@ mod tests {
         file.write_all(&nonce_bytes)?;
 
         let cipher = Aes256Gcm::new(key.into());
-        let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+        let nonce = aes_gcm::Nonce::from(nonce_bytes);
         let ciphertext = cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(&nonce, plaintext)
             .map_err(|e| anyhow!("Encryption error: {}", e))?;
 
         file.write_all(&ciphertext)?;
@@ -481,9 +484,9 @@ mod tests {
         file.write_all(&nonce_bytes)?;
 
         let cipher = Aes256Gcm::new(key.into());
-        let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+        let nonce = aes_gcm::Nonce::from(nonce_bytes);
         let ciphertext = cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(&nonce, plaintext)
             .map_err(|e| anyhow!("Encryption error: {}", e))?;
 
         file.write_all(&ciphertext)?;

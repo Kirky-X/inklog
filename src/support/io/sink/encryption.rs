@@ -10,7 +10,7 @@
 use crate::InklogError;
 use base64::{engine::general_purpose, Engine as _};
 use pbkdf2::pbkdf2_hmac;
-use rand::RngCore;
+use rand::Rng;
 use sha2::Sha256;
 use zeroize::Zeroizing;
 

@@ -176,8 +176,8 @@ fn test_cli_decrypt_success() {
         let nonce_bytes = [0xAAu8; 12];
         file.write_all(&nonce_bytes).expect("write nonce");
         let cipher = Aes256Gcm::new((&key).into());
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).expect("encrypt");
+        let nonce = Nonce::from(nonce_bytes);
+        let ciphertext = cipher.encrypt(&nonce, plaintext.as_ref()).expect("encrypt");
         file.write_all(&ciphertext).expect("write ciphertext");
     }
 
