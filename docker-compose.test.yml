@@ -1,0 +1,71 @@
+# inklog 测试数据库 Docker Compose 配置
+#
+# 用途：为 inklog 的数据库集成测试提供真实的数据库环境。
+# 当前 dbnexus feature 启用 sqlite，PostgreSQL/MySQL 服务供未来扩展使用。
+#
+# 启动：
+#   docker compose -f docker-compose.test.yml up -d
+#
+# 环境变量：
+#   INKLOG_TEST_DB_URL - 测试用数据库连接字符串
+#     SQLite:   sqlite:///tmp/inklog_test.db
+#     PostgreSQL: postgres://inklog:inklog@localhost:5432/inklog_test
+#     MySQL:      mysql://inklog:inklog@localhost:3306/inklog_test
+#
+# 关闭：
+#   docker compose -f docker-compose.test.yml down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: inklog-test-postgres
+    environment:
+      POSTGRES_USER: inklog
+      POSTGRES_PASSWORD: inklog
+      POSTGRES_DB: inklog_test
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inklog -d inklog_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp
+
+  mysql:
+    image: mysql:8.0
+    container_name: inklog-test-mysql
+    environment:
+      MYSQL_USER: inklog
+      MYSQL_PASSWORD: inklog
+      MYSQL_DATABASE: inklog_test
+      MYSQL_ROOT_PASSWORD: rootpass
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "inklog", "-pinklog"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    volumes:
+      - mysqldata:/var/lib/mysql
+    tmpfs:
+      - /tmp
+
+  # SQLite 无需服务（文件数据库），此处通过 busybox 提供共享 tmpfs 卷
+  sqlite-volume:
+    image: busybox:latest
+    container_name: inklog-test-sqlite
+    command: ["sh", "-c", "mkdir -p /data && tail -f /dev/null"]
+    volumes:
+      - sqlitedata:/data
+
+volumes:
+  pgdata:
+  mysqldata:
+  sqlitedata:

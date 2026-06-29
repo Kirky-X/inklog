@@ -1,0 +1,88 @@
+# inklog Docker 数据库集成测试 CI 流水线
+#
+# 在 PR 和 push 时启动 Docker 数据库服务，运行 tests/docker.rs 集成测试。
+# 测试通过 `INKLOG_TEST_DB_URL` 环境变量连接数据库。
+name: Docker Database Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  docker-tests:
+    name: Docker DB Tests (${{ matrix.db }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, postgres, mysql]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-docker-${{ matrix.db }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-docker-${{ matrix.db }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v1
+
+      - name: Start PostgreSQL and MySQL (only for pg/mysql jobs)
+        if: matrix.db != 'sqlite'
+        run: |
+          docker compose -f docker-compose.test.yml up -d postgres mysql
+          # 等待服务健康
+          timeout 60 bash -c 'until docker compose -f docker-compose.test.yml ps postgres | grep -q "healthy"; do sleep 2; done'
+          timeout 60 bash -c 'until docker compose -f docker-compose.test.yml ps mysql | grep -q "healthy"; do sleep 2; done'
+
+      - name: Set INKLOG_TEST_DB_URL
+        run: |
+          case "${{ matrix.db }}" in
+            sqlite)
+              echo "INKLOG_TEST_DB_URL=sqlite:///tmp/inklog_ci_test.db" >> $GITHUB_ENV
+              ;;
+            postgres)
+              echo "INKLOG_TEST_DB_URL=postgres://inklog:inklog@localhost:5432/inklog_test" >> $GITHUB_ENV
+              ;;
+            mysql)
+              echo "INKLOG_TEST_DB_URL=mysql://inklog:inklog@localhost:3306/inklog_test" >> $GITHUB_ENV
+              ;;
+          esac
+
+      - name: Build tests (dbnexus feature)
+        run: cargo build --tests --features dbnexus
+
+      - name: Run Docker integration tests
+        run: cargo test --test docker --features dbnexus -- --test-threads=1
+
+      - name: Run lib tests (dbnexus feature)
+        run: cargo test --lib --features dbnexus
+
+      - name: Clippy (dbnexus feature)
+        run: cargo clippy --all-targets --features dbnexus -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Cleanup Docker services
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v

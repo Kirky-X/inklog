@@ -100,8 +100,6 @@ pnpm-lock.yaml
 .aws/
 
 # Docker
-docker/
-docker-compose.test.yml
 .dockerignore.local
 
 # OpenSpec
