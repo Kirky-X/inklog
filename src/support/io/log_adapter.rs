@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// 并分发到配置的 channels（console + async workers）。
 ///
 /// 使用 channel 实现无锁热路径，避免锁竞争。
-/// 使用 Arc<LogRecord> 避免深拷贝。
+/// 使用 `Arc<LogRecord>` 避免深拷贝。
 pub struct LogAdapter {
     /// Channel sender for console output (lock-free)
     console_sender: Sender<Arc<LogRecord>>,

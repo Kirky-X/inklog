@@ -21,7 +21,7 @@ const FALLBACK_BUFFER_SIZE: usize = 100;
 ///
 /// Uses crossbeam channels for both console and async sinks to eliminate
 /// lock contention in the hot path (on_event).
-/// Uses Arc<LogRecord> to avoid deep cloning when sending to multiple sinks.
+/// Uses `Arc<LogRecord>` to avoid deep cloning when sending to multiple sinks.
 /// Includes fallback buffer for critical logs (ERROR/FATAL).
 pub struct LoggerSubscriber {
     /// Channel sender for console output (lock-free)

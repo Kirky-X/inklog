@@ -7,7 +7,7 @@
 //!
 //! Provides typed keys for registering inklog's core infrastructure capabilities
 //! ([`Config`](crate::integrations::infra::Config), [`Cache`](crate::integrations::infra::Cache),
-//! [`Database`](crate::integrations::infra::Database)) and the [`InklogConfig`] value
+//! [`Database`](crate::integrations::infra::Database)) and the [`crate::InklogConfig`] value
 //! in a [`trait_kit::kit::Kit`].
 //!
 //! # Overview

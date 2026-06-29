@@ -6,7 +6,7 @@
 //! Typed keys for Kit capability and config registration.
 //!
 //! Provides [`CapabilityKey`] implementations for inklog's core infrastructure
-//! traits ([`Config`], [`Cache`], [`Database`]) and a [`ConfigKey`] implementation
+//! traits ([`Config`], [`Cache`], [`Database`]) and a [`trait_kit::core::config::ConfigKey`] implementation
 //! for typed [`InklogConfig`] storage.
 //!
 //! # Naming

@@ -30,7 +30,7 @@ use tracing::{Event, Level};
 ///
 /// # Performance
 ///
-/// `LogRecord` instances are pooled using [`object_pool::LOG_RECORD_POOL`] to reduce
+/// `LogRecord` instances are pooled using [`crate::LOG_RECORD_POOL`] to reduce
 /// memory allocations in the hot path. Use [`reset()`](Self::reset) to reuse instances.
 ///
 /// # Sensitive Data
@@ -194,7 +194,7 @@ impl LogRecord {
     ///
     /// This method uses object pooling for both the `LogRecord` and the message
     /// string to minimize allocations in the hot path. The returned instance
-    /// is taken from [`LOG_RECORD_POOL`](crate::LOG_RECORD_POOL).
+    /// is taken from [`LOG_RECORD_POOL`].
     ///
     /// # Sensitive Data
     ///
