@@ -341,7 +341,20 @@ impl FileSink {
                     break;
                 }
 
-                thread::sleep(check_interval);
+                // 拆分长 sleep 为 100ms 段，每段检查 shutdown_flag。
+                // 修复根因：原 thread::sleep(60s) 期间无法响应 shutdown，
+                // 即使 FileSink::Drop 设置 flag 后也要等 sleep 结束才能退出，
+                // 导致测试进程无法退出（PID 20848 等挂起问题）。
+                let mut elapsed = StdDuration::ZERO;
+                const POLL_INTERVAL: StdDuration = StdDuration::from_millis(100);
+                while elapsed < check_interval {
+                    if shutdown_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let step = std::cmp::min(POLL_INTERVAL, check_interval - elapsed);
+                    thread::sleep(step);
+                    elapsed += step;
+                }
 
                 // 检查关闭标志
                 if shutdown_flag.load(Ordering::Relaxed) {
@@ -540,7 +553,18 @@ impl FileSink {
                     break;
                 }
 
-                thread::sleep(check_interval);
+                // 拆分长 sleep 为 100ms 段，每段检查 shutdown_flag
+                // （修复根因见 cleanup_timer 同样修改）
+                let mut elapsed = StdDuration::ZERO;
+                const POLL_INTERVAL: StdDuration = StdDuration::from_millis(100);
+                while elapsed < check_interval {
+                    if shutdown_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let step = std::cmp::min(POLL_INTERVAL, check_interval - elapsed);
+                    thread::sleep(step);
+                    elapsed += step;
+                }
 
                 // Check again after sleep to avoid race condition
                 if shutdown_flag.load(Ordering::Relaxed) {
