@@ -13,18 +13,28 @@
 //! - `template`: 日志模板示例
 //! - `builder`: Builder 模式配置
 //! - `masking`: 数据脱敏示例
+//! - `object_pool`: 对象池使用示例
+//! - `path_validator`: 路径验证示例
+//! - `log_sanitizer`: 日志净化示例
+//! - `log_adapter`: log crate 兼容适配器示例
 //!
 //! ## Layer 1 - 本地资源示例（自动清理）
 //!
 //! - `file`: 文件输出、轮转、压缩
 //! - `encryption`: 加密功能
 //! - `performance`: 性能测试
+//! - `compression`: Zstd 压缩/解压缩示例
+//! - `rotation`: 日志轮转示例（按大小/按时间）
+//! - `ring_buffered_file`: 环形缓冲文件 Sink 示例
+//! - `config_file`: 从 TOML 配置文件加载示例
 //!
 //! ## Layer 2 - 外部服务示例（可选依赖）
 //!
 //! - `database`: 数据库输出
 //! - `http`: HTTP 健康监控
 //! - `fallback`: 降级机制
+//! - `metrics`: 指标收集与健康监控示例
+//! - `circuit_breaker`: 熔断器示例
 //!
 //! ## 运行示例
 //!
@@ -34,16 +44,26 @@
 //! cargo run --bin template
 //! cargo run --bin builder
 //! cargo run --bin masking
+//! cargo run --bin object_pool
+//! cargo run --bin path_validator
+//! cargo run --bin log_sanitizer
+//! cargo run --bin log_adapter
 //!
 //! # Layer 1 示例
 //! cargo run --bin file
 //! cargo run --bin encryption
 //! cargo run --bin performance
+//! cargo run --bin compression
+//! cargo run --bin rotation
+//! cargo run --bin ring_buffered_file
+//! cargo run --bin config_file
 //!
 //! # Layer 2 示例
 //! cargo run --bin database
 //! cargo run --bin http
 //! cargo run --bin fallback
+//! cargo run --bin metrics
+//! cargo run --bin circuit_breaker
 //! ```
 //!
 //! ## 现有 binary（保留）
@@ -51,6 +71,7 @@
 //! - `basic`: 基础用法
 //! - `production`: 生产环境配置
 //! - `all_features`: 完整功能演示
+//! - `di_example`: 依赖注入示例
 
 /// 共享辅助函数（可选）
 pub mod common;

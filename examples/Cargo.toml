@@ -1,6 +1,6 @@
 [package]
 name = "inklog-examples"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 publish = false
 description = "Examples for inklog - Enterprise-grade Rust logging infrastructure"
@@ -23,6 +23,10 @@ aes-gcm = "0.10.3"
 base64 = "0.22.1"
 rand = "0.10.0"
 tempfile = "3.27.0"
+# Layer 0 示例所需：log crate 适配器、channel、自定义正则模式
+log = "0.4"
+crossbeam-channel = "0.5"
+regex = "1.12"
 
 [[bin]]
 name = "console"
@@ -51,10 +55,6 @@ path = "src/bin/http.rs"
 [[bin]]
 name = "fallback"
 path = "src/bin/fallback.rs"
-
-[[bin]]
-name = "s3_archive"
-path = "src/bin/s3_archive.rs"
 
 # 现有 binary（保留）
 [[bin]]
@@ -85,3 +85,45 @@ path = "src/bin/masking.rs"
 [[bin]]
 name = "di_example"
 path = "src/bin/di_example.rs"
+
+[[bin]]
+name = "object_pool"
+path = "src/bin/object_pool.rs"
+
+[[bin]]
+name = "path_validator"
+path = "src/bin/path_validator.rs"
+
+[[bin]]
+name = "log_sanitizer"
+path = "src/bin/log_sanitizer.rs"
+
+[[bin]]
+name = "log_adapter"
+path = "src/bin/log_adapter.rs"
+
+# Layer 1 本地资源示例
+[[bin]]
+name = "compression"
+path = "src/bin/compression.rs"
+
+[[bin]]
+name = "rotation"
+path = "src/bin/rotation.rs"
+
+[[bin]]
+name = "ring_buffered_file"
+path = "src/bin/ring_buffered_file.rs"
+
+[[bin]]
+name = "config_file"
+path = "src/bin/config_file.rs"
+
+# Layer 2 外部服务示例
+[[bin]]
+name = "metrics"
+path = "src/bin/metrics.rs"
+
+[[bin]]
+name = "circuit_breaker"
+path = "src/bin/circuit_breaker.rs"
