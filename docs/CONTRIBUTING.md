@@ -1035,38 +1035,38 @@ cargo tarpaulin --out Html --all-features
 
 ```
 inklog/
-├── src/
-│   ├── lib.rs              # 公共 API 入口
-│   ├── manager.rs          # LoggerManager 核心实现
-│   ├── config.rs           # 配置结构体
-│   ├── error.rs            # 错误类型定义
-│   ├── masking.rs          # 数据脱敏
-│   ├── metrics.rs          # 健康监控指标
-│   ├── sink/               # 输出目标实现
-│   │   ├── mod.rs
-│   │   ├── console.rs      # 控制台输出
-│   │   ├── file.rs         # 文件输出 (1513 行)
-│   │   ├── database.rs     # 数据库输出
-│   │   ├── async_file.rs   # 异步文件输出
-│   │   └── ring_buffered_file.rs
-│   ├── archive/            # S3 云归档
-│   │   ├── mod.rs
-│   │   └── service.rs
-│   └── cli/                # 命令行工具
-│       ├── mod.rs
-│       ├── decrypt.rs
-│       ├── generate.rs
-│       └── validate.rs
-├── tests/                  # 集成测试
-├── examples/               # 使用示例
-├── docs/                   # 项目文档
-│   ├── ARCHITECTURE.md
-│   └── SECURITY.md
-├── benches/                # 基准测试
-├── Cargo.toml              # 项目配置
-├── README.md               # 项目说明
-├── CONTRIBUTING.md         # 贡献指南 (本文档)
-└── CHANGELOG.md            # 变更日志
+- src/
+  - lib.rs              # 公共 API 入口
+  - manager.rs          # LoggerManager 核心实现
+  - config.rs           # 配置结构体
+  - error.rs            # 错误类型定义
+  - masking.rs          # 数据脱敏
+  - metrics.rs          # 健康监控指标
+  - sink/               # 输出目标实现
+    - mod.rs
+    - console.rs      # 控制台输出
+    - file.rs         # 文件输出 (1513 行)
+    - database.rs     # 数据库输出
+    - async_file.rs   # 异步文件输出
+    - ring_buffered_file.rs
+  - archive/            # S3 云归档
+    - mod.rs
+    - service.rs
+  - cli/                # 命令行工具
+    - mod.rs
+    - decrypt.rs
+    - generate.rs
+    - validate.rs
+- tests/                  # 集成测试
+- examples/               # 使用示例
+- docs/                   # 项目文档
+  - ARCHITECTURE.md
+  - SECURITY.md
+- benches/                # 基准测试
+- Cargo.toml              # 项目配置
+- README.md               # 项目说明
+- CONTRIBUTING.md         # 贡献指南 (本文档)
+- CHANGELOG.md            # 变更日志
 ```
 
 ### 关键文件说明

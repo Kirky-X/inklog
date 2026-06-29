@@ -4,27 +4,30 @@
 
 ## 分层架构
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    inklog 示例项目                          │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 0 - 零依赖示例（开箱即运行）                          │
-│  ├── console.rs    控制台输出（基础、彩色、stderr 分流）       │
-│  ├── template.rs   日志模板渲染（占位符、自定义格式）          │
-│  ├── builder.rs    Builder 模式配置（链式 API 演示）          │
-│  └── masking.rs    数据脱敏（邮箱、电话、身份证等）            │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 1 - 本地资源示例（自动清理）                          │
-│  ├── file.rs       文件输出、轮转、Zstd 压缩                  │
-│  ├── encryption.rs 加密日志（AES-256-GCM）                    │
-│  └── performance.rs 性能测试（吞吐量、延迟统计）              │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 2 - 外部服务示例（可选依赖）                          │
-│  ├── database.rs   SQLite 内存数据库连接                     │
-│  ├── http.rs        HTTP 健康检查和指标端点                   │
-│  ├── fallback.rs    Sink 降级机制（故障切换）                 │
-│  └── s3_archive.rs  S3 日志归档（AWS/LocalStack）            │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph L0["Layer 0 - 零依赖示例（开箱即运行）"]
+        direction TB
+        C["console.rs<br/>控制台输出"]
+        T["template.rs<br/>日志模板渲染"]
+        B["builder.rs<br/>Builder 模式配置"]
+        M["masking.rs<br/>数据脱敏"]
+    end
+    subgraph L1["Layer 1 - 本地资源示例（自动清理）"]
+        direction TB
+        F["file.rs<br/>文件输出、轮转、Zstd 压缩"]
+        E["encryption.rs<br/>加密日志"]
+        P["performance.rs<br/>性能测试"]
+    end
+    subgraph L2["Layer 2 - 外部服务示例（可选依赖）"]
+        direction TB
+        D["database.rs<br/>SQLite 数据库连接"]
+        H["http.rs<br/>HTTP 健康检查和指标"]
+        FL["fallback.rs<br/>Sink 降级机制"]
+        S["s3_archive.rs<br/>S3 日志归档"]
+    end
+
+    L0 --> L1 --> L2
 ```
 
 ## 快速开始

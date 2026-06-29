@@ -1345,13 +1345,13 @@ std::fs::set_permissions("logs/", PermissionsExt::from_mode(0o700))?;
 
 ```
 /var/log/inklog/
-├── .env                    # 环境变量 (0o600)
-├── config.toml            # 配置文件 (0o600)
-└── app/
-    ├── secure.log.enc       # 加密日志 (0o600)
-    └── backup/
-        └── 2026-01/
-            └── app.log.enc  # 归档日志 (0o600)
+- .env                    # 环境变量 (0o600)
+- config.toml            # 配置文件 (0o600)
+- app/
+  - secure.log.enc       # 加密日志 (0o600)
+  - backup/
+    - 2026-01/
+      - app.log.enc  # 归档日志 (0o600)
 ```
 
 **配置文件保护**:

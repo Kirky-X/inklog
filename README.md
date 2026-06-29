@@ -633,49 +633,16 @@ The `examples/` crate provides 10 dedicated examples demonstrating specific feat
 
 </div>
 
-```
-┌─────────────────────────────────────────────────┐
-│           Application Layer                    │
-│  (Your code using log! macros)             │
-└────────────────┬────────────────────────────┘
-                 │
-┌────────────────▼────────────────────────────┐
-│         Inklog API Layer                  │
-│  - LoggerManager, LoggerBuilder          │
-│  - Configuration management               │
-│  - Health monitoring                     │
-└────────────────┬────────────────────────────┘
-                 │
-┌────────────────▼────────────────────────────┐
-│         Sink Abstraction Layer             │
-│  - ConsoleSink                          │
-│  - FileSink (rotation, compression)     │
-│  - DatabaseSink (batch writes)           │
-│  - AsyncFileSink                        │
-│  - RingBufferedFileSink                 │
-└────────────────┬────────────────────────────┘
-                 │
-┌────────────────▼────────────────────────────┐
-│         Core Processing Layer              │
-│  - Log formatting & templates            │
-│  - Data masking (PII redaction)         │
-│  - Encryption (AES-256-GCM)             │
-│  - Compression (ZSTD, GZIP, Brotli)    │
-└────────────────┬────────────────────────────┘
-                 │
-┌────────────────▼────────────────────────────┐
-│         Concurrency & I/O                 │
-│  - Tokio async runtime                  │
-│  - Crossbeam channels                  │
-│  - Rayon parallel processing            │
-└────────────────┬────────────────────────────┘
-                 │
-┌────────────────▼────────────────────────────┐
-│         Storage & External Services        │
-│  - Filesystem                          │
-│  - Database (PostgreSQL, MySQL, SQLite)  │
-│  - Parquet (analytics)                 │
-└───────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    App["Application Layer<br/>(Your code using log! macros)"]
+    API["Inklog API Layer<br/>- LoggerManager, LoggerBuilder<br/>- Configuration management<br/>- Health monitoring"]
+    Sink["Sink Abstraction Layer<br/>- ConsoleSink<br/>- FileSink (rotation, compression)<br/>- DatabaseSink (batch writes)<br/>- AsyncFileSink<br/>- RingBufferedFileSink"]
+    Core["Core Processing Layer<br/>- Log formatting & templates<br/>- Data masking (PII redaction)<br/>- Encryption (AES-256-GCM)<br/>- Compression (ZSTD, GZIP, Brotli)"]
+    IO["Concurrency & I/O<br/>- Tokio async runtime<br/>- Crossbeam channels<br/>- Rayon parallel processing"]
+    Store["Storage & External Services<br/>- Filesystem<br/>- Database (PostgreSQL, MySQL, SQLite)<br/>- Parquet (analytics)"]
+
+    App --> API --> Sink --> Core --> IO --> Store
 ```
 
 ### Layer-by-Layer Explanation
