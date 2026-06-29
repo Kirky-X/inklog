@@ -2244,4 +2244,25 @@ DbNexus 数据库适配器。
 
 ---
 
+## 示例参考
+
+Inklog 在 `examples/` crate 中提供了 10 个可运行示例，演示 API 的具体使用方式。使用 `cargo run --example <名称>` 运行（需要 `--package inklog-examples` 或在 `examples/` 目录下执行）。
+
+| 示例 | 对应 API/特性 | 运行命令 |
+|------|--------------|----------|
+| `object_pool` | 对象池复用与内存优化 | `cargo run --example object_pool` |
+| `path_validator` | 文件路径校验 | `cargo run --example path_validator` |
+| `log_sanitizer` | 日志输入净化 | `cargo run --example log_sanitizer` |
+| `log_adapter` | `log` 与 `tracing` 适配 | `cargo run --example log_adapter` |
+| `compression` | `FileSinkConfig` 压缩配置 | `cargo run --example compression` |
+| `rotation` | `FileSinkConfig` 轮转策略 | `cargo run --example rotation` |
+| `ring_buffered_file` | 环形缓冲文件 Sink | `cargo run --example ring_buffered_file` |
+| `config_file` | `InklogConfig::from_file` / `load`（`confers` feature） | `cargo run --example config_file` |
+| `metrics` | `Metrics` / `HealthStatus` / Prometheus 导出 | `cargo run --example metrics` |
+| `circuit_breaker` | Sink 断路器与 `recover_sink` | `cargo run --example circuit_breaker` |
+
+更多示例请参考 [examples/](../examples/) 目录。
+
+---
+
 **[返回顶部](#inklog-api-参考文档)**

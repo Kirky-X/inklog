@@ -25,7 +25,7 @@
   </a>
   <!-- Rust 版本 -->
   <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/rust-1.75+-orange.svg" alt="Rust 1.75+" style="display:inline;margin:0 4px;">
+    <img src="https://img.shields.io/badge/rust-1.85+-orange.svg" alt="Rust 1.85+" style="display:inline;margin:0 4px;">
   </a>
 </p>
 
@@ -598,6 +598,23 @@ log::info!("用户邮箱: user@example.com");
 </td>
 </tr>
 </table>
+
+### 📦 可运行示例
+
+`examples/` crate 提供了 10 个专用示例，演示特定功能。使用 `cargo run --example <名称>` 运行（在 `examples/` 目录下或使用 `--package inklog-examples`）。
+
+| 示例 | 描述 | 运行命令 |
+|---------|-------------|-------------|
+| `object_pool` | 对象池复用，优化高频分配路径 | `cargo run --example object_pool` |
+| `path_validator` | 路径校验，确保文件 Sink 目标安全 | `cargo run --example path_validator` |
+| `log_sanitizer` | 日志输入净化，防止日志注入攻击 | `cargo run --example log_sanitizer` |
+| `log_adapter` | `log` 与 `tracing` 生态桥接适配器 | `cargo run --example log_adapter` |
+| `compression` | 文件 Sink 压缩（ZSTD/GZIP/Brotli/LZ4） | `cargo run --example compression` |
+| `rotation` | 基于大小和时间的文件轮转 | `cargo run --example rotation` |
+| `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
+| `config_file` | TOML 配置文件加载（`confers` 特性） | `cargo run --example config_file` |
+| `metrics` | 健康指标与 Prometheus 导出 | `cargo run --example metrics` |
+| `circuit_breaker` | Sink 断路器与故障恢复 | `cargo run --example circuit_breaker` |
 
 <div align="center" style="margin: 24px 0;">
 

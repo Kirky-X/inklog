@@ -126,6 +126,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 数据库连接池泄漏修复
 - S3 分片上传重试逻辑修复
 
+## [0.1.1] - 2026-06-29
+
+### BREAKING
+- 完全移除 S3/AWS 代码和依赖（aws feature、aws-sdk-s3、aws-config 等）
+- 移除 ArchiveConfig、S3Error、ArchiveError 类型
+- 移除 archive 模块和 S3 归档服务
+- **MSRV 提升**: Rust 1.75+ → 1.85+（因 rand 0.10 要求 MSRV 1.85）
+- **rand 0.9 → 0.10**: `RngCore` trait 重命名为 `Rng`，`Rng` 重命名为 `RngExt`，`OsRng` 重命名为 `SysRng`
+- **aes-gcm 0.10 → 0.11**: `Nonce::from_slice` 已废弃，改用 `Nonce::from`；`cipher.encrypt/decrypt` 接受 `&Nonce` 而非 `Nonce`
+
+### Added
+- 新增 10 个示例：object_pool、path_validator、log_sanitizer、log_adapter、compression、rotation、ring_buffered_file、config_file、metrics、circuit_breaker
+- 测试覆盖率达 90.12%（3291/3652 行）
+- 新增 Docker 测试基础设施（SQLite/PostgreSQL/MySQL）
+- 新增 CI 流水线（test-docker.yml）
+- Cargo.toml 新增 `rust-version = "1.85"` 显式声明 MSRV
+
+### Changed
+- **依赖升级**:
+  - `toml` 0.9 → 1.1（major 版本升级）
+  - `validator` 0.19 → 0.20
+  - `aes-gcm` 0.10 → 0.11（破坏性 API 变更已适配）
+  - `rand` 0.9 → 0.10（破坏性 API 变更已适配，MSRV 1.85+）
+  - `parquet` 57.3 → 59.0（major 版本升级）
+  - `arrow-array` 57.3 → 59.0
+  - `arrow-schema` 57.3 → 59.0
+  - `cron` 0.15 → 0.17
+  - `sha2` 0.10 → 0.11
+  - `pbkdf2` 0.12 → 0.13
+- CI MSRV 矩阵从 1.70.0 提升至 1.85.0
+- README/README_zh Rust 版本徽章从 1.75+ 更新为 1.85+
+- docs/CONTRIBUTING.md MSRV 与版本引用同步更新
+- examples/Cargo.toml 移除 s3_archive [[bin]] 定义
+- lib.rs 移除 "S3 归档" 描述
+
+### Fixed
+- 修复 examples/Cargo.toml s3_archive 残留导致编译失败
+- 修复 lib.rs S3 归档描述残留
+- 适配 rand 0.10 破坏性 API：`RngCore` → `Rng`，`Rng` → `RngExt`（src/support/io/sink/encryption.rs、src/support/io/sink/file.rs、src/cli/decrypt.rs、benches/inklog_bench.rs）
+- 适配 aes-gcm 0.11 破坏性 API：`Nonce::from_slice` → `Nonce::from`，`cipher.encrypt/decrypt` 接受引用（src/support/io/sink/file.rs、src/cli/decrypt.rs、tests/cli_integration.rs）
+
 ## [0.1.0] - 2026-01-18
 
 ### Added
@@ -200,6 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/kirkyx/inklog/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kirkyx/inklog/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/kirkyx/inklog/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kirkyx/inklog/compare/v0.0.0...v0.1.0
 [0.0.0]: https://github.com/kirkyx/inklog/releases/tag/v0.0.0

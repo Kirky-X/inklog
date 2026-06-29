@@ -792,6 +792,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### 可运行示例（cargo run --example）
+
+除上述内联示例外，`examples/` crate 还提供了 10 个聚焦特定主题的可运行示例。在 `examples/` 目录下执行 `cargo run --example <名称>`，或在工作区根目录使用 `cargo run --package inklog-examples --example <名称>` 运行。
+
+| 示例 | 主题 | 运行命令 |
+|------|------|----------|
+| `object_pool` | 对象池复用，减少高频路径上的内存分配 | `cargo run --example object_pool` |
+| `path_validator` | 文件 Sink 路径校验，防止越权写入 | `cargo run --example path_validator` |
+| `log_sanitizer` | 日志输入净化，防止日志注入与控制字符污染 | `cargo run --example log_sanitizer` |
+| `log_adapter` | `log` 与 `tracing` 生态桥接适配器 | `cargo run --example log_adapter` |
+| `compression` | 文件 Sink 压缩（ZSTD/GZIP/Brotli/LZ4）对比 | `cargo run --example compression` |
+| `rotation` | 基于大小和时间的文件轮转策略 | `cargo run --example rotation` |
+| `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
+| `config_file` | TOML 配置文件加载（需启用 `confers` feature） | `cargo run --example config_file` |
+| `metrics` | 健康指标采集与 Prometheus 格式导出 | `cargo run --example metrics` |
+| `circuit_breaker` | Sink 断路器与故障自动恢复 | `cargo run --example circuit_breaker` |
+
+> 提示：部分示例（如 `config_file`）需要启用对应 feature。运行前请参考 `examples/Cargo.toml` 中的 feature 配置。
+
 ---
 
 ## 高级主题

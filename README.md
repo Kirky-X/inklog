@@ -25,7 +25,7 @@
   </a>
   <!-- Rust Version -->
   <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/rust-1.75+-orange.svg" alt="Rust 1.75+" style="display:inline;margin:0 4px;">
+    <img src="https://img.shields.io/badge/rust-1.85+-orange.svg" alt="Rust 1.85+" style="display:inline;margin:0 4px;">
   </a>
 </p>
 
@@ -599,6 +599,23 @@ log::info!("User email: user@example.com");
 </td>
 </tr>
 </table>
+
+### 📦 Runnable Examples
+
+The `examples/` crate provides 10 dedicated examples demonstrating specific features. Run them with `cargo run --example <name>` (from the `examples/` directory or with `--package inklog-examples`).
+
+| Example | Description | Run Command |
+|---------|-------------|-------------|
+| `object_pool` | Object pool reuse for allocation-heavy paths | `cargo run --example object_pool` |
+| `path_validator` | Path validation for safe file sink targets | `cargo run --example path_validator` |
+| `log_sanitizer` | Log input sanitization to prevent log injection | `cargo run --example log_sanitizer` |
+| `log_adapter` | Bridging `log` and `tracing` ecosystems | `cargo run --example log_adapter` |
+| `compression` | File sink compression (ZSTD/GZIP/Brotli/LZ4) | `cargo run --example compression` |
+| `rotation` | Size-based and time-based file rotation | `cargo run --example rotation` |
+| `ring_buffered_file` | Ring-buffered file sink for high throughput | `cargo run --example ring_buffered_file` |
+| `config_file` | TOML configuration file loading (`confers` feature) | `cargo run --example config_file` |
+| `metrics` | Health metrics and Prometheus export | `cargo run --example metrics` |
+| `circuit_breaker` | Sink circuit breaker and failure recovery | `cargo run --example circuit_breaker` |
 
 <div align="center" style="margin: 24px 0;">
 

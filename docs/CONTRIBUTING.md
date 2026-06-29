@@ -101,9 +101,9 @@ git push origin feature/your-feature
 
 | 要求 | 最低版本 | 推荐版本 |
 |------|---------|---------|
-| Rust | 1.75.0 | 1.85.0+ |
+| Rust | 1.85.0 | 最新稳定版 |
 | Git | 2.0 | 最新版 |
-| Cargo | 1.75.0 | 1.85.0+ |
+| Cargo | 1.85.0 | 最新稳定版 |
 | 内存 | 4GB | 8GB+ |
 | 磁盘 | 2GB | 5GB+ |
 
@@ -118,10 +118,10 @@ cargo --version
 rustup update stable
 
 # 安装特定版本
-rustup install 1.75.0
+rustup install 1.85.0
 
 # 设置默认版本
-rustup default 1.75.0
+rustup default 1.85.0
 
 # 查看已安装版本
 rustup toolchain list
@@ -943,10 +943,10 @@ git push origin feature/your-feature
 
 ## 环境
 
-- Inklog 版本: 0.1.0
-- Rust 版本: 1.75.0
+- Inklog 版本: 0.1.1
+- Rust 版本: 1.85.0
 - 操作系统: Linux / macOS / Windows
-- 特性标志: aws, http, cli
+- 特性标志: http, cli
 
 ## 日志/错误信息
 
