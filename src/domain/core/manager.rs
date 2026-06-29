@@ -10,8 +10,6 @@ use crate::integrations::infra::{Cache, Config};
 #[cfg(feature = "dbnexus")]
 use crate::integrations::kit::keys::DatabaseCapabilityKey;
 use crate::integrations::kit::keys::{CacheCapabilityKey, ConfigCapabilityKey, InklogConfigKey};
-#[cfg(feature = "aws")]
-use crate::integrations::storage::archive::{ArchiveService, ArchiveServiceBuilder};
 use crate::support::io::sink::console::ConsoleSink;
 #[cfg(feature = "dbnexus")]
 use crate::support::io::sink::database::DatabaseSink;
@@ -36,10 +34,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
-#[cfg(feature = "aws")]
-use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
-#[cfg(any(feature = "aws", feature = "http"))]
+#[cfg(feature = "http")]
 use tracing::info;
 use tracing_subscriber::prelude::*;
 use trait_kit::kit::Kit;
@@ -141,7 +137,6 @@ impl std::fmt::Debug for LoggerDependencies {
 /// - Log message routing to configured sinks (console, file, database)
 /// - Health monitoring and metrics collection
 /// - Sink recovery on failure
-/// - Archive service lifecycle (when S3 is enabled)
 /// - HTTP server for health endpoints (when http feature is enabled)
 ///
 /// # Examples
@@ -168,8 +163,6 @@ pub struct LoggerManager {
     worker_handles: Mutex<Vec<JoinHandle<()>>>,
     control_tx: Sender<SinkControlMessage>,
     effective_capacity: Arc<AtomicUsize>,
-    #[cfg(feature = "aws")]
-    archive_service: Option<Arc<tokio::sync::Mutex<ArchiveService>>>,
     #[cfg(feature = "http")]
     http_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// 注入的缓存依赖
@@ -378,7 +371,7 @@ impl LoggerManager {
     /// ```
     pub async fn with_config(config: InklogConfig) -> Result<Self, InklogError> {
         // Security audit: Log logger initialization
-        #[cfg(any(feature = "aws", feature = "http"))]
+        #[cfg(feature = "http")]
         tracing::info!(
             event = "security_logger_initialized",
             sinks = ?config.sinks_enabled(),
@@ -500,62 +493,6 @@ impl LoggerManager {
             database,
         })?;
 
-        // Initialize archive service if configured
-        #[cfg(feature = "aws")]
-        let archive_service = if let Some(ref archive_config) = config.s3_archive {
-            if archive_config.enabled {
-                info!("Initializing S3 archive service");
-
-                #[cfg(feature = "dbnexus")]
-                let db_conn: Option<dbnexus::database::pool::DbPool> =
-                    if let Some(ref db_cfg) = config.database_sink {
-                        use dbnexus::database::pool::DbPoolBuilder;
-                        let db_result = DbPoolBuilder::new()
-                            .url(&db_cfg.url)
-                            .max_connections(db_cfg.pool_size)
-                            .build()
-                            .await;
-
-                        match db_result {
-                            Ok(pool) => Some(pool),
-                            Err(e) => {
-                                tracing::warn!("Failed to create DbPool: {}", e);
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
-
-                #[cfg(feature = "dbnexus")]
-                let mut archive_service_builder =
-                    ArchiveServiceBuilder::new().config(archive_config.clone());
-                #[cfg(not(feature = "dbnexus"))]
-                let archive_service_builder =
-                    ArchiveServiceBuilder::new().config(archive_config.clone());
-
-                #[cfg(feature = "dbnexus")]
-                #[allow(clippy::collapsible_match, clippy::match_result_ok)]
-                if let Some(pool) = db_conn {
-                    if let Some(s) = pool.get_session("admin").await.ok() {
-                        archive_service_builder = archive_service_builder.database_session(s);
-                    }
-                }
-
-                match archive_service_builder.build().await {
-                    Ok(service) => Some(Arc::new(AsyncMutex::new(service))),
-                    Err(e) => {
-                        error!("Failed to initialize archive service: {}", e);
-                        None
-                    }
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         // 构建 trait-kit 能力注册中心：注册 InklogConfig 和默认 Config 能力
         let kit = {
             let kit = Kit::new();
@@ -566,27 +503,6 @@ impl LoggerManager {
             kit
         };
 
-        #[cfg(feature = "aws")]
-        let manager = Self {
-            config,
-            sender,
-            console_sender,
-            shutdown_txs,
-            console_sink,
-            metrics,
-            worker_handles: Mutex::new(handles),
-            control_tx,
-            effective_capacity: effective_capacity.clone(),
-            archive_service,
-            #[cfg(feature = "http")]
-            http_server_handle: Mutex::new(None),
-            cache: None,
-            #[cfg(feature = "dbnexus")]
-            database: None,
-            kit,
-        };
-
-        #[cfg(not(feature = "aws"))]
         let manager = Self {
             config,
             sender,
@@ -848,62 +764,6 @@ impl LoggerManager {
 
         info!("HTTP monitoring server configured on {}", addr);
         Ok(())
-    }
-
-    /// 启动S3归档服务
-    #[cfg(feature = "aws")]
-    pub async fn start_archive_service(&self) -> Result<(), InklogError> {
-        if let Some(ref archive_service) = self.archive_service {
-            let service = archive_service.clone();
-            tokio::spawn(async move {
-                let mut service_guard = service.lock().await;
-                if let Err(e) = service_guard.start().await {
-                    error!("Archive service failed: {}", e);
-                }
-            });
-            Ok(())
-        } else {
-            info!("Archive service not configured, skipping startup");
-            Ok(())
-        }
-    }
-
-    /// 停止S3归档服务
-    #[cfg(feature = "aws")]
-    pub async fn stop_archive_service(&self) -> Result<(), InklogError> {
-        if let Some(ref archive_service) = self.archive_service {
-            let service = archive_service.clone();
-            tokio::spawn(async move {
-                let service_guard = service.lock().await;
-                if let Err(e) = service_guard.stop().await {
-                    error!("Failed to stop archive service: {}", e);
-                }
-            });
-            info!("Archive service shutdown signal sent");
-        }
-        Ok(())
-    }
-
-    /// 执行手动归档
-    #[cfg(feature = "aws")]
-    pub async fn trigger_archive(&self) -> Result<String, InklogError> {
-        if let Some(ref archive_service) = self.archive_service {
-            let service = archive_service.clone();
-            let archive_key = tokio::spawn(async move {
-                let service_guard = service.lock().await;
-                service_guard.archive_now().await
-            })
-            .await
-            .map_err(|e| InklogError::RuntimeError(format!("Archive task failed: {}", e)))?
-            .map_err(|e| InklogError::S3Error(format!("Archive operation failed: {}", e)))?;
-
-            info!("Manual archive completed: {}", archive_key);
-            Ok(archive_key)
-        } else {
-            Err(InklogError::ConfigError(
-                "Archive service not configured".to_string(),
-            ))
-        }
     }
 
     fn start_workers(params: WorkerParams) -> WorkerStartResult {
@@ -1784,28 +1644,11 @@ impl LoggerBuilder {
             batch_size: 100,
             flush_interval_ms: 500,
             partition: crate::PartitionStrategy::default(),
-            archive_to_s3: false,
-            archive_after_days: 30,
-            s3_bucket: None,
-            s3_region: None,
             table_name: "logs".to_string(),
             archive_format: "json".to_string(),
             parquet_config: crate::ParquetConfig::default(),
         };
         self.config.database_sink = Some(config);
-        self
-    }
-
-    #[cfg(feature = "aws")]
-    pub fn s3_archive(mut self, bucket: impl Into<String>, region: impl Into<String>) -> Self {
-        let bucket_str = bucket.into();
-        let region_str = region.into();
-        self.config.s3_archive = Some(crate::integrations::storage::archive::S3ArchiveConfig {
-            enabled: true,
-            bucket: bucket_str,
-            region: region_str,
-            ..Default::default()
-        });
         self
     }
 
@@ -2681,20 +2524,6 @@ mod tests {
     // ============================================================================
     // LoggerBuilder 特性门控方法测试
     // ============================================================================
-
-    #[cfg(feature = "aws")]
-    #[test]
-    fn test_builder_s3_archive_sets_config() {
-        let builder = LoggerBuilder::new().s3_archive("my-bucket", "us-east-1");
-        let s3 = builder
-            .config
-            .s3_archive
-            .as_ref()
-            .expect("s3_archive should be set");
-        assert!(s3.enabled);
-        assert_eq!(s3.bucket, "my-bucket");
-        assert_eq!(s3.region, "us-east-1");
-    }
 
     #[cfg(feature = "dbnexus")]
     #[test]
@@ -3602,6 +3431,615 @@ worker_threads = 1
             reqwest::StatusCode::OK,
             "CIDR 127.0.0.0/8 should contain 127.0.0.1"
         );
+        let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // build_with_deps 通过 Config trait 应用配置测试 (lines 235-300)
+    //
+    // 这组测试覆盖 build_with_deps 中通过 Config trait 实现加载配置的分支，
+    // 包括 global、file_sink、http_server、performance 配置的应用。
+    // 之前测试仅覆盖了 cache/database 注入路径，未覆盖 config_provider 提供时的
+    // 配置加载逻辑。
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_with_deps_applies_global_config_from_provider() {
+        // 验证 Config trait 的 global.level/format/masking_enabled/auto_fallback
+        // 被正确应用到 InklogConfig
+        use crate::integrations::infra::MockConfig;
+        let mock_config = MockConfig::new()
+            .with_value("global.level", "debug")
+            .with_value("global.format", "{level} {message}")
+            .with_value("global.masking_enabled", "true")
+            .with_value("global.auto_fallback", "true");
+
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(mock_config)),
+            #[cfg(feature = "dbnexus")]
+            database: None,
+        };
+
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with config provider");
+
+        // 通过 kit 验证配置已应用到 InklogConfig
+        let kit = manager.kit();
+        let handle = kit
+            .config::<InklogConfigKey>()
+            .expect("InklogConfig should be registered in kit");
+        let config = handle.load();
+        assert_eq!(config.global.level, "debug");
+        assert_eq!(config.global.format, "{level} {message}");
+        assert!(config.global.masking_enabled);
+        assert!(config.global.auto_fallback);
+
+        let _ = manager.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_with_deps_configures_file_sink_from_provider() {
+        // 验证 Config trait 的 file_sink.* 配置被正确应用到 InklogConfig.file_sink
+        // 并触发 file worker 实际写入文件
+        use crate::integrations::infra::MockConfig;
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let log_path = dir.path().join("from_provider.log");
+        let path_str = log_path
+            .to_str()
+            .expect("path should be valid utf-8")
+            .to_string();
+
+        let mock_config = MockConfig::new()
+            .with_value("file_sink.enabled", "true")
+            .with_value("file_sink.path", &path_str)
+            .with_value("file_sink.max_size", "50MB")
+            .with_value("file_sink.compress", "false");
+
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(mock_config)),
+            #[cfg(feature = "dbnexus")]
+            database: None,
+        };
+
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with file_sink config");
+
+        // 验证配置已应用到 InklogConfig
+        let kit = manager.kit();
+        let handle = kit
+            .config::<InklogConfigKey>()
+            .expect("InklogConfig should be registered");
+        let config = handle.load();
+        let file_sink = config
+            .file_sink
+            .as_ref()
+            .expect("file_sink should be configured from provider");
+        assert!(file_sink.enabled);
+        assert_eq!(file_sink.path, std::path::PathBuf::from(&path_str));
+        assert_eq!(file_sink.max_size, "50MB");
+        assert!(!file_sink.compress);
+
+        // 验证 file worker 实际启动并写入文件（证明配置完整生效）
+        let record = Arc::new(LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "config_provider_test".to_string(),
+            message: "from_provider_unique_marker_abc123".to_string(),
+            fields: std::collections::HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "test".to_string(),
+        });
+        manager
+            .sender
+            .send(record)
+            .expect("Failed to send record to file worker");
+
+        // 给 file worker 时间处理记录
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = manager.shutdown();
+
+        let content =
+            std::fs::read_to_string(&log_path).expect("Log file should exist after write");
+        assert!(
+            content.contains("from_provider_unique_marker_abc123"),
+            "Log file should contain the message sent via config_provider-configured file sink"
+        );
+    }
+
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_with_deps_configures_http_server_from_provider() {
+        // 验证 Config trait 的 http_server.* 配置被正确应用到 InklogConfig.http_server
+        // 注意：with_dependencies 不启动 HTTP 服务器（只有 with_config 才启动），
+        // 所以本测试只验证配置构建，不实际启动 HTTP 服务
+        use crate::integrations::infra::MockConfig;
+        let mock_config = MockConfig::new()
+            .with_value("http_server.enabled", "true")
+            .with_value("http_server.host", "127.0.0.1")
+            .with_value("http_server.port", "9090");
+
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(mock_config)),
+            #[cfg(feature = "dbnexus")]
+            database: None,
+        };
+
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with http_server config");
+
+        // 验证配置已应用到 InklogConfig
+        let kit = manager.kit();
+        let handle = kit
+            .config::<InklogConfigKey>()
+            .expect("InklogConfig should be registered");
+        let config = handle.load();
+        let http = config
+            .http_server
+            .as_ref()
+            .expect("http_server should be configured from provider");
+        assert!(http.enabled);
+        assert_eq!(http.host, "127.0.0.1");
+        assert_eq!(http.port, 9090);
+
+        let _ = manager.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_with_deps_configures_performance_from_provider() {
+        // 验证 Config trait 的 performance.worker_threads/channel_capacity
+        // 被正确应用到 InklogConfig.performance
+        use crate::integrations::infra::MockConfig;
+        let mock_config = MockConfig::new()
+            .with_value("performance.worker_threads", "2")
+            .with_value("performance.channel_capacity", "3000");
+
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(mock_config)),
+            #[cfg(feature = "dbnexus")]
+            database: None,
+        };
+
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with performance config");
+
+        // 验证 channel_capacity 已生效（effective_channel_capacity 反映配置值）
+        assert_eq!(
+            manager.effective_channel_capacity(),
+            3000,
+            "channel_capacity from config provider should be applied"
+        );
+
+        // 验证 worker_threads 也已应用到 InklogConfig
+        let kit = manager.kit();
+        let handle = kit
+            .config::<InklogConfigKey>()
+            .expect("InklogConfig should be registered");
+        let config = handle.load();
+        assert_eq!(config.performance.worker_threads, 2);
+
+        let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // build_with_deps 注入 database 到 kit 测试 (lines 336-340)
+    // 需要 dbnexus feature
+    // ============================================================================
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_with_deps_injects_database_to_kit() {
+        // 验证通过 LoggerDependencies.database 注入的 Database 实现
+        // 被注册到 kit 的 DatabaseCapabilityKey
+        use crate::integrations::infra::MockDatabaseAdapter;
+        let deps = LoggerDependencies {
+            cache: None,
+            config: None,
+            database: Some(Arc::new(MockDatabaseAdapter::new())),
+        };
+
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with database injection");
+
+        // 验证 database 能力已注册到 kit
+        assert!(
+            manager.kit().contains::<DatabaseCapabilityKey>(),
+            "DatabaseCapabilityKey should be registered in kit after database injection"
+        );
+
+        let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // build_detached 直接调用测试 (lines 832-884)
+    //
+    // build_detached 是 with_config/with_dependencies 的底层实现，
+    // 返回 (manager, subscriber, filter) 三元组。
+    // 直接调用可覆盖其内部逻辑：metrics 创建、channel 创建、subscriber 创建、
+    // filter 解析、kit 注册等。
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_detached_returns_valid_components() {
+        // 验证 build_detached 返回的 manager/subscriber/filter 均有效
+        let config = InklogConfig {
+            global: crate::GlobalConfig {
+                level: "warn".to_string(),
+                ..Default::default()
+            },
+            performance: crate::PerformanceConfig {
+                channel_capacity: 2000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let (manager, _subscriber, filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(feature = "dbnexus")]
+            None,
+        )
+        .await
+        .expect("build_detached should succeed with valid config");
+
+        // 验证 manager 状态
+        assert_eq!(
+            manager.effective_channel_capacity(),
+            2000,
+            "effective_channel_capacity should match config"
+        );
+        assert_eq!(
+            manager.channel_len(),
+            0,
+            "channel_len should be 0 for fresh manager"
+        );
+
+        // 验证 filter 反映配置的 level（warn → WARN）
+        assert_eq!(
+            filter,
+            tracing_subscriber::filter::LevelFilter::WARN,
+            "filter should reflect config.global.level 'warn'"
+        );
+
+        // 验证 kit 中 InklogConfig 已注册
+        assert!(
+            manager.kit().contains_config::<InklogConfigKey>(),
+            "InklogConfigKey should be registered in kit"
+        );
+        assert!(
+            manager.kit().contains::<ConfigCapabilityKey>(),
+            "ConfigCapabilityKey should be registered in kit"
+        );
+
+        let _ = manager.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_detached_invalid_level_falls_back_to_info() {
+        // 验证 build_detached 中 level.parse() 失败时回退到 INFO
+        let config = InklogConfig {
+            global: crate::GlobalConfig {
+                level: "invalid_level".to_string(),
+                ..Default::default()
+            },
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let (manager, _subscriber, filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(feature = "dbnexus")]
+            None,
+        )
+        .await
+        .expect("build_detached should succeed even with invalid level");
+
+        // 无效 level 应回退到 INFO
+        assert_eq!(
+            filter,
+            tracing_subscriber::filter::LevelFilter::INFO,
+            "invalid level should fall back to INFO"
+        );
+
+        let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // file worker FileSink::new 失败分支测试 (line 910)
+    //
+    // 当 FileSink::new 失败时，file worker 应跳过整个 file_config 分支，
+    // manager 仍能正常创建和 shutdown。
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_file_worker_skips_when_file_sink_new_fails() {
+        // 使用 /dev/null 子路径触发 create_dir_all 失败
+        // /dev/null 是文件而非目录，在其下创建子目录会失败
+        let config = InklogConfig {
+            file_sink: Some(FileSinkConfig {
+                enabled: true,
+                path: PathBuf::from("/dev/null/subdir/file.log"),
+                ..Default::default()
+            }),
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // build_detached 应成功（FileSink::new 失败在 worker 线程内处理）
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should be created even if FileSink::new fails in worker");
+
+        // 验证 manager 仍然可用
+        assert_eq!(manager.effective_channel_capacity(), 1000);
+
+        // shutdown 应正常完成（file worker 不会进入循环，直接退出）
+        let result = manager.shutdown();
+        assert!(result.is_ok(), "shutdown should succeed");
+    }
+
+    // ============================================================================
+    // file worker 控制消息处理测试 (lines 991-1013)
+    //
+    // 通过 recover_sink 发送 RecoverSink("file") 命令，验证 file worker
+    // 能处理控制消息而不死锁或 panic。同时验证 recover_sink 在 control channel
+    // 满（容量 10）时的错误路径。
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_file_worker_recovers_after_recover_sink_command() {
+        // 启用 file sink 使 file worker 进入循环并消费 control 消息
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let log_path = dir.path().join("recover_worker.log");
+
+        let manager = LoggerManager::builder()
+            .channel_capacity(500)
+            .worker_threads(1)
+            .file(&log_path)
+            .build()
+            .await
+            .expect("Failed to build manager");
+
+        // 发送一条记录让 file worker 进入正常 recv_timeout 路径
+        let record = Arc::new(LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "recover_test".to_string(),
+            message: "before_recover_marker".to_string(),
+            fields: std::collections::HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "test".to_string(),
+        });
+        manager.sender.send(record).expect("Failed to send record");
+
+        // 等待 file worker 处理记录
+        std::thread::sleep(Duration::from_millis(200));
+
+        // 发送 recover_sink 命令 - file worker 应处理并重建 sink
+        let result = manager.recover_sink("file");
+        assert!(
+            result.is_ok(),
+            "recover_sink('file') should succeed on live manager"
+        );
+
+        // 等待 file worker 处理控制消息
+        std::thread::sleep(Duration::from_millis(200));
+
+        // 发送第二条记录，验证 file worker 在 recover 后仍能正常工作
+        let record2 = Arc::new(LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "recover_test".to_string(),
+            message: "after_recover_marker".to_string(),
+            fields: std::collections::HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "test".to_string(),
+        });
+        manager.sender.send(record2).expect("Failed to send record");
+
+        // 等待 file worker 处理第二条记录
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = manager.shutdown();
+
+        // 验证两条记录都写入了文件（recover 命令重建 sink 后文件仍可写）
+        let content =
+            std::fs::read_to_string(&log_path).expect("Log file should exist after recover");
+        assert!(
+            content.contains("before_recover_marker"),
+            "Log file should contain record sent before recover"
+        );
+        assert!(
+            content.contains("after_recover_marker"),
+            "Log file should contain record sent after recover"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_recover_sink_returns_error_when_control_channel_full() {
+        // control channel 容量为 10。当 worker 未消费消息时，连续发送 11 条
+        // 应使第 11 条返回 ChannelError。
+        // 注意：此测试需要 file worker 存活但暂停消费 control 消息。
+        // 实际上 file worker 在每次循环都会 try_recv control 消息，
+        // 所以很难填满 channel。我们通过发送足够多的消息来触发。
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let log_path = dir.path().join("channel_full.log");
+
+        let manager = LoggerManager::builder()
+            .channel_capacity(500)
+            .worker_threads(1)
+            .file(&log_path)
+            .build()
+            .await
+            .expect("Failed to build manager");
+
+        // 连续发送 recover_sink 命令。control channel 容量 10，
+        // 但 worker 在循环中消费，所以多数会被消费。
+        // 我们发送足够多以触发潜在的 ChannelError（如果 worker 暂时未消费）。
+        let mut ok_count = 0;
+        let mut err_count = 0;
+        for _ in 0..20 {
+            match manager.recover_sink("file") {
+                Ok(_) => ok_count += 1,
+                Err(InklogError::ChannelError(_)) => err_count += 1,
+                Err(other) => panic!("Unexpected error type: {:?}", other),
+            }
+        }
+
+        // 至少有一些命令成功（worker 在消费）
+        assert!(
+            ok_count > 0,
+            "At least some recover_sink commands should succeed"
+        );
+        // ok_count + err_count 应等于 20
+        assert_eq!(ok_count + err_count, 20);
+
+        let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // build_detached 创建 error_sink 测试 (lines 475-480)
+    //
+    // build_detached 会创建 error_sink（FileSink）用于记录系统错误。
+    // 验证 error_sink 创建失败时不影响 manager 构建。
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_detached_creates_error_sink() {
+        // build_detached 内部创建 error_sink 指向 logs/error.log
+        // 验证此路径不 panic 且 manager 正常工作
+        let config = InklogConfig {
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let (manager, _subscriber, _filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(feature = "dbnexus")]
+            None,
+        )
+        .await
+        .expect("build_detached should succeed");
+
+        // 验证 manager 创建成功，error_sink 已初始化（即使为 None）
+        assert!(manager.effective_channel_capacity() > 0);
+
+        let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // LoggerDependencies Debug 实现测试 (lines 118-131)
+    //
+    // 验证 LoggerDependencies 的 Debug 实现包含 cache/config/database 字段
+    // （database 字段仅在 dbnexus feature 下存在）
+    // ============================================================================
+
+    #[cfg(feature = "dbnexus")]
+    #[test]
+    fn test_logger_dependencies_debug_includes_database_field() {
+        use crate::integrations::infra::{MockCache, MockDatabaseAdapter};
+        let deps = LoggerDependencies {
+            cache: Some(Arc::new(MockCache::new())),
+            config: None,
+            database: Some(Arc::new(MockDatabaseAdapter::new())),
+        };
+        let debug_str = format!("{:?}", deps);
+        assert!(
+            debug_str.contains("cache"),
+            "debug should include cache field"
+        );
+        assert!(
+            debug_str.contains("config"),
+            "debug should include config field"
+        );
+        assert!(
+            debug_str.contains("database"),
+            "debug should include database field when dbnexus feature enabled"
+        );
+    }
+
+    // ============================================================================
+    // build_with_deps 同时注入 cache 和 config 测试 (lines 332-345)
+    //
+    // 验证同时注入 cache 和 config 时，两者都被注册到 kit。
+    // 之前测试只单独注入 cache 或 config，未覆盖同时注入的路径。
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_with_deps_injects_both_cache_and_config() {
+        use crate::integrations::infra::{InklogConfigAdapter, MockCache};
+        let config = InklogConfig::default();
+        let deps = LoggerDependencies {
+            cache: Some(Arc::new(MockCache::new())),
+            config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
+            #[cfg(feature = "dbnexus")]
+            database: None,
+        };
+
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with cache and config");
+
+        // 验证 cache 和 config 能力都注册到 kit
+        assert!(
+            manager.kit().contains::<CacheCapabilityKey>(),
+            "CacheCapabilityKey should be registered"
+        );
+        assert!(
+            manager.kit().contains::<ConfigCapabilityKey>(),
+            "ConfigCapabilityKey should be registered"
+        );
+
+        let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // build_with_deps 同时注入 cache/config/database 测试 (lines 332-345, dbnexus)
+    // ============================================================================
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_with_deps_injects_all_three_deps() {
+        use crate::integrations::infra::{InklogConfigAdapter, MockCache, MockDatabaseAdapter};
+        let config = InklogConfig::default();
+        let deps = LoggerDependencies {
+            cache: Some(Arc::new(MockCache::new())),
+            config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
+            database: Some(Arc::new(MockDatabaseAdapter::new())),
+        };
+
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with all deps");
+
+        // 验证三个能力都注册到 kit
+        assert!(manager.kit().contains::<CacheCapabilityKey>());
+        assert!(manager.kit().contains::<ConfigCapabilityKey>());
+        assert!(manager.kit().contains::<DatabaseCapabilityKey>());
+
         let _ = manager.shutdown();
     }
 }

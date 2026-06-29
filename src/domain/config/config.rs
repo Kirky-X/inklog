@@ -29,9 +29,6 @@ pub struct InklogConfig {
     pub file_sink: Option<FileSinkConfig>,
     #[serde(default)]
     pub database_sink: Option<DatabaseSinkConfig>,
-    #[cfg(feature = "aws")]
-    #[serde(skip)]
-    pub s3_archive: Option<crate::integrations::storage::archive::S3ArchiveConfig>,
     #[serde(default)]
     pub performance: PerformanceConfig,
     #[serde(default)]
@@ -49,8 +46,6 @@ impl Default for InklogConfig {
             console_sink: default_console_sink(),
             file_sink: None,
             database_sink: None,
-            #[cfg(feature = "aws")]
-            s3_archive: None,
             performance: PerformanceConfig::default(),
             http_server: None,
         }
@@ -76,7 +71,6 @@ impl InklogConfig {
     /// representing nested structure:
     /// - `INKLOG_GLOBAL_LEVEL` → global.level
     /// - `INKLOG_HTTP_SERVER_PORT` → http_server.port
-    /// - `INKLOG_S3_BUCKET` → s3_archive.bucket
     ///
     /// # Returns
     ///
@@ -165,46 +159,6 @@ impl InklogConfig {
             config.performance.channel_capacity =
                 val.parse().unwrap_or(config.performance.channel_capacity);
         }
-
-        // S3 archive overrides (requires aws feature)
-        #[cfg(feature = "aws")]
-        {
-            if let Ok(val) = std::env::var("INKLOG_S3_ARCHIVE_ENABLED") {
-                if val.parse::<bool>().unwrap_or(false) {
-                    let s3_config = config.s3_archive.get_or_insert_with(Default::default);
-                    s3_config.enabled = true;
-                }
-            }
-            if let Ok(val) = std::env::var("INKLOG_S3_ARCHIVE_BUCKET") {
-                let s3_config = config.s3_archive.get_or_insert_with(Default::default);
-                s3_config.bucket = val;
-            }
-            if let Ok(val) = std::env::var("INKLOG_S3_ARCHIVE_REGION") {
-                let s3_config = config.s3_archive.get_or_insert_with(Default::default);
-                s3_config.region = val;
-            }
-            if let Ok(val) = std::env::var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM") {
-                let s3_config = config.s3_archive.get_or_insert_with(Default::default);
-                let algorithm = match val.to_lowercase().as_str() {
-                    "awskms" => crate::integrations::storage::archive::EncryptionAlgorithm::AwsKms,
-                    "ssec" | "customer" => {
-                        crate::integrations::storage::archive::EncryptionAlgorithm::CustomerKey
-                    }
-                    _ => crate::integrations::storage::archive::EncryptionAlgorithm::Aes256,
-                };
-                s3_config.encryption =
-                    Some(crate::integrations::storage::archive::EncryptionConfig {
-                        algorithm,
-                        kms_key_id: std::env::var("INKLOG_S3_ARCHIVE_ENCRYPTION_KMS_KEY_ID").ok(),
-                        customer_key: crate::integrations::storage::archive::SecretString::default(
-                        ),
-                    });
-            }
-            if let Ok(val) = std::env::var("INKLOG_S3_ARCHIVE_ARCHIVE_FORMAT") {
-                let s3_config = config.s3_archive.get_or_insert_with(Default::default);
-                s3_config.archive_format = val;
-            }
-        }
     }
 
     ///
@@ -260,10 +214,6 @@ impl InklogConfig {
         }
         if self.database_sink.as_ref().is_some_and(|c| c.enabled) {
             sinks.push("database");
-        }
-        #[cfg(feature = "aws")]
-        if self.s3_archive.as_ref().is_some_and(|c| c.enabled) {
-            sinks.push("s3_archive");
         }
         sinks
     }
@@ -1134,12 +1084,8 @@ impl Default for ParquetConfig {
 ///   - Monthly: Best for high-volume production (>100k logs/day)
 ///   - Yearly: Best for medium volume or archival
 ///
-/// # Archival to S3
+/// # Archive Format
 ///
-/// - **archive_to_s3**: Enable automatic S3 archival (default: false)
-/// - **archive_after_days**: Days before archiving to S3 (default: 30)
-/// - **s3_bucket**: S3 bucket name for archived logs
-/// - **s3_region**: AWS region for S3 operations
 /// - **archive_format**: Export format - "json" or "parquet" (default: "json")
 /// - **parquet_config**: Parquet-specific settings (when archive_format = "parquet")
 ///
@@ -1174,17 +1120,13 @@ impl Default for ParquetConfig {
 /// batch_size = 50
 /// ```
 ///
-/// ## S3 Archival with Parquet
+/// ## Parquet Archive Format
 ///
 /// ```toml
 /// [database_sink]
 /// enabled = true
 /// driver = "postgres"
 /// url = "postgres://user:pass@localhost/logs"
-/// archive_to_s3 = true
-/// archive_after_days = 30
-/// s3_bucket = "my-log-archive"
-/// s3_region = "us-west-2"
 /// archive_format = "parquet"
 ///
 /// [database_sink.parquet]
@@ -1232,14 +1174,6 @@ pub struct DatabaseSinkConfig {
     pub flush_interval_ms: u64,
     #[serde(default)]
     pub partition: PartitionStrategy,
-    #[serde(default)]
-    pub archive_to_s3: bool,
-    #[serde(default = "default_db_archive_after_days")]
-    pub archive_after_days: u32,
-    #[serde(default)]
-    pub s3_bucket: Option<String>,
-    #[serde(default)]
-    pub s3_region: Option<String>,
     #[serde(default = "default_db_table_name")]
     pub table_name: String,
     #[serde(default = "default_db_archive_format")]
@@ -1263,9 +1197,6 @@ fn default_db_batch_size() -> usize {
 fn default_db_flush_interval_ms() -> u64 {
     500
 }
-fn default_db_archive_after_days() -> u32 {
-    30
-}
 fn default_db_table_name() -> String {
     "logs".to_string()
 }
@@ -1284,10 +1215,6 @@ impl Default for DatabaseSinkConfig {
             batch_size: default_db_batch_size(),
             flush_interval_ms: default_db_flush_interval_ms(),
             partition: PartitionStrategy::default(),
-            archive_to_s3: false,
-            archive_after_days: default_db_archive_after_days(),
-            s3_bucket: None,
-            s3_region: None,
             table_name: default_db_table_name(),
             archive_format: default_db_archive_format(),
             parquet_config: ParquetConfig::default(),
@@ -2645,121 +2572,6 @@ level = "error"
         let auth = HttpAuthConfig::default();
         assert!(!auth.enabled);
         assert_eq!(auth.token_env, "INKLOG_HTTP_AUTH_TOKEN");
-    }
-
-    // =========================================================================
-    // S3 Archive env overrides (aws feature) 测试
-    // =========================================================================
-
-    #[cfg(feature = "aws")]
-    #[test]
-    #[serial]
-    fn test_load_with_env_overrides_s3_archive_enabled_and_bucket_region() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
-        env::set_var("INKLOG_S3_ARCHIVE_BUCKET", "test-bucket");
-        env::set_var("INKLOG_S3_ARCHIVE_REGION", "us-east-1");
-        env::set_var("INKLOG_S3_ARCHIVE_ARCHIVE_FORMAT", "parquet");
-        let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
-        env::remove_var("INKLOG_S3_ARCHIVE_BUCKET");
-        env::remove_var("INKLOG_S3_ARCHIVE_REGION");
-        env::remove_var("INKLOG_S3_ARCHIVE_ARCHIVE_FORMAT");
-
-        let s3 = config.s3_archive.expect("s3_archive should be Some");
-        assert!(s3.enabled);
-        assert_eq!(s3.bucket, "test-bucket");
-        assert_eq!(s3.region, "us-east-1");
-        assert_eq!(s3.archive_format, "parquet");
-    }
-
-    #[cfg(feature = "aws")]
-    #[test]
-    #[serial]
-    fn test_load_with_env_overrides_s3_archive_encryption_awskms() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
-        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM", "awskms");
-        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_KMS_KEY_ID", "key-123");
-        let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_KMS_KEY_ID");
-
-        let s3 = config.s3_archive.expect("s3_archive should be Some");
-        let encryption = s3.encryption.expect("encryption should be set");
-        assert!(
-            matches!(
-                encryption.algorithm,
-                crate::integrations::storage::archive::EncryptionAlgorithm::AwsKms
-            ),
-            "algorithm should be AwsKms"
-        );
-        assert_eq!(encryption.kms_key_id, Some("key-123".to_string()));
-    }
-
-    #[cfg(feature = "aws")]
-    #[test]
-    #[serial]
-    fn test_load_with_env_overrides_s3_archive_encryption_ssec() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
-        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM", "ssec");
-        let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM");
-
-        let s3 = config.s3_archive.expect("s3_archive should be Some");
-        let encryption = s3.encryption.expect("encryption should be set");
-        assert!(
-            matches!(
-                encryption.algorithm,
-                crate::integrations::storage::archive::EncryptionAlgorithm::CustomerKey
-            ),
-            "algorithm should be CustomerKey"
-        );
-    }
-
-    #[cfg(feature = "aws")]
-    #[test]
-    #[serial]
-    fn test_load_with_env_overrides_s3_archive_encryption_unknown_defaults_aes256() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
-        env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM", "unknown_algo");
-        let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENABLED");
-        env::remove_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM");
-
-        let s3 = config.s3_archive.expect("s3_archive should be Some");
-        let encryption = s3.encryption.expect("encryption should be set");
-        assert!(
-            matches!(
-                encryption.algorithm,
-                crate::integrations::storage::archive::EncryptionAlgorithm::Aes256
-            ),
-            "unknown algorithm should default to Aes256"
-        );
-    }
-
-    #[cfg(feature = "aws")]
-    #[test]
-    fn test_sinks_enabled_includes_s3_archive() {
-        use crate::integrations::storage::archive::S3ArchiveConfig;
-
-        let config = InklogConfig {
-            s3_archive: Some(S3ArchiveConfig {
-                enabled: true,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let sinks = config.sinks_enabled();
-        assert!(
-            sinks.contains(&"s3_archive"),
-            "s3_archive should be enabled, got: {:?}",
-            sinks
-        );
     }
 
     // =========================================================================

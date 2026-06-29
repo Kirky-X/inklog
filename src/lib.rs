@@ -131,8 +131,6 @@ pub mod validation;
 // Backwards compatibility - expose modules at root level
 pub use domain::config;
 pub use domain::types::log_record;
-#[cfg(feature = "aws")]
-pub use integrations::storage::archive;
 pub use support::io::sink;
 pub use support::processing::template;
 
@@ -172,9 +170,4 @@ pub use support::processing::{
 };
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,
-};
-
-#[cfg(feature = "aws")]
-pub use integrations::storage::archive::{
-    ArchiveService, ArchiveServiceBuilder, S3ArchiveConfig, S3ArchiveManager,
 };

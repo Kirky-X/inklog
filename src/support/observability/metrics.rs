@@ -1105,16 +1105,6 @@ impl SinkHealthMonitor {
                     )
                 }
             }
-            "s3" | "s3_archive" => {
-                // S3 不可达 -> 本地保留，网络恢复后重试
-                (
-                    "local".to_string(),
-                    FallbackAction::LocalQueue {
-                        sink_name: sink_name.to_string(),
-                        reason: format!("S3 不可达: {}，本地保留待重试", error),
-                    },
-                )
-            }
             _ => {
                 // 未知 Sink，默认降级到 console
                 (
@@ -1535,26 +1525,6 @@ mod sink_health_monitor_tests {
     }
 
     #[test]
-    fn test_determine_fallback_target_s3() {
-        let monitor = SinkHealthMonitor::with_defaults();
-        for _ in 0..3 {
-            let _ = monitor.check_and_fallback("s3", false, Some("Connection refused"));
-        }
-        let state = monitor.get_fallback_state("s3");
-        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "local"));
-    }
-
-    #[test]
-    fn test_determine_fallback_target_s3_archive() {
-        let monitor = SinkHealthMonitor::with_defaults();
-        for _ in 0..3 {
-            let _ = monitor.check_and_fallback("s3_archive", false, Some("Timeout"));
-        }
-        let state = monitor.get_fallback_state("s3_archive");
-        assert!(matches!(state, FallbackState::Fallback { target, .. } if target == "local"));
-    }
-
-    #[test]
     fn test_determine_fallback_target_unknown_sink() {
         let monitor = SinkHealthMonitor::with_defaults();
         for _ in 0..3 {
@@ -1693,8 +1663,8 @@ mod metrics_tests {
     fn test_gauge_f64_new_and_set() {
         let gauge = GaugeF64::new(1.5);
         assert_eq!(gauge.get(), 1.5);
-        gauge.set(3.14);
-        assert_eq!(gauge.get(), 3.14);
+        gauge.set(3.15);
+        assert_eq!(gauge.get(), 3.15);
     }
 
     #[test]

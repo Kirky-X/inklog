@@ -386,44 +386,6 @@ impl Config for InklogConfigAdapter {
                 .as_ref()
                 .and_then(|f| f.encryption_key_env.clone()),
 
-            // S3 bucket and region
-            "database_sink.s3_bucket" => self
-                .config
-                .database_sink
-                .as_ref()
-                .and_then(|d| d.s3_bucket.clone()),
-            "database_sink.s3_region" => self
-                .config
-                .database_sink
-                .as_ref()
-                .and_then(|d| d.s3_region.clone()),
-
-            // S3 Archive (conditional compilation)
-            #[cfg(feature = "aws")]
-            "s3_archive.enabled" => self
-                .config
-                .s3_archive
-                .as_ref()
-                .map(|s| s.enabled.to_string()),
-            #[cfg(feature = "aws")]
-            "s3_archive.bucket" => self.config.s3_archive.as_ref().map(|s| s.bucket.clone()),
-            #[cfg(feature = "aws")]
-            "s3_archive.region" => self.config.s3_archive.as_ref().map(|s| s.region.clone()),
-            #[cfg(feature = "aws")]
-            "s3_archive.prefix" => self.config.s3_archive.as_ref().map(|s| s.prefix.clone()),
-            #[cfg(feature = "aws")]
-            "s3_archive.archive_interval_days" => self
-                .config
-                .s3_archive
-                .as_ref()
-                .map(|s| s.archive_interval_days.to_string()),
-            #[cfg(feature = "aws")]
-            "s3_archive.archive_format" => self
-                .config
-                .s3_archive
-                .as_ref()
-                .map(|s| s.archive_format.clone()),
-
             _ => None,
         }
     }
@@ -938,8 +900,6 @@ mod tests {
                 flush_interval_ms: 250,
                 table_name: "app_logs".to_string(),
                 archive_format: "parquet".to_string(),
-                s3_bucket: Some("my-bucket".to_string()),
-                s3_region: Some("us-west-2".to_string()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -962,14 +922,6 @@ mod tests {
             adapter.get_string("database_sink.archive_format"),
             Some("parquet".to_string())
         );
-        assert_eq!(
-            adapter.get_string("database_sink.s3_bucket"),
-            Some("my-bucket".to_string())
-        );
-        assert_eq!(
-            adapter.get_string("database_sink.s3_region"),
-            Some("us-west-2".to_string())
-        );
     }
 
     #[test]
@@ -983,7 +935,6 @@ mod tests {
 
         assert_eq!(adapter.get_string("database_sink.enabled"), None);
         assert_eq!(adapter.get_string("database_sink.url"), None);
-        assert_eq!(adapter.get_string("database_sink.s3_bucket"), None);
     }
 
     #[test]
@@ -1048,55 +999,5 @@ mod tests {
         let adapter = InklogConfigAdapter::from_config(config);
 
         assert_eq!(adapter.get_int("global.level"), None);
-    }
-
-    #[cfg(feature = "aws")]
-    #[test]
-    fn test_adapter_s3_archive_fields() {
-        use crate::integrations::storage::archive::S3ArchiveConfig;
-
-        let config = InklogConfig {
-            s3_archive: Some(S3ArchiveConfig {
-                enabled: true,
-                bucket: "test-bucket".to_string(),
-                region: "us-east-1".to_string(),
-                prefix: "logs/".to_string(),
-                archive_interval_days: 7,
-                archive_format: "parquet".to_string(),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        let adapter = InklogConfigAdapter::from_config(config);
-
-        assert_eq!(adapter.get_bool("s3_archive.enabled"), Some(true));
-        assert_eq!(
-            adapter.get_string("s3_archive.bucket"),
-            Some("test-bucket".to_string())
-        );
-        assert_eq!(
-            adapter.get_string("s3_archive.region"),
-            Some("us-east-1".to_string())
-        );
-        assert_eq!(
-            adapter.get_string("s3_archive.prefix"),
-            Some("logs/".to_string())
-        );
-        assert_eq!(adapter.get_int("s3_archive.archive_interval_days"), Some(7));
-        assert_eq!(
-            adapter.get_string("s3_archive.archive_format"),
-            Some("parquet".to_string())
-        );
-    }
-
-    #[cfg(feature = "aws")]
-    #[test]
-    fn test_adapter_s3_archive_none_returns_none() {
-        let config = InklogConfig::default();
-        let adapter = InklogConfigAdapter::from_config(config);
-
-        assert_eq!(adapter.get_string("s3_archive.enabled"), None);
-        assert_eq!(adapter.get_string("s3_archive.bucket"), None);
     }
 }

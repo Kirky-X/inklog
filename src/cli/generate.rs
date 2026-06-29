@@ -142,8 +142,6 @@ url = "postgres://localhost/logs"
 pool_size = 10
 batch_size = 100
 flush_interval_ms = 500
-archive_to_s3 = false
-archive_after_days = 30
 table_name = "logs"
 
 # For MySQL:

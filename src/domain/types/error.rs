@@ -17,7 +17,6 @@
 //! | `EncryptionError` | 加密/解密错误 |
 //! | `Shutdown` | 关闭过程中的错误 |
 //! | `ChannelError` | 通道通信错误 |
-//! | `S3Error` | AWS S3 操作错误 |
 //! | `CompressionError` | 压缩/解压错误 |
 //! | `RuntimeError` | 运行时错误 |
 //! | `HttpServerError` | HTTP 服务器错误 |
@@ -114,12 +113,6 @@ pub enum InklogError {
     #[error("Channel error: {0}")]
     ChannelError(String),
 
-    #[error("S3 error: {0}")]
-    S3Error(String),
-
-    #[error("Archive error: {0}")]
-    ArchiveError(String),
-
     #[error("Compression error: {0}")]
     CompressionError(String),
 
@@ -136,13 +129,6 @@ pub enum InklogError {
 impl From<toml::de::Error> for InklogError {
     fn from(err: toml::de::Error) -> Self {
         InklogError::ConfigError(err.to_string())
-    }
-}
-
-#[cfg(feature = "aws")]
-impl From<tokio_cron_scheduler::JobSchedulerError> for InklogError {
-    fn from(err: tokio_cron_scheduler::JobSchedulerError) -> Self {
-        InklogError::ConfigError(format!("Scheduler error: {}", err))
     }
 }
 
@@ -188,12 +174,6 @@ impl InklogError {
             }
             InklogError::ChannelError(msg) => {
                 format!("Channel error: {}", sanitize_message(msg))
-            }
-            InklogError::S3Error(msg) => {
-                format!("S3 error: {}", sanitize_message(msg))
-            }
-            InklogError::ArchiveError(msg) => {
-                format!("Archive error: {}", sanitize_message(msg))
             }
             InklogError::CompressionError(msg) => {
                 format!("Compression error: {}", sanitize_message(msg))
@@ -322,12 +302,6 @@ mod tests {
         assert!(InklogError::ChannelError("x".into())
             .safe_message()
             .contains("Channel error:"));
-        assert!(InklogError::S3Error("x".into())
-            .safe_message()
-            .contains("S3 error:"));
-        assert!(InklogError::ArchiveError("x".into())
-            .safe_message()
-            .contains("Archive error:"));
         assert!(InklogError::CompressionError("x".into())
             .safe_message()
             .contains("Compression error:"));
