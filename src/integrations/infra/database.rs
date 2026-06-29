@@ -277,20 +277,24 @@ impl Database for DbNexusAdapter {
     }
 
     async fn is_healthy(&self) -> bool {
-        // 使用连接池的健康检查 (使用 admin 角色，因为默认权限配置只允许 admin/system)
+        // 健康检查：仅验证连接池能获取 admin 会话。
+        //
+        // 不执行 `SELECT 1` 之类的探针 SQL，原因：
+        // dbnexus 启用 `sql-parser` + `permission` features 后，
+        // `execute_raw` 要求 SQL 必须含表名以做权限校验，
+        // 无表名的 `SELECT 1` 会被 `Permission("SQL statement requires a valid
+        // table name for permission checking")` 拒绝。
+        //
+        // `get_session("admin")` 内部调用 `acquire_connection`：
+        // - 空闲队列有连接时直接返回（池已验证过初始可达性，见 `with_config`）
+        // - 空闲队列为空时调用 `create_connection` 重新建立连接，失败则返回 Err
+        //
+        // 因此 `get_session` 成功即可认为数据库当前可达，符合 `is_healthy()`
+        // 文档要求的"轻量级，适合频繁调用"。
         match self.pool.get_session("admin").await {
-            Ok(session) => {
-                // 执行简单的健康检查查询
-                match session.execute_raw("SELECT 1").await {
-                    Ok(_) => true,
-                    Err(e) => {
-                        tracing::warn!("Database health check failed: {}", e);
-                        false
-                    }
-                }
-            }
+            Ok(_) => true,
             Err(e) => {
-                tracing::warn!("Failed to get session for health check: {}", e);
+                tracing::warn!("Database health check failed: {}", e);
                 false
             }
         }
