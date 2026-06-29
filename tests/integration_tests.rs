@@ -8,7 +8,6 @@
 //! 此文件作为集成测试的入口点，包含所有集成测试模块的测试用例。
 //!
 //! 测试模块组织：
-//! - 归档测试 (integration::archive)
 //! - 自动恢复测试 (integration::recovery)
 //! - 批量写入测试 (integration::batch)
 //! - 配置环境测试 (integration::config)
@@ -73,192 +72,6 @@ async fn test_load_from_file() {
     // Skip full LoggerManager initialization in test (can cause timeout in CI)
     // Just verify config is valid
     assert!(config.validate().is_ok());
-}
-
-// ============ 归档集成测试 (integration::archive) ============
-
-use inklog::archive::{ArchiveMetadata, CompressionType, ScheduleState, StorageClass};
-
-#[test]
-fn test_archive_metadata_creation() {
-    let metadata = ArchiveMetadata::new(100, 50000, "json");
-
-    assert_eq!(metadata.record_count, 100);
-    assert_eq!(metadata.original_size, 50000);
-    assert!(metadata.compressed_size >= 0);
-    assert_eq!(metadata.archive_type, "json");
-}
-
-#[test]
-fn test_archive_metadata_with_tag() {
-    let metadata = ArchiveMetadata::new(50, 25000, "parquet")
-        .with_tag("daily")
-        .with_tag("automated");
-
-    let tags: Vec<String> = metadata.tags.to_vec();
-    assert!(tags.contains(&"daily".to_string()));
-    assert!(tags.contains(&"automated".to_string()));
-}
-
-#[test]
-fn test_archive_metadata_mark_success() {
-    let metadata = ArchiveMetadata::new(100, 50000, "json");
-
-    let result = metadata.mark_success();
-
-    // 验证状态已更改
-    match result.status {
-        inklog::archive::ArchiveStatus::Success => {}
-        _ => panic!("Expected Success status"),
-    }
-}
-
-#[test]
-fn test_archive_metadata_mark_failed() {
-    let metadata = ArchiveMetadata::new(100, 50000, "json");
-
-    let result = metadata.mark_failed();
-
-    match result.status {
-        inklog::archive::ArchiveStatus::Failed => {}
-        _ => panic!("Expected Failed status"),
-    }
-}
-
-#[test]
-fn test_archive_metadata_with_checksum() {
-    let checksum = "abc123".to_string();
-    let metadata = ArchiveMetadata::new(10, 100, "json").with_checksum(checksum.clone());
-    assert_eq!(metadata.checksum, checksum);
-}
-
-#[test]
-fn test_archive_metadata_with_s3_key() {
-    let s3_key = "archive/2026/02/03/test.json".to_string();
-    let metadata = ArchiveMetadata::new(10, 100, "json").with_s3_key(s3_key.clone());
-    assert_eq!(metadata.s3_key, s3_key);
-}
-
-#[test]
-fn test_archive_metadata_mark_failed_local() {
-    let metadata = ArchiveMetadata::new(100, 50000, "json");
-    let result = metadata.mark_failed_local();
-
-    match result.status {
-        inklog::archive::ArchiveStatus::FailedLocal => {}
-        _ => panic!("Expected FailedLocal status"),
-    }
-}
-
-#[test]
-fn test_schedule_state_default() {
-    let state = ScheduleState::default();
-
-    assert!(state.last_scheduled_run.is_none());
-    assert!(state.last_successful_run.is_none());
-    assert!(state.last_run_status.is_none());
-    assert_eq!(state.consecutive_failures, 0);
-    assert!(state.locked_date.is_none());
-    assert!(!state.is_running);
-}
-
-#[test]
-fn test_schedule_state_start_execution() {
-    let mut state = ScheduleState::default();
-
-    state.start_execution();
-
-    assert!(state.last_scheduled_run.is_some());
-    assert!(state.locked_date.is_some());
-    assert!(state.is_running);
-}
-
-#[test]
-fn test_schedule_state_success() {
-    let mut state = ScheduleState::default();
-
-    state.start_execution();
-    state.mark_success();
-
-    assert_eq!(state.consecutive_failures, 0);
-    assert!(state.last_successful_run.is_some());
-    assert!(!state.is_running);
-}
-
-#[test]
-fn test_schedule_state_failure() {
-    let mut state = ScheduleState::default();
-
-    state.start_execution();
-    state.mark_failed();
-
-    assert_eq!(state.consecutive_failures, 1);
-    assert!(!state.is_running);
-}
-
-#[test]
-fn test_schedule_state_consecutive_failures() {
-    let mut state = ScheduleState::default();
-
-    for _ in 0..3 {
-        state.mark_failed();
-    }
-
-    assert_eq!(state.consecutive_failures, 3);
-}
-
-#[test]
-fn test_compression_type_values() {
-    // 测试 CompressionType 变体
-    let _none = CompressionType::None;
-    let _gzip = CompressionType::Gzip;
-    let _zstd = CompressionType::Zstd;
-    let _lz4 = CompressionType::Lz4;
-    let _brotli = CompressionType::Brotli;
-}
-
-#[test]
-fn test_storage_class_values() {
-    // 测试 StorageClass 变体
-    let _standard = StorageClass::Standard;
-    let _standard_ia = StorageClass::StandardIa;
-    let _glacier = StorageClass::Glacier;
-}
-
-#[test]
-fn test_archive_metadata_parquet_type() {
-    let metadata = ArchiveMetadata::new(100, 50000, "parquet");
-
-    assert_eq!(metadata.archive_type, "parquet");
-}
-
-#[test]
-fn test_schedule_state_reset_after_success() {
-    let mut state = ScheduleState::default();
-
-    state.mark_failed();
-    state.mark_failed();
-    assert_eq!(state.consecutive_failures, 2);
-
-    state.mark_success();
-
-    assert_eq!(state.consecutive_failures, 0);
-}
-
-#[test]
-fn test_schedule_state_can_run_today() {
-    let state = ScheduleState::default();
-
-    assert!(state.can_run_today());
-}
-
-#[test]
-fn test_schedule_state_cannot_run_when_locked() {
-    let mut state = ScheduleState::default();
-
-    state.start_execution();
-
-    assert!(!state.can_run_today());
 }
 
 // ============ 自动恢复集成测试 (integration::recovery) ============
@@ -431,10 +244,6 @@ async fn test_database_batch_write_dbnexus() {
         flush_interval_ms: 1000,
         pool_size: 5,
         partition: inklog::config::PartitionStrategy::default(),
-        archive_to_s3: false,
-        archive_after_days: 30,
-        s3_bucket: None,
-        s3_region: None,
         table_name: "logs".to_string(),
         archive_format: "json".to_string(),
         parquet_config: inklog::config::ParquetConfig::default(),
@@ -498,10 +307,6 @@ async fn test_database_timeout_flush_dbnexus() {
         flush_interval_ms: 300,
         pool_size: 5,
         partition: inklog::config::PartitionStrategy::default(),
-        archive_to_s3: false,
-        archive_after_days: 30,
-        s3_bucket: None,
-        s3_region: None,
         table_name: "logs".to_string(),
         archive_format: "json".to_string(),
         parquet_config: inklog::config::ParquetConfig::default(),
@@ -571,36 +376,6 @@ fn test_config_from_env_overrides() {
     assert!(file.enabled);
     assert_eq!(file.max_size, "50MB");
     assert!(file.compress);
-}
-
-#[test]
-#[config_serial]
-fn test_config_env_override_s3_encryption() {
-    clear_all_inklog_env_vars();
-
-    // 设置 S3 加密环境变量
-    std::env::set_var("INKLOG_S3_ARCHIVE_ENABLED", "true");
-    std::env::set_var("INKLOG_S3_ARCHIVE_BUCKET", "test-bucket");
-    std::env::set_var("INKLOG_S3_ARCHIVE_REGION", "us-west-2");
-    std::env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_ALGORITHM", "awskms");
-    std::env::set_var("INKLOG_S3_ARCHIVE_ENCRYPTION_KMS_KEY_ID", "test-key-id");
-    std::env::set_var("INKLOG_S3_ARCHIVE_ARCHIVE_FORMAT", "parquet");
-
-    // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
-    let config = ConfigInklogConfig::load_with_env_overrides().unwrap();
-
-    // 验证 S3 归档配置
-    assert!(config.s3_archive.is_some());
-    let s3 = config.s3_archive.unwrap();
-    assert!(s3.enabled);
-    assert_eq!(s3.bucket, "test-bucket");
-    assert_eq!(s3.region, "us-west-2");
-    assert!(s3.encryption.is_some());
-    match &s3.encryption.unwrap().algorithm {
-        inklog::archive::EncryptionAlgorithm::AwsKms => {} // 正确
-        _ => panic!("Expected AwsKms encryption"),
-    }
-    assert_eq!(s3.archive_format, "parquet");
 }
 
 #[test]

@@ -25,7 +25,6 @@
 //! - `database`: 数据库输出
 //! - `http`: HTTP 健康监控
 //! - `fallback`: 降级机制
-//! - `s3_archive`: S3 归档
 //!
 //! ## 运行示例
 //!
@@ -45,7 +44,6 @@
 //! cargo run --bin database
 //! cargo run --bin http
 //! cargo run --bin fallback
-//! cargo run --bin s3_archive
 //! ```
 //!
 //! ## 现有 binary（保留）

@@ -105,10 +105,6 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         batch_size: 10,                   // 批次大小
         flush_interval_ms: 100,          // 刷新间隔 100ms
         partition: inklog::config::PartitionStrategy::Monthly,
-        archive_to_s3: false,
-        archive_after_days: 30,
-        s3_bucket: None,
-        s3_region: None,
         table_name: "logs".to_string(),
         archive_format: "json".to_string(),
         parquet_config: Default::default(),
@@ -246,10 +242,6 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         batch_size: 5,                    // 小批次大小
         flush_interval_ms: 50,           // 快速刷新
         partition: inklog::config::PartitionStrategy::Monthly,
-        archive_to_s3: false,
-        archive_after_days: 30,
-        s3_bucket: None,
-        s3_region: None,
         table_name: "logs".to_string(),
         archive_format: "json".to_string(),
         parquet_config: Default::default(),

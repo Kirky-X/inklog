@@ -6,7 +6,6 @@
 //! 集成测试模块
 //!
 //! 测试 inklog 系统的完整功能集成，包括：
-//! - 归档调度测试
 //! - 自动恢复测试
 //! - 批量写入测试
 //! - 配置环境测试
@@ -15,7 +14,6 @@
 //! - 稳定性测试
 //! - 验证测试
 
-mod archive;
 mod additional_tests;
 mod batch;
 mod compression_ratio;

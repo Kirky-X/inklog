@@ -7,7 +7,6 @@
 //!
 //! 测试 inklog 各个组件的独立功能
 
-mod archive;
 mod cli;
 mod config;
 mod sink;
