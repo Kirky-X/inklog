@@ -1663,6 +1663,82 @@ mod metrics_tests {
     }
 
     #[test]
+    fn test_histogram_percentile_empty_bounds_edge() {
+        // 覆盖行 248: 当所有 bucket 累计计数都小于 target 时返回 last bound
+        let histogram = Histogram::new(vec![100, 500, 1000]);
+        // 只记录一个小值，请求高百分位数
+        histogram.record(50);
+        // p99 应该返回最后一个 bound（因为累计计数 1 < target 1，但 target=1 时 cumulative>=target 在第一个 bucket）
+        // 实际上 p50 应该返回第一个 bound 100
+        let p50 = histogram.percentile(50.0);
+        // target = ceil(1 * 50 / 100) = 1, cumulative 在第一个 bucket 达到 1 >= 1, 返回 bounds[0]=100
+        assert_eq!(p50, 100);
+    }
+
+    #[test]
+    fn test_histogram_percentile_returns_last_bound_when_target_exceeds_total() {
+        // 覆盖行 248: target 超过所有累计计数时返回 last bound
+        // 行 248 在 for 循环结束后触发，需要 cumulative < target
+        // 当所有值都在第一个 bucket，target=2 时，cumulative=1 < 2，循环结束后到行 248
+        let hist = Histogram::new(vec![100, 500, 1000]);
+        hist.record(50);
+        // 请求 p200（超过 100%），target = ceil(1 * 200 / 100) = 2
+        // cumulative=1 < 2, 循环结束到行 248
+        let result = hist.percentile(200.0);
+        // 返回 last bound = 1000
+        assert_eq!(result, 1000);
+    }
+
+    #[test]
+    fn test_gauge_f64_new_and_set() {
+        let gauge = GaugeF64::new(1.5);
+        assert_eq!(gauge.get(), 1.5);
+        gauge.set(3.14);
+        assert_eq!(gauge.get(), 3.14);
+    }
+
+    #[test]
+    fn test_gauge_f64_mutex_poisoning_recovery_set() {
+        // 覆盖行 174-176: GaugeF64::set 的 mutex poisoning 恢复路径
+        let gauge = std::sync::Arc::new(GaugeF64::new(0.0));
+        let gauge_clone = gauge.clone();
+
+        // 在子线程中获取 lock 并 panic，毒化 mutex
+        let handle = std::thread::spawn(move || {
+            let _guard = gauge_clone.value.lock().unwrap();
+            panic!("Intentional panic to poison mutex");
+        });
+
+        // 等待子线程结束（它会 panic）
+        let _ = handle.join();
+
+        // 现在 mutex 被毒化，set 应该走恢复路径
+        gauge.set(42.0);
+        // 验证值被正确设置（恢复后）
+        assert_eq!(gauge.get(), 42.0);
+    }
+
+    #[test]
+    fn test_gauge_f64_mutex_poisoning_recovery_get() {
+        // 覆盖行 184-186: GaugeF64::get 的 mutex poisoning 恢复路径
+        let gauge = std::sync::Arc::new(GaugeF64::new(10.0));
+        let gauge_clone = gauge.clone();
+
+        // 在子线程中获取 lock 并 panic，毒化 mutex
+        let handle = std::thread::spawn(move || {
+            let _guard = gauge_clone.value.lock().unwrap();
+            panic!("Intentional panic to poison mutex");
+        });
+
+        // 等待子线程结束
+        let _ = handle.join();
+
+        // get 应该走恢复路径，返回毒化的值（10.0）
+        let val = gauge.get();
+        assert_eq!(val, 10.0);
+    }
+
+    #[test]
     fn test_sink_health_healthy() {
         let health = SinkHealth::healthy();
         assert!(matches!(health.status, SinkStatus::Healthy));
