@@ -636,4 +636,100 @@ mod tests {
         assert!(from_new.build().is_ok());
         assert!(from_default.build().is_ok());
     }
+
+    // ============================================================================
+    // dbnexus feature 下的 database 方法测试
+    // ============================================================================
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test]
+    async fn test_container_database_returns_none_by_default() {
+        // 覆盖 database() 方法（行 301-302）
+        // 默认创建的容器 database 字段为 None
+        let container = InklogContainer::builder()
+            .cache(Arc::new(MockCache::new()))
+            .config(Arc::new(InklogConfigAdapter::from_config(
+                InklogConfig::default(),
+            )))
+            .build()
+            .unwrap();
+
+        // 默认未配置数据库，应返回 None
+        assert!(container.database().is_none());
+    }
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test]
+    async fn test_container_set_database_and_get() {
+        // 覆盖 set_database() 方法（行 323-324）
+        use crate::integrations::infra::MockDatabaseAdapter;
+        use crate::LogRecord;
+
+        let mut container = InklogContainer::builder()
+            .cache(Arc::new(MockCache::new()))
+            .config(Arc::new(InklogConfigAdapter::from_config(
+                InklogConfig::default(),
+            )))
+            .build()
+            .unwrap();
+
+        // 初始状态：database 为 None
+        assert!(container.database().is_none());
+
+        // 设置数据库实例（保留原始 Arc<MockDatabaseAdapter> 用于验证共享状态）
+        let mock_db = Arc::new(MockDatabaseAdapter::new());
+        let db: Arc<dyn Database> = Arc::clone(&mock_db) as Arc<dyn Database>;
+        container.set_database(Arc::clone(&db));
+
+        // 获取并验证：database 应返回 Some
+        let retrieved = container.database();
+        assert!(retrieved.is_some());
+
+        // 验证返回的实例健康
+        let retrieved_db = retrieved.unwrap();
+        assert!(retrieved_db.is_healthy().await);
+
+        // 通过返回的实例插入记录
+        let records = vec![LogRecord::new(
+            tracing::Level::INFO,
+            "test::module".to_string(),
+            "test message".to_string(),
+        )];
+        let count = retrieved_db.insert_batch(&records).await.unwrap();
+        assert_eq!(count, 1);
+
+        // 通过原始 Arc<MockDatabaseAdapter> 验证记录已写入（共享底层存储）
+        assert_eq!(mock_db.record_count(), 1);
+    }
+
+    #[cfg(feature = "dbnexus")]
+    #[tokio::test]
+    async fn test_container_builder_database() {
+        // 覆盖 builder.database() 方法（行 409-411）
+        use crate::integrations::infra::MockDatabaseAdapter;
+
+        let mock_db = Arc::new(MockDatabaseAdapter::new());
+        let db: Arc<dyn Database> = Arc::clone(&mock_db) as Arc<dyn Database>;
+
+        // 通过 builder 设置 database
+        let container = InklogContainer::builder()
+            .cache(Arc::new(MockCache::new()))
+            .config(Arc::new(InklogConfigAdapter::from_config(
+                InklogConfig::default(),
+            )))
+            .database(Arc::clone(&db))
+            .build()
+            .unwrap();
+
+        // 验证 database 已被设置
+        let retrieved = container.database();
+        assert!(retrieved.is_some());
+
+        // 验证返回的实例可用
+        let retrieved_db = retrieved.unwrap();
+        assert!(retrieved_db.is_healthy().await);
+
+        // 通过原始 Arc<MockDatabaseAdapter> 验证实例共享（未插入记录时应为 0）
+        assert_eq!(mock_db.record_count(), 0);
+    }
 }

@@ -566,4 +566,234 @@ mod tests {
 
         sink.shutdown().unwrap();
     }
+
+    // ========================================================================
+    // try_write 错误分支覆盖（额外任务）
+    // 覆盖行 225-228（Block Disconnected）、247-248（DropOldest retry 失败）、
+    // 253-254（DropOldest Disconnected）、232-236（DropNewest Disconnected）
+    // ========================================================================
+
+    /// 辅助函数：创建 sink 并 shutdown，返回可变的 sink 以便替换内部字段
+    fn make_shutdown_sink(
+        strategy: BackpressureStrategy,
+        path: std::path::PathBuf,
+    ) -> ChannelBufferedFileSink {
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path,
+                ..Default::default()
+            },
+            channel_capacity: 8,
+            backpressure_strategy: strategy,
+            flush_batch_size: 4,
+            flush_interval_ms: 1000,
+        };
+        let tmpl = LogTemplate::default();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).expect("Failed to create sink");
+        sink.shutdown().expect("Failed to shutdown");
+        sink
+    }
+
+    #[test]
+    fn test_try_write_block_strategy_disconnected() {
+        // 覆盖 Block 策略下 sender.send() 返回 Err 的分支（行 225-228）
+        // send() 仅在所有 receiver 被 drop 时返回 Err
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("block_disconnected.log");
+        let mut sink = make_shutdown_sink(BackpressureStrategy::Block, path);
+
+        // shutdown 已 drop IO 线程的 receiver clone
+        // 现在替换 sink.receiver 为另一个 channel 的 receiver，原 channel 断开
+        let (_other_tx, other_rx) = crossbeam_channel::bounded::<String>(1);
+        let old_receiver = std::mem::replace(&mut sink.receiver, other_rx);
+        drop(old_receiver); // 显式 drop，断开原 channel
+
+        let record = make_record("disconnected-block");
+        let result = sink.try_write(&record);
+        assert!(
+            !result,
+            "Block strategy should return false when sender is disconnected"
+        );
+        let m = sink.metrics();
+        assert!(
+            m.dropped_count > 0,
+            "dropped_count should be incremented for disconnected Block, got: {}",
+            m.dropped_count
+        );
+    }
+
+    #[test]
+    fn test_try_write_drop_newest_strategy_disconnected() {
+        // 覆盖 DropNewest 策略下 try_send 返回 Disconnected 的分支（行 232-236）
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("drop_newest_disconnected.log");
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropNewest, path);
+
+        let (_other_tx, other_rx) = crossbeam_channel::bounded::<String>(1);
+        let old_receiver = std::mem::replace(&mut sink.receiver, other_rx);
+        drop(old_receiver);
+
+        let record = make_record("disconnected-drop-newest");
+        let result = sink.try_write(&record);
+        assert!(
+            !result,
+            "DropNewest strategy should return false when sender is disconnected"
+        );
+        let m = sink.metrics();
+        assert!(
+            m.dropped_count > 0,
+            "dropped_count should be incremented for disconnected DropNewest, got: {}",
+            m.dropped_count
+        );
+    }
+
+    #[test]
+    fn test_try_write_drop_oldest_strategy_disconnected() {
+        // 覆盖 DropOldest 策略下 try_send 返回 Disconnected 的分支（行 253-254）
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("drop_oldest_disconnected.log");
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path);
+
+        let (_other_tx, other_rx) = crossbeam_channel::bounded::<String>(1);
+        let old_receiver = std::mem::replace(&mut sink.receiver, other_rx);
+        drop(old_receiver);
+
+        let record = make_record("disconnected-drop-oldest");
+        let result = sink.try_write(&record);
+        assert!(
+            !result,
+            "DropOldest strategy should return false when sender is disconnected"
+        );
+        let m = sink.metrics();
+        assert!(
+            m.dropped_count > 0,
+            "dropped_count should be incremented for disconnected DropOldest, got: {}",
+            m.dropped_count
+        );
+    }
+
+    #[test]
+    fn test_try_write_drop_oldest_retry_failure() {
+        // 覆盖 DropOldest 策略下重试 try_send 失败的分支（行 247-248）
+        // 使用 capacity=0 的 rendezvous channel：
+        //   - try_send 总是返回 Full（无缓冲区）
+        //   - try_recv 总是返回 Empty（无数据可收）
+        // 因此 try_recv.is_ok() 为 false，不增加 dropped_count
+        // 重试 try_send 仍返回 Full，命中 Err(_) 分支
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("drop_oldest_retry.log");
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path);
+
+        // 替换为 capacity=0 的 channel
+        let (new_tx, new_rx) = crossbeam_channel::bounded::<String>(0);
+        let old_sender = std::mem::replace(&mut sink.sender, new_tx);
+        let old_receiver = std::mem::replace(&mut sink.receiver, new_rx);
+        drop(old_sender);
+        drop(old_receiver);
+
+        let record = make_record("retry-failure");
+        let result = sink.try_write(&record);
+        assert!(
+            !result,
+            "DropOldest should return false when retry try_send fails"
+        );
+        let m = sink.metrics();
+        assert!(
+            m.dropped_count > 0,
+            "dropped_count should be incremented for retry failure, got: {}",
+            m.dropped_count
+        );
+    }
+
+    #[test]
+    fn test_try_write_drop_oldest_eviction_then_success() {
+        // 覆盖 DropOldest 策略下：try_send 返回 Full → try_recv 成功 → 重试 try_send 成功
+        // 即 DropOldest 的正常驱逐路径（行 240-243, 245）
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("drop_oldest_evict.log");
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path);
+
+        // 替换为 capacity=1 的 channel，并预填充一条消息
+        let (new_tx, new_rx) = crossbeam_channel::bounded::<String>(1);
+        new_tx.send("filler".to_string()).expect("Failed to fill");
+        let old_sender = std::mem::replace(&mut sink.sender, new_tx);
+        let old_receiver = std::mem::replace(&mut sink.receiver, new_rx);
+        drop(old_sender);
+        drop(old_receiver);
+
+        let record = make_record("after-eviction");
+        let result = sink.try_write(&record);
+        assert!(
+            result,
+            "DropOldest should succeed after evicting one item from full channel"
+        );
+        let m = sink.metrics();
+        // try_recv 成功，dropped_count 应 +1（驱逐了一条）
+        assert!(
+            m.dropped_count >= 1,
+            "dropped_count should be incremented for evicted item, got: {}",
+            m.dropped_count
+        );
+    }
+
+    #[test]
+    fn test_try_write_block_strategy_succeeds_when_connected() {
+        // 对照测试：Block 策略在 channel 连接时应成功
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("block_success.log");
+        let sink = make_shutdown_sink(BackpressureStrategy::Block, path);
+
+        let record = make_record("block-success");
+        let result = sink.try_write(&record);
+        assert!(
+            result,
+            "Block strategy should succeed when channel is connected"
+        );
+        let m = sink.metrics();
+        assert_eq!(m.dropped_count, 0, "no drops expected for connected Block");
+    }
+
+    // ========================================================================
+    // IO 线程 write_all 错误路径（行 169）- 仅 Linux，使用 /dev/full
+    // ========================================================================
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_io_thread_write_error_to_dev_full() {
+        // 覆盖 IO 线程中 writer.write_all 失败的分支（行 169）
+        // /dev/full 在写入时始终返回 ENOSPC
+        // 需要写入 > 8KB（BufWriter 默认缓冲区大小）以触发实际 I/O
+        let path = PathBuf::from("/dev/full");
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 8,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 4,
+            flush_interval_ms: 50,
+        };
+        let tmpl = LogTemplate::default();
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl).expect("Failed to create sink");
+
+        // 写入 > 8KB 的消息，迫使 BufWriter 刷新到底层 /dev/full，触发 write_all 失败
+        let large_msg = "x".repeat(10_000);
+        let record = make_record(&large_msg);
+        sink.write(&record).expect("write should not error");
+
+        // 等待 IO 线程处理
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let m = sink.metrics();
+        // write_all 失败，bytes_written 不应增加
+        assert_eq!(
+            m.bytes_written, 0,
+            "write to /dev/full should fail, bytes_written should be 0, got: {}",
+            m.bytes_written
+        );
+
+        // shutdown 可能因 flush 失败而返回错误，忽略
+        let _ = sink.shutdown();
+    }
 }

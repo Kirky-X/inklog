@@ -486,4 +486,72 @@ mod tests {
             .unwrap()
             .contains("Dangerous path component"));
     }
+
+    // ========================================================================
+    // canonicalize 失败分支（行 139、143）
+    // ========================================================================
+
+    #[test]
+    fn test_base_dir_validation_path_canonicalize_fails() {
+        // 覆盖行 139：path.canonicalize() 失败时回退到 path.to_path_buf()
+        // 构造一个存在的 base_dir，但 path 本身不存在（canonicalize 失败）
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let base_dir = temp_dir.path().to_path_buf();
+        // path 不存在 → canonicalize 失败 → 走 Err 分支使用 path.to_path_buf()
+        // 注意：path 不含 ".." 且不在 deny_components 中，因此能通过前面的检查
+        let nonexistent_path = base_dir.join("nonexistent_subdir").join("app.log");
+
+        let config = PathValidatorConfig {
+            allow_absolute: true,
+            base_dir: Some(base_dir.clone()),
+            allow_symlinks: false,
+            // 允许 nonexistent_subdir 通过，避免被 deny 拦截
+            deny_components: vec![],
+        };
+        let validator = PathValidator::with_config(config);
+        let result = validator.validate(&nonexistent_path);
+        // nonexistent_path 的 canonicalize 失败，回退到原路径
+        // 原路径 starts_with base_dir（字符串前缀匹配）→ valid
+        // 关键：覆盖了 Err 分支，且验证了回退路径的处理逻辑
+        assert!(
+            result.valid,
+            "path under base_dir should be valid even if canonicalize fails, got: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn test_base_dir_validation_base_dir_canonicalize_fails() {
+        // 覆盖行 143：base_dir.canonicalize() 失败时回退到 base_dir.clone()
+        // 构造一个不存在的 base_dir，但 path 存在且为相对路径
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        // base_dir 指向不存在的路径
+        let nonexistent_base = temp_dir.path().join("nonexistent_base_dir");
+        // path 是一个相对路径（不存在的 base_dir 的子路径，相对形式）
+        // 使用相对路径避免绝对路径的 canonicalize 影响
+        let relative_path = Path::new("logs/app.log");
+
+        let config = PathValidatorConfig {
+            allow_absolute: true,
+            base_dir: Some(nonexistent_base.clone()),
+            allow_symlinks: false,
+            deny_components: vec![],
+        };
+        let validator = PathValidator::with_config(config);
+        let result = validator.validate(relative_path);
+        // relative_path.canonicalize() 会失败（相对路径不存在）
+        // base_dir.canonicalize() 也会失败（不存在）
+        // 两者都回退到原路径，relative_path 不 starts_with nonexistent_base（绝对路径）
+        // 因此返回 invalid "Path is outside base directory"
+        // 关键：覆盖了 base_dir canonicalize 的 Err 分支
+        assert!(!result.valid);
+        assert!(
+            result
+                .error
+                .as_ref()
+                .is_some_and(|m| m.contains("base directory")),
+            "expected base directory error, got: {:?}",
+            result.error
+        );
+    }
 }

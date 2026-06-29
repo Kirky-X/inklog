@@ -798,4 +798,67 @@ mod tests {
         assert!(!debug_str.contains("writer"));
         assert!(!debug_str.contains("masker"));
     }
+
+    // ========================================================================
+    // write_record with color: INFO 级别（覆盖 writeln! 着色分支，行 62）
+    // ========================================================================
+
+    #[test]
+    fn test_write_record_with_color_info() {
+        // 显式覆盖 use_color=true 且 level=INFO 的写入路径
+        // 现有测试已覆盖 ERROR/WARN/DEBUG/TRACE，新增 INFO 补全 match 分支
+        let sink = get_sink();
+        let mut buf: Vec<u8> = Vec::new();
+        let record = make_record("INFO", "info colored output");
+        sink.write_record(&mut buf, &record, true).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("info colored output"));
+        assert!(output.contains("[INFO]"));
+        assert!(
+            output.ends_with('\n'),
+            "writeln should append newline, got: {:?}",
+            output
+        );
+    }
+
+    // ========================================================================
+    // write_record with color: 错误路径（覆盖行 62 writeln! 失败分支）
+    // ========================================================================
+
+    #[test]
+    fn test_write_record_with_color_propagates_write_error() {
+        // 覆盖 use_color=true 时 writeln! 失败的分支（行 61-65）
+        // 现有 test_write_record_propagates_write_error 只覆盖 use_color=false
+        let sink = get_sink();
+        let mut writer = FailingWriter;
+        let record = make_record("ERROR", "colored but fails");
+        let result = sink.write_record(&mut writer, &record, true);
+        assert!(
+            result.is_err(),
+            "write_record with color should propagate error"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("write failed"),
+            "error should carry the underlying message, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_write_record_with_color_all_levels_propagate_error() {
+        // 覆盖 use_color=true 时各 level 着色后 writeln! 失败的分支
+        // 确保 match 各分支后的 writeln! 都能传播错误
+        let sink = get_sink();
+        for level in &["ERROR", "WARN", "INFO", "DEBUG", "TRACE", "FATAL"] {
+            let mut writer = FailingWriter;
+            let record = make_record(level, "payload");
+            let result = sink.write_record(&mut writer, &record, true);
+            assert!(
+                result.is_err(),
+                "write_record with color should fail for level: {}",
+                level
+            );
+        }
+    }
 }

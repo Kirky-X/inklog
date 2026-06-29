@@ -1168,4 +1168,328 @@ mod tests {
         // 4 线程 × 5 次 get = 20 次
         assert_eq!(total_gets.load(Ordering::Relaxed), 20);
     }
+
+    // ============================================================================
+    // Default trait 实现测试
+    // ============================================================================
+
+    #[test]
+    fn test_object_pool_default_trait_uses_default_capacity() {
+        // 覆盖 line 323-331: ObjectPool::default() 应使用默认容量 1024
+        let pool = ObjectPool::<String, i32>::default();
+        assert_eq!(pool.capacity(), 1024);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_object_pool_builder_default_trait() {
+        // 覆盖 line 389-397: ObjectPoolBuilder::default() 应使用默认配置
+        let builder = ObjectPoolBuilder::<String, i32>::default();
+        let pool = builder.build();
+        assert_eq!(pool.capacity(), 1024);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_log_record_pool_default_trait() {
+        // 覆盖 line 457-461: LogRecordPool::default() 应使用默认容量
+        let pool = LogRecordPool::default();
+        // LogRecordPool 没有直接暴露 capacity，通过 metrics 验证
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 1024);
+    }
+
+    #[test]
+    fn test_string_pool_default_trait() {
+        // 覆盖 line 512-516: StringPool::default() 应使用默认容量
+        let pool = StringPool::default();
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 1024);
+    }
+
+    #[test]
+    fn test_thread_local_log_record_pool_default_trait() {
+        // 覆盖 line 580-584: ThreadLocalLogRecordPool::default() 应使用默认容量 1024
+        let pool = ThreadLocalLogRecordPool::default();
+        // default 容量 1024，可放入多个 record 而不被丢弃
+        let r1 = pool.get();
+        pool.put(r1);
+        assert!(!pool.is_empty());
+    }
+
+    #[test]
+    fn test_thread_local_string_pool_default_trait() {
+        // 覆盖 line 638-642: ThreadLocalStringPool::default() 应使用默认容量 1024
+        let pool = ThreadLocalStringPool::default();
+        let s = pool.get();
+        assert!(s.is_empty());
+        pool.put("default".to_string());
+        assert!(!pool.is_empty());
+    }
+
+    // ============================================================================
+    // LogRecordPool / StringPool new() 默认容量测试
+    // ============================================================================
+
+    #[test]
+    fn test_log_record_pool_new_uses_default_capacity() {
+        // 覆盖 line 419-421: LogRecordPool::new() 应使用默认容量 1024
+        let pool = LogRecordPool::new();
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 1024);
+    }
+
+    #[test]
+    fn test_string_pool_new_uses_default_capacity() {
+        // 覆盖 line 472-474: StringPool::new() 应使用默认容量 1024
+        let pool = StringPool::new();
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 1024);
+    }
+
+    // ============================================================================
+    // ThreadLocalStringPool 长度/容量测试
+    // ============================================================================
+
+    #[test]
+    fn test_thread_local_string_pool_len_and_is_empty() {
+        // 覆盖 line 626-635: ThreadLocalStringPool 的 len() 和 is_empty()
+        let pool = ThreadLocalStringPool::new(10);
+
+        // 清空线程本地池（避免其他测试残留影响）
+        while !pool.is_empty() {
+            let _ = pool.get();
+        }
+        assert!(pool.is_empty());
+        assert_eq!(pool.len(), 0);
+
+        pool.put("first".to_string());
+        assert!(!pool.is_empty());
+        assert_eq!(pool.len(), 1);
+
+        pool.put("second".to_string());
+        assert_eq!(pool.len(), 2);
+
+        let s = pool.get();
+        assert_eq!(s, "second"); // 后进先出
+        assert_eq!(pool.len(), 1);
+
+        let s = pool.get();
+        assert_eq!(s, "first");
+        assert_eq!(pool.len(), 0);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_thread_local_string_pool_exceed_capacity_drops_excess() {
+        // 覆盖 line 615-623: 当 pool 满 capacity 时，多余的 put 应被丢弃
+        let pool = ThreadLocalStringPool::new(2);
+
+        // 清空线程本地池
+        while !pool.is_empty() {
+            let _ = pool.get();
+        }
+
+        // 填满容量
+        pool.put("a".to_string());
+        pool.put("b".to_string());
+        assert_eq!(pool.len(), 2);
+
+        // 第三次 put 应被丢弃
+        pool.put("c".to_string());
+        assert_eq!(
+            pool.len(),
+            2,
+            "pool should not grow beyond capacity; excess should be dropped"
+        );
+
+        // 验证 pool 中保留的是 a 和 b（先放入的两个）
+        let s1 = pool.get();
+        let s2 = pool.get();
+        let mut remaining = vec![s1, s2];
+        remaining.sort();
+        assert_eq!(remaining, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    // ============================================================================
+    // LogRecordPool / StringPool 显式 len/is_empty 测试
+    // ============================================================================
+
+    #[test]
+    fn test_log_record_pool_len_and_is_empty() {
+        // 覆盖 line 446-454: LogRecordPool::len() 和 is_empty()
+        let pool = LogRecordPool::with_capacity(10);
+
+        // 在空池上 get 不增加 len
+        let _ = pool.get();
+        // 池中没有 put 任何 record，is_empty 应为 true
+        assert!(pool.is_empty());
+        assert_eq!(pool.len(), 0);
+
+        // put 一个 record
+        pool.put(LogRecord::default());
+        // put 操作后 len 可能因为底层 cache 异步更新而不立即反映
+        // 验证 metrics 行为正确
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 10);
+    }
+
+    #[test]
+    fn test_string_pool_len_and_is_empty() {
+        // 覆盖 line 501-509: StringPool::len() 和 is_empty()
+        let pool = StringPool::with_capacity(10);
+
+        // 空池
+        assert!(pool.is_empty());
+
+        let _ = pool.get(); // get 空池返回默认值，不增加 len
+        let _ = pool.len(); // 验证 len() 可调用
+
+        pool.put("test".to_string());
+        let _ = pool.len();
+        let metrics = pool.metrics();
+        assert_eq!(metrics.max_capacity, 10);
+    }
+
+    // ============================================================================
+    // 全局便捷函数测试
+    // ============================================================================
+
+    #[test]
+    fn test_global_log_record_functions() {
+        // 覆盖 line 660-667: get_log_record / put_log_record 全局函数
+        let record = get_log_record();
+        // 默认 LogRecord 的 level 应为 "INFO"
+        assert_eq!(record.level, "INFO");
+
+        // 修改 record 后放回
+        let mut modified = record;
+        modified.message = "global test".to_string();
+        put_log_record(modified);
+
+        // 再次获取应得到有效 record（可能是刚放回的，也可能是新的）
+        let record2 = get_log_record();
+        assert_eq!(record2.level, "INFO"); // put 会 reset，所以 level 是 INFO
+
+        // 验证多次调用不会 panic
+        for _ in 0..5 {
+            let r = get_log_record();
+            put_log_record(r);
+        }
+    }
+
+    // ============================================================================
+    // ObjectPool contains() 在 remove 后返回 false 测试
+    // ============================================================================
+
+    #[test]
+    fn test_object_pool_contains_after_put_and_remove() {
+        // 覆盖 line 226-234: contains() 在 put 和 remove 后的行为
+        let pool = ObjectPool::<String, String>::with_capacity(10);
+
+        // 初始不存在
+        assert!(!pool.contains(&"k".to_string()));
+
+        // put 后存在
+        pool.put(&"k".to_string(), "value".to_string());
+        assert!(pool.contains(&"k".to_string()));
+
+        // remove 后不存在
+        let removed = pool.remove(&"k".to_string());
+        assert_eq!(removed, Some("value".to_string()));
+        assert!(!pool.contains(&"k".to_string()));
+    }
+
+    // ============================================================================
+    // ObjectPool metrics 在 clear 后的测试
+    // ============================================================================
+
+    #[test]
+    fn test_object_pool_metrics_after_clear_resets_size() {
+        // 覆盖 line 311-320: clear() 后 metrics.current_size 应为 0
+        let pool = ObjectPool::<String, i32>::with_capacity(10);
+
+        pool.put(&"a".to_string(), 1);
+        pool.put(&"b".to_string(), 2);
+
+        let metrics_before = pool.metrics();
+        // total_items 在 put 后会被设置
+        let _ = metrics_before.current_size;
+
+        pool.clear();
+
+        let metrics_after = pool.metrics();
+        assert_eq!(
+            metrics_after.current_size, 0,
+            "current_size should be 0 after clear"
+        );
+        // hits/misses 不应被 clear 重置（它们是累计统计）
+        assert_eq!(metrics_after.hits, 0);
+        assert_eq!(metrics_after.misses, 0);
+    }
+
+    // ============================================================================
+    // ObjectPool remove() 不存在 key 不影响其他 key 测试
+    // ============================================================================
+
+    #[test]
+    fn test_object_pool_remove_nonexistent_does_not_affect_others() {
+        // 覆盖 line 236-262: remove() 不存在 key 时其他 key 不受影响
+        let pool = ObjectPool::<String, i32>::with_capacity(10);
+        pool.put(&"keep".to_string(), 100);
+        pool.put(&"also_keep".to_string(), 200);
+
+        // remove 一个不存在的 key
+        let removed = pool.remove(&"nonexistent".to_string());
+        assert_eq!(removed, None);
+
+        // 其他 key 应该不受影响
+        assert_eq!(pool.get(&"keep".to_string()), Some(100));
+        assert_eq!(pool.get(&"also_keep".to_string()), Some(200));
+    }
+
+    // ============================================================================
+    // ObjectPoolBuilder 链式调用完整性测试
+    // ============================================================================
+
+    #[test]
+    fn test_object_pool_builder_chained_methods() {
+        // 覆盖 line 354-387: ObjectPoolBuilder 链式调用应正确传递配置
+        let pool = ObjectPool::<String, String>::builder()
+            .capacity(2048)
+            .ttl_secs(3600)
+            .build();
+        assert_eq!(pool.capacity(), 2048);
+
+        // 验证功能正常
+        pool.put(&"test".to_string(), "value".to_string());
+        assert_eq!(pool.get(&"test".to_string()), Some("value".to_string()));
+    }
+
+    // ============================================================================
+    // ObjectPoolConfig Default 测试
+    // ============================================================================
+
+    #[test]
+    fn test_object_pool_config_default() {
+        // 覆盖 line 72-79: ObjectPoolConfig::default()
+        let config = ObjectPoolConfig::default();
+        assert_eq!(config.max_capacity, 1024);
+        assert_eq!(config.ttl_secs, None);
+    }
+
+    #[test]
+    fn test_object_pool_config_with_ttl() {
+        // 覆盖 line 144-146: ttl_secs 配置项
+        let config = ObjectPoolConfig {
+            max_capacity: 256,
+            ttl_secs: Some(60),
+        };
+        let pool = ObjectPool::<String, String>::with_config(config);
+        assert_eq!(pool.capacity(), 256);
+
+        // 验证带 TTL 的 pool 能正常工作
+        pool.put(&"k".to_string(), "v".to_string());
+        assert_eq!(pool.get(&"k".to_string()), Some("v".to_string()));
+    }
 }

@@ -527,4 +527,84 @@ mod tests {
         let decompressed = strategy.decompress(&compressed).unwrap();
         assert_eq!(data.to_vec(), decompressed);
     }
+
+    // =========================================================================
+    // compress_file 错误路径：覆盖 File::create 失败分支
+    // =========================================================================
+
+    #[test]
+    fn test_gzip_compress_file_create_output_fails_errors() {
+        // 覆盖行 181-182：GzipCompression::compress_file 中 File::create 失败
+        // 策略：输入文件存在，但 compressed_path（path.with_extension("gz")）
+        // 指向一个已存在的目录 → File::create 返回 Err → 走 IoError 分支
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let file_path = temp.path().join("input_create_fail.log");
+        let mut file = File::create(&file_path).unwrap();
+        file.write_all(b"data").unwrap();
+        drop(file);
+
+        // compressed_path = input_create_fail.gz（with_extension 替换扩展名）
+        // 把它创建为目录，使 File::create 失败
+        let compressed_path = temp.path().join("input_create_fail.gz");
+        std::fs::create_dir(&compressed_path).unwrap();
+
+        let strategy = GzipCompression::new(6);
+        let result = strategy.compress_file(&file_path, 6);
+        assert!(
+            matches!(result, Err(InklogError::IoError(_))),
+            "expected IoError when output file create fails, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_zstd_compress_file_internal_create_output_fails_errors() {
+        // 覆盖行 219-220：compress_file_internal 中 File::create 失败
+        // 同样的策略：把 compressed_path 创建为目录
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let file_path = temp.path().join("zstd_input_create_fail.log");
+        let mut file = File::create(&file_path).unwrap();
+        file.write_all(b"data").unwrap();
+        drop(file);
+
+        // compressed_path = zstd_input_create_fail.zst
+        let compressed_path = temp.path().join("zstd_input_create_fail.zst");
+        std::fs::create_dir(&compressed_path).unwrap();
+
+        // 直接调用 compress_file_internal 的公共入口 compress_file
+        let result = compress_file(&file_path, 3);
+        assert!(
+            matches!(result, Err(InklogError::IoError(_))),
+            "expected IoError when zstd output file create fails, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_zstd_compress_file_internal_invalid_level_clamped() {
+        // zstd::stream::Encoder::new 对超出范围的 compression_level 会内部 clamp 到有效级别，
+        // 而不是返回 Err。因此行 224-225（Encoder::new 失败分支）在实际中难以可靠触发。
+        // 本测试验证 zstd 的 clamp 行为：传入 i32::MIN 应返回 Ok（而非 Err）。
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let file_path = temp.path().join("invalid_level.log");
+        let mut file = File::create(&file_path).unwrap();
+        file.write_all(b"data").unwrap();
+        drop(file);
+
+        // zstd 会 clamp i32::MIN 到有效级别，返回 Ok
+        let result = compress_file(&file_path, i32::MIN);
+        assert!(
+            result.is_ok(),
+            "zstd should clamp invalid level and return Ok, got: {:?}",
+            result
+        );
+
+        // 验证压缩文件已生成
+        let compressed_path = result.unwrap();
+        assert!(compressed_path.exists());
+        assert!(compressed_path.extension().is_some_and(|ext| ext == "zst"));
+    }
 }

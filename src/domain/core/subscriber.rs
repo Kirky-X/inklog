@@ -140,6 +140,7 @@ where
 mod tests {
     use super::*;
     use crossbeam_channel::bounded;
+    use serial_test::serial;
     use tracing::subscriber::with_default;
     use tracing_subscriber::prelude::*;
 
@@ -435,6 +436,183 @@ mod tests {
             metrics.logs_dropped() >= 1,
             "console full should increment logs_dropped, got: {}",
             metrics.logs_dropped()
+        );
+    }
+
+    // =========================================================================
+    // on_event fallback_buffer 锁毒化恢复（行 116, 119-120）
+    // =========================================================================
+
+    #[test]
+    fn test_on_event_critical_level_recovers_from_poisoned_fallback_mutex() {
+        // 覆盖行 116, 119-120：on_event 中 fallback_buffer.lock() 返回 Err(poisoned)
+        // 时的恢复分支（tracing::warn + into_inner）
+        //
+        // 策略：
+        // 1. async_sender 用 bounded(0) → send_timeout 总是超时
+        // 2. 在另一线程持有 fallback_buffer 锁时 panic → 毒化 mutex
+        // 3. 触发 ERROR 级别 tracing 事件 → on_event → send_timeout 超时
+        //    → is_critical_level("ERROR")=true → fallback_buffer.lock() 返回 Err
+        //    → 走 poisoned 恢复分支
+        let (console_tx, _console_rx) = bounded(10);
+        // bounded(0) 是 rendezvous channel，无 receiver 时 send_timeout 必然超时
+        let (async_tx, _async_rx) = bounded(0);
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()));
+        // 在 layer 被 registry 消费前，先拿到 fallback_buffer 的 Arc clone
+        let buffer_clone = Arc::clone(&layer.fallback_buffer);
+
+        // 在另一线程持有 fallback_buffer 锁时 panic，毒化 mutex
+        let handle = std::thread::spawn(move || {
+            let _guard = buffer_clone.lock().unwrap();
+            panic!("intentional panic to poison fallback buffer mutex");
+        });
+        let join_result = handle.join();
+        assert!(
+            join_result.is_err(),
+            "poisoning thread should have panicked"
+        );
+
+        // 现在 fallback_buffer 已被毒化
+        // 安装 layer 并触发 ERROR 事件
+        let registry = tracing_subscriber::registry().with(layer);
+        with_default(registry, || {
+            // ERROR 级别 → is_critical_level=true → 进入 fallback buffer 分支
+            // fallback_buffer.lock() 返回 Err(poisoned) → 走恢复分支
+            tracing::error!(target: "test::subscriber", message = "poisoned fallback test");
+        });
+
+        // 到达此处说明毒化恢复成功（on_event 未 panic）
+        // 验证 console channel 仍然收到了记录（console 路径不受 fallback 毒化影响）
+        let console_received = _console_rx.try_recv();
+        assert!(
+            console_received.is_ok(),
+            "console channel should still receive the record"
+        );
+        assert_eq!(console_received.unwrap().level, "ERROR");
+    }
+
+    #[test]
+    fn test_on_event_console_ok_and_async_ok_paths() {
+        // 显式覆盖行 95（console try_send Ok）和行 110（async send_timeout Ok）
+        // 现有 test_on_event_sends_to_channels 已覆盖，但这里额外验证
+        // metrics 没有增加（确认 Ok 路径不触发 drop/blocked 计数）
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::subscriber", message = "ok path test");
+        });
+
+        // 两个 channel 都应收到记录
+        assert!(
+            console_rx.try_recv().is_ok(),
+            "console should receive record"
+        );
+        assert!(async_rx.try_recv().is_ok(), "async should receive record");
+
+        // Ok 路径不应增加 logs_dropped 或 channel_blocked
+        assert_eq!(
+            metrics.logs_dropped(),
+            0,
+            "Ok path should not increment logs_dropped"
+        );
+    }
+
+    // =========================================================================
+    // on_event 错误路径覆盖：非关键级别 async 超时 → metrics 递增
+    // 显式覆盖行 128-129（inc_channel_blocked + inc_logs_dropped）
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_on_event_non_critical_async_timeout_increments_blocked_and_dropped() {
+        // async channel 容量 0（rendezvous）→ send_timeout 必然超时
+        // INFO 级别非关键 → 走行 128-129（inc_channel_blocked + inc_logs_dropped）
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(0);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        let before_blocked = metrics.channel_blocked();
+        let before_dropped = metrics.logs_dropped();
+
+        with_default(registry, || {
+            tracing::info!(target: "test::subscriber", message = "non-critical timeout");
+        });
+
+        // 非关键级别 + async 超时：channel_blocked 和 logs_dropped 各 +1
+        assert_eq!(
+            metrics.channel_blocked(),
+            before_blocked + 1,
+            "non-critical async timeout should increment channel_blocked"
+        );
+        assert_eq!(
+            metrics.logs_dropped(),
+            before_dropped + 1,
+            "non-critical async timeout should increment logs_dropped"
+        );
+    }
+
+    // =========================================================================
+    // on_event 错误路径覆盖：关键级别 async 超时 → 记录存入 fallback_buffer
+    // 显式覆盖行 113-126，并验证 buffer 内容和 metrics 不递增
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_on_event_critical_async_timeout_stores_record_in_fallback_buffer() {
+        // async channel 容量 0（rendezvous）→ send_timeout 必然超时
+        // ERROR 级别为关键 → 走行 113-126（存入 fallback_buffer，不递增 metrics）
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(0);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone());
+        // 在 layer 被 registry 消费前，先拿到 fallback_buffer 的 Arc clone
+        let fallback_buffer = Arc::clone(&layer.fallback_buffer);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        let before_blocked = metrics.channel_blocked();
+        let before_dropped = metrics.logs_dropped();
+
+        with_default(registry, || {
+            tracing::error!(target: "test::subscriber", message = "critical timeout");
+        });
+
+        // 关键级别 + async 超时：记录存入 fallback_buffer
+        let buffer_guard = fallback_buffer.lock().unwrap();
+        assert_eq!(
+            buffer_guard.len(),
+            1,
+            "fallback_buffer should contain exactly 1 record"
+        );
+        let record = buffer_guard
+            .front()
+            .expect("should have a record in fallback_buffer");
+        assert_eq!(record.level, "ERROR", "record level should be ERROR");
+        assert_eq!(
+            record.message, "critical timeout",
+            "record message should match"
+        );
+        drop(buffer_guard);
+
+        // 关键级别不应递增 channel_blocked 或 logs_dropped
+        assert_eq!(
+            metrics.channel_blocked(),
+            before_blocked,
+            "critical level should not increment channel_blocked"
+        );
+        assert_eq!(
+            metrics.logs_dropped(),
+            before_dropped,
+            "critical level should not increment logs_dropped"
         );
     }
 }

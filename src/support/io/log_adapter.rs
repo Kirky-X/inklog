@@ -477,4 +477,44 @@ mod tests {
         // flush() is a no-op, just verify it doesn't panic
         logger.flush();
     }
+
+    // ========================================================================
+    // LogLogger::install - 覆盖行 153-154（成功路径）与错误路径
+    // ========================================================================
+
+    #[test]
+    #[serial_test::serial]
+    fn test_log_logger_install_second_call_err_after_first() {
+        // 全局 logger 只能安装一次。
+        // 注意：在并行测试环境中，全局 logger 可能已被其他测试（如 manager.rs 的测试）设置。
+        // 本测试验证：第二次 install 必然返回 Err(SetLoggerError)。
+        //
+        // 如果第一次 install 成功（全局 logger 未被占用），则覆盖行 153-154（set_max_level + Ok(())）。
+        // 如果第一次 install 失败（全局 logger 已被占用），则跳过行 153-154 覆盖，但仍验证第二次失败。
+
+        let (console_tx1, _cr1) = bounded(10);
+        let (async_tx1, _ar1) = bounded(10);
+        let metrics1 = Arc::new(Metrics::new());
+        let adapter1 = LogAdapter::new(console_tx1, async_tx1, metrics1);
+        let logger1 = LogLogger::new(adapter1, LevelFilter::Info);
+
+        // 第一次 install：可能成功（覆盖行 153-154）或失败（全局 logger 已被占用）
+        let result1 = logger1.install();
+
+        // 第二次 install：必须失败（无论第一次是否成功，全局 logger 此时已被占用）
+        let (console_tx2, _cr2) = bounded(10);
+        let (async_tx2, _ar2) = bounded(10);
+        let metrics2 = Arc::new(Metrics::new());
+        let adapter2 = LogAdapter::new(console_tx2, async_tx2, metrics2);
+        let logger2 = LogLogger::new(adapter2, LevelFilter::Info);
+
+        let result2 = logger2.install();
+        assert!(
+            result2.is_err(),
+            "second install should fail because a global logger is already installed, \
+             got: {:?} (first install result: {:?})",
+            result2,
+            result1
+        );
+    }
 }

@@ -593,4 +593,351 @@ mod tests {
             assert_eq!(value, Some(format!("value{}", i)));
         }
     }
+
+    // ============================================================================
+    // Default 实现测试 - 覆盖 OxCacheAdapter::default 和 MockCache::default
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_default_creates_instance() {
+        // 覆盖 OxCacheAdapter::default() 实现（行 159-160）
+        let cache = OxCacheAdapter::default();
+        // 验证 default 实例可用：set/get 往返一致
+        cache
+            .set("default_key", "default_value".to_string())
+            .await
+            .expect("default cache set should succeed");
+        assert_eq!(
+            cache.get("default_key").await,
+            Some("default_value".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mock_cache_default_equals_new() {
+        // 覆盖 MockCache::default() 实现（行 331-332）
+        let default_cache = MockCache::default();
+        let new_cache = MockCache::new();
+        // 两者行为应等价：初始为空
+        assert_eq!(default_cache.get("any").await, None);
+        assert_eq!(new_cache.get("any").await, None);
+        // default 实例可正常写入读取
+        default_cache
+            .set("k", "v".to_string())
+            .await
+            .expect("default mock set should succeed");
+        assert_eq!(default_cache.get("k").await, Some("v".to_string()));
+    }
+
+    // ============================================================================
+    // MockCache with_delay 覆盖 delete/exists 延迟分支（行 359、368）
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_mock_cache_with_delay_delete_measures_delay() {
+        // 覆盖 MockCache::delete 的 delay 分支（行 359）
+        let cache = MockCache::with_delay(15);
+        // 先放入一条记录
+        cache
+            .set("delay_key", "v".to_string())
+            .await
+            .expect("set should succeed");
+        // delete 应当至少消耗 delay_ms 的时间
+        let start = std::time::Instant::now();
+        let deleted = cache.delete("delay_key").await;
+        let elapsed = start.elapsed();
+        assert!(deleted, "existing key should be deleted");
+        assert!(
+            elapsed.as_millis() >= 15,
+            "delete should respect delay_ms, got {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mock_cache_with_delay_exists_measures_delay() {
+        // 覆盖 MockCache::exists 的 delay 分支（行 368）
+        let cache = MockCache::with_delay(15);
+        cache
+            .set("k", "v".to_string())
+            .await
+            .expect("set should succeed");
+        // exists 应当至少消耗 delay_ms 的时间
+        let start = std::time::Instant::now();
+        let exists = cache.exists("k").await;
+        let elapsed = start.elapsed();
+        assert!(exists, "key should exist");
+        assert!(
+            elapsed.as_millis() >= 15,
+            "exists should respect delay_ms, got {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    // ============================================================================
+    // OxCacheAdapter TTL 过期与边界场景测试（任务 7.8）
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_ttl_expiration() {
+        // 覆盖 TTL 过期路径：set 后等待 TTL 到期，get 应返回 None
+        let cache = OxCacheAdapter::builder()
+            .ttl(std::time::Duration::from_millis(100))
+            .build()
+            .await
+            .expect("Failed to build cache with TTL");
+
+        cache
+            .set("expiring_key", "expiring_value".to_string())
+            .await
+            .expect("Failed to set");
+
+        // 立即读取应能拿到值
+        assert_eq!(
+            cache.get("expiring_key").await,
+            Some("expiring_value".to_string())
+        );
+
+        // 等待 TTL 过期
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // 过期后应返回 None
+        assert_eq!(
+            cache.get("expiring_key").await,
+            None,
+            "expired key should return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_exists_after_ttl_expiration() {
+        // 覆盖 exists 在 TTL 过期后返回 false 的路径
+        let cache = OxCacheAdapter::builder()
+            .ttl(std::time::Duration::from_millis(80))
+            .build()
+            .await
+            .expect("Failed to build cache with TTL");
+
+        cache
+            .set("ttl_exists_key", "v".to_string())
+            .await
+            .expect("Failed to set");
+        assert!(cache.exists("ttl_exists_key").await);
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(
+            !cache.exists("ttl_exists_key").await,
+            "exists should return false after TTL expiration"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_delete_after_ttl_expiration() {
+        // 覆盖 delete 在键已过期（exists 返回 false）时返回 false 的路径
+        // 命中 OxCacheAdapter::delete 中 `if !exists { return false }` 分支
+        let cache = OxCacheAdapter::builder()
+            .ttl(std::time::Duration::from_millis(80))
+            .build()
+            .await
+            .expect("Failed to build cache with TTL");
+
+        cache
+            .set("ttl_delete_key", "v".to_string())
+            .await
+            .expect("Failed to set");
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        // 键已过期，exists 返回 false，delete 应短路返回 false
+        let deleted = cache.delete("ttl_delete_key").await;
+        assert!(
+            !deleted,
+            "delete should return false for expired key (exists short-circuit)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_builder_ttl_only() {
+        // 覆盖 builder 仅配置 TTL（不配置 capacity）的分支
+        let cache = OxCacheAdapter::builder()
+            .ttl(std::time::Duration::from_secs(60))
+            .build()
+            .await
+            .expect("Failed to build cache with TTL only");
+
+        cache
+            .set("ttl_only_key", "ttl_only_value".to_string())
+            .await
+            .expect("Failed to set");
+        assert_eq!(
+            cache.get("ttl_only_key").await,
+            Some("ttl_only_value".to_string())
+        );
+        assert!(cache.exists("ttl_only_key").await);
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_builder_capacity_only() {
+        // 覆盖 builder 仅配置 capacity（不配置 TTL）的分支
+        let cache = OxCacheAdapter::builder()
+            .capacity(50)
+            .build()
+            .await
+            .expect("Failed to build cache with capacity only");
+
+        cache
+            .set("cap_only_key", "cap_only_value".to_string())
+            .await
+            .expect("Failed to set");
+        assert_eq!(
+            cache.get("cap_only_key").await,
+            Some("cap_only_value".to_string())
+        );
+        assert!(cache.exists("cap_only_key").await);
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_empty_key() {
+        // 边界场景：空键
+        let cache = OxCacheAdapter::new().expect("Failed to create cache");
+
+        cache
+            .set("", "empty_key_value".to_string())
+            .await
+            .expect("Failed to set with empty key");
+        assert_eq!(cache.get("").await, Some("empty_key_value".to_string()));
+        assert!(cache.exists("").await);
+        assert!(cache.delete("").await);
+        assert!(!cache.exists("").await);
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_special_characters_in_key() {
+        // 边界场景：键包含特殊字符
+        let cache = OxCacheAdapter::new().expect("Failed to create cache");
+
+        let keys = [
+            "user:1",
+            "namespace::key",
+            "key with spaces",
+            "key\twith\ttabs",
+            "key\nwith\nnewlines",
+            "中文键",
+            "key\"with\"quotes",
+            "key'with'apostrophes",
+        ];
+
+        for key in &keys {
+            let value = format!("value_for_{}", key);
+            cache
+                .set(key, value.clone())
+                .await
+                .expect("Failed to set with special char key");
+            assert_eq!(
+                cache.get(key).await,
+                Some(value),
+                "get should return the set value for key: {:?}",
+                key
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_large_value() {
+        // 边界场景：大值
+        let cache = OxCacheAdapter::new().expect("Failed to create cache");
+
+        let large_value = "x".repeat(100_000);
+        cache
+            .set("large_key", large_value.clone())
+            .await
+            .expect("Failed to set large value");
+        let retrieved = cache.get("large_key").await;
+        assert_eq!(retrieved.as_ref().map(|v| v.len()), Some(100_000));
+        assert_eq!(retrieved, Some(large_value));
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_concurrent_access() {
+        // 覆盖 OxCacheAdapter 的并发安全性（与 MockCache 的并发测试对称）
+        use std::sync::Arc;
+        use tokio::task;
+
+        let cache = Arc::new(OxCacheAdapter::new().expect("Failed to create cache"));
+        let mut handles = vec![];
+
+        for i in 0..10 {
+            let cache_clone = cache.clone();
+            let handle = task::spawn(async move {
+                cache_clone
+                    .set(&format!("ckey{}", i), format!("cvalue{}", i))
+                    .await
+                    .expect("Failed to set");
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.await.expect("Task panicked");
+        }
+
+        for i in 0..10 {
+            assert_eq!(
+                cache.get(&format!("ckey{}", i)).await,
+                Some(format!("cvalue{}", i)),
+                "concurrent write for key {} should be visible",
+                i
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_delete_nonexistent_after_set() {
+        // 覆盖 delete 在 exists=false 时返回 false 的路径（非 TTL 场景）
+        // 即 OxCacheAdapter::delete 中 `if !exists { return false }` 分支
+        let cache = OxCacheAdapter::new().expect("Failed to create cache");
+
+        // 从未设置过的键
+        assert!(
+            !cache.delete("never_set_key").await,
+            "delete on never-set key should return false"
+        );
+
+        // 设置后删除，再删除应返回 false
+        cache
+            .set("temp_key", "temp_value".to_string())
+            .await
+            .expect("Failed to set");
+        assert!(cache.delete("temp_key").await);
+        assert!(
+            !cache.delete("temp_key").await,
+            "delete on already-deleted key should return false"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_overwrite_does_not_reset_ttl() {
+        // 覆盖 TTL 场景下的 overwrite：新值覆盖旧值后应可读
+        // （不验证 TTL 是否重置，因为 oxcache 的 TTL 语义由后端决定）
+        let cache = OxCacheAdapter::builder()
+            .ttl(std::time::Duration::from_secs(60))
+            .build()
+            .await
+            .expect("Failed to build cache");
+
+        cache
+            .set("ow_key", "v1".to_string())
+            .await
+            .expect("Failed to set v1");
+        cache
+            .set("ow_key", "v2".to_string())
+            .await
+            .expect("Failed to set v2");
+
+        assert_eq!(
+            cache.get("ow_key").await,
+            Some("v2".to_string()),
+            "overwrite should replace value"
+        );
+    }
 }

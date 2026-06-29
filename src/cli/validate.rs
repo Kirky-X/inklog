@@ -65,11 +65,6 @@ fn validate_toml_content(content: &str, config_path: &PathBuf) -> Result<()> {
         validate_http_server(http)?;
     }
 
-    // Handle both "s3" and "s3_archive" naming conventions
-    if let Some(s3) = get_table(&config, "s3").or(get_table(&config, "s3_archive")) {
-        validate_s3_archive(s3)?;
-    }
-
     validate_sections(&config, config_path)?;
 
     Ok(())
@@ -358,53 +353,6 @@ fn validate_http_server(http: &toml::Table) -> Result<()> {
     Ok(())
 }
 
-fn validate_s3_archive(s3: &toml::Table) -> Result<()> {
-    if let Some(enabled) = s3.get("enabled") {
-        if !enabled.is_bool() {
-            return Err(anyhow::anyhow!("s3_archive.enabled must be a boolean"));
-        }
-        println!("  ✓ S3 archive enabled: {}", enabled);
-    }
-
-    if let Some(bucket) = s3.get("bucket") {
-        if let Some(bucket_str) = bucket.as_str() {
-            if bucket_str.is_empty() {
-                return Err(anyhow::anyhow!("s3_archive.bucket cannot be empty"));
-            }
-            println!("  ✓ S3 bucket: {}", bucket_str);
-        }
-    }
-
-    if let Some(region) = s3.get("region") {
-        if let Some(region_str) = region.as_str() {
-            if region_str.is_empty() {
-                return Err(anyhow::anyhow!("s3_archive.region cannot be empty"));
-            }
-            println!("  ✓ S3 region: {}", region_str);
-        }
-    }
-
-    if let Some(interval) = s3.get("archive_interval_days") {
-        if let Some(n) = interval.as_integer() {
-            if n < 1 {
-                return Err(anyhow::anyhow!(
-                    "s3_archive.archive_interval_days must be >= 1"
-                ));
-            }
-        }
-    }
-
-    if let Some(max_size) = s3.get("max_file_size_mb") {
-        if let Some(n) = max_size.as_integer() {
-            if n < 1 {
-                return Err(anyhow::anyhow!("s3_archive.max_file_size_mb must be >= 1"));
-            }
-        }
-    }
-
-    Ok(())
-}
-
 fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()> {
     // Valid sections (both naming conventions accepted)
     let valid_sections = [
@@ -418,9 +366,6 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
         // Database variations
         "database",
         "db_config",
-        // S3 variations
-        "s3",
-        "s3_archive",
         // Performance
         "performance",
         // HTTP variations
@@ -704,20 +649,6 @@ max_file_size_mb = 100
     }
 
     #[test]
-    fn test_validate_config_with_s3_archive_naming() {
-        // Covers get_table for "s3_archive" naming convention
-        let content = r#"
-[s3_archive]
-enabled = true
-bucket = "my-bucket"
-region = "us-west-2"
-"#;
-        let file = write_config(content);
-        let result = validate_config(&file.path().to_path_buf());
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_validate_config_with_performance_section() {
         let content = r#"
 [performance]
@@ -835,5 +766,694 @@ encryption_key_env = "LOG_ENCRYPTION_KEY"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // get_table 分支覆盖（任务 7.9）
+    // 覆盖 as_table() 返回 None（值存在但非 table）、双重命名等场景
+    // ========================================================================
+
+    #[test]
+    fn test_get_table_console_value_not_a_table_falls_through_to_console_sink() {
+        // 覆盖 get_table 中 config.get(name) 返回 Some 但 as_table() 返回 None 的分支
+        // console = "string" 使 get_table("console") 返回 None
+        // .or(get_table("console_sink")) 取到 [console_sink] 表
+        let content = r#"
+console = "not a table"
+[console_sink]
+enabled = true
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(
+            result.is_ok(),
+            "should fall through to console_sink, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_get_table_file_value_not_a_table_falls_through_to_file_sink() {
+        // 同上，覆盖 file 字段非 table 时回退到 file_sink
+        let content = r#"
+file = 123
+[file_sink]
+enabled = true
+path = "logs/app.log"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(
+            result.is_ok(),
+            "should fall through to file_sink, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_get_table_database_value_not_a_table_falls_through_to_db_config() {
+        // 覆盖 database 字段非 table 时回退到 db_config
+        let content = r#"
+database = true
+[db_config]
+enabled = true
+driver = "sqlite"
+url = "sqlite://test.db"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(
+            result.is_ok(),
+            "should fall through to db_config, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_get_table_http_value_not_a_table_falls_through_to_http_server() {
+        // 覆盖 http 字段非 table 时回退到 http_server
+        let content = r#"
+http = "enabled"
+[http_server]
+enabled = true
+port = 8080
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(
+            result.is_ok(),
+            "should fall through to http_server, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_get_table_both_naming_conventions_present_prefers_first() {
+        // 覆盖 .or() 短路：当 console 和 console_sink 都存在时，应使用 console
+        // 通过让 console 含无效配置（enabled 非布尔）来验证优先使用 console
+        let content = r#"
+[console]
+enabled = "invalid"
+[console_sink]
+enabled = true
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err(), "should use first [console] table and fail");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("console_sink.enabled must be a boolean"));
+    }
+
+    #[test]
+    fn test_get_table_both_file_naming_conventions_prefers_first() {
+        // 覆盖 file/file_sink 的 .or() 短路：file 优先
+        let content = r#"
+[file]
+enabled = "invalid"
+[file_sink]
+enabled = true
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_sink.enabled must be a boolean"));
+    }
+
+    #[test]
+    fn test_get_table_no_section_present() {
+        // 覆盖 get_table 在两个命名都不存在时返回 None 的路径
+        // 此时 validate_toml_content 应直接 Ok（所有 section 可选）
+        let content = r#"
+[global]
+level = "info"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_table_both_names_not_tables() {
+        // 覆盖两个命名都存在但都不是 table 的场景
+        // get_table 对两者都返回 None，validate 跳过验证
+        let content = r#"
+console = "string1"
+console_sink = "string2"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(
+            result.is_ok(),
+            "non-table values should be skipped, got: {:?}",
+            result
+        );
+    }
+
+    // ========================================================================
+    // validate_sections: 双 sink 警告分支（行 386-400）
+    // ========================================================================
+
+    #[test]
+    fn test_validate_sections_dual_sink_file_disabled_warning() {
+        // 覆盖 validate_sections 中 has_file && has_database 且 file.enabled=false 的分支
+        // 该分支会 eprintln 警告但返回 Ok
+        let content = r#"
+[file]
+enabled = false
+[database]
+enabled = true
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        // 警告不影响 Ok 结果
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_sections_dual_sink_file_enabled_no_warning() {
+        // 覆盖 has_file && has_database 且 file.enabled=true 的分支（不进入 if !enabled）
+        let content = r#"
+[file]
+enabled = true
+[database]
+enabled = true
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_sections_dual_sink_file_enabled_via_file_sink() {
+        // 覆盖 file_sink 命名下的 dual-sink 分支
+        let content = r#"
+[file_sink]
+enabled = false
+[db_config]
+enabled = true
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // 类型错误与边界值覆盖
+    // ========================================================================
+
+    #[test]
+    fn test_validate_global_config_level_not_string() {
+        // 覆盖 global.level 为非字符串时 as_str() 返回 None 的分支（unwrap_or("")）
+        // 空字符串不在 valid_levels 中，应返回错误
+        let content = r#"
+[global]
+level = 123
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid log level"));
+    }
+
+    #[test]
+    fn test_validate_global_config_format_not_string() {
+        // 覆盖 global.format 为非字符串时 as_str() 返回 None 的分支
+        // 该分支不会触发错误（仅当 format_str 非空时才检查）
+        let content = r#"
+[global]
+format = 123
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_console_sink_enabled_not_bool() {
+        // 覆盖 console_sink.enabled 非布尔类型
+        let content = r#"
+[console]
+enabled = "yes"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("console_sink.enabled must be a boolean"));
+    }
+
+    #[test]
+    fn test_validate_console_sink_colored_not_bool() {
+        // 覆盖 console_sink.colored 非布尔类型
+        let content = r#"
+[console]
+colored = "yes"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("console_sink.colored must be a boolean"));
+    }
+
+    #[test]
+    fn test_validate_console_sink_stderr_levels_not_array() {
+        // 覆盖 console_sink.stderr_levels 非数组时 as_array() 返回 None 的分支
+        // 该分支不会触发错误（仅当 levels 是数组时才迭代）
+        let content = r#"
+[console]
+stderr_levels = "error"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_console_sink_stderr_levels_non_string_element() {
+        // 覆盖 stderr_levels 数组中含非字符串元素
+        let content = r#"
+[console]
+stderr_levels = [123, "error"]
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("stderr_levels must be an array of strings"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_enabled_not_bool() {
+        // 覆盖 file_sink.enabled 非布尔类型
+        let content = r#"
+[file]
+enabled = "yes"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_sink.enabled must be a boolean"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_path_empty() {
+        // 覆盖 file_sink.path 为空字符串
+        let content = r#"
+[file]
+path = ""
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_sink.path cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_max_size_invalid_format() {
+        // 覆盖 parse_size 失败分支
+        let content = r#"
+[file]
+max_size = "100XX"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid file_sink.max_size format"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_keep_files_zero() {
+        // 覆盖 keep_files < 1 的错误分支
+        let content = r#"
+[file]
+keep_files = 0
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_sink.keep_files must be >= 1"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_retention_days_zero() {
+        // 覆盖 retention_days < 1 的错误分支
+        let content = r#"
+[file]
+retention_days = 0
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_sink.retention_days must be >= 1"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_compress_not_bool() {
+        // 覆盖 compress 非布尔类型
+        let content = r#"
+[file]
+compress = "yes"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_sink.compress must be a boolean"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_encrypt_not_bool() {
+        // 覆盖 encrypt 非布尔类型
+        let content = r#"
+[file]
+encrypt = "yes"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_sink.encrypt must be a boolean"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_encrypt_key_env_not_string() {
+        // 覆盖 encryption_key_env 非字符串类型的分支
+        let content = r#"
+[file]
+encrypt = true
+encryption_key_env = 123
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("encryption_key_env must be a string"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_encrypt_false_skips_key_env_check() {
+        // 覆盖 encrypt=false 时提前返回 Ok 的分支（行 186-188）
+        let content = r#"
+[file]
+encrypt = false
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_database_sink_enabled_not_bool() {
+        // 覆盖 db_config.enabled 非布尔类型
+        let content = r#"
+[database]
+enabled = "yes"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("db_config.enabled must be a boolean"));
+    }
+
+    #[test]
+    fn test_validate_database_sink_driver_not_string() {
+        // 覆盖 driver 非字符串时 as_str() 返回 None 的分支（不触发错误）
+        let content = r#"
+[database]
+driver = 123
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        // driver 非字符串时不进入校验，应 Ok
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_database_sink_url_empty() {
+        // 覆盖 url 为空字符串
+        let content = r#"
+[database]
+url = ""
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("db_config.url cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_database_sink_pool_size_zero() {
+        // 覆盖 pool_size 不在 1..=100 范围
+        let content = r#"
+[database]
+pool_size = 0
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("pool_size must be between 1 and 100"));
+    }
+
+    #[test]
+    fn test_validate_database_sink_pool_size_too_large() {
+        // 覆盖 pool_size 超过 100 的分支
+        let content = r#"
+[database]
+pool_size = 200
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("pool_size must be between 1 and 100"));
+    }
+
+    #[test]
+    fn test_validate_database_sink_batch_size_zero() {
+        // 覆盖 batch_size < 1 的错误分支
+        let content = r#"
+[database]
+batch_size = 0
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("db_config.batch_size must be >= 1"));
+    }
+
+    #[test]
+    fn test_validate_database_sink_table_name_empty() {
+        // 覆盖 table_name 为空字符串
+        let content = r#"
+[database]
+table_name = ""
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("db_config.table_name cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_database_sink_table_name_invalid_chars() {
+        // 覆盖 table_name 含非法字符
+        let content = r#"
+[database]
+table_name = "invalid-name!"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("table_name must contain only alphanumeric"));
+    }
+
+    #[test]
+    fn test_validate_http_server_enabled_not_bool() {
+        // 覆盖 http_server.enabled 非布尔类型
+        let content = r#"
+[http]
+enabled = "yes"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("http_server.enabled must be a boolean"));
+    }
+
+    #[test]
+    fn test_validate_http_server_host_empty() {
+        // 覆盖 host 为空字符串
+        let content = r#"
+[http]
+host = ""
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("http_server.host cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_performance_channel_capacity_zero() {
+        // 覆盖 channel_capacity < 1 的错误分支
+        let content = r#"
+[performance]
+channel_capacity = 0
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("performance.channel_capacity must be >= 1"));
+    }
+
+    #[test]
+    fn test_validate_performance_worker_threads_zero() {
+        // 覆盖 worker_threads < 1 的错误分支
+        let content = r#"
+[performance]
+worker_threads = 0
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("performance.worker_threads must be >= 1"));
+    }
+
+    #[test]
+    fn test_validate_config_empty_file() {
+        // 边界场景：空配置文件
+        let file = write_config("");
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_database_url_valid_prefixes() {
+        // 覆盖 validate_database_url 各合法前缀分支
+        for url in &[
+            "postgres://localhost/db",
+            "postgresql://localhost/db",
+            "mysql://localhost/db",
+            "sqlite://test.db",
+            "sqlite3://test.db",
+        ] {
+            let content = format!("[database]\nurl = \"{}\"", url);
+            let file = write_config(&content);
+            let result = validate_config(&file.path().to_path_buf());
+            assert!(result.is_ok(), "url {} should be valid", url);
+        }
+    }
+
+    #[test]
+    fn test_validate_global_config_lowercase_level() {
+        // 覆盖 to_lowercase 转换：大写日志级别应通过校验
+        let content = r#"
+[global]
+level = "INFO"
+"#;
+        let file = write_config(content);
+        let result = validate_config(&file.path().to_path_buf());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_global_config_all_valid_levels() {
+        // 覆盖所有合法日志级别
+        for level in &["trace", "debug", "info", "warn", "error"] {
+            let content = format!("[global]\nlevel = \"{}\"", level);
+            let file = write_config(&content);
+            let result = validate_config(&file.path().to_path_buf());
+            assert!(result.is_ok(), "level {} should be valid", level);
+        }
+    }
+
+    #[test]
+    fn test_validate_file_sink_max_size_valid_units() {
+        // 覆盖 parse_size 各合法单位
+        for size in &["100B", "100KB", "100MB", "1GB", "1TB"] {
+            let content = format!("[file]\nmax_size = \"{}\"", size);
+            let file = write_config(&content);
+            let result = validate_config(&file.path().to_path_buf());
+            assert!(result.is_ok(), "size {} should be valid", size);
+        }
+    }
+
+    #[test]
+    fn test_validate_database_sink_valid_drivers() {
+        // 覆盖所有合法驱动（含大小写）
+        for driver in &["postgres", "postgresql", "mysql", "sqlite", "sqlite3"] {
+            let content = format!("[database]\ndriver = \"{}\"", driver);
+            let file = write_config(&content);
+            let result = validate_config(&file.path().to_path_buf());
+            assert!(result.is_ok(), "driver {} should be valid", driver);
+        }
     }
 }
