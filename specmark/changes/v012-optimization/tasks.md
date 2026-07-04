@@ -13,7 +13,7 @@
   - 验证：`cargo check --all-features` 通过，`cargo tree -i moka` 显示只通过 oxcache 引入
   - TDD：写测试验证 `OxCacheAdapter::new()` 仍能正常 set/get（已有测试覆盖）
 
-- [ ] [T002] [P0] 拆分 `dbnexus` feature 为 `sqlite`/`postgres`/`mysql` 三个独立 feature
+- [x] [T002] [P0] 拆分 `dbnexus` feature 为 `sqlite`/`postgres`/`mysql` 三个独立 feature
   - 文件：`Cargo.toml` 第 19-26 行 `[features]` 节
   - 改动：移除 `dbnexus = ["dep:dbnexus", "dep:sea-orm"]`，新增三行：
     - `sqlite = ["dep:dbnexus", "dep:sea-orm", "dbnexus/sqlite", "sea-orm/sqlx-sqlite"]`
@@ -22,7 +22,7 @@
   - 更新 `[lints.rust]` 的 `check-cfg` 添加新 feature 值
   - 验证：`cargo check --features sqlite`、`cargo check --features postgres`、`cargo check --features mysql` 各自通过
 
-- [ ] [T003] [P0] 切换 `sea-orm` TLS 后端 `runtime-tokio-native-tls` → `runtime-tokio-rustls`
+- [x] [T003] [P0] 切换 `sea-orm` TLS 后端 `runtime-tokio-native-tls` → `runtime-tokio-rustls`
   - 文件：`Cargo.toml` 第 70 行
   - 改动：`sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }`
   - 验证：`cargo check --features sqlite` 通过，无 native-tls 残留
@@ -36,10 +36,13 @@
 
 ## Phase 2: cfg 替换（dbnexus → sqlite/postgres/mysql）
 
-- [ ] [T005] [P0] 替换所有源码中 `#[cfg(feature = "dbnexus")]` 为 `#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]`
-  - 文件：`src/support/io/sink/database/mod.rs`、`src/domain/core/manager.rs`、`src/domain/core/container.rs`、`src/support/io/sink/entity.rs`、`src/integrations/infra/database.rs`
-  - 验证：`grep -rn 'feature = "dbnexus"' src/` 返回 0 结果
-  - 注意：`#[cfg(not(feature = "dbnexus"))]` 改为 `#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]`
+- [x] [T005] [P0] 替换所有源码中 `#[cfg(feature = "dbnexus")]` 为 `#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]`
+  - 文件：`src/support/io/sink/database/mod.rs`、`src/domain/core/manager.rs`、`src/domain/core/container.rs`、`src/integrations/infra/database.rs`、`src/integrations/kit/keys.rs`、`src/support/io/sink/mod.rs`、`src/integrations/infra/mod.rs`、`src/integrations/kit/mod.rs`
+  - 测试/基准/示例同步：`benches/inklog_bench.rs`、`tests/integration_tests.rs`、`tests/unit_tests.rs`、`tests/unit/sink/{mod,entity_test}.rs`、`tests/integration/additional_tests.rs`、`tests/integration/batch/batch_write_test.rs`、`tests/performance/benchmark_test.rs`、`tests/combinations/complex_features_test.rs`、`tests/docker/main.rs`、`examples/src/bin/{database,parquet_archive}.rs`、`examples/src/lib.rs`、`examples/README.md`
+  - 配套修复：`examples/Cargo.toml` 拆分 `dbnexus` feature 为 `sqlite`/`postgres`/`mysql` 三独立 feature 并正确转发；`.github/workflows/test-docker.yml` 将 `--features dbnexus` 改为 `--features ${{ matrix.db }}`
+  - 特殊处理：`tests/docker/main.rs` 内部属性 `#![cfg(...)]` 单独 Edit；`tests/combinations/complex_features_test.rs` 的 `#[cfg(all(feature = "aws", feature = "dbnexus"))]` 改为 `#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]`（aws feature 已移除）
+  - 文本引用：剩余 7 处 `--features dbnexus` 文档/eprintln 引用全部改为 `--features sqlite`（默认示例数据库）
+  - 验证：`grep -rn 'feature = "dbnexus"' src/ tests/ benches/ examples/` 返回 0 结果；`grep -rn --features dbnexus` 全仓返回 0 结果；`cargo fmt --all -- --check` 通过；`cargo clippy --all-features --all-targets -- -D warnings` 退出码 0 无警告
 
 ---
 

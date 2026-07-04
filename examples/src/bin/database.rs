@@ -14,7 +14,7 @@
 //! ## 运行
 //!
 //! ```bash
-//! cargo run --bin database --features dbnexus
+//! cargo run --bin database --features sqlite
 //! ```
 //!
 //! ## 核心特性
@@ -40,18 +40,18 @@
 //! | module_path | VARCHAR | 模块路径 |
 //! | metadata | TEXT | 元数据 |
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use chrono::Utc;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::{DatabaseDriver, DatabaseSinkConfig};
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog_examples::common::{print_section, print_separator};
 
 /// 创建临时权限配置文件
 ///
 /// 创建一个包含全权限配置的临时 YAML 文件，用于 dbnexus 权限系统。
 /// 临时文件会在程序退出时自动清理。
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn create_temp_permission_file() -> Result<tempfile::NamedTempFile, Box<dyn std::error::Error>> {
     use std::io::Write;
 
@@ -87,7 +87,7 @@ fn create_temp_permission_file() -> Result<tempfile::NamedTempFile, Box<dyn std:
 ///
 /// 注意：SQLite 内存数据库每个连接是独立的，
 /// 需要使用共享连接模式或同一连接来保持数据。
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例1: SQLite 内存数据库连接");
 
@@ -225,7 +225,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
 /// - 配置小批次大小触发频繁刷新
 /// - 写入多种级别的日志
 /// - 展示批量写入的性能优势
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例2: 批量写入演示");
 
@@ -369,7 +369,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
 /// - 按时间范围过滤
 /// - 按目标模块过滤
 /// - 聚合统计
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例3: 查询功能演示");
 
@@ -535,7 +535,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog Database Sink 示例 ===\n");
     println!("本示例使用 SQLite 内存数据库 (:memory:)");
@@ -567,13 +567,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // 当未启用 dbnexus 特性时显示友好提示
-#[cfg(not(feature = "dbnexus"))]
+#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 fn main() {
-    eprintln!("错误: 需要启用 dbnexus 特性来运行此示例");
+    eprintln!("错误: 需要启用数据库特性（sqlite/postgres/mysql）来运行此示例");
     eprintln!();
     eprintln!("请使用以下命令运行:");
-    eprintln!("  cargo run --bin database --features dbnexus");
+    eprintln!("  cargo run --bin database --features sqlite");
     eprintln!();
-    eprintln!("或在 examples/Cargo.toml 中启用 dbnexus 特性:");
-    eprintln!("  inklog = {{ path = \"..\", features = [\"dbnexus\"] }}");
+    eprintln!("或在 examples/Cargo.toml 中启用 sqlite 特性:");
+    eprintln!("  inklog = {{ path = \"..\", features = [\"sqlite\"] }}");
 }

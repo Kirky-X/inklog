@@ -6,10 +6,10 @@
 pub mod circuit_breaker;
 pub mod compression;
 pub mod console;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub mod database;
 pub mod encryption;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub mod entity;
 pub mod file;
 pub mod registry;

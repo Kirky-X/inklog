@@ -4,14 +4,14 @@
 // See LICENSE file in the project root for full license information.
 
 use crate::domain::core::subscriber::LoggerSubscriber;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::integrations::infra::Database;
 use crate::integrations::infra::{Cache, Config};
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::integrations::kit::keys::DatabaseCapabilityKey;
 use crate::integrations::kit::keys::{CacheCapabilityKey, ConfigCapabilityKey, InklogConfigKey};
 use crate::support::io::sink::console::ConsoleSink;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::support::io::sink::database::DatabaseSink;
 use crate::support::io::sink::file::FileSink;
 use crate::support::io::sink::LogSink;
@@ -61,7 +61,7 @@ struct WorkerParams {
     error_sink: Arc<Mutex<Option<FileSink>>>,
     effective_capacity: Arc<AtomicUsize>,
     /// 注入的数据库依赖（DI 模式）
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     database: Option<Arc<dyn Database>>,
 }
 
@@ -86,7 +86,7 @@ type WorkerStartResult = Result<(Vec<JoinHandle<()>>, Vec<Sender<()>>), InklogEr
 ///     let deps = LoggerDependencies {
 ///         cache: Some(Arc::new(MockCache::new())),
 ///         config: Some(Arc::new(MockConfig::new())),
-///         #[cfg(feature = "dbnexus")]
+///         #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 ///         database: None,
 ///     };
 ///     let logger = LoggerManager::with_dependencies(deps).await?;
@@ -111,7 +111,7 @@ pub struct LoggerDependencies {
     ///
     /// 用于日志记录的持久化存储。
     /// 如果未提供但配置了数据库 sink，LoggerManager 将创建默认连接池。
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     pub database: Option<Arc<dyn Database>>,
 }
 
@@ -121,7 +121,7 @@ impl std::fmt::Debug for LoggerDependencies {
         builder
             .field("cache", &self.cache.as_ref().map(|_| "Arc<dyn Cache>"))
             .field("config", &self.config.as_ref().map(|_| "Arc<dyn Config>"));
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         builder.field(
             "database",
             &self.database.as_ref().map(|_| "Arc<dyn Database>"),
@@ -168,7 +168,7 @@ pub struct LoggerManager {
     /// 注入的缓存依赖
     cache: Option<Arc<dyn Cache>>,
     /// 注入的数据库依赖（需要 dbnexus feature）
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     database: Option<Arc<dyn Database>>,
     /// trait-kit 能力注册中心
     ///
@@ -308,13 +308,13 @@ impl LoggerManager {
         // 注意：cache 和 database 依赖传递给 LoggerManager 内部使用
         // 它们可以通过 LoggerManager 传递给需要的服务（如 DatabaseSink）
         let cache = deps.cache;
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let database = deps.database;
 
         // 使用解析后的配置调用现有的构建逻辑
         let (mut manager, _subscriber, _filter) = Self::build_detached(
             config,
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database.clone(),
         )
         .await?;
@@ -323,7 +323,7 @@ impl LoggerManager {
         manager.cache = cache;
 
         // database 已经在 build_detached 中使用，同时也存储在 manager 中
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         {
             manager.database = database;
         }
@@ -332,7 +332,7 @@ impl LoggerManager {
         if let Some(ref cache) = manager.cache {
             manager.kit.replace::<CacheCapabilityKey>(cache.clone());
         }
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         if let Some(ref database) = manager.database {
             manager
                 .kit
@@ -381,7 +381,7 @@ impl LoggerManager {
 
         let (manager, subscriber, filter) = Self::build_detached(
             config.clone(),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             None,
         )
         .await?;
@@ -439,7 +439,9 @@ impl LoggerManager {
     /// 这主要用于测试和基准测试。
     pub async fn build_detached(
         config: InklogConfig,
-        #[cfg(feature = "dbnexus")] database: Option<Arc<dyn Database>>,
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))] database: Option<
+            Arc<dyn Database>,
+        >,
     ) -> Result<
         (
             Self,
@@ -489,7 +491,7 @@ impl LoggerManager {
             console_sink: console_sink.clone(),
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database,
         })?;
 
@@ -516,7 +518,7 @@ impl LoggerManager {
             #[cfg(feature = "http")]
             http_server_handle: Mutex::new(None),
             cache: None,
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
             kit,
         };
@@ -777,7 +779,7 @@ impl LoggerManager {
             console_sink,
             error_sink,
             effective_capacity,
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database,
         } = params;
         let file_config = config.file_sink.clone();
@@ -785,7 +787,7 @@ impl LoggerManager {
         let db_config = config.database_sink.clone();
 
         // 确保 database 始终有效：如果配置了数据库但没有提供 DI 依赖，则创建默认实现
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let database = {
             match database {
                 Some(db) => Some(db),
@@ -1105,17 +1107,17 @@ impl LoggerManager {
         });
 
         // Thread 2: DB Sink
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let rx_db = receiver.clone();
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let (shutdown_tx_db, shutdown_db) = bounded(1);
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let metrics_db = metrics.clone();
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let console_sink_db = console_sink.clone();
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let control_rx_db = control_rx.clone();
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let handle_db = thread::spawn(
             #[allow(unused_assignments)]
             move || {
@@ -1332,7 +1334,7 @@ impl LoggerManager {
             },
         );
 
-        #[cfg(not(feature = "dbnexus"))]
+        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
         let _handle_db = thread::spawn(|| {});
 
         // Health Check Thread
@@ -1443,20 +1445,20 @@ impl LoggerManager {
             }
         });
 
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let handles = vec![handle_console, handle_file, handle_db, handle_health];
-        #[cfg(not(feature = "dbnexus"))]
+        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
         let handles = vec![handle_console, handle_file, handle_health];
 
         // shutdown_txs 与 handles 一一对应，保持 cfg 一致性
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         let shutdown_txs = vec![
             shutdown_tx_console,
             shutdown_tx_file,
             shutdown_tx_db,
             shutdown_tx_health,
         ];
-        #[cfg(not(feature = "dbnexus"))]
+        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
         let shutdown_txs = vec![shutdown_tx_console, shutdown_tx_file, shutdown_tx_health];
 
         Ok((handles, shutdown_txs))
@@ -1632,7 +1634,7 @@ impl LoggerBuilder {
         self
     }
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     pub fn database(mut self, url: impl Into<String>) -> Self {
         let url_str = url.into();
         let config = crate::DatabaseSinkConfig {
@@ -1918,7 +1920,7 @@ impl LoggerBuilder {
     ///     .with_database(Arc::new(MockDatabaseAdapter::new()))
     ///     .build().await?;
     /// ```
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     pub fn with_database(mut self, database: Arc<dyn Database>) -> Self {
         self.deps.database = Some(database);
         self
@@ -1934,11 +1936,11 @@ impl LoggerBuilder {
     pub async fn build(self) -> Result<LoggerManager, InklogError> {
         // 如果有任何注入的依赖，使用 with_dependencies
         let has_deps = self.deps.cache.is_some() || self.deps.config.is_some() || {
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             {
                 self.deps.database.is_some()
             }
-            #[cfg(not(feature = "dbnexus"))]
+            #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
             {
                 false
             }
@@ -2262,7 +2264,7 @@ mod tests {
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: None,
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -2280,7 +2282,7 @@ mod tests {
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -2525,7 +2527,7 @@ mod tests {
     // LoggerBuilder 特性门控方法测试
     // ============================================================================
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[test]
     fn test_builder_database_sets_config() {
         let builder = LoggerBuilder::new().database("postgres://localhost/logs");
@@ -2539,7 +2541,7 @@ mod tests {
         assert_eq!(db.name, "default");
     }
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[test]
     fn test_builder_with_database_injects_dep() {
         use crate::integrations::infra::MockDatabaseAdapter;
@@ -3457,7 +3459,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
         };
 
@@ -3500,7 +3502,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
         };
 
@@ -3566,7 +3568,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
         };
 
@@ -3603,7 +3605,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
         };
 
@@ -3634,7 +3636,7 @@ worker_threads = 1
     // 需要 dbnexus feature
     // ============================================================================
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_database_to_kit() {
         // 验证通过 LoggerDependencies.database 注入的 Database 实现
@@ -3686,7 +3688,7 @@ worker_threads = 1
 
         let (manager, _subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             None,
         )
         .await
@@ -3742,7 +3744,7 @@ worker_threads = 1
 
         let (manager, _subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             None,
         )
         .await
@@ -3938,7 +3940,7 @@ worker_threads = 1
 
         let (manager, _subscriber, _filter) = LoggerManager::build_detached(
             config,
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             None,
         )
         .await
@@ -3957,7 +3959,7 @@ worker_threads = 1
     // （database 字段仅在 dbnexus feature 下存在）
     // ============================================================================
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[test]
     fn test_logger_dependencies_debug_includes_database_field() {
         use crate::integrations::infra::{MockCache, MockDatabaseAdapter};
@@ -3995,7 +3997,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
-            #[cfg(feature = "dbnexus")]
+            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
         };
 
@@ -4020,7 +4022,7 @@ worker_threads = 1
     // build_with_deps 同时注入 cache/config/database 测试 (lines 332-345, dbnexus)
     // ============================================================================
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_all_three_deps() {
         use crate::integrations::infra::{InklogConfigAdapter, MockCache, MockDatabaseAdapter};

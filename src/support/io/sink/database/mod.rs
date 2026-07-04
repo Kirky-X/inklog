@@ -3,37 +3,37 @@
 //! This module provides database logging functionality with support for
 //! PostgreSQL, MySQL, and SQLite.
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::fmt;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::path::PathBuf;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::sync::Arc;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use anyhow::Result;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use parking_lot::Mutex;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use tokio::runtime::Handle;
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::support::io::sink::circuit_breaker::CircuitBreaker;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::support::io::sink::file::FileSink;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::DataMasker;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::FileSinkConfig;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::InklogError;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::LogRecord;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::Metrics;
 
 const DEFAULT_BATCH_SIZE: usize = 100;
@@ -43,7 +43,7 @@ const MAX_BATCH_SIZE: usize = 1000;
 const ADAPTIVE_WINDOW_SIZE: usize = 10;
 
 /// DatabaseSink 的可变内部状态
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 struct DatabaseSinkInner {
     buffer: Vec<LogRecord>,
     last_flush: Instant,
@@ -56,7 +56,7 @@ struct DatabaseSinkInner {
     metrics: Option<Arc<Metrics>>,
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub struct DatabaseSink {
     /// 可变内部状态
     inner: Mutex<DatabaseSinkInner>,
@@ -69,7 +69,7 @@ pub struct DatabaseSink {
     stop: Arc<AtomicBool>,
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl DatabaseSink {
     /// 创建 DatabaseSink（使用默认配置）
     ///
@@ -184,14 +184,14 @@ impl DatabaseSink {
     }
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl fmt::Display for DatabaseSink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "DatabaseSink")
     }
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl crate::support::io::sink::LogSink for DatabaseSink {
     fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         let mut inner = self.inner.lock();
@@ -245,7 +245,7 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
     }
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl DatabaseSink {
     fn flush_inner(&self, inner: &mut DatabaseSinkInner) -> Result<(), InklogError> {
         if inner.buffer.is_empty() {
@@ -294,7 +294,7 @@ impl DatabaseSink {
 }
 
 /// Convert LogRecord to Parquet format
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub fn convert_logs_to_parquet(
     logs: &[crate::LogRecord],
     _config: &crate::ParquetConfig,

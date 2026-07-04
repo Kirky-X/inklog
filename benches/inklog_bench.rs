@@ -5,7 +5,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use inklog::masking::{self, DataMasker};
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::convert_logs_to_parquet;
 use inklog::{
     config::{FileSinkConfig, PerformanceConfig},
@@ -13,10 +13,10 @@ use inklog::{
     template::LogTemplate,
     InklogConfig, LoggerManager,
 };
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use rand::RngExt;
 use rayon::prelude::*;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -50,7 +50,7 @@ async fn setup_file_logger(log_path: &Path, channel_capacity: usize) -> (LoggerM
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         None,
     )
     .await
@@ -76,7 +76,7 @@ async fn setup_console_logger() -> (LoggerManager, impl Drop) {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         None,
     )
     .await
@@ -98,7 +98,7 @@ async fn setup_noop_logger() -> (LoggerManager, impl Drop) {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         None,
     )
     .await
@@ -286,7 +286,7 @@ fn bench_memory_usage(c: &mut Criterion) {
 }
 
 // ============ Parquet 转换性能测试 ============
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn bench_parquet_conversion(c: &mut Criterion) {
     let mut group = c.benchmark_group("parquet_conversion");
     group.measurement_time(Duration::from_secs(10));
@@ -558,7 +558,7 @@ criterion_group!(
     bench_object_pool,
     bench_zero_allocation
 );
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 criterion_group!(dbnexus_benches, bench_parquet_conversion);
 criterion_main!(benches);
 

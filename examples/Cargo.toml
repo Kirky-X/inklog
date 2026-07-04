@@ -6,11 +6,13 @@ publish = false
 description = "Examples for inklog - Enterprise-grade Rust logging infrastructure"
 
 [features]
-dbnexus = ["inklog/dbnexus", "dep:dbnexus"]
+sqlite = ["inklog/sqlite", "dep:dbnexus", "dbnexus/sqlite"]
+postgres = ["inklog/postgres", "dep:dbnexus", "dbnexus/postgres"]
+mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
 
 [dependencies]
-inklog = { path = "..", features = ["dbnexus"] }
-dbnexus = { path = "../../dbnexus", features = ["sqlite"], optional = true }
+inklog = { path = ".." }
+dbnexus = { path = "../../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"

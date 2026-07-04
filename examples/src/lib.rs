@@ -82,8 +82,8 @@
 //! cargo run --bin env_overrides
 //! cargo run --bin config_inspect
 //! cargo run --bin database_pg_mysql
-//! # Parquet 归档示例需要 dbnexus feature
-//! cargo run --bin parquet_archive --features dbnexus
+//! # Parquet 归档示例需要 sqlite feature
+//! cargo run --bin parquet_archive --features sqlite
 //! ```
 //!
 //! ## 现有 binary（保留）

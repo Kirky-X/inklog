@@ -5,7 +5,7 @@
 
 //! 数据库实体单元测试
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 mod entity_tests {
     use chrono::{DateTime, Utc};
     use inklog::sink::entity::{ActiveModel, Column, Entity, Model, TABLE_NAME};

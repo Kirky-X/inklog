@@ -13,7 +13,7 @@
 //! ```bash
 //! docker compose -f docker-compose.test.yml up -d
 //! export INKLOG_TEST_DB_URL="sqlite:///tmp/inklog_test.db"
-//! cargo test --test docker --features dbnexus
+//! cargo test --test docker --features sqlite
 //! ```
 //!
 //! # 测试边界
@@ -21,7 +21,7 @@
 //! 仅测试 inklog 自身的 `DbNexusAdapter` / `DatabaseSink` 适配器逻辑，
 //! 不测试 `dbnexus` / `sea-orm` 库内部实现。
 
-#![cfg(feature = "dbnexus")]
+#![cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 
 use inklog::InklogError;
 use std::env;

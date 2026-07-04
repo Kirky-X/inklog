@@ -75,9 +75,9 @@ pub trait Database: Send + Sync {
 // DbNexusAdapter - dbnexus 适配器实现 (条件编译)
 // ============================================================================
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use dbnexus::database::pool::DbPool;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use dbnexus::foundation::config::DbConfig;
 
 /// dbnexus 适配器
@@ -105,13 +105,13 @@ use dbnexus::foundation::config::DbConfig;
 ///     Ok(())
 /// }
 /// ```
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub struct DbNexusAdapter {
     pool: DbPool,
     table_name: String,
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl DbNexusAdapter {
     /// 创建新的 dbnexus 适配器
     ///
@@ -210,7 +210,7 @@ impl DbNexusAdapter {
     }
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[async_trait]
 impl Database for DbNexusAdapter {
     async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {
@@ -305,7 +305,7 @@ impl Database for DbNexusAdapter {
 // 非 dbnexus feature 时的占位实现
 // ============================================================================
 
-#[cfg(not(feature = "dbnexus"))]
+#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 /// DbNexusAdapter - 仅在启用 `dbnexus` feature 时可用
 ///
 /// 当未启用 `dbnexus` feature 时，此类型不存在。
@@ -314,7 +314,7 @@ pub struct DbNexusAdapter {
     _phantom: (),
 }
 
-#[cfg(not(feature = "dbnexus"))]
+#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 impl DbNexusAdapter {
     /// 此方法仅在启用 `dbnexus` feature 时可用
     #[deprecated(note = "Enable 'dbnexus' feature to use DbNexusAdapter")]
@@ -465,7 +465,7 @@ mod tests {
     // DbNexusAdapter 测试 (需要 feature)
     // ============================================================================
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test]
     async fn test_dbnexus_adapter_health_check() {
         // 创建临时权限配置文件
@@ -548,7 +548,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test]
     async fn test_dbnexus_adapter_insert_batch() {
         // 创建临时权限配置文件
@@ -630,7 +630,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(not(feature = "dbnexus"))]
+    #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
     #[allow(deprecated)]
     #[tokio::test]
     async fn test_dbnexus_adapter_not_available_without_feature() {

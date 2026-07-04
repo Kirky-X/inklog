@@ -25,7 +25,7 @@
 pub mod keys;
 pub mod module;
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub use keys::DatabaseCapabilityKey;
 pub use keys::{CacheCapabilityKey, ConfigCapabilityKey, InklogConfigKey};
 pub use module::{InklogModule, InklogModuleBuilder};

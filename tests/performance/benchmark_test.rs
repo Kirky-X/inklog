@@ -210,7 +210,7 @@ mod performance_test {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("batch_test.db");
         
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         {
             let db_url = format!("sqlite://{}", db_path.display());
             
@@ -253,7 +253,7 @@ mod performance_test {
             }
         }
         
-        #[cfg(not(feature = "dbnexus"))]
+        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
         {
             println!("Skipping test: requires --features \"dbnexus\"");
         }
@@ -263,7 +263,7 @@ mod performance_test {
 
     #[tokio::test]
     async fn test_connection_pool_performance() {
-        #[cfg(feature = "dbnexus")]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("pool_test.db");
@@ -323,7 +323,7 @@ mod performance_test {
             }
         }
         
-        #[cfg(not(feature = "dbnexus"))]
+        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
         {
             println!("Skipping test: requires --features \"dbnexus\"");
         }

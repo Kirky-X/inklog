@@ -24,7 +24,7 @@ use serial_test::serial;
 use std::time::Duration;
 use tracing::{error, info};
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[allow(unused_imports)]
 use inklog::sink::database::DatabaseSink;
 
@@ -209,25 +209,25 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
 }
 
 // ============ 批量写入集成测试 (integration::batch) ============
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::DatabaseDriver as BatchDatabaseDriver;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::log_record::LogRecord as BatchLogRecord;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[allow(unused_imports)]
 use inklog::sink::LogSink as BatchLogSink;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::DatabaseSinkConfig as BatchDatabaseSinkConfig;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::time::Duration as BatchDuration;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use tempfile::TempDir as BatchTempDir;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use tracing::Level as BatchLevel;
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_database_batch_write_dbnexus() {
     let temp_dir = BatchTempDir::new().expect("Failed to create temp directory");
@@ -290,7 +290,7 @@ async fn test_database_batch_write_dbnexus() {
     sink.flush().expect("Failed to flush batch logs");
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_database_timeout_flush_dbnexus() {
     let temp_dir = BatchTempDir::new().expect("Failed to create temp directory");
@@ -597,23 +597,23 @@ async fn test_http_server_disabled_by_default() {
 // Parquet功能验证测试
 // 测试Parquet导出功能的正确性、性能和兼容性
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use arrow_array::RecordBatchReader;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use arrow_schema::DataType;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use bytes::Bytes;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::convert_logs_to_parquet;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::time::Instant;
 
 // ============ Test Data Helper Functions ============
 
 /// Creates test log data with specified count
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn create_test_logs(count: usize) -> Vec<inklog::log_record::LogRecord> {
     (0..count)
         .map(|i| inklog::log_record::LogRecord {
@@ -638,7 +638,7 @@ fn create_test_logs(count: usize) -> Vec<inklog::log_record::LogRecord> {
 // ============ Parquet Verification Helper Functions ============
 
 /// Expected schema field names
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 const EXPECTED_FIELD_NAMES: &[&str] = &[
     "id",
     "timestamp",
@@ -652,7 +652,7 @@ const EXPECTED_FIELD_NAMES: &[&str] = &[
 ];
 
 /// Expected schema field types
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 const EXPECTED_FIELD_TYPES: &[DataType] = &[
     DataType::Int64,  // id
     DataType::Date64, // timestamp
@@ -666,7 +666,7 @@ const EXPECTED_FIELD_TYPES: &[DataType] = &[
 ];
 
 /// Verifies Parquet file schema (names and types)
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
@@ -691,7 +691,7 @@ fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 /// Verifies Parquet file data content
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
@@ -709,7 +709,7 @@ fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Complete Parquet file verification (schema + data)
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     verify_parquet_schema(data)?;
     verify_parquet_data(data)?;
@@ -719,7 +719,7 @@ fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 // ============ Parquet Tests ============
 
 #[test]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn test_parquet_basic_conversion() {
     let logs = create_test_logs(100);
     let result = convert_logs_to_parquet(&logs, &Default::default());
@@ -737,7 +737,7 @@ fn test_parquet_basic_conversion() {
 }
 
 #[test]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn test_parquet_small_dataset() {
     let logs = create_test_logs(1_000);
     let start = Instant::now();
@@ -764,7 +764,7 @@ fn test_parquet_small_dataset() {
 }
 
 #[test]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn test_parquet_medium_dataset() {
     let logs = create_test_logs(10_000);
     let start = Instant::now();
@@ -787,7 +787,7 @@ fn test_parquet_medium_dataset() {
 }
 
 #[test]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn test_parquet_large_dataset() {
     let logs = create_test_logs(100_000);
     let start = Instant::now();
@@ -810,7 +810,7 @@ fn test_parquet_large_dataset() {
 }
 
 #[test]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn test_parquet_compression_ratio() {
     let logs = create_test_logs(10_000);
     let result = convert_logs_to_parquet(&logs, &Default::default())
@@ -836,7 +836,7 @@ fn test_parquet_compression_ratio() {
 }
 
 #[test]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn test_parquet_empty_dataset() {
     let logs: Vec<inklog::log_record::LogRecord> = vec![];
     let result = convert_logs_to_parquet(&logs, &Default::default());
@@ -851,7 +851,7 @@ fn test_parquet_empty_dataset() {
 }
 
 #[test]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn test_parquet_schema_compatibility() {
     let logs = create_test_logs(100);
     let result = convert_logs_to_parquet(&logs, &Default::default())
@@ -913,18 +913,18 @@ async fn test_long_running_stability() {
 
 // ============ 验证集成测试 (integration::verification) ============
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::DatabaseDriver as VerifyDatabaseDriver;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::DatabaseSink as VerifyDatabaseSink;
 use inklog::sink::file::FileSink as VerifyFileSink;
 // LogSink already imported at line 29
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::{
     log_record::LogRecord as VerifyLogRecord, DatabaseSinkConfig as VerifyDatabaseSinkConfig,
     FileSinkConfig as VerifyFileSinkConfig,
 };
-#[cfg(not(feature = "dbnexus"))]
+#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 use inklog::{log_record::LogRecord as VerifyLogRecord, FileSinkConfig as VerifyFileSinkConfig};
 use std::fs::File as VerifyFile;
 use std::io::Read as VerifyRead;
@@ -1040,7 +1040,7 @@ fn verify_file_sink_encryption() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 async fn verify_database_sink_sqlite() {
     let temp_dir = VerifyTempDir::new().expect("Failed to create temp directory");
     let db_path = temp_dir.path().join("logs.db");
@@ -1095,7 +1095,7 @@ async fn verify_database_sink_sqlite() {
     }
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 async fn create_logs_table(url: &str) -> Result<(), String> {
     let pool = dbnexus::DbPool::new(url).await.map_err(|e| e.to_string())?;
     let session = pool.get_session("admin").await.map_err(|e| e.to_string())?;

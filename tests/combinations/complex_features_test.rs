@@ -5,7 +5,7 @@
 
 // 复杂特性组合测试
 
-#[cfg(all(feature = "aws", feature = "dbnexus"))]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[cfg(test)]
 mod complex_features_test {
     use inklog::{DatabaseSinkConfig, FileSinkConfig, InklogConfig, LoggerManager};
