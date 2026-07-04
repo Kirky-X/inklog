@@ -104,12 +104,12 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
 			"ring_example::block".to_string(),
 			format!("block-message-{:02}", i),
 		);
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
 	print_section("2.3 flush + shutdown 确保数据落盘");
-	sink.flush()?;
-	sink.shutdown()?;
+	sink.flush().await?;
+	sink.shutdown().await?;
 
 	let data = std::fs::read_to_string(&log_path)?;
 	assert!(data.contains("block-message-00"));
@@ -155,15 +155,15 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
 			"ring_example::drop_newest".to_string(),
 			format!("drop-newest-{:02}", i),
 		);
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
 	let m = sink.metrics();
 	println!("metrics.dropped_count = {}", m.dropped_count);
 	assert!(m.dropped_count > 0, "DropNewest 应丢弃部分日志");
 
-	sink.flush()?;
-	sink.shutdown()?;
+	sink.flush().await?;
+	sink.shutdown().await?;
 	println!("✓ DropNewest 在 channel 满时丢弃新日志，dropped_count > 0");
 
 	Ok(())
@@ -198,15 +198,15 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
 			"ring_example::drop_oldest".to_string(),
 			format!("drop-oldest-{:02}", i),
 		);
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
 	let m = sink.metrics();
 	println!("metrics.dropped_count = {}", m.dropped_count);
 	assert!(m.dropped_count > 0, "DropOldest 应驱逐部分旧日志");
 
-	sink.flush()?;
-	sink.shutdown()?;
+	sink.flush().await?;
+	sink.shutdown().await?;
 	println!("✓ DropOldest 在 channel 满时驱逐最旧日志，dropped_count > 0");
 
 	Ok(())
@@ -240,7 +240,7 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
 			"ring_example::metrics".to_string(),
 			format!("metrics-message-{:02}", i),
 		);
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
 	print_section("5.3 等待 IO 线程处理并读取 metrics");
@@ -262,8 +262,8 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(m.bytes_written > 0, "应有字节写入");
 	assert!(m.flush_count >= 1, "应至少 flush 一次");
 
-	sink.flush()?;
-	sink.shutdown()?;
+	sink.flush().await?;
+	sink.shutdown().await?;
 
 	let data = std::fs::read_to_string(&log_path)?;
 	assert!(data.contains("metrics-message-00"));

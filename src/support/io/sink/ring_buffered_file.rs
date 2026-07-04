@@ -10,6 +10,7 @@ use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use async_trait::async_trait;
 use crossbeam_channel;
 use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
@@ -277,13 +278,9 @@ pub struct ChannelBufferedMetrics {
     pub dropped_count: usize,
 }
 
-impl LogSink for ChannelBufferedFileSink {
-    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-        self.try_write(record);
-        Ok(())
-    }
-
-    fn flush(&self) -> Result<(), InklogError> {
+impl ChannelBufferedFileSink {
+    /// 同步 flush 内部实现（供 async flush 和 Drop 共用，避免 Drop 调用 async 方法）
+    fn flush_sync(&self) -> Result<(), InklogError> {
         let mut file_guard = self.file.lock();
         if let Some(writer) = file_guard.as_mut() {
             writer.flush()?;
@@ -292,7 +289,8 @@ impl LogSink for ChannelBufferedFileSink {
         Ok(())
     }
 
-    fn shutdown(&self) -> Result<(), InklogError> {
+    /// 同步 shutdown 内部实现（供 async shutdown 和 Drop 共用，避免 Drop 调用 async 方法）
+    fn shutdown_inner(&self) -> Result<(), InklogError> {
         // Signal threads to stop
         self.shutdown_flag.store(true, Ordering::Relaxed);
 
@@ -308,16 +306,31 @@ impl LogSink for ChannelBufferedFileSink {
         }
 
         // Final flush
-        self.flush()?;
+        self.flush_sync()
+    }
+}
+
+#[async_trait]
+impl LogSink for ChannelBufferedFileSink {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        self.try_write(record);
         Ok(())
+    }
+
+    async fn flush(&self) -> Result<(), InklogError> {
+        self.flush_sync()
+    }
+
+    async fn shutdown(&self) -> Result<(), InklogError> {
+        self.shutdown_inner()
     }
 }
 
 impl Drop for ChannelBufferedFileSink {
     fn drop(&mut self) {
         // Ensure shutdown is called, but don't double-join threads
-        // shutdown() will handle joining threads if they haven't been joined yet
-        let _ = self.shutdown();
+        // shutdown_inner() will handle joining threads if they haven't been joined yet
+        let _ = self.shutdown_inner();
     }
 }
 
@@ -334,8 +347,8 @@ mod tests {
         )
     }
 
-    #[test]
-    fn test_write_flush_shutdown_flow() {
+    #[tokio::test]
+    async fn test_write_flush_shutdown_flow() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ring.log");
 
@@ -355,19 +368,19 @@ mod tests {
         for i in 0..20 {
             let msg = format!("hello-{i}");
             let rec = make_record(&msg);
-            sink.write(&rec).unwrap();
+            sink.write(&rec).await.unwrap();
         }
 
-        sink.flush().unwrap();
-        sink.shutdown().unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
 
         let data = std::fs::read_to_string(&path).unwrap();
         assert!(data.contains("hello-0"));
         assert!(data.contains("hello-19"));
     }
 
-    #[test]
-    fn test_metrics_updated() {
+    #[tokio::test]
+    async fn test_metrics_updated() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ring_metrics.log");
 
@@ -386,10 +399,10 @@ mod tests {
 
         for i in 0..6 {
             let rec = make_record(&format!("m-{i}"));
-            sink.write(&rec).unwrap();
+            sink.write(&rec).await.unwrap();
         }
 
-        sink.flush().unwrap();
+        sink.flush().await.unwrap();
 
         let start = std::time::Instant::now();
         let mut m = sink.metrics();
@@ -401,11 +414,11 @@ mod tests {
         assert!(m.bytes_written >= 1);
         assert!(m.flush_count >= 1);
 
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_backpressure_drop_newest() {
+    #[tokio::test]
+    async fn test_backpressure_drop_newest() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ring_drop_newest.log");
 
@@ -424,17 +437,17 @@ mod tests {
 
         for i in 0..64 {
             let rec = make_record(&format!("drop-newest-{i}"));
-            sink.write(&rec).unwrap();
+            sink.write(&rec).await.unwrap();
         }
 
         let m = sink.metrics();
         assert!(m.dropped_count > 0);
-        sink.flush().unwrap();
-        sink.shutdown().unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_backpressure_drop_oldest() {
+    #[tokio::test]
+    async fn test_backpressure_drop_oldest() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ring_drop_oldest.log");
 
@@ -453,13 +466,13 @@ mod tests {
 
         for i in 0..64 {
             let rec = make_record(&format!("drop-oldest-{i}"));
-            sink.write(&rec).unwrap();
+            sink.write(&rec).await.unwrap();
         }
 
         let m = sink.metrics();
         assert!(m.dropped_count > 0);
-        sink.flush().unwrap();
-        sink.shutdown().unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
     }
 
     #[test]
@@ -486,8 +499,8 @@ mod tests {
         assert_eq!(metrics.dropped_count, 0);
     }
 
-    #[test]
-    fn test_open_file_creates_parent_directory() {
+    #[tokio::test]
+    async fn test_open_file_creates_parent_directory() {
         let dir = TempDir::new().unwrap();
         // Use a nested path that doesn't exist yet
         let nested_path = dir.path().join("nested").join("subdir").join("test.log");
@@ -507,16 +520,16 @@ mod tests {
 
         // Write a record to verify the file was created
         let rec = make_record("nested-dir-test");
-        sink.write(&rec).unwrap();
-        sink.flush().unwrap();
-        sink.shutdown().unwrap();
+        sink.write(&rec).await.unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
 
         // Verify the file exists
         assert!(nested_path.exists());
     }
 
-    #[test]
-    fn test_write_with_block_strategy_succeeds() {
+    #[tokio::test]
+    async fn test_write_with_block_strategy_succeeds() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("block_test.log");
 
@@ -535,16 +548,16 @@ mod tests {
 
         // Write a single record
         let rec = make_record("block-strategy-test");
-        sink.write(&rec).unwrap();
-        sink.flush().unwrap();
-        sink.shutdown().unwrap();
+        sink.write(&rec).await.unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
 
         let data = std::fs::read_to_string(&path).unwrap();
         assert!(data.contains("block-strategy-test"));
     }
 
-    #[test]
-    fn test_metrics_reflects_config() {
+    #[tokio::test]
+    async fn test_metrics_reflects_config() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("metrics_config.log");
 
@@ -564,7 +577,7 @@ mod tests {
         let m = sink.metrics();
         assert_eq!(m.channel_capacity, 16);
 
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
     // ========================================================================
@@ -574,7 +587,7 @@ mod tests {
     // ========================================================================
 
     /// 辅助函数：创建 sink 并 shutdown，返回可变的 sink 以便替换内部字段
-    fn make_shutdown_sink(
+    async fn make_shutdown_sink(
         strategy: BackpressureStrategy,
         path: std::path::PathBuf,
     ) -> ChannelBufferedFileSink {
@@ -590,17 +603,17 @@ mod tests {
         };
         let tmpl = LogTemplate::default();
         let sink = ChannelBufferedFileSink::new(cfg, tmpl).expect("Failed to create sink");
-        sink.shutdown().expect("Failed to shutdown");
+        sink.shutdown().await.expect("Failed to shutdown");
         sink
     }
 
-    #[test]
-    fn test_try_write_block_strategy_disconnected() {
+    #[tokio::test]
+    async fn test_try_write_block_strategy_disconnected() {
         // 覆盖 Block 策略下 sender.send() 返回 Err 的分支（行 225-228）
         // send() 仅在所有 receiver 被 drop 时返回 Err
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("block_disconnected.log");
-        let mut sink = make_shutdown_sink(BackpressureStrategy::Block, path);
+        let mut sink = make_shutdown_sink(BackpressureStrategy::Block, path).await;
 
         // shutdown 已 drop IO 线程的 receiver clone
         // 现在替换 sink.receiver 为另一个 channel 的 receiver，原 channel 断开
@@ -622,12 +635,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_try_write_drop_newest_strategy_disconnected() {
+    #[tokio::test]
+    async fn test_try_write_drop_newest_strategy_disconnected() {
         // 覆盖 DropNewest 策略下 try_send 返回 Disconnected 的分支（行 232-236）
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("drop_newest_disconnected.log");
-        let mut sink = make_shutdown_sink(BackpressureStrategy::DropNewest, path);
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropNewest, path).await;
 
         let (_other_tx, other_rx) = crossbeam_channel::bounded::<String>(1);
         let old_receiver = std::mem::replace(&mut sink.receiver, other_rx);
@@ -647,12 +660,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_try_write_drop_oldest_strategy_disconnected() {
+    #[tokio::test]
+    async fn test_try_write_drop_oldest_strategy_disconnected() {
         // 覆盖 DropOldest 策略下 try_send 返回 Disconnected 的分支（行 253-254）
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("drop_oldest_disconnected.log");
-        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path);
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path).await;
 
         let (_other_tx, other_rx) = crossbeam_channel::bounded::<String>(1);
         let old_receiver = std::mem::replace(&mut sink.receiver, other_rx);
@@ -672,8 +685,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_try_write_drop_oldest_retry_failure() {
+    #[tokio::test]
+    async fn test_try_write_drop_oldest_retry_failure() {
         // 覆盖 DropOldest 策略下重试 try_send 失败的分支（行 247-248）
         // 使用 capacity=0 的 rendezvous channel：
         //   - try_send 总是返回 Full（无缓冲区）
@@ -682,7 +695,7 @@ mod tests {
         // 重试 try_send 仍返回 Full，命中 Err(_) 分支
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("drop_oldest_retry.log");
-        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path);
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path).await;
 
         // 替换为 capacity=0 的 channel
         let (new_tx, new_rx) = crossbeam_channel::bounded::<String>(0);
@@ -705,13 +718,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_try_write_drop_oldest_eviction_then_success() {
+    #[tokio::test]
+    async fn test_try_write_drop_oldest_eviction_then_success() {
         // 覆盖 DropOldest 策略下：try_send 返回 Full → try_recv 成功 → 重试 try_send 成功
         // 即 DropOldest 的正常驱逐路径（行 240-243, 245）
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("drop_oldest_evict.log");
-        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path);
+        let mut sink = make_shutdown_sink(BackpressureStrategy::DropOldest, path).await;
 
         // 替换为 capacity=1 的 channel，并预填充一条消息
         let (new_tx, new_rx) = crossbeam_channel::bounded::<String>(1);
@@ -736,12 +749,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_try_write_block_strategy_succeeds_when_connected() {
+    #[tokio::test]
+    async fn test_try_write_block_strategy_succeeds_when_connected() {
         // 对照测试：Block 策略在 channel 连接时应成功
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("block_success.log");
-        let sink = make_shutdown_sink(BackpressureStrategy::Block, path);
+        let sink = make_shutdown_sink(BackpressureStrategy::Block, path).await;
 
         let record = make_record("block-success");
         let result = sink.try_write(&record);
@@ -758,8 +771,8 @@ mod tests {
     // ========================================================================
 
     #[cfg(target_os = "linux")]
-    #[test]
-    fn test_io_thread_write_error_to_dev_full() {
+    #[tokio::test]
+    async fn test_io_thread_write_error_to_dev_full() {
         // 覆盖 IO 线程中 writer.write_all 失败的分支（行 169）
         // /dev/full 在写入时始终返回 ENOSPC
         // 需要写入 > 8KB（BufWriter 默认缓冲区大小）以触发实际 I/O
@@ -780,7 +793,7 @@ mod tests {
         // 写入 > 8KB 的消息，迫使 BufWriter 刷新到底层 /dev/full，触发 write_all 失败
         let large_msg = "x".repeat(10_000);
         let record = make_record(&large_msg);
-        sink.write(&record).expect("write should not error");
+        sink.write(&record).await.expect("write should not error");
 
         // 等待 IO 线程处理
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -794,6 +807,6 @@ mod tests {
         );
 
         // shutdown 可能因 flush 失败而返回错误，忽略
-        let _ = sink.shutdown();
+        let _ = sink.shutdown().await;
     }
 }

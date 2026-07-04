@@ -180,7 +180,19 @@ where
         T: Send + 'static,
     {
         if let Ok(handle) = Handle::try_current() {
-            tokio::task::block_in_place(|| handle.block_on(f))
+            // 用 spawn_blocking 在 blocking 线程池跑 block_on，避免两个陷阱：
+            // 1. block_in_place 在 current_thread runtime 上 panic
+            //    ("can call blocking only when running on the multi-threaded runtime")
+            // 2. 直接 handle.block_on 在 multi_thread worker 上会死锁或 panic
+            //    ("Cannot block the current thread from within a runtime")
+            // 全局 LoggerSubscriber 的 on_event 间接调用此方法，必须在任意 runtime flavor 上工作。
+            let (tx, rx) = std::sync::mpsc::channel();
+            tokio::task::spawn_blocking(move || {
+                let result = handle.block_on(f);
+                let _ = tx.send(result);
+            });
+            rx.recv()
+                .expect("spawn_blocking task panicked during execute_async")
         } else {
             get_runtime().block_on(f)
         }

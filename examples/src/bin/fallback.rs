@@ -27,6 +27,7 @@
 //! 2. **simulate_failure()**: 模拟主 Sink 故障场景
 //! 3. **fallback_demo()**: 演示降级到 File Sink
 
+use async_trait::async_trait;
 use chrono::Utc;
 use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 use inklog::log_record::LogRecord;
@@ -102,8 +103,9 @@ impl FailingSink {
     }
 }
 
+#[async_trait]
 impl LogSink for FailingSink {
-    fn write(&self, record: &LogRecord) -> Result<(), inklog::InklogError> {
+    async fn write(&self, record: &LogRecord) -> Result<(), inklog::InklogError> {
         let mut count = self.write_count.lock();
         *count += 1;
 
@@ -111,7 +113,7 @@ impl LogSink for FailingSink {
         if *count <= self.fail_after {
             let inner = self.inner.lock();
             if let Some(ref sink) = *inner {
-                return sink.write(record);
+                return sink.write(record).await;
             }
         }
 
@@ -122,10 +124,10 @@ impl LogSink for FailingSink {
         ))))
     }
 
-    fn flush(&self) -> Result<(), inklog::InklogError> {
+    async fn flush(&self) -> Result<(), inklog::InklogError> {
         let inner = self.inner.lock();
         if let Some(ref sink) = *inner {
-            sink.flush()
+            sink.flush().await
         } else {
             Err(inklog::InklogError::IoError(std::io::Error::other(
                 "Sink is failed",
@@ -137,10 +139,10 @@ impl LogSink for FailingSink {
         self.inner.lock().is_some()
     }
 
-    fn shutdown(&self) -> Result<(), inklog::InklogError> {
+    async fn shutdown(&self) -> Result<(), inklog::InklogError> {
         let inner = self.inner.lock();
         if let Some(ref sink) = *inner {
-            sink.shutdown()
+            sink.shutdown().await
         } else {
             Ok(())
         }
@@ -151,7 +153,7 @@ impl LogSink for FailingSink {
 ///
 /// 展示如何同时配置 Console 和 File Sink，实现日志的双重输出。
 /// 这是在生产环境中推荐的配置方式，确保日志不会因单一 Sink 故障而丢失。
-fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
+async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例 1: 多 Sink 配置（Console + File）");
 
     // 生成临时文件路径
@@ -231,9 +233,9 @@ fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
 
     for record in &records {
         // 写入 Console
-        console_sink.write(record)?;
+        console_sink.write(record).await?;
         // 写入 File
-        file_sink.write(record)?;
+        file_sink.write(record).await?;
 
         let level_marker = match record.level.as_str() {
             "ERROR" => "[ERROR]",
@@ -244,8 +246,8 @@ fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         println!("{} -> Console + File: {}", level_marker, record.message);
     }
 
-    console_sink.flush()?;
-    file_sink.flush()?;
+    console_sink.flush().await?;
+    file_sink.flush().await?;
 
     // 5. 验证文件内容
     print_section("验证 File Sink");
@@ -267,7 +269,7 @@ fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 演示当主 Sink 发生故障时，系统如何检测故障并切换到备用 Sink。
 /// 这是 inklog 高可用性的核心机制。
-fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
+async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例 2: 故障模拟与降级切换");
 
     // 生成临时文件路径
@@ -336,7 +338,7 @@ fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
 
     for record in &test_records {
         // 尝试写入主 Sink
-        match primary_sink.write(record) {
+        match primary_sink.write(record).await {
             Ok(()) => {
                 success_count += 1;
                 println!(
@@ -358,8 +360,8 @@ fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
                     "[{}] [备用 Sink] 接管写入",
                     Utc::now().format("%H:%M:%S%.3f")
                 );
-                backup_sink.write(record)?;
-                backup_sink.flush()?;
+                backup_sink.write(record).await?;
+                backup_sink.flush().await?;
             }
         }
     }
@@ -401,7 +403,7 @@ fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
 /// - 健康状态检测
 /// - 降级条件判断
 /// - 降级执行和日志记录
-fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
+async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例 3: 降级策略完整演示");
 
     // 生成临时文件路径
@@ -546,8 +548,8 @@ fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         if current_sink == "primary" {
-            primary_sink.write(record)?;
-            primary_sink.flush()?;
+            primary_sink.write(record).await?;
+            primary_sink.flush().await?;
         } else {
             // 写入时标记这是降级后的日志
             let fallback_record = LogRecord {
@@ -560,8 +562,8 @@ fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
                 line: record.line,
                 thread_id: record.thread_id.clone(),
             };
-            fallback_sink.write(&fallback_record)?;
-            fallback_sink.flush()?;
+            fallback_sink.write(&fallback_record).await?;
+            fallback_sink.flush().await?;
         }
 
         println!(
@@ -642,17 +644,18 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog Sink 降级机制示例 ===\n");
 
     // 示例 1: 多 Sink 配置
-    multi_sink_config()?;
+    multi_sink_config().await?;
 
     // 示例 2: 故障模拟与降级切换
-    simulate_failure()?;
+    simulate_failure().await?;
 
     // 示例 3: 降级策略完整演示
-    fallback_demo()?;
+    fallback_demo().await?;
 
     println!("\n=== 所有示例完成 ===");
     Ok(())

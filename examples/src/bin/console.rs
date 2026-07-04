@@ -33,7 +33,7 @@ use inklog_examples::common::{print_section, print_separator};
 /// 示例1: 基础控制台输出（无颜色）
 ///
 /// 演示最简单的控制台日志配置，输出到 stdout，不使用颜色。
-fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
+async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
 	print_separator("示例1: 基础控制台输出（无颜色）");
 
 	// 创建 ConsoleSink（禁用颜色）
@@ -58,10 +58,10 @@ fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
 			line: None,
 			thread_id: "main".to_string(),
 		};
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
-	sink.flush()?;
+	sink.flush().await?;
 	println!("\n✓ 基础控制台输出完成（无颜色）\n");
 	Ok(())
 }
@@ -79,7 +79,7 @@ fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
 /// - `NO_COLOR=1`: 禁用颜色
 /// - `CLICOLOR_FORCE=1`: 强制启用颜色
 /// - `TERM=dumb`: 禁用颜色
-fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
+async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
 	print_separator("示例2: 彩色控制台输出");
 
 	// 创建 ConsoleSink（启用颜色）
@@ -105,10 +105,10 @@ fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
 			line: None,
 			thread_id: "main".to_string(),
 		};
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
-	sink.flush()?;
+	sink.flush().await?;
 	println!("\n✓ 彩色控制台输出完成\n");
 	Ok(())
 }
@@ -131,7 +131,7 @@ fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
 /// # 仅查看错误日志
 /// cargo run --bin console 2>&1 >/dev/null
 /// ```
-fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
+async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
 	print_separator("示例3: stderr 日志分流");
 
 	println!("配置：ERROR 和 WARN → stderr");
@@ -166,25 +166,26 @@ fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
 			line: None,
 			thread_id: "main".to_string(),
 		};
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
-	sink.flush()?;
+	sink.flush().await?;
 	println!("\n✓ stderr 分流完成（检查输出流）\n");
 	Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	println!("=== inklog Console Sink 示例 ===\n");
 
 	// 示例1：基础控制台输出（无颜色）
-	basic_console()?;
+	basic_console().await?;
 
 	// 示例2：彩色控制台输出
-	colored_console()?;
+	colored_console().await?;
 
 	// 示例3：stderr 日志分流
-	stderr_levels()?;
+	stderr_levels().await?;
 
 	println!("所有示例完成！");
 	Ok(())

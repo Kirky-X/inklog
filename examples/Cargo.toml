@@ -12,6 +12,7 @@ mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
 
 [dependencies]
 inklog = { path = ".." }
+async-trait = "0.1"
 dbnexus = { path = "../../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }

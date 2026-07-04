@@ -1,6 +1,6 @@
 <div align="center" id="inklog">
 
-<img src="resource/inklog.png" alt="Inklog Logo" width="200" style="margin-bottom: 16px;">
+<img src="docs/image/inklog.png" alt="Inklog Logo" width="200" style="margin-bottom: 16px;">
 
 <p>
   <!-- CI/CD 状态 -->

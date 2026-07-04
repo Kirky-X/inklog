@@ -260,7 +260,9 @@ async fn test_database_batch_write_dbnexus() {
             "batch_test".into(),
             format!("Message {}", i),
         );
-        sink.write(&record).expect("Failed to write log record");
+        sink.write(&record)
+            .await
+            .expect("Failed to write log record");
     }
 
     tokio::time::sleep(BatchDuration::from_millis(1100)).await;
@@ -270,11 +272,13 @@ async fn test_database_batch_write_dbnexus() {
         "batch_test".into(),
         "Trigger flush".into(),
     );
-    sink.write(&record).expect("Failed to write log record");
+    sink.write(&record)
+        .await
+        .expect("Failed to write log record");
 
     tokio::time::sleep(BatchDuration::from_millis(200)).await;
 
-    sink.flush().expect("Failed to flush batch logs");
+    sink.flush().await.expect("Failed to flush batch logs");
 
     for i in 4..9 {
         let record = BatchLogRecord::new(
@@ -282,12 +286,14 @@ async fn test_database_batch_write_dbnexus() {
             "batch_test".into(),
             format!("Message {}", i),
         );
-        sink.write(&record).expect("Failed to write log record");
+        sink.write(&record)
+            .await
+            .expect("Failed to write log record");
     }
 
     tokio::time::sleep(BatchDuration::from_millis(500)).await;
 
-    sink.flush().expect("Failed to flush batch logs");
+    sink.flush().await.expect("Failed to flush batch logs");
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -323,6 +329,7 @@ async fn test_database_timeout_flush_dbnexus() {
         "First message".into(),
     );
     sink.write(&record1)
+        .await
         .expect("Failed to write first log record");
 
     tokio::time::sleep(BatchDuration::from_millis(500)).await;
@@ -333,11 +340,12 @@ async fn test_database_timeout_flush_dbnexus() {
         "Second message".into(),
     );
     sink.write(&record2)
+        .await
         .expect("Failed to write second log record");
 
     tokio::time::sleep(BatchDuration::from_millis(500)).await;
 
-    sink.flush().expect("Failed to flush timeout logs");
+    sink.flush().await.expect("Failed to flush timeout logs");
 }
 
 // ============ 配置环境集成测试 (integration::config) ============
@@ -968,8 +976,8 @@ fn verify_encrypted_file(file_path: &PathBuf) {
 
 // ============ Verification Tests ============
 
-#[test]
-fn verify_file_sink_compression() {
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_file_sink_compression() {
     let temp_dir = VerifyTempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("test.log");
 
@@ -988,11 +996,14 @@ fn verify_file_sink_compression() {
         "test".into(),
         "A long message to trigger rotation".into(),
     );
-    sink.write(&record).expect("Failed to write log record");
+    sink.write(&record)
+        .await
+        .expect("Failed to write log record");
 
     // Trigger rotation
     for _ in 0..5 {
         sink.write(&record)
+            .await
             .expect("Failed to write log record during rotation");
     }
 
@@ -1003,8 +1014,8 @@ fn verify_file_sink_compression() {
     verify_zstd_compression(&zst_path);
 }
 
-#[test]
-fn verify_file_sink_encryption() {
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_file_sink_encryption() {
     let temp_dir = VerifyTempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("enc.log");
 
@@ -1024,15 +1035,18 @@ fn verify_file_sink_encryption() {
 
     let sink = VerifyFileSink::new(config).expect("Failed to create FileSink");
     let record = VerifyLogRecord::new(VerifyLevel::INFO, "test".into(), "Secret message".into());
-    sink.write(&record).expect("Failed to write log record");
+    sink.write(&record)
+        .await
+        .expect("Failed to write log record");
 
     for _ in 0..5 {
         sink.write(&record)
+            .await
             .expect("Failed to write log record during rotation");
     }
 
     // Flush to ensure all data is written
-    sink.flush().expect("Failed to flush");
+    sink.flush().await.expect("Failed to flush");
     std::thread::sleep(VerifyDuration::from_millis(1000));
 
     let enc_path = find_file_with_extension(&temp_dir, "enc").expect("No encrypted file found");
@@ -1067,13 +1081,14 @@ async fn verify_database_sink_sqlite() {
 
     let record = VerifyLogRecord::new(VerifyLevel::INFO, "db_test".into(), "message to db".into());
     sink.write(&record)
+        .await
         .expect("Failed to write log record to database");
 
     // Wait for background processing
     tokio::time::sleep(VerifyDuration::from_millis(500)).await;
 
     // Flush the sink
-    sink.flush().expect("Failed to flush database sink");
+    sink.flush().await.expect("Failed to flush database sink");
 
     // 验证 MockDatabaseAdapter 存储了记录
     let mock_ref = mock_db_arc.as_ref() as &inklog::integrations::infra::MockDatabaseAdapter;

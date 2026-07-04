@@ -30,8 +30,8 @@ fn test_builder() {
         .build();
 }
 
-#[test]
-fn test_console_sink_format() {
+#[tokio::test]
+async fn test_console_sink_format() {
     let config = ConsoleSinkConfig {
         colored: false,
         ..Default::default()
@@ -39,11 +39,11 @@ fn test_console_sink_format() {
     let template = LogTemplate::default();
     let sink = ConsoleSink::new(config, template);
     let record = LogRecord::new(Level::INFO, "test_target".into(), "test_message".into());
-    assert!(sink.write(&record).is_ok());
+    assert!(sink.write(&record).await.is_ok());
 }
 
-#[test]
-fn test_file_sink_rotation() {
+#[tokio::test]
+async fn test_file_sink_rotation() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("app.log");
 
@@ -59,7 +59,9 @@ fn test_file_sink_rotation() {
     // Write enough data to trigger rotation
     for i in 0..10 {
         let record = LogRecord::new(Level::INFO, "test".into(), format!("msg {}", i));
-        sink.write(&record).expect("Failed to write log record");
+        sink.write(&record)
+            .await
+            .expect("Failed to write log record");
     }
 
     // Check if files created

@@ -45,7 +45,7 @@ use std::path::PathBuf;
 /// - 创建 FileSink 配置
 /// - 写入多级别日志
 /// - 查看文件内容
-fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
+async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
 	print_separator("示例1: 基础文件写入");
 
 	// 生成临时文件路径
@@ -88,10 +88,10 @@ fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
 			line: Some(line!()),
 			thread_id: "main".to_string(),
 		};
-		sink.write(&record)?;
+		sink.write(&record).await?;
 	}
 
-	sink.flush()?;
+	sink.flush().await?;
 
 	// 读取并展示文件内容
 	print_section("文件内容");
@@ -111,7 +111,7 @@ fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
 /// - 配置小文件大小（100字节）触发轮转
 /// - 写入大量日志触发多次轮转
 /// - 展示轮转文件命名规则
-fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
+async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 	print_separator("示例2: 文件轮转");
 
 	// 生成临时文件路径
@@ -156,9 +156,9 @@ fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 			line: Some(line!()),
 			thread_id: "main".to_string(),
 		};
-		sink.write(&record)?;
+		sink.write(&record).await?;
 		// 立即 flush 以触发轮转检查
-		sink.flush()?;
+		sink.flush().await?;
 	}
 
 	// 展示轮转后的文件列表
@@ -206,7 +206,7 @@ fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 /// - 启用 Zstd 压缩
 /// - 配置小文件触发轮转
 /// - 展示压缩后的 .zst 文件
-fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
+async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 	print_separator("示例3: Zstd 压缩");
 
 	// 生成临时文件路径
@@ -251,9 +251,9 @@ fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 			line: Some(line!()),
 			thread_id: "main".to_string(),
 		};
-		sink.write(&record)?;
+		sink.write(&record).await?;
 		// 立即 flush 以触发轮转检查
-		sink.flush()?;
+		sink.flush().await?;
 	}
 
 	// 等待压缩完成
@@ -332,17 +332,18 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
 	Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	println!("=== inklog File Sink 示例 ===\n");
 
 	// 示例1：基础文件写入
-	basic_file()?;
+	basic_file().await?;
 
 	// 示例2：文件轮转
-	file_rotation()?;
+	file_rotation().await?;
 
 	// 示例3：Zstd 压缩
-	file_compression()?;
+	file_compression().await?;
 
 	println!("所有示例完成！");
 	Ok(())

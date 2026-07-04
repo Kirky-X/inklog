@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use anyhow::Result;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use parking_lot::Mutex;
+use async_trait::async_trait;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use tokio::runtime::Handle;
+use tokio::sync::Mutex;
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::support::io::sink::circuit_breaker::CircuitBreaker;
@@ -143,8 +143,8 @@ impl DatabaseSink {
         })
     }
 
-    pub fn set_metrics(&self, metrics: Arc<Metrics>) {
-        let mut inner = self.inner.lock();
+    pub async fn set_metrics(&self, metrics: Arc<Metrics>) {
+        let mut inner = self.inner.lock().await;
         inner.metrics = Some(metrics);
     }
 
@@ -172,16 +172,6 @@ impl DatabaseSink {
         inner.success_count = 0;
         inner.failure_count = 0;
     }
-
-    fn execute_async<F, T>(&self, f: F) -> T
-    where
-        F: std::future::Future<Output = T> + Send + 'static,
-        T: Send + 'static,
-    {
-        // Use block_in_place to allow blocking in async context
-        // This is safe because we're not holding any async locks across the blocking call
-        tokio::task::block_in_place(|| Handle::current().block_on(f))
-    }
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -192,13 +182,14 @@ impl fmt::Display for DatabaseSink {
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[async_trait]
 impl crate::support::io::sink::LogSink for DatabaseSink {
-    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-        let mut inner = self.inner.lock();
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        let mut inner = self.inner.lock().await;
 
         if !inner.circuit_breaker.can_execute() {
             if let Some(ref sink) = inner.fallback_sink {
-                let _ = sink.write(record);
+                let _ = sink.write(record).await;
             }
             return Ok(());
         }
@@ -214,11 +205,11 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
             || inner.last_flush.elapsed() > Duration::from_millis(DEFAULT_FLUSH_INTERVAL_MS)
         {
             let start = Instant::now();
-            if let Err(e) = Self::flush_inner(self, &mut inner) {
+            if let Err(e) = Self::flush_inner(self, &mut inner).await {
                 inner.failure_count += 1;
                 inner.circuit_breaker.record_failure();
                 if let Some(ref sink) = inner.fallback_sink {
-                    let _ = sink.write(record);
+                    let _ = sink.write(record).await;
                 }
                 return Err(e);
             }
@@ -231,15 +222,15 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
         Ok(())
     }
 
-    fn flush(&self) -> Result<(), InklogError> {
-        let mut inner = self.inner.lock();
-        Self::flush_inner(self, &mut inner)
+    async fn flush(&self) -> Result<(), InklogError> {
+        let mut inner = self.inner.lock().await;
+        Self::flush_inner(self, &mut inner).await
     }
 
-    fn shutdown(&self) -> Result<(), InklogError> {
+    async fn shutdown(&self) -> Result<(), InklogError> {
         self.stop.store(true, Ordering::Relaxed);
-        let mut inner = self.inner.lock();
-        let _ = Self::flush_inner(self, &mut inner);
+        let mut inner = self.inner.lock().await;
+        let _ = Self::flush_inner(self, &mut inner).await;
         tracing::info!("Database sink shutdown complete");
         Ok(())
     }
@@ -247,7 +238,7 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl DatabaseSink {
-    fn flush_inner(&self, inner: &mut DatabaseSinkInner) -> Result<(), InklogError> {
+    async fn flush_inner(&self, inner: &mut DatabaseSinkInner) -> Result<(), InklogError> {
         if inner.buffer.is_empty() {
             return Ok(());
         }
@@ -261,35 +252,25 @@ impl DatabaseSink {
 
         // 使用注入的 database 实现
         // 所有数据库操作通过 Database trait 进行，完全符合 DI 架构要求
-        let database_clone = self.database.clone();
-        let metrics_ref = inner.metrics.clone();
-        let records_clone = records.clone();
-
-        let result = self.execute_async(async move {
-            match database_clone.insert_batch(&records_clone).await {
-                Ok(written) => {
-                    if let Some(m) = &metrics_ref {
-                        m.add_db_batch_records_total(written);
-                        m.update_sink_health("database", true, None);
-                    }
-                    Ok(())
+        // 直接 await，不再通过 execute_async + block_in_place 包装（T010）
+        match self.database.insert_batch(&records).await {
+            Ok(written) => {
+                if let Some(m) = &inner.metrics {
+                    m.add_db_batch_records_total(written);
+                    m.update_sink_health("database", true, None);
                 }
-                Err(e) => {
-                    if let Some(m) = &metrics_ref {
-                        m.inc_sink_error();
-                        m.update_sink_health("database", false, Some(e.to_string()));
-                    }
-                    Err(e)
-                }
+                Ok(())
             }
-        });
-
-        if let Err(e) = result {
-            inner.buffer = records;
-            return Err(e);
+            Err(e) => {
+                if let Some(m) = &inner.metrics {
+                    m.inc_sink_error();
+                    m.update_sink_health("database", false, Some(e.to_string()));
+                }
+                // 恢复 buffer，让下次 flush 重试
+                inner.buffer = records;
+                Err(e)
+            }
         }
-
-        Ok(())
     }
 }
 
@@ -402,13 +383,13 @@ mod tests {
         let sink = DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
 
         let metrics = Arc::new(Metrics::new());
-        sink.set_metrics(metrics.clone());
+        sink.set_metrics(metrics.clone()).await;
 
         let record = LogRecord::default();
-        let result = sink.write(&record);
+        let result = sink.write(&record).await;
         assert!(result.is_ok());
 
-        let flush_result = sink.flush();
+        let flush_result = sink.flush().await;
         assert!(flush_result.is_ok());
 
         // Verify the mock DB received the record
@@ -422,9 +403,9 @@ mod tests {
         let sink = DatabaseSink::new(mock_db.clone()).unwrap();
         // 写入一条记录，验证默认配置下能正常工作
         let record = LogRecord::default();
-        let result = sink.write(&record);
+        let result = sink.write(&record).await;
         assert!(result.is_ok());
-        let flush_result = sink.flush();
+        let flush_result = sink.flush().await;
         assert!(flush_result.is_ok());
         assert_eq!(mock_db.stored_count(), 1);
     }
@@ -444,7 +425,7 @@ mod tests {
         let mock_db = Arc::new(MockDatabaseAdapter::new());
         let sink = DatabaseSink::new(mock_db).unwrap();
         // 没有写入任何记录，直接 flush 应该返回 Ok
-        let result = sink.flush();
+        let result = sink.flush().await;
         assert!(result.is_ok());
     }
 
@@ -455,9 +436,9 @@ mod tests {
         let sink = DatabaseSink::new(mock_db.clone()).unwrap();
         // 写入一条记录，但不 flush
         let record = LogRecord::default();
-        let _ = sink.write(&record);
+        let _ = sink.write(&record).await;
         // shutdown 应该触发 flush，把记录写入数据库
-        let result = sink.shutdown();
+        let result = sink.shutdown().await;
         assert!(result.is_ok());
         // shutdown 后记录应该已经被 flush 到数据库
         assert_eq!(mock_db.stored_count(), 1);
@@ -480,7 +461,7 @@ mod tests {
                 message: format!("message {}", i),
                 ..Default::default()
             };
-            let result = sink.write(&record);
+            let result = sink.write(&record).await;
             assert!(result.is_ok(), "Write {} failed: {:?}", i, result.err());
         }
 
@@ -501,7 +482,7 @@ mod tests {
 
         // 写入一条记录，由于 batch_size=1000 不会触发 flush
         let record = LogRecord::default();
-        let _ = sink.write(&record);
+        let _ = sink.write(&record).await;
         assert_eq!(mock_db.stored_count(), 0);
 
         // 等待超过 DEFAULT_FLUSH_INTERVAL_MS (500ms)
@@ -509,7 +490,7 @@ mod tests {
 
         // 再写入一条记录，应该因为 last_flush 超时而触发 flush
         let record2 = LogRecord::default();
-        let result = sink.write(&record2);
+        let result = sink.write(&record2).await;
         assert!(result.is_ok());
 
         // 两条记录应该都被写入数据库
@@ -527,8 +508,8 @@ mod tests {
             message: "User email: test@example.com".to_string(),
             ..Default::default()
         };
-        let _ = sink.write(&record);
-        let _ = sink.flush();
+        let _ = sink.write(&record).await;
+        let _ = sink.flush().await;
 
         // 验证数据库中的记录已被脱敏（邮箱被替换）
         let records = mock_db.get_records();
@@ -546,12 +527,12 @@ mod tests {
         let mock_db = Arc::new(MockDatabaseAdapter::new());
         let sink = DatabaseSink::new(mock_db.clone()).unwrap();
         let metrics = Arc::new(Metrics::new());
-        sink.set_metrics(metrics.clone());
+        sink.set_metrics(metrics.clone()).await;
 
         // 写入并 flush 一条记录，验证 metrics 被更新
         let record = LogRecord::default();
-        let _ = sink.write(&record);
-        let _ = sink.flush();
+        let _ = sink.write(&record).await;
+        let _ = sink.flush().await;
 
         // metrics 应该记录了 batch records total
         assert!(metrics.db_batch_records_total() > 0);
@@ -586,11 +567,11 @@ mod tests {
         // 写入足够多的记录触发 flush，flush 应该失败
         for _ in 0..10 {
             let record = LogRecord::default();
-            let _ = sink.write(&record);
+            let _ = sink.write(&record).await;
         }
 
         // 直接调用 flush 也应该返回错误
-        let result = sink.flush();
+        let result = sink.flush().await;
         // 如果 buffer 为空（因为前面已经触发 flush 失败但记录被放回 buffer），可能返回 Ok 或 Err
         // 这里主要验证不会 panic
         let _ = result;
@@ -604,10 +585,10 @@ mod tests {
 
         // 写入记录
         let record = LogRecord::default();
-        let _ = sink.write(&record);
+        let _ = sink.write(&record).await;
 
         // shutdown 应该返回 Ok（即使 flush 失败，shutdown 也会忽略错误）
-        let result = sink.shutdown();
+        let result = sink.shutdown().await;
         assert!(result.is_ok());
     }
 
@@ -628,7 +609,7 @@ mod tests {
         };
         let sink = DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
         let metrics = Arc::new(Metrics::new());
-        sink.set_metrics(metrics.clone());
+        sink.set_metrics(metrics.clone()).await;
 
         // 写入 100 条记录，触发 10 次 flush
         for i in 0..100 {
@@ -636,7 +617,7 @@ mod tests {
                 message: format!("adjust-grow-{}", i),
                 ..Default::default()
             };
-            let result = sink.write(&record);
+            let result = sink.write(&record).await;
             assert!(result.is_ok(), "write {} failed: {:?}", i, result.err());
         }
 
@@ -686,14 +667,14 @@ mod tests {
                 message: format!("adjust-shrink-{}", i),
                 ..Default::default()
             };
-            let result = sink.write(&record);
+            let result = sink.write(&record).await;
             assert!(result.is_ok(), "write {} failed: {:?}", i, result.err());
         }
 
         // 到达此处说明 adjust_batch_size 执行了缩减分支（未 panic）
         // current_batch_size 应从 10 减为 5（MIN_BATCH_SIZE）
         // 间接验证：再写入 5 条，应触发 flush（因为 current_batch_size=5）
-        let before = sink.flush();
+        let before = sink.flush().await;
         let _ = before;
     }
 
@@ -723,7 +704,7 @@ mod tests {
                 message: format!("cb-open-{}", i),
                 ..Default::default()
             };
-            let _ = sink.write(&record);
+            let _ = sink.write(&record).await;
         }
 
         // 第 13 条：circuit_breaker.can_execute()=false → fallback_sink → Ok
@@ -731,7 +712,7 @@ mod tests {
             message: "after circuit open".to_string(),
             ..Default::default()
         };
-        let result = sink.write(&record);
+        let result = sink.write(&record).await;
         assert!(
             result.is_ok(),
             "write after circuit open should route to fallback and return Ok, got: {:?}",
@@ -754,12 +735,12 @@ mod tests {
         };
         let sink = DatabaseSink::new_with_config(failing_db, Some(config)).unwrap();
         let metrics = Arc::new(Metrics::new());
-        sink.set_metrics(metrics.clone());
+        sink.set_metrics(metrics.clone()).await;
 
         // 写入 10 条触发 flush 失败
         for _ in 0..10 {
             let record = LogRecord::default();
-            let _ = sink.write(&record);
+            let _ = sink.write(&record).await;
         }
 
         // 验证 metrics 的 sink_error 被增加（覆盖行 279）

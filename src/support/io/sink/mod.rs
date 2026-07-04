@@ -25,18 +25,20 @@ pub use rotation::{
 
 use crate::InklogError;
 use crate::LogRecord;
+use async_trait::async_trait;
 
 /// Log sink trait for writing log records to various destinations.
 ///
 /// All methods use `&self` instead of `&mut self` to support interior mutability
 /// and dependency injection patterns. Implementations should use `Mutex` or `RwLock`
 /// for mutable state.
+#[async_trait]
 pub trait LogSink: Send + Sync {
     /// Write a log record to the sink.
-    fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
 
     /// Flush any buffered data to the underlying storage.
-    fn flush(&self) -> Result<(), InklogError>;
+    async fn flush(&self) -> Result<(), InklogError>;
 
     /// Check if the sink is healthy and operational.
     fn is_healthy(&self) -> bool {
@@ -44,7 +46,7 @@ pub trait LogSink: Send + Sync {
     }
 
     /// Gracefully shutdown the sink, flushing any remaining data.
-    fn shutdown(&self) -> Result<(), InklogError>;
+    async fn shutdown(&self) -> Result<(), InklogError>;
 
     /// Start rotation timer (for file-based sinks with time-based rotation).
     fn start_rotation_timer(&self) {
@@ -69,14 +71,15 @@ mod tests {
     /// Test struct that uses default trait method implementations
     struct DummySink;
 
+    #[async_trait]
     impl LogSink for DummySink {
-        fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
             Ok(())
         }
-        fn flush(&self) -> Result<(), InklogError> {
+        async fn flush(&self) -> Result<(), InklogError> {
             Ok(())
         }
-        fn shutdown(&self) -> Result<(), InklogError> {
+        async fn shutdown(&self) -> Result<(), InklogError> {
             Ok(())
         }
     }

@@ -67,7 +67,7 @@ async fn test_database_sink_create_and_shutdown() {
     };
 
     let sink = setup_sink(&url, 5, 1000).await;
-    let result = sink.shutdown();
+    let result = sink.shutdown().await;
     assert!(result.is_ok(), "shutdown 应成功: {:?}", result.err());
 }
 
@@ -83,11 +83,11 @@ async fn test_database_sink_write_below_batch_threshold() {
 
     for i in 0..3 {
         let record = make_log_record("INFO", "docker_test", &format!("msg {}", i));
-        sink.write(&record).expect("write should succeed");
+        sink.write(&record).await.expect("write should succeed");
     }
 
-    sink.flush().expect("flush should succeed");
-    sink.shutdown().expect("shutdown should succeed");
+    sink.flush().await.expect("flush should succeed");
+    sink.shutdown().await.expect("shutdown should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -102,10 +102,10 @@ async fn test_database_sink_write_triggers_batch_flush() {
 
     for i in 0..3 {
         let record = make_log_record("INFO", "docker_test", &format!("batch {}", i));
-        sink.write(&record).expect("write should succeed");
+        sink.write(&record).await.expect("write should succeed");
     }
 
-    sink.shutdown().expect("shutdown should succeed");
+    sink.shutdown().await.expect("shutdown should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -119,11 +119,11 @@ async fn test_database_sink_flush_interval_triggers() {
     let sink = setup_sink(&url, 100, 200).await;
 
     let record = make_log_record("INFO", "docker_test", "interval flush test");
-    sink.write(&record).expect("write should succeed");
+    sink.write(&record).await.expect("write should succeed");
 
     std::thread::sleep(Duration::from_millis(400));
 
-    sink.shutdown().expect("shutdown should succeed");
+    sink.shutdown().await.expect("shutdown should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -139,11 +139,11 @@ async fn test_database_sink_high_volume_adjust_batch_size_up() {
     // 写入大量记录，触发多次 batch flush + adjust_batch_size
     for i in 0..30 {
         let record = make_log_record("INFO", "docker_test", &format!("high vol {}", i));
-        let _ = sink.write(&record);
+        let _ = sink.write(&record).await;
     }
 
-    sink.flush().expect("flush should succeed");
-    sink.shutdown().expect("shutdown should succeed");
+    sink.flush().await.expect("flush should succeed");
+    sink.shutdown().await.expect("shutdown should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -159,11 +159,11 @@ async fn test_database_sink_multiple_levels() {
     let levels = ["ERROR", "WARN", "INFO", "DEBUG", "TRACE"];
     for (i, lvl) in levels.iter().enumerate() {
         let record = make_log_record(lvl, "docker_test", &format!("level test {}", i));
-        sink.write(&record).expect("write should succeed");
+        sink.write(&record).await.expect("write should succeed");
     }
 
-    sink.flush().expect("flush should succeed");
-    sink.shutdown().expect("shutdown should succeed");
+    sink.flush().await.expect("flush should succeed");
+    sink.shutdown().await.expect("shutdown should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -176,10 +176,10 @@ async fn test_database_sink_double_shutdown_safe() {
 
     let sink = setup_sink(&url, 5, 1000).await;
 
-    let first = sink.shutdown();
+    let first = sink.shutdown().await;
     assert!(first.is_ok(), "第一次 shutdown 应成功");
 
-    let _ = sink.shutdown();
+    let _ = sink.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -192,8 +192,10 @@ async fn test_database_sink_flush_empty_buffer() {
 
     let sink = setup_sink(&url, 5, 1000).await;
 
-    sink.flush().expect("flush empty buffer should succeed");
-    sink.shutdown().expect("shutdown should succeed");
+    sink.flush()
+        .await
+        .expect("flush empty buffer should succeed");
+    sink.shutdown().await.expect("shutdown should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -210,7 +212,7 @@ async fn test_database_sink_default_config() {
     let sink = DatabaseSink::new(db).expect("new() should succeed");
 
     let record = make_log_record("INFO", "default_config", "test");
-    sink.write(&record).expect("write should succeed");
-    sink.flush().expect("flush should succeed");
-    sink.shutdown().expect("shutdown should succeed");
+    sink.write(&record).await.expect("write should succeed");
+    sink.flush().await.expect("flush should succeed");
+    sink.shutdown().await.expect("shutdown should succeed");
 }
