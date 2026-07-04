@@ -594,7 +594,7 @@ impl Metrics {
 
         let count = self.latency_count.load(Ordering::Relaxed);
         let total = self.total_latency_us.load(Ordering::Relaxed);
-        let avg_latency = if count > 0 { total / count } else { 0 };
+        let avg_latency = total.checked_div(count).unwrap_or(0);
 
         HealthStatus {
             overall_status,
@@ -679,7 +679,7 @@ impl Metrics {
         //
         let count = self.latency_count.load(Ordering::Relaxed);
         let total = self.total_latency_us.load(Ordering::Relaxed);
-        let avg_latency = if count > 0 { total / count } else { 0 };
+        let avg_latency = total.checked_div(count).unwrap_or(0);
 
         s.push_str("# HELP inklog_avg_latency_us Average log processing latency in microseconds\n");
         s.push_str("# TYPE inklog_avg_latency_us gauge\n");

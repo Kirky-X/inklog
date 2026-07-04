@@ -1183,7 +1183,7 @@ dependencies = [
  "dbnexus-macros",
  "futures",
  "once_cell",
- "oxcache",
+ "oxcache 0.2.0",
  "parking_lot",
  "regex",
  "sea-orm",
@@ -2121,7 +2121,6 @@ dependencies = [
  "criterion",
  "cron",
  "crossbeam-channel",
- "dashmap",
  "dbnexus",
  "dirs",
  "filetime",
@@ -2133,13 +2132,12 @@ dependencies = [
  "is-terminal",
  "log",
  "lz4",
- "moka",
  "nix",
  "num-traits",
  "num_cpus",
  "once_cell",
  "owo-colors",
- "oxcache",
+ "oxcache 0.3.3",
  "parking_lot",
  "parquet",
  "pbkdf2",
@@ -2878,7 +2876,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "oxcache_macros",
+ "oxcache_macros 0.2.0",
  "rand 0.10.1",
  "redis",
  "regex",
@@ -2895,10 +2893,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxcache"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b46f5551f3cd81219dc8b664068a07c48518c52c9fae4b2965ff867bdad9403f"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "base64",
+ "dashmap",
+ "lazy_static",
+ "moka",
+ "once_cell",
+ "oxcache_macros 0.3.3",
+ "rand 0.10.1",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "oxcache_macros"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a960e6dde8b7a121023a13ab045f53c833832240c0aa31a2d4fcbbc1083d34d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "oxcache_macros"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc1eaaf5a7c8afe66ebe382af76379ee2f1ed84b5fdb2b283df11cce5a48a4a1"
 dependencies = [
  "proc-macro2",
  "quote",
