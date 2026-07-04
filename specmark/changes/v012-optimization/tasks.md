@@ -27,10 +27,11 @@
   - 改动：`sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }`
   - 验证：`cargo check --features sqlite` 通过，无 native-tls 残留
 
-- [ ] [T004] [P0] 添加 `RUSTSEC-2026-0173`（proc-macro-error2 unmaintained）到 `deny.toml` ignore 列表
-  - 文件：`deny.toml` 第 5-12 行
-  - 改动：在 `ignore` 数组追加 `"RUSTSEC-2026-0173", # proc-macro-error2 unmaintained (transitive via validator_derive/sea-bae/dbnexus-macros, no safe upgrade available)`
-  - 验证：`cargo deny check advisories` 通过
+- [x] [T004] [P0] 添加 `RUSTSEC-2026-0173`（proc-macro-error2 unmaintained）到 `deny.toml` ignore 列表
+  - 文件：`deny.toml` 第 5-8 行
+  - 改动：在 `ignore` 数组追加 `"RUSTSEC-2026-0173", # proc-macro-error2 unmaintained (transitive via validator_derive, no safe upgrade available)`
+  - 顺手清理：移除 5 个 `advisory-not-detected` 警告项（`RUSTSEC-2025-0134` rustls-pemfile / `RUSTSEC-2023-0071` rsa / `RUSTSEC-2023-0086` lexical-core / `RUSTSEC-2021-0145` atty / `RUSTSEC-2024-0375` atty unmaintained）—这些依赖在依赖升级后已不再引入
+  - 验证：`cargo deny check advisories` 输出 `advisories ok`
 
 ---
 
