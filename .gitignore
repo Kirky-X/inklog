@@ -12,6 +12,7 @@
 
 # Build
 target/
+tarpaulin-report.html
 
 # Logs
 logs/

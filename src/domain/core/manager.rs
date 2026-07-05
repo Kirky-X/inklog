@@ -4121,4 +4121,127 @@ worker_threads = 1
 
         let _ = manager.shutdown();
     }
+
+    // ============================================================================
+    // LoggerManager::load() 测试 (L589-592)
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial_test::serial]
+    async fn test_load_succeeds_with_valid_config_via_env() {
+        // 覆盖 L590 (load_sync Ok) + L592 (with_config Ok)
+        // 通过 INKLOG_CONFIG_PATH 环境变量指定有效配置文件
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config_path = dir.path().join("load_test.toml");
+        std::fs::write(&config_path, "[global]\nlevel = \"info\"\n").unwrap();
+        std::env::set_var("INKLOG_CONFIG_PATH", &config_path);
+
+        let manager = LoggerManager::load().await.expect("load should succeed");
+        let _ = manager.shutdown();
+
+        std::env::remove_var("INKLOG_CONFIG_PATH");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial_test::serial]
+    async fn test_load_returns_error_when_config_invalid_toml() {
+        // 覆盖 L590-591 (load_sync Err → map_err → ? 传播)
+        // 通过 INKLOG_CONFIG_PATH 指定无效 TOML 文件
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let config_path = dir.path().join("invalid.toml");
+        std::fs::write(&config_path, "this is = not = valid toml\n").unwrap();
+        std::env::set_var("INKLOG_CONFIG_PATH", &config_path);
+
+        let result = LoggerManager::load().await;
+        assert!(result.is_err(), "load should fail with invalid TOML");
+        let err_msg = result.err().unwrap().to_string();
+        assert!(
+            err_msg.contains("Failed to load config") || err_msg.contains("Failed to parse"),
+            "error should mention config load failure, got: {}",
+            err_msg
+        );
+
+        std::env::remove_var("INKLOG_CONFIG_PATH");
+    }
+
+    // ============================================================================
+    // LoggerBuilder 分支覆盖 (L1693-1694, L1701-1702)
+    // ============================================================================
+
+    #[test]
+    fn test_builder_console_when_none_creates_config() {
+        // 覆盖 L1693-1694：console_sink 为 None 时 console(true) 创建 Some
+        // 默认 InklogConfig 的 console_sink 是 Some，需要手动设为 None
+        let mut builder = LoggerBuilder::new();
+        builder.config.console_sink = None;
+        let builder = builder.console(true);
+        let console = builder
+            .config
+            .console_sink
+            .as_ref()
+            .expect("console_sink should be Some after console(true)");
+        assert!(
+            console.enabled,
+            "console.enabled should be true after console(true)"
+        );
+    }
+
+    #[test]
+    fn test_builder_file_when_some_updates_path() {
+        // 覆盖 L1701-1702：file_sink 为 Some 时 file(path) 更新已有配置
+        // 默认 InklogConfig 的 file_sink 是 None，需要手动设为 Some
+        let mut builder = LoggerBuilder::new();
+        builder.config.file_sink = Some(crate::FileSinkConfig::default());
+        let builder = builder.file("logs/updated.log");
+        let file_sink = builder
+            .config
+            .file_sink
+            .as_ref()
+            .expect("file_sink should remain Some");
+        assert!(
+            file_sink.enabled,
+            "file_sink.enabled should be true after file(path)"
+        );
+        assert_eq!(
+            file_sink.path,
+            std::path::PathBuf::from("logs/updated.log"),
+            "file_sink.path should be updated"
+        );
+    }
+
+    // ============================================================================
+    // trigger_recovery_for_unhealthy_sinks 成功路径 (L1567-1568)
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_trigger_recovery_recovers_unhealthy_sink() {
+        // 覆盖 L1567-1568：当 sink 非操作状态且 recover_sink 成功时，push 到结果
+        // 需要 file worker 存活使 recover_sink 的 control channel 接收端存在
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let log_path = dir.path().join("recovery_test.log");
+        let manager = LoggerManager::builder()
+            .channel_capacity(1000)
+            .worker_threads(1)
+            .file(log_path)
+            .build()
+            .await
+            .expect("Failed to build manager");
+
+        // 手动将 file sink 标记为 Unhealthy
+        manager
+            .metrics
+            .update_sink_health("file", false, Some("test error".to_string()));
+
+        // 触发恢复——recover_sink 应成功（file worker 存活），push "file" 到结果
+        let result = manager.trigger_recovery_for_unhealthy_sinks();
+        assert!(result.is_ok(), "trigger_recovery should succeed");
+        let recovered = result.unwrap();
+        assert!(
+            recovered.contains(&"file".to_string()),
+            "recovered sinks should contain 'file', got: {:?}",
+            recovered
+        );
+
+        let _ = manager.shutdown();
+    }
 }

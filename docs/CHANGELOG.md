@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- 在 `deny.toml` 忽略列表中添加 `RUSTSEC-2026-0173`（proc-macro-error2 unmaintained）
+- 在 `deny.toml` 忽略列表中添加 `RUSTSEC-2026-0173`（proc-macro-error2 unmaintained，transitive via dbnexus-macros/sea-bae，无安全升级路径）
 
 ## [0.1.1] - 2026-06-29
 

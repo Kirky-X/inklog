@@ -398,6 +398,24 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_object_pool_is_empty() {
+        // 覆盖 is_empty() 方法 (行 162-163) 和 get() 内部 cache 访问 (行 128)
+        let pool = ObjectPool::<String, i32>::new().await.expect("build");
+        // 新池应为空
+        assert!(pool.is_empty());
+        assert_eq!(pool.len(), 0);
+
+        // get 触发 .cache.get() 路径（行 128）
+        let result = pool.get(&"missing".to_string()).await.expect("get");
+        assert_eq!(result, None);
+
+        // put 后 get 验证条目存在（覆盖 .cache 访问路径）
+        pool.put(&"key".to_string(), 42).await.expect("put");
+        let value = pool.get(&"key".to_string()).await.expect("get");
+        assert_eq!(value, Some(42));
+    }
+
     // ============================================================================
     // ObjectPoolConfig 测试
     // ============================================================================

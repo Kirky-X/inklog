@@ -2083,4 +2083,20 @@ mod metrics_tests {
         histogram.record(2000);
         assert_eq!(histogram.p99(), 1000);
     }
+
+    #[test]
+    fn test_get_status_with_not_started_sink_returns_healthy() {
+        // 覆盖 L591：当 sinks 非空且仅含 NotStarted 状态（非 Healthy/Unhealthy/Degraded）时，
+        // get_status 的 else 分支返回 SinkStatus::Healthy
+        let metrics = Metrics::new();
+        if let Ok(mut map) = metrics.sink_health.lock() {
+            map.insert("not_started_sink".to_string(), SinkHealth::default());
+        }
+        let status = metrics.get_status(0, 100);
+        assert!(
+            matches!(status.overall_status, SinkStatus::Healthy),
+            "expected Healthy, got {:?}",
+            status.overall_status
+        );
+    }
 }

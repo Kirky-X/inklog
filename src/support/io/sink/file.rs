@@ -3149,6 +3149,28 @@ mod tests {
         write_count: Arc<parking_lot::Mutex<usize>>,
     }
 
+    /// Mock LogSink，跟踪 shutdown 调用，用于测试 shutdown 路径
+    struct MockFallbackSinkWithShutdownFlag {
+        shutdown_called: Arc<parking_lot::Mutex<bool>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LogSink for MockFallbackSinkWithShutdownFlag {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            Ok(())
+        }
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+        fn is_healthy(&self) -> bool {
+            true
+        }
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            *self.shutdown_called.lock() = true;
+            Ok(())
+        }
+    }
+
     #[async_trait::async_trait]
     impl LogSink for MockFallbackSink {
         async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
@@ -3411,6 +3433,191 @@ mod tests {
         assert!(
             result.is_err(),
             "four-byte pattern key should be rejected (entropy = 2.0 < 4.0)"
+        );
+    }
+
+    // ==================== open_file_inner: OpenOptions 失败分支 (L320-322) ====================
+
+    #[test]
+    fn test_open_file_inner_fails_when_path_is_directory() {
+        // 覆盖行 320-322：OpenOptions::open 失败时返回 IoError
+        // 当 path 指向一个已存在的目录时，open(create+append) 会失败
+        let temp_dir = tempdir().unwrap();
+        let dir_as_path = temp_dir.path().to_path_buf();
+        // dir_as_path 是目录，OpenOptions::new().create(true).append(true).open(dir) 会失败
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: dir_as_path,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.open_file_inner(&mut inner);
+        assert!(
+            result.is_err(),
+            "open_file_inner should fail when path is an existing directory"
+        );
+        // 确认 inner.current_file 未被设置
+        assert!(inner.current_file.is_none());
+    }
+
+    // ==================== compress_file: File::create 失败分支 (L643-644) ====================
+
+    #[test]
+    fn test_compress_file_fails_when_output_dir_readonly() {
+        // 覆盖行 643-644：File::create(compressed_path) 失败时返回 IoError
+        // 通过将父目录设为只读来触发 File::create 失败
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("readonly_test.log");
+        std::fs::write(&log_path, "test data").unwrap();
+
+        // 将父目录设为只读
+        let original_perms = std::fs::metadata(temp_dir.path()).unwrap().permissions();
+        let mut readonly_perms = original_perms.clone();
+        readonly_perms.set_mode(0o555); // r-x for all
+        std::fs::set_permissions(temp_dir.path(), readonly_perms).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.compress_file(&log_path);
+
+        // 恢复权限以便 tempdir 能清理（先恢复再断言，避免泄漏）
+        std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
+
+        // root 用户会绕过权限检查；只在 result 为 Err 时断言错误类型
+        match result {
+            Err(InklogError::IoError(_)) => { /* 预期：非 root 下 File::create 失败 */ }
+            Ok(_) => {
+                // root 下权限被绕过，压缩成功——清理产物
+                let _ = std::fs::remove_file(log_path.with_extension("zst"));
+            }
+            other => panic!("expected IoError or Ok, got: {:?}", other),
+        }
+    }
+
+    // ==================== encrypt_file: File::create 失败分支 (L716-717) ====================
+
+    #[test]
+    fn test_encrypt_file_fails_when_output_dir_readonly() {
+        // 覆盖行 716-717：File::create(output_path) 失败时返回 IoError
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("encrypt_input.bin");
+        std::fs::write(&input_path, b"plaintext data").unwrap();
+
+        // 设置有效的加密密钥（32 字节 base64）；用自定义 env var 避免与其他测试串扰
+        let (_key_bytes, key_b64) = make_test_key();
+        let enc_key_env = "TEST_ENCRYPT_READONLY_KEY";
+        std::env::set_var(enc_key_env, &key_b64);
+
+        // 将父目录设为只读
+        let original_perms = std::fs::metadata(temp_dir.path()).unwrap().permissions();
+        let mut readonly_perms = original_perms.clone();
+        readonly_perms.set_mode(0o555);
+        std::fs::set_permissions(temp_dir.path(), readonly_perms).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: input_path.clone(),
+            encrypt: true,
+            encryption_key_env: Some(enc_key_env.to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let output_path = temp_dir.path().join("nonexistent_encrypted.enc");
+        let result = sink.encrypt_file(&input_path, &output_path);
+
+        // 恢复权限
+        std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
+        std::env::remove_var(enc_key_env);
+
+        // root 用户会绕过权限检查；只在 result 为 Err 时断言错误类型
+        match result {
+            Err(InklogError::IoError(_)) => { /* 预期：非 root 下 File::create 失败 */ }
+            Ok(_) => {
+                let _ = std::fs::remove_file(&output_path);
+            }
+            other => panic!("expected IoError or Ok, got: {:?}", other),
+        }
+    }
+
+    // ==================== rotate_inner: rename 失败 fallback 分支 (L753-758) ====================
+
+    #[test]
+    fn test_rotate_inner_rename_failure_returns_error_when_copy_also_fails() {
+        // 覆盖行 753-758：rename 失败且 copy 也失败时返回 IoError
+        // 通过将父目录设为只读来使 rename 和 copy 都失败
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("rotate_rename_fail.log");
+        std::fs::write(&log_path, "rotation test data").unwrap();
+
+        // 将父目录设为只读
+        let original_perms = std::fs::metadata(temp_dir.path()).unwrap().permissions();
+        let mut readonly_perms = original_perms.clone();
+        readonly_perms.set_mode(0o555);
+        std::fs::set_permissions(temp_dir.path(), readonly_perms).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.rotate_inner(&mut inner);
+
+        // 恢复权限
+        std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
+
+        // root 用户会绕过权限检查；只在 result 为 Err 时断言错误类型
+        match result {
+            Err(InklogError::IoError(_)) => { /* 预期：非 root 下 rename+copy 失败 */ }
+            Ok(_) => {
+                // root 下 rename 成功——清理轮转产物
+                let _ = std::fs::remove_file(log_path);
+            }
+            other => panic!("expected IoError or Ok, got: {:?}", other),
+        }
+    }
+
+    // ==================== shutdown: fallback_sink.shutdown() 调用 (L1011-1014) ====================
+
+    #[tokio::test]
+    async fn test_shutdown_calls_fallback_sink_shutdown() {
+        // 覆盖 L1013：当 fallback_sink 存在时，shutdown() 应调用其 shutdown()
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("shutdown_fallback.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        // 注入 fallback sink
+        let shutdown_called = Arc::new(parking_lot::Mutex::new(false));
+        let mock_sink = MockFallbackSinkWithShutdownFlag {
+            shutdown_called: shutdown_called.clone(),
+        };
+        {
+            let mut inner = sink.inner.write();
+            inner.fallback_sink = Some(Arc::new(mock_sink));
+        }
+
+        // 调用 shutdown——应触发 fallback_sink.shutdown()
+        let result = sink.shutdown().await;
+        assert!(result.is_ok(), "shutdown should succeed");
+
+        // 验证 fallback sink 的 shutdown 被调用
+        assert!(
+            *shutdown_called.lock(),
+            "fallback sink shutdown should be called"
         );
     }
 }

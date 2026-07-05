@@ -257,3 +257,65 @@ INKLOG_DECRYPT_KEY=your-decryption-key-here
     println!("Generated env example file: {}", output_file.display());
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_generate_config_minimal() {
+        let dir = tempdir().unwrap();
+        let output_path = dir.path().join("config.toml");
+        let result = generate_config(&output_path, "minimal");
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert!(content.contains("inklog minimal configuration"));
+        assert!(content.contains("[global]"));
+    }
+
+    #[test]
+    fn test_generate_config_to_directory() {
+        // 覆盖 L17-18: output_path.is_dir() 为 true 的分支
+        let dir = tempdir().unwrap();
+        let result = generate_config(dir.path(), "file");
+        assert!(result.is_ok());
+        let expected = dir.path().join("inklog_config.toml");
+        let content = std::fs::read_to_string(&expected).unwrap();
+        assert!(content.contains("inklog file configuration"));
+    }
+
+    #[test]
+    fn test_generate_config_unknown_type() {
+        // 覆盖 L28-33: unknown config type 错误分支
+        let dir = tempdir().unwrap();
+        let output_path = dir.path().join("config.toml");
+        let result = generate_config(&output_path, "unknown");
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("Unknown config type"));
+    }
+
+    #[test]
+    fn test_generate_env_example() {
+        // 覆盖 generate_env_example 成功路径（L247-258）
+        let dir = tempdir().unwrap();
+        let output_path = dir.path().join(".env.example");
+        let result = generate_env_example(&output_path);
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert!(content.contains("INKLOG_LEVEL"));
+        assert!(content.contains("INKLOG_DECRYPT_KEY"));
+    }
+
+    #[test]
+    fn test_generate_env_example_to_directory() {
+        // 覆盖 L241-243: output_path.is_dir() 为 true 的分支
+        let dir = tempdir().unwrap();
+        let result = generate_env_example(dir.path());
+        assert!(result.is_ok());
+        let expected = dir.path().join(".env.example");
+        let content = std::fs::read_to_string(&expected).unwrap();
+        assert!(content.contains("inklog environment variables"));
+    }
+}

@@ -4,7 +4,7 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # 忽略非关键的安全警告（这些是 transitive 依赖的问题）
 ignore = [
     "RUSTSEC-2024-0436", # paste unmaintained (dev dependency)
-    "RUSTSEC-2026-0173", # proc-macro-error2 unmaintained (transitive via validator_derive, no safe upgrade available)
+    "RUSTSEC-2026-0173", # proc-macro-error2 unmaintained (transitive via dbnexus-macros/sea-bae, no safe upgrade available)
 ]
 
 [licenses]
