@@ -371,6 +371,7 @@ inklog = { version = "0.1", features = [
 | **sqlite** | dbnexus, sea-orm | SQLite 数据库 Sink |
 | **postgres** | dbnexus, sea-orm | PostgreSQL 数据库 Sink |
 | **mysql** | dbnexus, sea-orm | MySQL 数据库 Sink |
+| **duckdb** | dbnexus | DuckDB 后端（仅用于 `--all-features` 测试场景；DatabaseSink 不直接支持 duckdb 驱动） |
 | **test-local** | - | 本地测试模式 |
 | **debug** | - | 安全审计日志 |
 

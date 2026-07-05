@@ -9,6 +9,7 @@ description = "Examples for inklog - Enterprise-grade Rust logging infrastructur
 sqlite = ["inklog/sqlite", "dep:dbnexus", "dbnexus/sqlite"]
 postgres = ["inklog/postgres", "dep:dbnexus", "dbnexus/postgres"]
 mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
+duckdb = ["inklog/duckdb", "dep:dbnexus", "dbnexus/duckdb"]
 
 [dependencies]
 inklog = { path = ".." }

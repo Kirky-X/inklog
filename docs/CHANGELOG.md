@@ -26,13 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 移除 `OxCacheAdapter::default()`（原本通过 `.expect()` 触发 panic）
   - `ObjectPool::with_config` 不再静默回退到 `Cache::default()`
 
-- **dbnexus feature 拆分**: `dbnexus` feature 拆分为三个独立 feature：`sqlite`、`postgres`、`mysql`
+- **dbnexus feature 拆分**: `dbnexus` feature 拆分为四个独立 feature：`sqlite`、`postgres`、`mysql`、`duckdb`（`duckdb` 仅用于 `--all-features` 测试场景，DatabaseSink 不直接支持 duckdb 驱动）
 
 ### Changed
 
 #### 依赖重构
 
 - `oxcache` 升级 0.2.0 → 0.3.3，启用 features `memory`/`serialization`/`tracing`/`macros`
+- `dbnexus` 升级 0.2.0 → 0.3.1，新增 `duckdb` feature 用于 `--all-features` 测试场景（dbnexus 0.3.1 规则 2 例外：sqlite+duckdb+postgres+mysql 全部 4 个后端启用时允许共存）
 - 移除直接的 `moka` 和 `dashmap` 依赖（现仅通过 oxcache 间接依赖）
 - `sea-orm` TLS 后端从 `runtime-tokio-native-tls` 切换至 `runtime-tokio-rustls`
 

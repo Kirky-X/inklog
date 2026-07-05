@@ -372,6 +372,7 @@ inklog = { version = "0.1", features = [
 | **sqlite** | dbnexus, sea-orm | SQLite database sink |
 | **postgres** | dbnexus, sea-orm | PostgreSQL database sink |
 | **mysql** | dbnexus, sea-orm | MySQL database sink |
+| **duckdb** | dbnexus | DuckDB backend (only for `--all-features` testing; DatabaseSink does not directly support duckdb driver) |
 | **test-local** | - | Local testing mode |
 | **debug** | - | Security audit logging |
 
