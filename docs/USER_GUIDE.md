@@ -127,12 +127,16 @@ inklog = { version = "0.1", features = ["http"] }
 # 命令行工具
 inklog = { version = "0.1", features = ["cli"] }
 
-# 外部配置支持
-inklog = { version = "0.1", features = ["confers"] }
+# 数据库支持（按需选择驱动）
+inklog = { version = "0.1", features = ["sqlite"] }
+inklog = { version = "0.1", features = ["postgres"] }
+inklog = { version = "0.1", features = ["mysql"] }
 
 # 完整功能
-inklog = { version = "0.1", features = ["http", "cli", "confers"] }
+inklog = { version = "0.1", features = ["http", "cli", "sqlite", "postgres", "mysql"] }
 ```
+
+> 注：TOML 配置文件加载（`from_file` / `load`）已内建，无需额外 feature。
 
 ---
 
@@ -414,7 +418,7 @@ log::info!("用户邮箱: user@example.com");
 
 #### 自定义脱敏模式
 
-如需自定义脱敏模式，请参考 `src/masking.rs` 模块的实现，并扩展正则表达式模式。
+如需自定义脱敏模式，请参考 `src/support/processing/masking.rs` 模块的实现，并扩展正则表达式模式。
 
 ---
 
@@ -805,11 +809,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `compression` | 文件 Sink 压缩（ZSTD/GZIP/Brotli/LZ4）对比 | `cargo run --example compression` |
 | `rotation` | 基于大小和时间的文件轮转策略 | `cargo run --example rotation` |
 | `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
-| `config_file` | TOML 配置文件加载（需启用 `confers` feature） | `cargo run --example config_file` |
+| `config_file` | TOML 配置文件加载（内建支持） | `cargo run --example config_file` |
 | `metrics` | 健康指标采集与 Prometheus 格式导出 | `cargo run --example metrics` |
 | `circuit_breaker` | Sink 断路器与故障自动恢复 | `cargo run --example circuit_breaker` |
 
-> 提示：部分示例（如 `config_file`）需要启用对应 feature。运行前请参考 `examples/Cargo.toml` 中的 feature 配置。
+> 提示：部分示例（如数据库相关示例）需要启用对应 feature（`sqlite`/`postgres`/`mysql`）。运行前请参考 `examples/Cargo.toml` 中的 feature 配置。
 
 ---
 
@@ -970,26 +974,27 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
 use inklog::infrastructure::MockCache;
 
 #[tokio::test]
-async fn test_cache_operations() {
+async fn test_cache_operations() -> Result<(), inklog::InklogError> {
     let cache = MockCache::new();
 
     // 设置缓存
-    cache.set("key1", "value1".to_string()).await;
-    cache.set("key2", "value2".to_string()).await;
+    cache.set("key1", "value1".to_string()).await?;
+    cache.set("key2", "value2".to_string()).await?;
 
     // 获取缓存
-    assert_eq!(cache.get("key1").await, Some("value1".to_string()));
+    assert_eq!(cache.get("key1").await?, Some("value1".to_string()));
 
     // 检查存在性
-    assert!(cache.exists("key1").await);
-    assert!(!cache.exists("nonexistent").await);
+    assert!(cache.exists("key1").await?);
+    assert!(!cache.exists("nonexistent").await?);
 
     // 删除缓存
-    assert!(cache.delete("key1").await);
-    assert_eq!(cache.get("key1").await, None);
+    assert!(cache.delete("key1").await?);
+    assert_eq!(cache.get("key1").await?, None);
 
     // 延迟模拟（测试超时场景）
     let slow_cache = MockCache::with_delay(100); // 100ms 延迟
+    Ok(())
 }
 ```
 

@@ -171,7 +171,7 @@ use std::sync::Arc;
 let deps = LoggerDependencies {
     cache: Some(Arc::new(MockCache::new())),
     config: Some(Arc::new(MockConfig::new())),
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     database: Some(Arc::new(MockDatabaseAdapter::new())),
 };
 
@@ -358,71 +358,40 @@ let (manager, subscriber, filter) = LoggerManager::build_detached(config).await?
 
 ---
 
-##### `with_watch`
-
-使用配置文件监视器创建 LoggerManager（需要 `confers` 功能）。
-
-**签名**
-```rust
-#[cfg(feature = "confers")]
-pub async fn with_watch() -> Result<Self, InklogError>
-```
-
-**返回值**
-- `Ok(LoggerManager)` - 管理器实例，配置变更会自动重新加载
-- `Err(InklogError)` - 初始化失败
-
-**示例**
-```rust
-#[cfg(feature = "confers")]
-{
-    let logger = LoggerManager::with_watch().await?;
-    // 配置文件变更时会自动重新加载
-}
-```
-
----
-
 ##### `from_file`
 
-从指定路径加载配置文件（需要 `confers` 功能）。
+从指定路径加载配置文件。
 
 **签名**
 ```rust
-#[cfg(feature = "confers")]
-pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, InklogError>
+pub async fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, InklogError>
 ```
 
 **参数**
-- `path` - 配置文件路径
+- `path` - 配置文件路径（TOML 格式）
 
 **返回值**
-- `Ok(InklogConfig)` - 加载的配置
+- `Ok(LoggerManager)` - 加载配置并初始化的管理器
 - `Err(InklogError)` - 加载失败
 
 **示例**
 ```rust
-#[cfg(feature = "confers")]
-{
-    let config = InklogConfig::from_file("inklog_config.toml")?;
-    let logger = LoggerManager::with_config(config).await?;
-}
+let logger = LoggerManager::from_file("inklog_config.toml").await?;
 ```
 
 ---
 
 ##### `load`
 
-从默认位置加载配置文件（需要 `confers` 功能）。
+从默认位置加载配置文件。
 
 **签名**
 ```rust
-#[cfg(feature = "confers")]
-pub fn load() -> Result<Self, InklogError>
+pub async fn load() -> Result<Self, InklogError>
 ```
 
 **返回值**
-- `Ok(InklogConfig)` - 加载的配置
+- `Ok(LoggerManager)` - 加载配置并初始化的管理器
 - `Err(InklogError)` - 加载失败
 
 **默认查找位置**
@@ -432,11 +401,7 @@ pub fn load() -> Result<Self, InklogError>
 
 **示例**
 ```rust
-#[cfg(feature = "confers")]
-{
-    let config = InklogConfig::load()?;
-    let logger = LoggerManager::with_config(config).await?;
-}
+let logger = LoggerManager::load().await?;
 ```
 
 ---
@@ -992,7 +957,7 @@ let builder = LoggerBuilder::new()
 
 **签名**
 ```rust
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub fn with_database(mut self, database: Arc<dyn Database>) -> Self
 ```
 
@@ -1128,7 +1093,7 @@ config.apply_env_overrides();
 #### 定义
 
 ```rust
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub struct DatabaseConfig {
     pub enabled: bool,
     pub url: String,
@@ -1148,7 +1113,7 @@ pub struct DatabaseConfig {
 | `flush_interval_ms` | `u64` | `500` | 批量刷新间隔（毫秒） |
 | `pool_size` | `u32` | `10` | 数据库连接池大小 |
 
-**注意**: `DatabaseConfig` 需要 `dbnexus` 功能标志才能启用。
+**注意**: `DatabaseConfig` 需要 `sqlite`/`postgres`/`mysql` 功能标志才能启用。
 
 #### 示例
 ```rust
@@ -1873,7 +1838,7 @@ let driver_str = driver.to_string(); // "postgres"
 pub struct LoggerDependencies {
     pub cache: Option<Arc<dyn Cache>>,
     pub config: Option<Arc<dyn Config>>,
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     pub database: Option<Arc<dyn Database>>,
 }
 ```
@@ -1884,7 +1849,7 @@ pub struct LoggerDependencies {
 |------|------|----------|------|
 | `cache` | `Option<Arc<dyn Cache>>` | `None` | 缓存实现（可选） |
 | `config` | `Option<Arc<dyn Config>>` | `None` | 配置实现（可选） |
-| `database` | `Option<Arc<dyn Database>>` | `None` | 数据库实现（可选，需要 `dbnexus` feature） |
+| `database` | `Option<Arc<dyn Database>>` | `None` | 数据库实现（可选，需要 `sqlite`/`postgres`/`mysql` feature） |
 
 **示例**
 ```rust
@@ -1895,7 +1860,7 @@ use std::sync::Arc;
 let deps = LoggerDependencies {
     cache: Some(Arc::new(MockCache::new())),
     config: Some(Arc::new(MockConfig::new().with_value("level", "debug"))),
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     database: Some(Arc::new(MockDatabaseAdapter::new())),
 };
 ```
@@ -1915,10 +1880,10 @@ Inklog 提供了三个核心 trait 用于依赖注入，支持自定义实现和
 ```rust
 #[async_trait]
 pub trait Cache: Send + Sync {
-    async fn get(&self, key: &str) -> Option<String>;
-    async fn set(&self, key: &str, value: String);
-    async fn delete(&self, key: &str) -> bool;
-    async fn exists(&self, key: &str) -> bool;
+    async fn get(&self, key: &str) -> Result<Option<String>, InklogError>;
+    async fn set(&self, key: &str, value: String) -> Result<(), InklogError>;
+    async fn delete(&self, key: &str) -> Result<bool, InklogError>;
+    async fn exists(&self, key: &str) -> Result<bool, InklogError>;
 }
 ```
 
@@ -1926,14 +1891,15 @@ pub trait Cache: Send + Sync {
 
 | 方法 | 描述 |
 |------|------|
-| `get` | 获取缓存值，不存在返回 `None` |
-| `set` | 设置缓存键值对 |
-| `delete` | 删除缓存键，返回是否成功 |
-| `exists` | 检查键是否存在 |
+| `get` | 获取缓存值，返回 `Result<Option<String>, InklogError>` |
+| `set` | 设置缓存键值对，返回 `Result<(), InklogError>` |
+| `delete` | 删除缓存键，返回 `Result<bool, InklogError>` |
+| `exists` | 检查键是否存在，返回 `Result<bool, InklogError>` |
 
 **示例实现**
 ```rust
 use inklog::infrastructure::Cache;
+use inklog::InklogError;
 use async_trait::async_trait;
 
 struct MyCache {
@@ -1942,23 +1908,24 @@ struct MyCache {
 
 #[async_trait]
 impl Cache for MyCache {
-    async fn get(&self, key: &str) -> Option<String> {
+    async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
         // 实现获取逻辑
-        None
+        Ok(None)
     }
 
-    async fn set(&self, key: &str, value: String) {
+    async fn set(&self, key: &str, value: String) -> Result<(), InklogError> {
         // 实现设置逻辑
+        Ok(())
     }
 
-    async fn delete(&self, key: &str) -> bool {
+    async fn delete(&self, key: &str) -> Result<bool, InklogError> {
         // 实现删除逻辑
-        false
+        Ok(false)
     }
 
-    async fn exists(&self, key: &str) -> bool {
+    async fn exists(&self, key: &str) -> Result<bool, InklogError> {
         // 实现存在检查逻辑
-        false
+        Ok(false)
     }
 }
 ```
@@ -2127,8 +2094,8 @@ pub struct MockCache {
 use inklog::infrastructure::MockCache;
 
 let cache = MockCache::new();
-cache.set("key", "value".to_string()).await;
-assert_eq!(cache.get("key").await, Some("value".to_string()));
+cache.set("key", "value".to_string()).await?;
+assert_eq!(cache.get("key").await?, Some("value".to_string()));
 ```
 
 ---
@@ -2220,22 +2187,22 @@ OxCache 缓存适配器。
 - 支持 TTL 过期
 - 线程安全
 
-### ConfersAdapter
+### InklogConfigAdapter
 
-Confers 配置适配器。
+InklogConfig 配置适配器（基于 `InklogConfig` 的内置配置访问）。
 
-**需要**: `confers` feature
+**需要**: 无（默认可用）
 
 **特性**:
-- TOML 配置文件支持
+- 基于 `InklogConfig` 的配置访问
 - 环境变量覆盖
-- 热重载
+- 链式键路径访问（如 `global.level`、`file_sink.path`）
 
 ### DbNexusAdapter
 
 DbNexus 数据库适配器。
 
-**需要**: `dbnexus` feature
+**需要**: `sqlite`/`postgres`/`mysql` feature（任选其一）
 
 **特性**:
 - 连接池管理
@@ -2257,7 +2224,7 @@ Inklog 在 `examples/` crate 中提供了 10 个可运行示例，演示 API 的
 | `compression` | `FileSinkConfig` 压缩配置 | `cargo run --example compression` |
 | `rotation` | `FileSinkConfig` 轮转策略 | `cargo run --example rotation` |
 | `ring_buffered_file` | 环形缓冲文件 Sink | `cargo run --example ring_buffered_file` |
-| `config_file` | `InklogConfig::from_file` / `load`（`confers` feature） | `cargo run --example config_file` |
+| `config_file` | `InklogConfig::from_file` / `load`（内建支持） | `cargo run --example config_file` |
 | `metrics` | `Metrics` / `HealthStatus` / Prometheus 导出 | `cargo run --example metrics` |
 | `circuit_breaker` | Sink 断路器与 `recover_sink` | `cargo run --example circuit_breaker` |
 

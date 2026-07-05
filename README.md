@@ -146,7 +146,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 📊 | **Parquet Export** | Analytics-ready log format (`parquet` feature) |
 | 🌐 | **HTTP Endpoint** | Axum-based health check server (`http` feature) |
 | 🔧 | **CLI Tools** | Utility commands for log management (`cli` feature) |
-| 📝 | **TOML Config** | External configuration support (`confers` feature) |
 
 </td>
 </tr>
@@ -350,9 +349,11 @@ inklog = { version = "0.1", features = [
     "cli",        # decrypt, generate, validate commands
 ] }
 
-# Configuration
+# Database Sinks (pick one or more)
 inklog = { version = "0.1", features = [
-    "confers",    # TOML configuration support
+    "sqlite",     # SQLite database sink
+    "postgres",   # PostgreSQL database sink
+    "mysql",      # MySQL database sink
 ] }
 
 # Development
@@ -368,7 +369,9 @@ inklog = { version = "0.1", features = [
 |---------|-------------|-------------|
 | **http** | axum | HTTP health check endpoint |
 | **cli** | clap, glob, toml | Command-line utilities |
-| **confers** | confers, toml | External TOML configuration support |
+| **sqlite** | dbnexus, sea-orm | SQLite database sink |
+| **postgres** | dbnexus, sea-orm | PostgreSQL database sink |
+| **mysql** | dbnexus, sea-orm | MySQL database sink |
 | **test-local** | - | Local testing mode |
 | **debug** | - | Security audit logging |
 
@@ -613,7 +616,7 @@ The `examples/` crate provides 10 dedicated examples demonstrating specific feat
 | `compression` | File sink compression (ZSTD/GZIP/Brotli/LZ4) | `cargo run --example compression` |
 | `rotation` | Size-based and time-based file rotation | `cargo run --example rotation` |
 | `ring_buffered_file` | Ring-buffered file sink for high throughput | `cargo run --example ring_buffered_file` |
-| `config_file` | TOML configuration file loading (`confers` feature) | `cargo run --example config_file` |
+| `config_file` | TOML configuration file loading | `cargo run --example config_file` |
 | `metrics` | Health metrics and Prometheus export | `cargo run --example metrics` |
 | `circuit_breaker` | Sink circuit breaker and failure recovery | `cargo run --example circuit_breaker` |
 

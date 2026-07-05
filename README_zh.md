@@ -146,7 +146,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 📊 | **Parquet 导出** | 分析就绪的日志格式 |
 | 🌐 | **HTTP 端点** | Axum 健康检查服务器 |
 | 🔧 | **命令行工具** | 日志管理实用命令 |
-| 📝 | **TOML 配置** | 外部配置支持 |
 
 </td>
 </tr>
@@ -349,9 +348,11 @@ inklog = { version = "0.1", features = [
     "cli",        # decrypt, generate, validate 命令
 ] }
 
-# 配置
+# 数据库 Sink (可选一个或多个)
 inklog = { version = "0.1", features = [
-    "confers",    # TOML 配置支持
+    "sqlite",     # SQLite 数据库 Sink
+    "postgres",   # PostgreSQL 数据库 Sink
+    "mysql",      # MySQL 数据库 Sink
 ] }
 
 # 开发
@@ -367,7 +368,9 @@ inklog = { version = "0.1", features = [
 |---------|-------------|-------------|
 | **http** | axum | HTTP 健康检查端点 |
 | **cli** | clap, glob, toml | 命令行工具 |
-| **confers** | confers, toml | 外部 TOML 配置支持 |
+| **sqlite** | dbnexus, sea-orm | SQLite 数据库 Sink |
+| **postgres** | dbnexus, sea-orm | PostgreSQL 数据库 Sink |
+| **mysql** | dbnexus, sea-orm | MySQL 数据库 Sink |
 | **test-local** | - | 本地测试模式 |
 | **debug** | - | 安全审计日志 |
 
@@ -612,7 +615,7 @@ log::info!("用户邮箱: user@example.com");
 | `compression` | 文件 Sink 压缩（ZSTD/GZIP/Brotli/LZ4） | `cargo run --example compression` |
 | `rotation` | 基于大小和时间的文件轮转 | `cargo run --example rotation` |
 | `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
-| `config_file` | TOML 配置文件加载（`confers` 特性） | `cargo run --example config_file` |
+| `config_file` | TOML 配置文件加载 | `cargo run --example config_file` |
 | `metrics` | 健康指标与 Prometheus 导出 | `cargo run --example metrics` |
 | `circuit_breaker` | Sink 断路器与故障恢复 | `cargo run --example circuit_breaker` |
 
