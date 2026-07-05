@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - cache1 设置 shared_key = shared_value");
 
     // 从另一个实例读取
-    let value = cache2.get("shared_key").await;
+    let value = cache2.get("shared_key").await?;
     println!("   - cache2 读取 shared_key = {:?}", value);
     println!("   - 两个实例共享同一底层数据: {}", value == Some("shared_value".to_string()));
 
@@ -99,16 +99,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 设置和读取值
     mock_cache.set("test_key", "test_value".to_string()).await?;
-    let value = mock_cache.get("test_key").await;
+    let value = mock_cache.get("test_key").await?;
     println!("   - MockCache 设置并读取: {:?}", value);
     assert_eq!(value, Some("test_value".to_string()));
 
     // 检查 exists
-    let exists = mock_cache.exists("test_key").await;
+    let exists = mock_cache.exists("test_key").await?;
     println!("   - test_key 存在: {}", exists);
 
     // 删除键
-    let deleted = mock_cache.delete("test_key").await;
+    let deleted = mock_cache.delete("test_key").await?;
     println!("   - 删除 test_key: {}", deleted);
 
     // 模式 7: 使用 MockConfig 进行测试

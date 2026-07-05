@@ -37,10 +37,10 @@ use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
 use inklog::support::processing::LogTemplate;
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
-use parking_lot::Mutex;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// 降级状态追踪器
 ///
@@ -84,7 +84,7 @@ impl FallbackState {
 ///
 /// 用于演示当主 Sink 发生故障时如何切换到备用 Sink
 ///
-/// 使用 `parking_lot::Mutex` 实现内部可变性，以满足 `LogSink: &self` 的 trait 约束
+/// 使用 `tokio::sync::Mutex` 实现内部可变性，以满足 `LogSink: &self` 的 trait 约束
 struct FailingSink {
     inner: Arc<Mutex<Option<Box<dyn LogSink>>>>,
     fail_after: usize,
@@ -106,12 +106,12 @@ impl FailingSink {
 #[async_trait]
 impl LogSink for FailingSink {
     async fn write(&self, record: &LogRecord) -> Result<(), inklog::InklogError> {
-        let mut count = self.write_count.lock();
+        let mut count = self.write_count.lock().await;
         *count += 1;
 
         // 在达到故障点之前正常工作
         if *count <= self.fail_after {
-            let inner = self.inner.lock();
+            let inner = self.inner.lock().await;
             if let Some(ref sink) = *inner {
                 return sink.write(record).await;
             }
@@ -125,7 +125,7 @@ impl LogSink for FailingSink {
     }
 
     async fn flush(&self) -> Result<(), inklog::InklogError> {
-        let inner = self.inner.lock();
+        let inner = self.inner.lock().await;
         if let Some(ref sink) = *inner {
             sink.flush().await
         } else {
@@ -136,11 +136,12 @@ impl LogSink for FailingSink {
     }
 
     fn is_healthy(&self) -> bool {
-        self.inner.lock().is_some()
+        // try_lock 避免在 sync 方法中 await
+        self.inner.try_lock().map(|g| g.is_some()).unwrap_or(false)
     }
 
     async fn shutdown(&self) -> Result<(), inklog::InklogError> {
-        let inner = self.inner.lock();
+        let inner = self.inner.lock().await;
         if let Some(ref sink) = *inner {
             sink.shutdown().await
         } else {

@@ -1390,8 +1390,7 @@ mod tests {
 
     #[test]
     fn test_file_sink_new_default() {
-        // Note: confers derive generates Default with empty PathBuf for path field.
-        // We need to provide an explicit path for the test.
+        // FileSinkConfig::default() 的 path 为空 PathBuf，测试需显式提供路径。
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,

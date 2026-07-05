@@ -510,7 +510,7 @@ mod tests {
         cache1.set("key", "value".to_string()).await.unwrap();
 
         // 另一个引用应该能看到
-        let value = cache2.get("key").await;
+        let value = cache2.get("key").await.unwrap();
         assert_eq!(value, Some("value".to_string()));
     }
 
@@ -607,15 +607,15 @@ mod tests {
             .set("test_key", "test_value".to_string())
             .await
             .unwrap();
-        let value = cache.get("test_key").await;
+        let value = cache.get("test_key").await.unwrap();
         assert_eq!(value, Some("test_value".to_string()));
 
         // 测试存在检查
-        assert!(cache.exists("test_key").await);
+        assert!(cache.exists("test_key").await.unwrap());
 
         // 测试删除
-        assert!(cache.delete("test_key").await);
-        assert!(!cache.exists("test_key").await);
+        assert!(cache.delete("test_key").await.unwrap());
+        assert!(!cache.exists("test_key").await.unwrap());
     }
 
     #[test]

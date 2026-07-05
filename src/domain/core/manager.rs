@@ -301,7 +301,6 @@ impl LoggerManager {
 
             config
         } else {
-            // 使用 confers 自动生成的方法加载配置
             InklogConfig::load_sync().unwrap_or_else(|_| InklogConfig::default())
         };
 

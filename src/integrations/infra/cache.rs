@@ -15,21 +15,21 @@ use async_trait::async_trait;
 /// 提供基本的缓存 CRUD 操作接口，所有方法都是异步的。
 /// 实现必须保证线程安全（`Send + Sync`）。
 ///
-/// # 实现要求
+/// # 错误处理
 ///
-/// - 所有方法使用 `&self`（不可变引用），支持并发访问
-/// - 返回类型使用 `Option` 或 `Result<_, InklogError>`
-/// - 实现应该是非阻塞的，适合在 async 上下文中调用
+/// 所有方法返回 `Result<_, InklogError>`，错误显性传播，不静默吞错。
+/// 实现应该是非阻塞的，适合在 async 上下文中调用。
 ///
 /// # 示例
 ///
 /// ```ignore
 /// use inklog::infrastructure::Cache;
 ///
-/// async fn example(cache: &dyn Cache) {
-///     cache.set("key", "value".to_string()).await.unwrap();
-///     let value = cache.get("key").await;
+/// async fn example(cache: &dyn Cache) -> Result<(), Box<dyn std::error::Error>> {
+///     cache.set("key", "value".to_string()).await?;
+///     let value = cache.get("key").await?;
 ///     assert_eq!(value, Some("value".to_string()));
+///     Ok(())
 /// }
 /// ```
 #[async_trait]
@@ -42,8 +42,10 @@ pub trait Cache: Send + Sync {
     ///
     /// # 返回
     ///
-    /// 如果键存在返回 `Some(value)`，否则返回 `None`
-    async fn get(&self, key: &str) -> Option<String>;
+    /// - `Ok(Some(value))` - 键存在
+    /// - `Ok(None)` - 键不存在
+    /// - `Err(InklogError)` - 缓存访问失败
+    async fn get(&self, key: &str) -> Result<Option<String>, InklogError>;
 
     /// 设置缓存值
     ///
@@ -65,8 +67,10 @@ pub trait Cache: Send + Sync {
     ///
     /// # 返回
     ///
-    /// 如果键存在并被删除返回 `true`，否则返回 `false`
-    async fn delete(&self, key: &str) -> bool;
+    /// - `Ok(true)` - 键存在并已删除
+    /// - `Ok(false)` - 键不存在
+    /// - `Err(InklogError)` - 缓存访问失败
+    async fn delete(&self, key: &str) -> Result<bool, InklogError>;
 
     /// 检查键是否存在
     ///
@@ -76,8 +80,10 @@ pub trait Cache: Send + Sync {
     ///
     /// # 返回
     ///
-    /// 键存在返回 `true`，否则返回 `false`
-    async fn exists(&self, key: &str) -> bool;
+    /// - `Ok(true)` - 键存在
+    /// - `Ok(false)` - 键不存在
+    /// - `Err(InklogError)` - 缓存访问失败
+    async fn exists(&self, key: &str) -> Result<bool, InklogError>;
 }
 
 // ============================================================================
@@ -101,11 +107,11 @@ use std::sync::RwLock;
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let cache = OxCacheAdapter::new()?;
-///     
+///
 ///     cache.set("user:1", "Alice".to_string()).await?;
-///     let name = cache.get("user:1").await;
+///     let name = cache.get("user:1").await?;
 ///     assert_eq!(name, Some("Alice".to_string()));
-///     
+///
 ///     Ok(())
 /// }
 /// ```
@@ -116,7 +122,7 @@ pub struct OxCacheAdapter {
 impl OxCacheAdapter {
     /// 创建新的 oxcache 适配器
     ///
-    /// 使用默认的内存后端（Moka）创建缓存实例。
+    /// 使用默认的内存后端创建缓存实例。
     ///
     /// # 返回
     ///
@@ -126,7 +132,6 @@ impl OxCacheAdapter {
     ///
     /// - `InklogError::CacheError` - 缓存初始化失败
     pub fn new() -> Result<Self, InklogError> {
-        // 使用同步构造方法（oxcache 0.2.0+ 支持）
         let cache = OxCache::new();
         Ok(Self { inner: cache })
     }
@@ -155,57 +160,39 @@ impl OxCacheAdapter {
     }
 }
 
-impl Default for OxCacheAdapter {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default OxCacheAdapter")
-    }
-}
-
 #[async_trait]
 impl Cache for OxCacheAdapter {
-    async fn get(&self, key: &str) -> Option<String> {
-        // oxcache::Cache::get 返回 Result<Option<V>>
-        match self.inner.get(&key.to_string()).await {
-            Ok(Some(value)) => Some(value),
-            Ok(None) => None,
-            Err(e) => {
-                tracing::warn!("Cache get error for key '{}': {}", key, e);
-                None
-            }
-        }
+    async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
+        self.inner.get(&key.to_string()).await.map_err(|e| {
+            InklogError::CacheError(format!("Failed to get cache key '{}': {}", key, e))
+        })
     }
 
     async fn set(&self, key: &str, value: String) -> Result<(), InklogError> {
-        self.inner
-            .set(&key.to_string(), &value)
-            .await
-            .map_err(|e| InklogError::CacheError(format!("Failed to set cache value: {}", e)))
+        self.inner.set(&key.to_string(), &value).await.map_err(|e| {
+            InklogError::CacheError(format!("Failed to set cache key '{}': {}", key, e))
+        })
     }
 
-    async fn delete(&self, key: &str) -> bool {
-        // 先检查键是否存在
-        let exists = self.exists(key).await;
+    async fn delete(&self, key: &str) -> Result<bool, InklogError> {
+        // 先检查键是否存在，避免无谓的 delete 调用
+        let exists = self.exists(key).await?;
         if !exists {
-            return false;
+            return Ok(false);
         }
-
-        match self.inner.delete(&key.to_string()).await {
-            Ok(()) => true,
-            Err(e) => {
-                tracing::warn!("Cache delete error for key '{}': {}", key, e);
-                false
-            }
-        }
+        self.inner.delete(&key.to_string()).await.map_err(|e| {
+            InklogError::CacheError(format!("Failed to delete cache key '{}': {}", key, e))
+        })?;
+        Ok(true)
     }
 
-    async fn exists(&self, key: &str) -> bool {
-        match self.inner.exists(&key.to_string()).await {
-            Ok(exists) => exists,
-            Err(e) => {
-                tracing::warn!("Cache exists error for key '{}': {}", key, e);
-                false
-            }
-        }
+    async fn exists(&self, key: &str) -> Result<bool, InklogError> {
+        self.inner.exists(&key.to_string()).await.map_err(|e| {
+            InklogError::CacheError(format!(
+                "Failed to check existence of cache key '{}': {}",
+                key, e
+            ))
+        })
     }
 }
 
@@ -271,15 +258,16 @@ impl OxCacheAdapterBuilder {
 /// use inklog::infrastructure::cache::{Cache, MockCache};
 ///
 /// #[tokio::main]
-/// async fn main() {
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let cache = MockCache::new();
 ///
-///     cache.set("key", "value".to_string()).await.unwrap();
-///     assert_eq!(cache.get("key").await, Some("value".to_string()));
+///     cache.set("key", "value".to_string()).await?;
+///     assert_eq!(cache.get("key").await?, Some("value".to_string()));
 ///
 ///     // 带延迟的 Mock
 ///     let delayed_cache = MockCache::with_delay(100);
-///     cache.set("slow", "op".to_string()).await.unwrap();
+///     delayed_cache.set("slow", "op".to_string()).await?;
+///     Ok(())
 /// }
 /// ```
 pub struct MockCache {
@@ -335,41 +323,37 @@ impl Default for MockCache {
 
 #[async_trait]
 impl Cache for MockCache {
-    async fn get(&self, key: &str) -> Option<String> {
+    async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-
         let storage = self.storage.read().unwrap();
-        storage.get(key).cloned()
+        Ok(storage.get(key).cloned())
     }
 
     async fn set(&self, key: &str, value: String) -> Result<(), InklogError> {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-
         let mut storage = self.storage.write().unwrap();
         storage.insert(key.to_string(), value);
         Ok(())
     }
 
-    async fn delete(&self, key: &str) -> bool {
+    async fn delete(&self, key: &str) -> Result<bool, InklogError> {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-
         let mut storage = self.storage.write().unwrap();
-        storage.remove(key).is_some()
+        Ok(storage.remove(key).is_some())
     }
 
-    async fn exists(&self, key: &str) -> bool {
+    async fn exists(&self, key: &str) -> Result<bool, InklogError> {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-
         let storage = self.storage.read().unwrap();
-        storage.contains_key(key)
+        Ok(storage.contains_key(key))
     }
 }
 
@@ -390,24 +374,27 @@ mod tests {
             .set("key1", "value1".to_string())
             .await
             .expect("Failed to set");
-        let value = cache.get("key1").await;
+        let value = cache.get("key1").await.expect("Failed to get");
         assert_eq!(value, Some("value1".to_string()));
 
         // 测试 exists
-        assert!(cache.exists("key1").await);
-        assert!(!cache.exists("nonexistent").await);
+        assert!(cache.exists("key1").await.expect("exists failed"));
+        assert!(!cache.exists("nonexistent").await.expect("exists failed"));
 
         // 测试 delete
-        assert!(cache.delete("key1").await);
-        assert!(!cache.exists("key1").await);
-        assert!(!cache.delete("key1").await); // 再次删除返回 false
+        assert!(cache.delete("key1").await.expect("delete failed"));
+        assert!(!cache.exists("key1").await.expect("exists failed"));
+        assert!(
+            !cache.delete("key1").await.expect("delete failed"),
+            "再次删除返回 false"
+        );
     }
 
     #[tokio::test]
     async fn test_oxcache_adapter_get_nonexistent() {
         let cache = OxCacheAdapter::new().expect("Failed to create cache");
 
-        let value = cache.get("nonexistent_key").await;
+        let value = cache.get("nonexistent_key").await.expect("Failed to get");
         assert_eq!(value, None);
     }
 
@@ -424,7 +411,7 @@ mod tests {
             .await
             .expect("Failed to set");
 
-        let value = cache.get("key").await;
+        let value = cache.get("key").await.expect("Failed to get");
         assert_eq!(value, Some("value2".to_string()));
     }
 
@@ -440,7 +427,10 @@ mod tests {
             .set("bkey", "bval".to_string())
             .await
             .expect("Failed to set");
-        assert_eq!(cache.get("bkey").await, Some("bval".to_string()));
+        assert_eq!(
+            cache.get("bkey").await.expect("Failed to get"),
+            Some("bval".to_string())
+        );
     }
 
     #[tokio::test]
@@ -457,8 +447,11 @@ mod tests {
             .set("ckey", "cval".to_string())
             .await
             .expect("Failed to set");
-        assert_eq!(cache.get("ckey").await, Some("cval".to_string()));
-        assert!(cache.exists("ckey").await);
+        assert_eq!(
+            cache.get("ckey").await.expect("Failed to get"),
+            Some("cval".to_string())
+        );
+        assert!(cache.exists("ckey").await.expect("exists failed"));
     }
 
     // ============================================================================
@@ -474,24 +467,27 @@ mod tests {
             .set("key1", "value1".to_string())
             .await
             .expect("Failed to set");
-        let value = cache.get("key1").await;
+        let value = cache.get("key1").await.expect("Failed to get");
         assert_eq!(value, Some("value1".to_string()));
 
         // 测试 exists
-        assert!(cache.exists("key1").await);
-        assert!(!cache.exists("nonexistent").await);
+        assert!(cache.exists("key1").await.expect("exists failed"));
+        assert!(!cache.exists("nonexistent").await.expect("exists failed"));
 
         // 测试 delete
-        assert!(cache.delete("key1").await);
-        assert!(!cache.exists("key1").await);
-        assert!(!cache.delete("key1").await); // 再次删除返回 false
+        assert!(cache.delete("key1").await.expect("delete failed"));
+        assert!(!cache.exists("key1").await.expect("exists failed"));
+        assert!(
+            !cache.delete("key1").await.expect("delete failed"),
+            "再次删除返回 false"
+        );
     }
 
     #[tokio::test]
     async fn test_mock_cache_get_nonexistent() {
         let cache = MockCache::new();
 
-        let value = cache.get("nonexistent_key").await;
+        let value = cache.get("nonexistent_key").await.expect("Failed to get");
         assert_eq!(value, None);
     }
 
@@ -508,7 +504,7 @@ mod tests {
             .await
             .expect("Failed to set");
 
-        let value = cache.get("key").await;
+        let value = cache.get("key").await.expect("Failed to get");
         assert_eq!(value, Some("value2".to_string()));
     }
 
@@ -524,7 +520,7 @@ mod tests {
         assert!(elapsed.as_millis() >= 10);
 
         let start = std::time::Instant::now();
-        let _ = cache.get("key").await;
+        let _ = cache.get("key").await.unwrap();
         let elapsed = start.elapsed();
 
         assert!(elapsed.as_millis() >= 10);
@@ -535,15 +531,15 @@ mod tests {
         let cache = MockCache::new();
 
         // 删除不存在的键
-        assert!(!cache.delete("nonexistent").await);
+        assert!(!cache.delete("nonexistent").await.expect("delete failed"));
 
         // 设置并删除
         cache.set("key", "value".to_string()).await.unwrap();
-        assert!(cache.delete("key").await);
+        assert!(cache.delete("key").await.expect("delete failed"));
 
         // 验证已删除
-        assert_eq!(cache.get("key").await, None);
-        assert!(!cache.exists("key").await);
+        assert_eq!(cache.get("key").await.expect("get failed"), None);
+        assert!(!cache.exists("key").await.expect("exists failed"));
     }
 
     #[tokio::test]
@@ -551,15 +547,15 @@ mod tests {
         let cache = MockCache::new();
 
         // 不存在的键
-        assert!(!cache.exists("key1").await);
+        assert!(!cache.exists("key1").await.expect("exists failed"));
 
         // 设置后存在
         cache.set("key1", "value1".to_string()).await.unwrap();
-        assert!(cache.exists("key1").await);
+        assert!(cache.exists("key1").await.expect("exists failed"));
 
         // 删除后不存在
-        cache.delete("key1").await;
-        assert!(!cache.exists("key1").await);
+        cache.delete("key1").await.unwrap();
+        assert!(!cache.exists("key1").await.expect("exists failed"));
     }
 
     #[tokio::test]
@@ -589,53 +585,41 @@ mod tests {
 
         // 验证所有写入
         for i in 0..10 {
-            let value = cache.get(&format!("key{}", i)).await;
+            let value = cache.get(&format!("key{}", i)).await.expect("get failed");
             assert_eq!(value, Some(format!("value{}", i)));
         }
     }
 
     // ============================================================================
-    // Default 实现测试 - 覆盖 OxCacheAdapter::default 和 MockCache::default
+    // Default 实现测试 - 覆盖 MockCache::default（OxCacheAdapter::default 已移除）
     // ============================================================================
 
     #[tokio::test]
-    async fn test_oxcache_adapter_default_creates_instance() {
-        // 覆盖 OxCacheAdapter::default() 实现（行 159-160）
-        let cache = OxCacheAdapter::default();
-        // 验证 default 实例可用：set/get 往返一致
-        cache
-            .set("default_key", "default_value".to_string())
-            .await
-            .expect("default cache set should succeed");
-        assert_eq!(
-            cache.get("default_key").await,
-            Some("default_value".to_string())
-        );
-    }
-
-    #[tokio::test]
     async fn test_mock_cache_default_equals_new() {
-        // 覆盖 MockCache::default() 实现（行 331-332）
+        // 覆盖 MockCache::default() 实现
         let default_cache = MockCache::default();
         let new_cache = MockCache::new();
         // 两者行为应等价：初始为空
-        assert_eq!(default_cache.get("any").await, None);
-        assert_eq!(new_cache.get("any").await, None);
+        assert_eq!(default_cache.get("any").await.expect("get failed"), None);
+        assert_eq!(new_cache.get("any").await.expect("get failed"), None);
         // default 实例可正常写入读取
         default_cache
             .set("k", "v".to_string())
             .await
             .expect("default mock set should succeed");
-        assert_eq!(default_cache.get("k").await, Some("v".to_string()));
+        assert_eq!(
+            default_cache.get("k").await.expect("get failed"),
+            Some("v".to_string())
+        );
     }
 
     // ============================================================================
-    // MockCache with_delay 覆盖 delete/exists 延迟分支（行 359、368）
+    // MockCache with_delay 覆盖 delete/exists 延迟分支
     // ============================================================================
 
     #[tokio::test]
     async fn test_mock_cache_with_delay_delete_measures_delay() {
-        // 覆盖 MockCache::delete 的 delay 分支（行 359）
+        // 覆盖 MockCache::delete 的 delay 分支
         let cache = MockCache::with_delay(15);
         // 先放入一条记录
         cache
@@ -644,7 +628,7 @@ mod tests {
             .expect("set should succeed");
         // delete 应当至少消耗 delay_ms 的时间
         let start = std::time::Instant::now();
-        let deleted = cache.delete("delay_key").await;
+        let deleted = cache.delete("delay_key").await.expect("delete failed");
         let elapsed = start.elapsed();
         assert!(deleted, "existing key should be deleted");
         assert!(
@@ -656,7 +640,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_cache_with_delay_exists_measures_delay() {
-        // 覆盖 MockCache::exists 的 delay 分支（行 368）
+        // 覆盖 MockCache::exists 的 delay 分支
         let cache = MockCache::with_delay(15);
         cache
             .set("k", "v".to_string())
@@ -664,7 +648,7 @@ mod tests {
             .expect("set should succeed");
         // exists 应当至少消耗 delay_ms 的时间
         let start = std::time::Instant::now();
-        let exists = cache.exists("k").await;
+        let exists = cache.exists("k").await.expect("exists failed");
         let elapsed = start.elapsed();
         assert!(exists, "key should exist");
         assert!(
@@ -675,7 +659,7 @@ mod tests {
     }
 
     // ============================================================================
-    // OxCacheAdapter TTL 过期与边界场景测试（任务 7.8）
+    // OxCacheAdapter TTL 过期与边界场景测试
     // ============================================================================
 
     #[tokio::test]
@@ -694,7 +678,7 @@ mod tests {
 
         // 立即读取应能拿到值
         assert_eq!(
-            cache.get("expiring_key").await,
+            cache.get("expiring_key").await.expect("get failed"),
             Some("expiring_value".to_string())
         );
 
@@ -703,7 +687,7 @@ mod tests {
 
         // 过期后应返回 None
         assert_eq!(
-            cache.get("expiring_key").await,
+            cache.get("expiring_key").await.expect("get failed"),
             None,
             "expired key should return None"
         );
@@ -722,11 +706,11 @@ mod tests {
             .set("ttl_exists_key", "v".to_string())
             .await
             .expect("Failed to set");
-        assert!(cache.exists("ttl_exists_key").await);
+        assert!(cache.exists("ttl_exists_key").await.expect("exists failed"));
 
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         assert!(
-            !cache.exists("ttl_exists_key").await,
+            !cache.exists("ttl_exists_key").await.expect("exists failed"),
             "exists should return false after TTL expiration"
         );
     }
@@ -749,7 +733,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         // 键已过期，exists 返回 false，delete 应短路返回 false
-        let deleted = cache.delete("ttl_delete_key").await;
+        let deleted = cache.delete("ttl_delete_key").await.expect("delete failed");
         assert!(
             !deleted,
             "delete should return false for expired key (exists short-circuit)"
@@ -770,10 +754,10 @@ mod tests {
             .await
             .expect("Failed to set");
         assert_eq!(
-            cache.get("ttl_only_key").await,
+            cache.get("ttl_only_key").await.expect("get failed"),
             Some("ttl_only_value".to_string())
         );
-        assert!(cache.exists("ttl_only_key").await);
+        assert!(cache.exists("ttl_only_key").await.expect("exists failed"));
     }
 
     #[tokio::test]
@@ -790,10 +774,10 @@ mod tests {
             .await
             .expect("Failed to set");
         assert_eq!(
-            cache.get("cap_only_key").await,
+            cache.get("cap_only_key").await.expect("get failed"),
             Some("cap_only_value".to_string())
         );
-        assert!(cache.exists("cap_only_key").await);
+        assert!(cache.exists("cap_only_key").await.expect("exists failed"));
     }
 
     #[tokio::test]
@@ -805,10 +789,13 @@ mod tests {
             .set("", "empty_key_value".to_string())
             .await
             .expect("Failed to set with empty key");
-        assert_eq!(cache.get("").await, Some("empty_key_value".to_string()));
-        assert!(cache.exists("").await);
-        assert!(cache.delete("").await);
-        assert!(!cache.exists("").await);
+        assert_eq!(
+            cache.get("").await.expect("get failed"),
+            Some("empty_key_value".to_string())
+        );
+        assert!(cache.exists("").await.expect("exists failed"));
+        assert!(cache.delete("").await.expect("delete failed"));
+        assert!(!cache.exists("").await.expect("exists failed"));
     }
 
     #[tokio::test]
@@ -834,7 +821,7 @@ mod tests {
                 .await
                 .expect("Failed to set with special char key");
             assert_eq!(
-                cache.get(key).await,
+                cache.get(key).await.expect("get failed"),
                 Some(value),
                 "get should return the set value for key: {:?}",
                 key
@@ -852,7 +839,7 @@ mod tests {
             .set("large_key", large_value.clone())
             .await
             .expect("Failed to set large value");
-        let retrieved = cache.get("large_key").await;
+        let retrieved = cache.get("large_key").await.expect("get failed");
         assert_eq!(retrieved.as_ref().map(|v| v.len()), Some(100_000));
         assert_eq!(retrieved, Some(large_value));
     }
@@ -883,7 +870,7 @@ mod tests {
 
         for i in 0..10 {
             assert_eq!(
-                cache.get(&format!("ckey{}", i)).await,
+                cache.get(&format!("ckey{}", i)).await.expect("get failed"),
                 Some(format!("cvalue{}", i)),
                 "concurrent write for key {} should be visible",
                 i
@@ -899,7 +886,7 @@ mod tests {
 
         // 从未设置过的键
         assert!(
-            !cache.delete("never_set_key").await,
+            !cache.delete("never_set_key").await.expect("delete failed"),
             "delete on never-set key should return false"
         );
 
@@ -908,9 +895,9 @@ mod tests {
             .set("temp_key", "temp_value".to_string())
             .await
             .expect("Failed to set");
-        assert!(cache.delete("temp_key").await);
+        assert!(cache.delete("temp_key").await.expect("delete failed"));
         assert!(
-            !cache.delete("temp_key").await,
+            !cache.delete("temp_key").await.expect("delete failed"),
             "delete on already-deleted key should return false"
         );
     }
@@ -935,7 +922,7 @@ mod tests {
             .expect("Failed to set v2");
 
         assert_eq!(
-            cache.get("ow_key").await,
+            cache.get("ow_key").await.expect("get failed"),
             Some("v2".to_string()),
             "overwrite should replace value"
         );

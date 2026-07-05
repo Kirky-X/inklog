@@ -54,7 +54,7 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
 		max_capacity: 64,
 		ttl_secs: None,
 	};
-	let pool = ObjectPool::<String, i32>::with_config(config).await?;
+	let pool = ObjectPool::<String, String>::with_config(config).await?;
 	println!("自定义配置构建成功");
 
 	print_section("1.3 put() / get() 存取");
@@ -72,7 +72,7 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
 
 	print_section("1.4 错误显性传播（Result 返回）");
 	// put/get 返回 Result<(), InklogError> / Result<Option<V>, InklogError>
-	let put_result = pool.put(&"k".to_string(), 1).await;
+	let put_result = pool.put(&"k".to_string(), "v".to_string()).await;
 	assert!(put_result.is_ok());
 	let get_result = pool.get(&"k".to_string()).await;
 	assert!(get_result.is_ok());
