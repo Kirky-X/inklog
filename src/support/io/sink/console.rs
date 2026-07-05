@@ -9,6 +9,7 @@ use crate::DataMasker;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use async_trait::async_trait;
 use is_terminal::IsTerminal;
 use owo_colors::OwoColorize;
 use std::fmt;
@@ -111,8 +112,9 @@ impl ConsoleSink {
     }
 }
 
+#[async_trait]
 impl LogSink for ConsoleSink {
-    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         // 应用数据脱敏（如果启用）
         let masked_record = if self.config.masking_enabled {
             let mut masked = record.clone();
@@ -147,7 +149,7 @@ impl LogSink for ConsoleSink {
         Ok(())
     }
 
-    fn flush(&self) -> Result<(), InklogError> {
+    async fn flush(&self) -> Result<(), InklogError> {
         let mut writer = self
             .writer
             .lock()
@@ -159,8 +161,8 @@ impl LogSink for ConsoleSink {
         true
     }
 
-    fn shutdown(&self) -> Result<(), InklogError> {
-        self.flush()
+    async fn shutdown(&self) -> Result<(), InklogError> {
+        self.flush().await
     }
 }
 
@@ -604,8 +606,8 @@ mod tests {
     // LogSink::write: masking, stderr/stdout routing, color interaction
     // ========================================================================
 
-    #[test]
-    fn test_log_sink_write_stdout_no_masking() {
+    #[tokio::test]
+    async fn test_log_sink_write_stdout_no_masking() {
         // masking_enabled=false covers the `else` branch of the masking if/else.
         let config = ConsoleSinkConfig {
             enabled: true,
@@ -615,15 +617,15 @@ mod tests {
         };
         let (sink, writer) = sink_with_test_writer(config);
         let record = make_record("INFO", "plain message");
-        sink.write(&record).unwrap();
+        sink.write(&record).await.unwrap();
         let output = writer.output();
         assert!(output.contains("plain message"));
         assert!(output.contains("[INFO]"));
         assert!(output.ends_with('\n'));
     }
 
-    #[test]
-    fn test_log_sink_write_with_masking_redacts_sensitive_data() {
+    #[tokio::test]
+    async fn test_log_sink_write_with_masking_redacts_sensitive_data() {
         // masking_enabled=true covers the `if` branch: mask message + fields.
         let config = ConsoleSinkConfig {
             enabled: true,
@@ -633,7 +635,7 @@ mod tests {
         };
         let (sink, writer) = sink_with_test_writer(config);
         let record = make_record("INFO", "email=test@example.com");
-        sink.write(&record).unwrap();
+        sink.write(&record).await.unwrap();
         let output = writer.output();
         // Original sensitive data must not appear.
         assert!(
@@ -645,8 +647,8 @@ mod tests {
         assert!(output.contains('@'), "masked email should retain @");
     }
 
-    #[test]
-    fn test_log_sink_write_stderr_level_writes_to_stderr_not_stdout() {
+    #[tokio::test]
+    async fn test_log_sink_write_stderr_level_writes_to_stderr_not_stdout() {
         // is_stderr=true in write() routes to io::stderr(), so the stdout
         // TestWriter should remain empty.
         let config = ConsoleSinkConfig {
@@ -657,15 +659,15 @@ mod tests {
         };
         let (sink, writer) = sink_with_test_writer(config);
         let record = make_record("ERROR", "stderr-only message");
-        sink.write(&record).unwrap();
+        sink.write(&record).await.unwrap();
         assert!(
             writer.is_empty(),
             "stdout writer must be empty when level routes to stderr"
         );
     }
 
-    #[test]
-    fn test_log_sink_write_warn_routes_to_stderr_by_default() {
+    #[tokio::test]
+    async fn test_log_sink_write_warn_routes_to_stderr_by_default() {
         // Default stderr_levels is ["error", "warn"]; WARN should go to stderr.
         let config = ConsoleSinkConfig {
             enabled: true,
@@ -674,15 +676,15 @@ mod tests {
         };
         let (sink, writer) = sink_with_test_writer(config);
         let record = make_record("WARN", "warning via stderr");
-        sink.write(&record).unwrap();
+        sink.write(&record).await.unwrap();
         assert!(
             writer.is_empty(),
             "WARN should route to stderr by default, not stdout"
         );
     }
 
-    #[test]
-    fn test_log_sink_write_info_routes_to_stdout_by_default() {
+    #[tokio::test]
+    async fn test_log_sink_write_info_routes_to_stdout_by_default() {
         // INFO is not in default stderr_levels, so it goes to stdout writer.
         let config = ConsoleSinkConfig {
             enabled: true,
@@ -691,13 +693,13 @@ mod tests {
         };
         let (sink, writer) = sink_with_test_writer(config);
         let record = make_record("INFO", "info via stdout");
-        sink.write(&record).unwrap();
+        sink.write(&record).await.unwrap();
         let output = writer.output();
         assert!(output.contains("info via stdout"));
     }
 
-    #[test]
-    fn test_log_sink_write_case_insensitive_stderr_match() {
+    #[tokio::test]
+    async fn test_log_sink_write_case_insensitive_stderr_match() {
         // stderr_levels contains lowercase "error"; record level "ERROR"
         // should still match after to_lowercase().
         let config = ConsoleSinkConfig {
@@ -708,7 +710,7 @@ mod tests {
         };
         let (sink, writer) = sink_with_test_writer(config);
         let record = make_record("ERROR", "uppercase level");
-        sink.write(&record).unwrap();
+        sink.write(&record).await.unwrap();
         assert!(
             writer.is_empty(),
             "uppercase ERROR must match lowercase stderr_levels"
@@ -719,10 +721,10 @@ mod tests {
     // LogSink trait: flush, is_healthy, shutdown
     // ========================================================================
 
-    #[test]
-    fn test_log_sink_flush_succeeds() {
+    #[tokio::test]
+    async fn test_log_sink_flush_succeeds() {
         let (sink, _writer) = sink_with_test_writer(ConsoleSinkConfig::default());
-        assert!(sink.flush().is_ok());
+        assert!(sink.flush().await.is_ok());
     }
 
     #[test]
@@ -732,11 +734,11 @@ mod tests {
         assert!(sink.is_healthy());
     }
 
-    #[test]
-    fn test_log_sink_shutdown_flushes_without_error() {
+    #[tokio::test]
+    async fn test_log_sink_shutdown_flushes_without_error() {
         let (sink, _writer) = sink_with_test_writer(ConsoleSinkConfig::default());
         // shutdown delegates to flush, so it should succeed.
-        assert!(sink.shutdown().is_ok());
+        assert!(sink.shutdown().await.is_ok());
     }
 
     // ========================================================================
@@ -762,8 +764,8 @@ mod tests {
         assert!(cloned.is_healthy());
     }
 
-    #[test]
-    fn test_console_sink_clone_shares_writer_buffer() {
+    #[tokio::test]
+    async fn test_console_sink_clone_shares_writer_buffer() {
         // Arc Clone shares the same underlying writer, so writes via the clone
         // should be visible through the original's writer reference.
         let config = ConsoleSinkConfig {
@@ -774,7 +776,7 @@ mod tests {
         let (sink, writer) = sink_with_test_writer(config);
         let cloned = sink.clone();
         let record = make_record("INFO", "written via clone");
-        cloned.write(&record).unwrap();
+        cloned.write(&record).await.unwrap();
         let output = writer.output();
         assert!(
             output.contains("written via clone"),

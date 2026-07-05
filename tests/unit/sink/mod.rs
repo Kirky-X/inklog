@@ -7,5 +7,5 @@
 //!
 //! 测试各种日志输出端（文件、控制台、数据库等）
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 mod entity_test;

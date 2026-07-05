@@ -64,14 +64,14 @@ pub fn create_log_record(level: &str, message: &str, target: &str) -> LogRecord 
 ///
 /// 每个级别生成一条记录，消息使用 `format!("这是一条 {} 级别日志", level)`。
 /// 返回写入的记录数（等于 `levels.len()`），便于调用方做完整性检查。
-pub fn write_level_records(sink: &dyn LogSink, levels: &[&str]) -> Result<usize> {
+pub async fn write_level_records(sink: &dyn LogSink, levels: &[&str]) -> Result<usize> {
     let mut written = 0;
     for level in levels {
         let record = create_log_record(level, &format!("这是一条 {} 级别日志", level), "file_ops");
-        sink.write(&record)?;
+        sink.write(&record).await?;
         written += 1;
     }
-    sink.flush()?;
+    sink.flush().await?;
     Ok(written)
 }
 
@@ -152,8 +152,8 @@ mod tests {
         assert!(diff.num_seconds().abs() < 5, "timestamp 应为当前时间");
     }
 
-    #[test]
-    fn test_write_level_records() {
+    #[tokio::test]
+    async fn test_write_level_records() {
         // 验证：写入 5 个级别记录后返回 5，且文件非空。
         let dir = tempdir().expect("创建临时目录失败");
         let log_path = dir.path().join("write_levels.log");
@@ -163,7 +163,7 @@ mod tests {
         let sink = FileSink::new(config).expect("创建 FileSink 失败");
 
         let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
-        let written = write_level_records(&sink, &levels).expect("写入失败");
+        let written = write_level_records(&sink, &levels).await.expect("写入失败");
         assert_eq!(written, 5);
 
         // 文件应已被创建且包含内容
@@ -175,14 +175,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_write_level_records_empty() {
+    #[tokio::test]
+    async fn test_write_level_records_empty() {
         // 验证：空级别列表返回 0 且不报错。
         let dir = tempdir().expect("创建临时目录失败");
         let log_path = dir.path().join("empty.log");
         let config = create_file_config(log_path.to_str().unwrap(), "10MB", false);
         let sink = FileSink::new(config).expect("创建 FileSink 失败");
-        let written = write_level_records(&sink, &[]).expect("写入空列表应成功");
+        let written = write_level_records(&sink, &[]).await.expect("写入空列表应成功");
         assert_eq!(written, 0);
     }
 

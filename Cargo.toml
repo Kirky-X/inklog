@@ -1,6 +1,6 @@
 [package]
 name = "inklog"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Kirky.X"]
@@ -14,11 +14,17 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\"))"] }
 
 [features]
 default = ["http", "cli"]
-dbnexus = ["dep:dbnexus", "dep:sea-orm"]
+sqlite = ["dep:dbnexus", "dep:sea-orm", "dbnexus/sqlite", "sea-orm/sqlx-sqlite"]
+postgres = ["dep:dbnexus", "dep:sea-orm", "dbnexus/postgres", "sea-orm/sqlx-postgres"]
+mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
+# duckdb feature 仅用于绕过 dbnexus 0.3.1+ 的 compile_error 规则 2 例外：
+# 当 sqlite+duckdb+postgres+mysql 全部 4 个后端都启用时允许共存（用于 --all-features 测试）。
+# DatabaseSink 仅支持 sea-orm 后端（sqlite/postgres/mysql），不直接支持 duckdb 驱动。
+duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb"]
 http = ["dep:axum"]
 test-local = []
 cli = ["dep:clap", "dep:glob"]
@@ -29,11 +35,9 @@ metrics = []
 log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "fmt", "registry", "env-filter"] }
-tracing-core = "0.1"
 crossbeam-channel = "0.5"
-tokio = { version = "1.50", features = ["full"] }
-rayon = "1.11"
-num_cpus = "1.17"
+tokio = { version = "1.52", features = ["full"] }
+rayon = "1.12"
 futures = { version = "0.3", features = ["executor"] }
 owo-colors = { version = "4.3", features = ["supports-colors"] }
 regex = "1.12"
@@ -41,24 +45,18 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = { version = "1.1" }
 trait-kit = "0.1.0"
-validator = { version = "0.20", features = ["derive"] }
 thiserror = "2.0"
 anyhow = "1.0"
-num-traits = "0.2"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 axum = { version = "0.8", optional = true }
-uuid = { version = "1.22", features = ["v4"] }
-hostname = "0.4"
 is-terminal = "0.4"
 once_cell = "1.21"
 nix = { version = "0.31", features = ["fs"] }
-bytes = "1.11"
+bytes = "1.12"
 dirs = "6.0"
 parking_lot = "0.12"
-oxcache = { version = "0.2.0", features = ["macros"] }
-moka = { version = "0.12", default-features = false, features = ["sync"] }
-dashmap = "6.1"
+oxcache = { version = "0.3.3", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
 zstd = "0.13"
 aes-gcm = "0.11"
 rand = "0.10"
@@ -66,16 +64,10 @@ base64 = "0.22"
 parquet = { version = "59.0", features = ["async"] }
 arrow-array = "59.0"
 arrow-schema = "59.0"
-dbnexus = { version = "0.2.0", default-features = false, features = ["sqlite", "sql-parser", "config-env", "macros", "permission"], optional = true }
-sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio-native-tls", "with-chrono"], optional = true }
+dbnexus = { version = "0.3.1", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
+sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"
-brotli = "8.0"
-lz4 = "1.28"
-cron = "0.17"
-chrono-tz = "0.10"
-tokio-cron-scheduler = "0.15"
-zeroize = "1.8"
-zeroize_derive = "1.4"
+zeroize = "1.9"
 sha2 = "0.11"
 pbkdf2 = "0.13"
 clap = { version = "4.6", features = ["derive", "env"], optional = true }
@@ -86,12 +78,12 @@ subtle = "2.6"
 [dev-dependencies]
 tempfile = "3.27"
 criterion = { version = "0.8", features = ["async_tokio"] }
-serial_test = "3.4"
+serial_test = "3.5"
 axum = "0.8"
 log = "0.4"
 reqwest = { version = "0.13", features = ["json"] }
 filetime = "0.2"
-bytes = "1.11"
+bytes = "1.12"
 assert_cmd = "2.2"
 predicates = "3.1"
 

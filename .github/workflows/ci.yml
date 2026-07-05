@@ -192,10 +192,10 @@ jobs:
       - name: Run database tests
         run: |
           if [ "${{ matrix.db }}" = "postgres" ]; then
-            cargo test --test integration_tests --features db-postgres 2>&1 | head -50
+            cargo test --test integration_tests --features postgres 2>&1 | head -50
           elif [ "${{ matrix.db }}" = "mysql" ]; then
-            cargo test --test integration_tests --features db-mysql 2>&1 | head -50
+            cargo test --test integration_tests --features mysql 2>&1 | head -50
           else
-            cargo test --lib --features db-sqlite 2>&1 | head -50
+            cargo test --lib --features sqlite 2>&1 | head -50
           fi
         continue-on-error: true

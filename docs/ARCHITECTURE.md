@@ -150,7 +150,7 @@ flowchart TD
     end
     subgraph Adapters["Adapters"]
         OA["OxCache Adapter<br/>(缓存服务)"]
-        CA["Confers Adapter<br/>(配置服务)"]
+        IA["InklogConfig Adapter<br/>(配置服务)"]
         DA["DbNexus Adapter<br/>(数据库服务)"]
     end
 
@@ -158,7 +158,7 @@ flowchart TD
     LB --> CT & CFT & DT
     LD --> CT & CFT & DT
     CT -.-> OA
-    CFT -.-> CA
+    CFT -.-> IA
     DT -.-> DA
 ```
 
@@ -166,7 +166,7 @@ flowchart TD
 
 1. **依赖倒置原则 (DIP)**
    - 高层模块（LoggerManager）依赖抽象接口（trait）
-   - 低层模块（OxCacheAdapter、ConfersAdapter、DbNexusAdapter）实现接口
+   - 低层模块（OxCacheAdapter、InklogConfigAdapter、DbNexusAdapter）实现接口
 
 2. **接口隔离原则 (ISP)**
    - 每个 trait 职责单一：Cache 负责缓存、Config 负责配置、Database 负责存储
@@ -209,7 +209,7 @@ pub trait Config: Send + Sync {
 }
 ```
 
-**生产实现**: `ConfersAdapter` - 基于 confers 库的 TOML 配置支持
+**生产实现**: `InklogConfigAdapter` - 基于 `InklogConfig` 的配置访问
 **测试实现**: `MockConfig` - 基于 `RwLock<HashMap>` 的内存配置
 
 #### Database Trait
@@ -235,7 +235,7 @@ pub trait Database: Send + Sync {
 pub struct LoggerDependencies {
     pub cache: Option<Arc<dyn Cache>>,
     pub config: Option<Arc<dyn Config>>,
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     pub database: Option<Arc<dyn Database>>,
 }
 ```
@@ -245,13 +245,13 @@ pub struct LoggerDependencies {
 1. **纯默认模式** (零依赖)
 ```rust
 let logger = LoggerManager::new().await?;
-// 使用 OxCacheAdapter、ConfersAdapter(默认配置)、无数据库
+// 使用 OxCacheAdapter、InklogConfigAdapter(默认配置)、无数据库
 ```
 
-2. **配置文件模式** (confers feature)
+2. **配置文件模式**
 ```rust
 let logger = LoggerManager::from_file("config.toml").await?;
-// 使用 OxCacheAdapter、ConfersAdapter(文件配置)、DbNexusAdapter(如配置)
+// 使用 OxCacheAdapter、InklogConfigAdapter(文件配置)、DbNexusAdapter(如配置)
 ```
 
 3. **依赖注入模式** (测试和自定义实现)
@@ -270,8 +270,8 @@ let logger = LoggerManager::with_dependencies(deps).await?;
 
 ```rust
 let cache = MockCache::new();
-cache.set("key", "value".to_string()).await;
-assert_eq!(cache.get("key").await, Some("value".to_string()));
+cache.set("key", "value".to_string()).await?;
+assert_eq!(cache.get("key").await?, Some("value".to_string()));
 
 // 延迟模拟（测试超时场景）
 let slow_cache = MockCache::with_delay(100); // 100ms 延迟
@@ -360,7 +360,7 @@ impl DatabaseSink {
 
 ### 配置键映射
 
-ConfersAdapter 支持完整的配置键映射：
+InklogConfigAdapter 支持完整的配置键映射：
 
 **全局配置**:
 - `global.level`、`global.format`、`global.masking_enabled`
@@ -380,15 +380,16 @@ ConfersAdapter 支持完整的配置键映射：
 Sink 抽象层定义统一接口 `LogSink`:
 
 ```rust
+#[async_trait]
 pub trait LogSink: Send + Sync {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError>;
-    fn flush(&mut self) -> Result<(), InklogError>;
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
+    async fn flush(&self) -> Result<(), InklogError>;
     fn is_healthy(&self) -> bool { true }
-    fn shutdown(&mut self) -> Result<(), InklogError>;
+    async fn shutdown(&self) -> Result<(), InklogError>;
 
     // 可选: 轮转支持
-    fn start_rotation_timer(&mut self) {}
-    fn stop_rotation_timer(&mut self) {}
+    fn start_rotation_timer(&self) {}
+    fn stop_rotation_timer(&self) {}
 
     // 可选: 磁盘空间检查
     fn check_disk_space(&self) -> Result<bool, InklogError> { Ok(true) }
@@ -575,16 +576,17 @@ pub struct CustomSink {
     buffer: Vec<LogRecord>,
 }
 
+#[async_trait]
 impl LogSink for CustomSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         self.buffer.push(record.clone());
         if self.buffer.len() >= 10 {
-            self.flush()?;
+            self.flush().await?;
         }
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), InklogError> {
+    async fn flush(&self) -> Result<(), InklogError> {
         // 发送到远程 API
         let payload = serde_json::to_vec(&self.buffer)?;
         self.client
@@ -1083,16 +1085,17 @@ pub struct SlackSink {
     buffer: Vec<LogRecord>,
 }
 
+#[async_trait]
 impl LogSink for SlackSink {
-    fn write(&mut self, record: &LogRecord) -> Result<(), InklogError> {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         self.buffer.push(record.clone());
         if self.buffer.len() >= 10 {
-            self.flush()?;
+            self.flush().await?;
         }
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), InklogError> {
+    async fn flush(&self) -> Result<(), InklogError> {
         let payload = serde_json::json!({
             "text": self.buffer.iter()
                 .filter(|r| r.level == "ERROR" || r.level == "WARN")
@@ -1115,8 +1118,8 @@ impl LogSink for SlackSink {
         self.webhook_url.len() > 0
     }
 
-    fn shutdown(&mut self) -> Result<(), InklogError> {
-        self.flush()
+    async fn shutdown(&self) -> Result<(), InklogError> {
+        self.flush().await
     }
 }
 ```
@@ -1187,7 +1190,7 @@ pub struct InklogConfig {
 | axum   | HTTP 服务器      |
 | serde  | JSON 响应       |
 
-**数据库特性** (默认):
+**数据库特性** (`sqlite`/`postgres`/`mysql`):
 | 依赖      | 用途                    |
 |----------|------------------------|
 | sea-orm  | ORM 层               |
@@ -1218,6 +1221,6 @@ pub struct InklogConfig {
 
 ---
 
-**文档版本**: 1.1（对应 inklog 0.1.1）  
-**最后更新**: 2026-06-29  
-**代码基准**: commit b7c5e6e
+**文档版本**: 1.2（对应 inklog 0.1.2）  
+**最后更新**: 2026-07-05  
+**代码基准**: v0.1.2

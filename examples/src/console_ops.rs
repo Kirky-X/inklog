@@ -34,7 +34,7 @@ pub fn create_console_config(colored: bool, stderr_levels: Vec<String>) -> Conso
 ///
 /// 返回写入的用例数，便于调用方做完整性检查。`target` 统一使用
 /// `"console_ops"`，便于在输出中识别来源。
-pub fn write_test_cases(sink: &dyn LogSink, cases: &[(&str, &str)]) -> Result<usize> {
+pub async fn write_test_cases(sink: &dyn LogSink, cases: &[(&str, &str)]) -> Result<usize> {
     let mut written = 0;
     for (level, message) in cases {
         let record = LogRecord {
@@ -47,10 +47,10 @@ pub fn write_test_cases(sink: &dyn LogSink, cases: &[(&str, &str)]) -> Result<us
             line: None,
             thread_id: "main".to_string(),
         };
-        sink.write(&record)?;
+        sink.write(&record).await?;
         written += 1;
     }
-    sink.flush()?;
+    sink.flush().await?;
     Ok(written)
 }
 
@@ -79,8 +79,8 @@ mod tests {
         assert_eq!(config.stderr_levels, levels);
     }
 
-    #[test]
-    fn test_write_test_cases() {
+    #[tokio::test]
+    async fn test_write_test_cases() {
         // 验证：写入 5 个用例后返回 5，且不报错（ConsoleSink 写 stdout）。
         let config = create_console_config(false, vec![]);
         let sink = ConsoleSink::new(config, LogTemplate::default());
@@ -91,16 +91,16 @@ mod tests {
             ("WARN", "这是 WARN 日志"),
             ("ERROR", "这是 ERROR 日志"),
         ];
-        let written = write_test_cases(&sink, &cases).expect("写入失败");
+        let written = write_test_cases(&sink, &cases).await.expect("写入失败");
         assert_eq!(written, 5);
     }
 
-    #[test]
-    fn test_write_test_cases_empty() {
+    #[tokio::test]
+    async fn test_write_test_cases_empty() {
         // 验证：空用例列表返回 0。
         let config = create_console_config(false, vec![]);
         let sink = ConsoleSink::new(config, LogTemplate::default());
-        let written = write_test_cases(&sink, &[]).expect("写入空列表应成功");
+        let written = write_test_cases(&sink, &[]).await.expect("写入空列表应成功");
         assert_eq!(written, 0);
     }
 }

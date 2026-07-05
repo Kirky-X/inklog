@@ -7,124 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security Fixes
-
-- **恒定时间比较**: 在 `src/manager.rs` 中使用 `subtle::ConstantTimeEq` 实现时序安全的 bearer token 比较，防止时序攻击
-- **拒绝弱密钥**: 在 `src/sink/file.rs` 中实现基于 Shannon 熵（阈值 4.0）的密钥强度验证，低熵密钥将被拒绝并返回错误
-- **随机盐值 PBKDF2**: 在 `src/sink/encryption.rs` 中使用 `rand::rng().fill_bytes()` 生成 16 字节随机盐值替代硬编码盐值
-
-### Code Quality Improvements
-
-- **LogLevel 枚举**: 新增 `src/log_level.rs` 定义 `LogLevel` 枚举类型（Trace/Debug/Info/Warn/Error/Fatal），替代字符串字面量
-- **apply_env! 宏**: 在 `src/config.rs` 中定义 `apply_env!` 宏消除配置解析重复代码，支持嵌套字段路径和环境变量覆盖
-- **词边界正则**: 在 `src/masking.rs` 中使用 `\b` 词边界正则替代简单子串匹配，避免 "cakey"/"polygon" 等字段误判
-- **模板转义修复**: 在 `src/template.rs` 中支持 `{{` → `{` 和 `}}` → `}` 转义序列
-
-### Bug Fixes
-
-- **集成测试密钥**: 修复集成测试中弱熵密钥导致加密文件未生成的问题
-- **confers 库**: 修复 `ConfigError::LockPoisoned` 枚举变体在 match 中缺失的问题
-- **chrono Datelike**: 修复 `src/archive/mod.rs` 中 `Datelike` trait 未导入导致编译错误
-- **LogSink trait 导入**: 修复集成测试中 `LogSink` trait 未导入导致的编译错误
-- **apply_env! 宏**: 修复宏无法匹配 `self.global.level` 等嵌套路径的问题
-
-### Dependencies
-
-- 添加 `subtle` crate 用于恒定时间比较
-
-### Added
-#### 依赖注入架构 (v0.2.0)
-
-完整的依赖注入支持，实现控制反转 (IoC) 设计模式：
-
-- **Trait 定义**: 基础设施层抽象接口
-  - `Cache` trait: 缓存操作接口 (`src/infrastructure/cache.rs`)
-  - `Config` trait: 配置访问接口 (`src/infrastructure/config.rs`)
-  - `Database` trait: 数据库操作接口 (`src/infrastructure/database.rs`)
-
-- **适配器实现**: 连接外部依赖
-  - `OxCacheAdapter`: 连接 oxcache 缓存服务
-  - `ConfersAdapter`: 连接 confers 配置系统
-  - `DbNexusAdapter`: 连接 dbnexus 数据库连接池 (需要 `dbnexus` feature)
-
-- **Mock 实现**: 测试替身
-  - `MockCache`: 内存缓存模拟
-  - `MockConfig`: 内存配置模拟
-  - `MockDatabaseAdapter`: 内存数据库模拟
-
-- **依赖注入 API**:
-  - `LoggerDependencies`: 依赖集合结构体
-  - `LoggerManager::with_dependencies()`: 依赖注入构造方法
-  - `LoggerBuilder::cache()`: 设置缓存依赖
-  - `LoggerBuilder::config()`: 设置配置依赖
-  - `LoggerBuilder::with_database()`: 设置数据库依赖
-
-- **应用容器**:
-  - `InklogContainer`: 应用级依赖管理容器
-  - `InklogContainerBuilder`: 容器构建器
-  - 实例共享：多个 Logger 共享同一依赖实例
-
-- **示例代码**: `examples/src/bin/di_example.rs`
+## [0.1.2] - 2026-07-05
 
 ### BREAKING CHANGES
 
-- **LogSink trait**: 方法签名从 `&mut self` 改为 `&self`
-  - `write()`, `flush()`, `shutdown()` 等方法现在使用 `&self`
-  - 自定义 Sink 实现需要使用内部可变性（RwLock/Mutex）
-  - 所有内置 Sink 实现已更新
-- 移除 `aws` feature 和所有 S3/archive 相关代码
-- 移除 `aws-sdk-s3`、`aws-config`、`aws-types`、`aws-credential-types` 依赖
-- 从 `default` feature 中移除 `aws`
-- 移除 `InklogConfig.s3_archive` 配置字段
-- 移除 `InklogError::S3Error` 和 `InklogError::ArchiveError` 错误变体
-- 移除 `src/integrations/storage/archive/` 整个目录
-- 移除 `examples/src/bin/s3_archive.rs` 示例
-- 移除 `DatabaseSinkConfig` 中的 `archive_to_s3`、`archive_after_days`、`s3_bucket`、`s3_region` 字段
+- **LogSink trait async 化**: `LogSink` trait 的 `write`/`flush`/`shutdown` 方法签名改为 `async`
+  - `FileSink`、`ConsoleSink`、`RingBufferedFileSink`、`DatabaseSink` 全部迁移至 async
+  - `DatabaseSink` 移除 `block_in_place`，使用原生 async
+  - `LoggerManager` 中所有 sink 调用更新为 `.await`
+  - 自定义 Sink 实现需要相应改为 async
 
-### Migration
+- **ObjectPool API 重构**:
+  - `ObjectPool::new`/`with_config`/`get`/`put` 改为 `async` 并返回 `Result<_, InklogError>`
+  - 移除内部 `SHARED_RUNTIME`（内部 tokio runtime）
+  - ThreadLocal 池（`get_log_record`/`put_log_record`/`get_string_buffer`/`put_string_buffer`）保留为同步便捷函数
 
-- 使用 `default` feature 的用户不再获得 S3 归档能力
-- 使用 `aws` feature 的用户需要移除该 feature 引用
-- 配置文件中的 `[s3_archive]` 部分需要移除
-- `DatabaseSinkConfig` 中的 S3 相关字段需要移除
+- **Cache trait 错误处理显性化**: `Cache` trait 的 `get`/`delete`/`exists` 方法返回 `Result<_, InklogError>`（此前为 `Option`/`bool`，错误被 `tracing::warn!` 静默吞掉）
+  - 移除 `OxCacheAdapter::default()`（原本通过 `.expect()` 触发 panic）
+  - `ObjectPool::with_config` 不再静默回退到 `Cache::default()`
+
+- **dbnexus feature 拆分**: `dbnexus` feature 拆分为四个独立 feature：`sqlite`、`postgres`、`mysql`、`duckdb`（`duckdb` 仅用于 `--all-features` 测试场景，DatabaseSink 不直接支持 duckdb 驱动）
 
 ### Changed
 
-- 所有 Sink 实现使用内部可变性模式
-- `FileSink`: 使用 `RwLock` 保护内部状态
-- `ConsoleSink`: 使用 `RwLock` 保护内部状态
-- `DatabaseSink`: 使用 `RwLock` 保护内部状态
-- `AsyncFileSink`: 使用 `RwLock` 保护内部状态
-- `RingBufferedFile`: 使用 `RwLock` 保护内部状态
+#### 依赖重构
 
-#### 计划中的功能 (未来版本)
-- 性能基准测试工具
-- 更多压缩算法支持
-- 分布式追踪集成
+- `oxcache` 升级 0.2.0 → 0.3.3，启用 features `memory`/`serialization`/`tracing`/`macros`
+- `dbnexus` 升级 0.2.0 → 0.3.1，新增 `duckdb` feature 用于 `--all-features` 测试场景（dbnexus 0.3.1 规则 2 例外：sqlite+duckdb+postgres+mysql 全部 4 个后端启用时允许共存）
+- 移除直接的 `moka` 和 `dashmap` 依赖（现仅通过 oxcache 间接依赖）
+- `sea-orm` TLS 后端从 `runtime-tokio-native-tls` 切换至 `runtime-tokio-rustls`
 
-### Changed
-#### 改进计划
-- 配置热重载优化
-- 更详细的错误上下文
-- 代码质量改进
-  - 测试代码中 `unwrap()` → `expect()` 替换 (~52处)
-  - 示例代码中 `unwrap()` → `expect()` 替换
-  - 修复 clippy 警告
+#### 代码清理
 
-#### 配置系统增强
-- S3 加密算法环境变量支持 (`INKLOG_S3_ENCRYPTION_ALGORITHM`)
-- S3 KMS 密钥 ID 环境变量支持 (`INKLOG_S3_ENCRYPTION_KMS_KEY_ID`)
-- INKLOG_ARCHIVE_FORMAT 环境变量支持
+- 移除源码注释中所有 `confers` 引用
+- 清理 `object_pool.rs` 中的死代码（1507 → ~650 行）
 
-### Fixed
-- 配置系统环境变量处理优化
-- HTTP 监控端点实现完成
-- 归档服务 Parquet 导出配置传递修复
-- `src/archive/mod.rs` 中时间戳转换 unwrap 修复
-- 文件锁竞争问题修复
-- 异步上下文日志丢失问题修复
-- 数据库连接池泄漏修复
-- S3 分片上传重试逻辑修复
+### Removed
+
+- `SHARED_RUNTIME`（内部 tokio runtime）
+- `ObjectPoolBuilder`、`PoolMetrics` 类型
+- `ObjectPool` 死代码方法：`with_capacity`/`remove`/`contains`/`capacity`/`metrics`/`clear`/`execute_async`
+- `LOG_RECORD_POOL`/`STRING_POOL` 静态变量
+- `OxCacheAdapter::default()` 实现
+- 直接的 `moka` 和 `dashmap` 依赖
+
+### Security
+
+- 在 `deny.toml` 忽略列表中添加 `RUSTSEC-2026-0173`（proc-macro-error2 unmaintained，transitive via dbnexus-macros/sea-bae，无安全升级路径）
 
 ## [0.1.1] - 2026-06-29
 
@@ -241,7 +170,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/kirkyx/inklog/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/kirkyx/inklog/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/kirkyx/inklog/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kirkyx/inklog/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kirkyx/inklog/compare/v0.0.0...v0.1.0
 [0.0.0]: https://github.com/kirkyx/inklog/releases/tag/v0.0.0

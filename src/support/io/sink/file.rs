@@ -17,6 +17,7 @@ use crate::InklogError;
 use crate::LogRecord;
 use aes_gcm::aead::Aead;
 use aes_gcm::KeyInit;
+use async_trait::async_trait;
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, Utc};
 use parking_lot::RwLock;
@@ -57,7 +58,7 @@ struct FileSinkInner {
     /// 断路器
     circuit_breaker: CircuitBreaker,
     /// 降级接收器
-    fallback_sink: Option<Arc<parking_lot::Mutex<dyn LogSink + Send>>>,
+    fallback_sink: Option<Arc<dyn LogSink + Send + Sync>>,
     /// 轮转定时器
     rotation_timer: Option<Arc<parking_lot::Mutex<Instant>>>,
     /// 轮转定时器句柄
@@ -865,83 +866,103 @@ impl FileSink {
     }
 }
 
+#[async_trait]
 impl LogSink for FileSink {
-    fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-        let mut inner = self.inner.write();
-
-        // 检查断路器
-        if !inner.circuit_breaker.can_execute() {
-            if let Some(sink) = &inner.fallback_sink {
-                let locked = sink.lock();
-                let _ = locked.write(record);
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        // 检查断路器（使用 read lock，作用域内释放后再 await）
+        let circuit_open = {
+            let inner = self.inner.read();
+            !inner.circuit_breaker.can_execute()
+        };
+        if circuit_open {
+            let fallback = self.inner.read().fallback_sink.clone();
+            if let Some(sink) = fallback {
+                let _ = sink.write(record).await;
             }
             return Ok(());
         }
 
-        // 检查磁盘空间
+        // 检查磁盘空间（sync，不持有锁）
         if !self.check_disk_space()? {
             warn!("Low disk space - checking before write");
-            if let Some(sink) = &inner.fallback_sink {
-                let locked = sink.lock();
-                let _ = locked.write(record);
+            let fallback = self.inner.read().fallback_sink.clone();
+            if let Some(sink) = fallback {
+                let _ = sink.write(record).await;
             }
             return Ok(());
         }
 
-        // 应用数据脱敏（如果启用）
-        let masked_record = if self.config.masking_enabled {
-            let mut masked = record.clone();
-            masked.message = self.masker.mask(&record.message);
-            self.masker.mask_hashmap(&mut masked.fields);
-            masked
-        } else {
-            record.clone()
-        };
+        // 主路径：所有需要 write lock 的同步操作都封装在 block 内，
+        // block 返回 Some(fallback) 表示轮转失败需要降级写入，None 表示正常完成。
+        // parking_lot::RwLockWriteGuard 非 Send，不能跨 await 持有，故用 block scope 隔离。
+        let rotation_failed_fallback: Option<Arc<dyn LogSink + Send + Sync>> = {
+            let mut inner = self.inner.write();
 
-        // 添加到批量缓冲区
-        // Update current_size before adding to buffer
-        let record_len = masked_record.timestamp.to_rfc3339().len()
-            + masked_record.level.len()
-            + masked_record.target.len()
-            + masked_record.message.len()
-            + 7;
-        inner.current_size += record_len as u64;
-        inner.batch_buffer.push(masked_record);
+            // 应用数据脱敏（如果启用）
+            let masked_record = if self.config.masking_enabled {
+                let mut masked = record.clone();
+                masked.message = self.masker.mask(&record.message);
+                self.masker.mask_hashmap(&mut masked.fields);
+                masked
+            } else {
+                record.clone()
+            };
 
-        // 检查轮转条件（在更新 current_size 之后）
-        let should_rotate = Self::parse_size(&self.config.max_size)
-            .is_some_and(|max| inner.current_size >= max)
-            || inner
-                .rotation_timer
-                .as_ref()
-                .map(|t| t.lock().elapsed() >= self.rotation_interval)
-                .unwrap_or(false);
+            // 添加到批量缓冲区
+            let record_len = masked_record.timestamp.to_rfc3339().len()
+                + masked_record.level.len()
+                + masked_record.target.len()
+                + masked_record.message.len()
+                + 7;
+            inner.current_size += record_len as u64;
+            inner.batch_buffer.push(masked_record);
 
-        if should_rotate {
-            if let Err(e) = self.rotate_inner(&mut inner) {
-                error!("Rotation failed: {}", e);
-                if let Some(sink) = &inner.fallback_sink {
-                    let locked = sink.lock();
-                    let _ = locked.write(record);
+            // 检查轮转条件（在更新 current_size 之后）
+            let should_rotate = Self::parse_size(&self.config.max_size)
+                .is_some_and(|max| inner.current_size >= max)
+                || inner
+                    .rotation_timer
+                    .as_ref()
+                    .map(|t| t.lock().elapsed() >= self.rotation_interval)
+                    .unwrap_or(false);
+
+            if should_rotate {
+                if let Err(e) = self.rotate_inner(&mut inner) {
+                    error!("Rotation failed: {}", e);
+                    inner.fallback_sink.clone()
+                } else {
+                    // 轮转成功，继续 batch flush
+                    let now = Instant::now();
+                    let flush_interval = StdDuration::from_millis(self.config.flush_interval_ms);
+                    if inner.batch_buffer.len() >= self.config.batch_size
+                        || now.duration_since(inner.last_flush_time) >= flush_interval
+                    {
+                        self.flush_batch_inner(&mut inner)?;
+                    }
+                    None
                 }
-                return Ok(());
+            } else {
+                // 无需轮转，batch flush
+                let now = Instant::now();
+                let flush_interval = StdDuration::from_millis(self.config.flush_interval_ms);
+                if inner.batch_buffer.len() >= self.config.batch_size
+                    || now.duration_since(inner.last_flush_time) >= flush_interval
+                {
+                    self.flush_batch_inner(&mut inner)?;
+                }
+                None
             }
-        }
+        }; // inner 在此 drop，write lock 释放
 
-        // 检查是否需要批量写入
-        let now = Instant::now();
-        let flush_interval = StdDuration::from_millis(self.config.flush_interval_ms);
-
-        if inner.batch_buffer.len() >= self.config.batch_size
-            || now.duration_since(inner.last_flush_time) >= flush_interval
-        {
-            self.flush_batch_inner(&mut inner)?;
+        // 轮转失败路径：await fallback sink 的 write（lock 已释放，安全 await）
+        if let Some(sink) = rotation_failed_fallback {
+            let _ = sink.write(record).await;
         }
 
         Ok(())
     }
 
-    fn flush(&self) -> Result<(), InklogError> {
+    async fn flush(&self) -> Result<(), InklogError> {
         let mut inner = self.inner.write();
         // 先刷新批量缓冲区
         self.flush_batch_inner(&mut inner)?;
@@ -957,27 +978,39 @@ impl LogSink for FileSink {
         self.inner.read().current_file.is_some()
     }
 
-    fn shutdown(&self) -> Result<(), InklogError> {
+    async fn shutdown(&self) -> Result<(), InklogError> {
         // Signal shutdown to all timer threads first
         self.shutdown_flag.store(true, Ordering::Relaxed);
 
-        let mut inner = self.inner.write();
+        // All sync operations on `inner` are confined to this block.
+        // The guard is dropped at block end, so the await below does not
+        // cross a `!Send` boundary (parking_lot::RwLockWriteGuard is !Send).
+        let fallback = {
+            let mut inner = self.inner.write();
 
-        // Stop rotation timer with graceful shutdown
-        if let Some(handle) = inner.timer_handle.take() {
-            let _ = handle.join(); // Join without timeout for simplicity
-        }
-        inner.rotation_timer = None;
+            // Stop rotation timer with graceful shutdown
+            if let Some(handle) = inner.timer_handle.take() {
+                let _ = handle.join();
+            }
+            inner.rotation_timer = None;
 
-        // Stop cleanup timer with graceful shutdown
-        if let Some(handle) = inner.cleanup_timer_handle.take() {
-            let _ = handle.join();
-        }
+            // Stop cleanup timer with graceful shutdown
+            if let Some(handle) = inner.cleanup_timer_handle.take() {
+                let _ = handle.join();
+            }
 
-        // Flush remaining data
-        self.flush_batch_inner(&mut inner)?;
-        if let Some(file) = &mut inner.current_file {
-            file.flush()?;
+            // Flush remaining data
+            self.flush_batch_inner(&mut inner)?;
+            if let Some(file) = &mut inner.current_file {
+                file.flush()?;
+            }
+
+            inner.fallback_sink.take()
+        };
+
+        // Shut down fallback sink (lock released, safe to await)
+        if let Some(sink) = fallback {
+            let _ = sink.shutdown().await;
         }
 
         Ok(())
@@ -1037,13 +1070,14 @@ impl Drop for FileSink {
             }
         }
 
-        // Close fallback console sink
+        // Fallback sink: best-effort cleanup only.
+        // Async shutdown() already calls `sink.shutdown().await` (line 994-999).
+        // In Drop we cannot `.await`; rely on `Arc` drop + fallback sink's own Drop impl.
+        // If caller forgets to call `shutdown()`, fallback sink resources are reclaimed
+        // when the last `Arc` is dropped (Sink's own Drop handles file close etc.).
         {
             let mut inner = self.inner.write();
-            if let Some(fallback) = inner.fallback_sink.take() {
-                let locked = fallback.lock();
-                let _ = locked.shutdown();
-            }
+            let _fallback = inner.fallback_sink.take();
         }
     }
 }
@@ -1245,8 +1279,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_write_with_disk_space_check() {
+    #[tokio::test]
+    async fn test_write_with_disk_space_check() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");
 
@@ -1270,14 +1304,14 @@ mod tests {
         };
 
         // Should succeed with sufficient disk space
-        let result = sink.write(&record);
+        let result = sink.write(&record).await;
         assert!(
             result.is_ok(),
             "Write should succeed with sufficient disk space"
         );
 
         // Flush to ensure data is written
-        sink.flush().unwrap();
+        sink.flush().await.unwrap();
 
         // Verify file was created and contains data
         assert!(log_path.exists(), "Log file should exist");
@@ -1356,8 +1390,7 @@ mod tests {
 
     #[test]
     fn test_file_sink_new_default() {
-        // Note: confers derive generates Default with empty PathBuf for path field.
-        // We need to provide an explicit path for the test.
+        // FileSinkConfig::default() 的 path 为空 PathBuf，测试需显式提供路径。
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,
@@ -2255,8 +2288,8 @@ mod tests {
         assert!(sink.is_healthy());
     }
 
-    #[test]
-    fn test_file_sink_flush_writes_buffered_records() {
+    #[tokio::test]
+    async fn test_file_sink_flush_writes_buffered_records() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");
         let config = FileSinkConfig {
@@ -2270,14 +2303,14 @@ mod tests {
             sink.open_file_inner(&mut inner).unwrap();
             inner.batch_buffer.push(create_test_record("Flush test"));
         }
-        let result = sink.flush();
+        let result = sink.flush().await;
         assert!(result.is_ok());
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("Flush test"));
     }
 
-    #[test]
-    fn test_file_sink_flush_without_file_succeeds() {
+    #[tokio::test]
+    async fn test_file_sink_flush_without_file_succeeds() {
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,
@@ -2286,12 +2319,12 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
         // 未打开文件，flush 应仍成功（空操作）
-        let result = sink.flush();
+        let result = sink.flush().await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_file_sink_shutdown_flushes_remaining_data() {
+    #[tokio::test]
+    async fn test_file_sink_shutdown_flushes_remaining_data() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");
         let config = FileSinkConfig {
@@ -2305,7 +2338,7 @@ mod tests {
             sink.open_file_inner(&mut inner).unwrap();
             inner.batch_buffer.push(create_test_record("Shutdown test"));
         }
-        let result = sink.shutdown();
+        let result = sink.shutdown().await;
         assert!(result.is_ok());
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("Shutdown test"));
@@ -2313,8 +2346,8 @@ mod tests {
 
     // ==================== LogSink::write 测试 ====================
 
-    #[test]
-    fn test_write_multiple_records_all_persisted() {
+    #[tokio::test]
+    async fn test_write_multiple_records_all_persisted() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");
         let config = FileSinkConfig {
@@ -2327,18 +2360,18 @@ mod tests {
         let sink = FileSink::new(config).unwrap();
         for i in 0..5 {
             let record = create_test_record(&format!("Message {}", i));
-            sink.write(&record).unwrap();
+            sink.write(&record).await.unwrap();
         }
-        sink.flush().unwrap();
+        sink.flush().await.unwrap();
         let content = std::fs::read_to_string(&log_path).unwrap();
         for i in 0..5 {
             assert!(content.contains(&format!("Message {}", i)));
         }
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_write_with_masking_disabled_preserves_sensitive_value() {
+    #[tokio::test]
+    async fn test_write_with_masking_disabled_preserves_sensitive_value() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");
         let config = FileSinkConfig {
@@ -2360,18 +2393,18 @@ mod tests {
             line: None,
             thread_id: "t1".to_string(),
         };
-        sink.write(&record).unwrap();
-        sink.flush().unwrap();
+        sink.write(&record).await.unwrap();
+        sink.flush().await.unwrap();
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(
             content.contains("secret1234567890"),
             "masking disabled should preserve original value"
         );
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_write_with_masking_enabled_redacts_sensitive_value() {
+    #[tokio::test]
+    async fn test_write_with_masking_enabled_redacts_sensitive_value() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");
         let config = FileSinkConfig {
@@ -2393,8 +2426,8 @@ mod tests {
             line: None,
             thread_id: "t1".to_string(),
         };
-        sink.write(&record).unwrap();
-        sink.flush().unwrap();
+        sink.write(&record).await.unwrap();
+        sink.flush().await.unwrap();
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(
             !content.contains("secret1234567890"),
@@ -2404,11 +2437,11 @@ mod tests {
             content.contains("***REDACTED***"),
             "masked output should contain REDACTED marker"
         );
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_write_appends_to_existing_file() {
+    #[tokio::test]
+    async fn test_write_appends_to_existing_file() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");
         // 预先写入内容
@@ -2421,18 +2454,20 @@ mod tests {
             ..Default::default()
         };
         let sink = FileSink::new(config).unwrap();
-        sink.write(&create_test_record("Appended message")).unwrap();
-        sink.flush().unwrap();
+        sink.write(&create_test_record("Appended message"))
+            .await
+            .unwrap();
+        sink.flush().await.unwrap();
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.starts_with("pre-existing line"));
         assert!(content.contains("Appended message"));
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
     // ==================== rotation_time 分支覆盖测试 ====================
 
-    #[test]
-    fn test_file_sink_new_with_weekly_rotation() {
+    #[tokio::test]
+    async fn test_file_sink_new_with_weekly_rotation() {
         // 覆盖行 108: "weekly" => StdDuration::from_secs(604800)
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
@@ -2443,11 +2478,11 @@ mod tests {
         };
         let sink = FileSink::new(config).unwrap();
         assert_eq!(sink.rotation_interval, StdDuration::from_secs(604800));
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_file_sink_new_with_monthly_rotation() {
+    #[tokio::test]
+    async fn test_file_sink_new_with_monthly_rotation() {
         // 覆盖行 109: "monthly" => StdDuration::from_secs(2592000)
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
@@ -2458,11 +2493,11 @@ mod tests {
         };
         let sink = FileSink::new(config).unwrap();
         assert_eq!(sink.rotation_interval, StdDuration::from_secs(2592000));
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_file_sink_new_with_unknown_rotation_falls_back_to_daily() {
+    #[tokio::test]
+    async fn test_file_sink_new_with_unknown_rotation_falls_back_to_daily() {
         // 覆盖行 110: _ => StdDuration::from_secs(86400)（默认分支）
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
@@ -2473,11 +2508,11 @@ mod tests {
         };
         let sink = FileSink::new(config).unwrap();
         assert_eq!(sink.rotation_interval, StdDuration::from_secs(86400));
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn test_file_sink_new_with_hourly_rotation() {
+    #[tokio::test]
+    async fn test_file_sink_new_with_hourly_rotation() {
         // 覆盖行 106: "hourly" => StdDuration::from_secs(3600)
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
@@ -2488,7 +2523,7 @@ mod tests {
         };
         let sink = FileSink::new(config).unwrap();
         assert_eq!(sink.rotation_interval, StdDuration::from_secs(3600));
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
     }
 
     // ==================== get_encryption_key 错误路径测试 ====================
@@ -2784,8 +2819,9 @@ mod tests {
 
     // ==================== rotate_inner 测试 ====================
 
-    #[test]
-    fn test_rotate_inner_basic() {
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_rotate_inner_basic() {
         // 覆盖 rotate_inner 基本轮转路径
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("rotate.log");
@@ -2807,7 +2843,7 @@ mod tests {
         assert!(result.is_ok(), "rotate_inner should succeed");
         drop(inner);
 
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
 
         // 原文件应被重命名（轮转后），新文件应被创建
         let entries: Vec<_> = std::fs::read_dir(temp_dir.path()).unwrap().collect();
@@ -2818,8 +2854,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_rotate_inner_with_compression() {
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_rotate_inner_with_compression() {
         // 覆盖 rotate_inner 的压缩分支（行 748-755）
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("rotate_compress.log");
@@ -2845,7 +2882,7 @@ mod tests {
 
         // 给后台压缩线程一点时间完成
         std::thread::sleep(std::time::Duration::from_millis(500));
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
 
         // 检查是否有 .zst 文件生成
         let has_zst = std::fs::read_dir(temp_dir.path())
@@ -2856,9 +2893,10 @@ mod tests {
 
     // ==================== rotate_inner encrypt-only 分支测试 ====================
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn test_rotate_inner_with_encryption_only_branch() {
+    #[allow(clippy::await_holding_lock)]
+    async fn test_rotate_inner_with_encryption_only_branch() {
         // 覆盖行 808-847：compress=false 但 encrypt=true 的分支
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("rotate_encrypt.log");
@@ -2887,7 +2925,7 @@ mod tests {
 
         // 给后台加密线程一点时间完成
         std::thread::sleep(std::time::Duration::from_millis(500));
-        sink.shutdown().unwrap();
+        sink.shutdown().await.unwrap();
 
         // 检查是否有 .enc 文件生成（encrypt-only 路径会生成 .enc 文件）
         let has_enc = std::fs::read_dir(temp_dir.path())
@@ -3111,24 +3149,47 @@ mod tests {
         write_count: Arc<parking_lot::Mutex<usize>>,
     }
 
-    impl LogSink for MockFallbackSink {
-        fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
-            *self.write_count.lock() += 1;
+    /// Mock LogSink，跟踪 shutdown 调用，用于测试 shutdown 路径
+    struct MockFallbackSinkWithShutdownFlag {
+        shutdown_called: Arc<parking_lot::Mutex<bool>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LogSink for MockFallbackSinkWithShutdownFlag {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
             Ok(())
         }
-        fn flush(&self) -> Result<(), InklogError> {
+        async fn flush(&self) -> Result<(), InklogError> {
             Ok(())
         }
         fn is_healthy(&self) -> bool {
             true
         }
-        fn shutdown(&self) -> Result<(), InklogError> {
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            *self.shutdown_called.lock() = true;
             Ok(())
         }
     }
 
-    #[test]
-    fn test_write_with_open_circuit_breaker_uses_fallback_sink() {
+    #[async_trait::async_trait]
+    impl LogSink for MockFallbackSink {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            *self.write_count.lock() += 1;
+            Ok(())
+        }
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+        fn is_healthy(&self) -> bool {
+            true
+        }
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_write_with_open_circuit_breaker_uses_fallback_sink() {
         // 覆盖行 873-879：circuit breaker 打开时，使用 fallback sink 写入
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
@@ -3145,7 +3206,7 @@ mod tests {
         };
         {
             let mut inner = sink.inner.write();
-            inner.fallback_sink = Some(Arc::new(parking_lot::Mutex::new(mock_sink)));
+            inner.fallback_sink = Some(Arc::new(mock_sink));
             // 触发足够多的失败使断路器打开（failure_threshold=5）
             for _ in 0..5 {
                 inner.circuit_breaker.record_failure();
@@ -3155,7 +3216,7 @@ mod tests {
         }
 
         let record = create_test_record("Fallback test");
-        let result = sink.write(&record);
+        let result = sink.write(&record).await;
         assert!(
             result.is_ok(),
             "write should not error when circuit is open"
@@ -3171,8 +3232,8 @@ mod tests {
 
     // ==================== rotation 失败使用 fallback sink 测试 ====================
 
-    #[test]
-    fn test_write_with_rotation_failure_uses_fallback_sink() {
+    #[tokio::test]
+    async fn test_write_with_rotation_failure_uses_fallback_sink() {
         // 覆盖行 921-928：rotate_inner 失败时使用 fallback sink 写入
         let temp_dir = tempdir().unwrap();
         // 构造一个会让 rotate_inner 失败的场景：
@@ -3199,12 +3260,12 @@ mod tests {
         };
         {
             let mut inner = sink.inner.write();
-            inner.fallback_sink = Some(Arc::new(parking_lot::Mutex::new(mock_sink)));
+            inner.fallback_sink = Some(Arc::new(mock_sink));
         }
 
         // 写入一条记录，触发 size 轮转，但轮转会因路径无效而失败
         let record = create_test_record("Rotation failure test");
-        let result = sink.write(&record);
+        let result = sink.write(&record).await;
         // write 不应返回错误（错误被吞掉，转用 fallback sink）
         assert!(result.is_ok(), "write should not error when rotation fails");
         // fallback sink 应被调用
@@ -3216,8 +3277,8 @@ mod tests {
 
     // ==================== shutdown 完整流程测试 ====================
 
-    #[test]
-    fn test_shutdown_with_active_timers_completes_successfully() {
+    #[tokio::test]
+    async fn test_shutdown_with_active_timers_completes_successfully() {
         // 覆盖 line 960-984：shutdown 应能正确停止 active 的 timer 线程
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("shutdown_test.log");
@@ -3232,11 +3293,11 @@ mod tests {
         // 写入一些数据
         for i in 0..3 {
             let record = create_test_record(&format!("Pre-shutdown message {}", i));
-            sink.write(&record).unwrap();
+            sink.write(&record).await.unwrap();
         }
 
         // shutdown 应能正常完成（线程会响应 shutdown_flag 并退出）
-        let result = sink.shutdown();
+        let result = sink.shutdown().await;
         assert!(result.is_ok(), "shutdown should complete successfully");
 
         // 验证数据已被刷盘
@@ -3251,8 +3312,8 @@ mod tests {
 
     // ==================== Drop trait 测试 ====================
 
-    #[test]
-    fn test_drop_does_not_panic_with_active_timers() {
+    #[tokio::test]
+    async fn test_drop_does_not_panic_with_active_timers() {
         // 覆盖 line 988-1048：Drop 实现应能优雅处理 active 的 timer 线程
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("drop_test.log");
@@ -3265,6 +3326,7 @@ mod tests {
 
         // 写入一些数据但不调用 shutdown，直接 drop
         sink.write(&create_test_record("Drop test message"))
+            .await
             .unwrap();
 
         // drop 应不 panic，且应等待线程退出（带超时）
@@ -3371,6 +3433,191 @@ mod tests {
         assert!(
             result.is_err(),
             "four-byte pattern key should be rejected (entropy = 2.0 < 4.0)"
+        );
+    }
+
+    // ==================== open_file_inner: OpenOptions 失败分支 (L320-322) ====================
+
+    #[test]
+    fn test_open_file_inner_fails_when_path_is_directory() {
+        // 覆盖行 320-322：OpenOptions::open 失败时返回 IoError
+        // 当 path 指向一个已存在的目录时，open(create+append) 会失败
+        let temp_dir = tempdir().unwrap();
+        let dir_as_path = temp_dir.path().to_path_buf();
+        // dir_as_path 是目录，OpenOptions::new().create(true).append(true).open(dir) 会失败
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: dir_as_path,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.open_file_inner(&mut inner);
+        assert!(
+            result.is_err(),
+            "open_file_inner should fail when path is an existing directory"
+        );
+        // 确认 inner.current_file 未被设置
+        assert!(inner.current_file.is_none());
+    }
+
+    // ==================== compress_file: File::create 失败分支 (L643-644) ====================
+
+    #[test]
+    fn test_compress_file_fails_when_output_dir_readonly() {
+        // 覆盖行 643-644：File::create(compressed_path) 失败时返回 IoError
+        // 通过将父目录设为只读来触发 File::create 失败
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("readonly_test.log");
+        std::fs::write(&log_path, "test data").unwrap();
+
+        // 将父目录设为只读
+        let original_perms = std::fs::metadata(temp_dir.path()).unwrap().permissions();
+        let mut readonly_perms = original_perms.clone();
+        readonly_perms.set_mode(0o555); // r-x for all
+        std::fs::set_permissions(temp_dir.path(), readonly_perms).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let result = sink.compress_file(&log_path);
+
+        // 恢复权限以便 tempdir 能清理（先恢复再断言，避免泄漏）
+        std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
+
+        // root 用户会绕过权限检查；只在 result 为 Err 时断言错误类型
+        match result {
+            Err(InklogError::IoError(_)) => { /* 预期：非 root 下 File::create 失败 */ }
+            Ok(_) => {
+                // root 下权限被绕过，压缩成功——清理产物
+                let _ = std::fs::remove_file(log_path.with_extension("zst"));
+            }
+            other => panic!("expected IoError or Ok, got: {:?}", other),
+        }
+    }
+
+    // ==================== encrypt_file: File::create 失败分支 (L716-717) ====================
+
+    #[test]
+    fn test_encrypt_file_fails_when_output_dir_readonly() {
+        // 覆盖行 716-717：File::create(output_path) 失败时返回 IoError
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("encrypt_input.bin");
+        std::fs::write(&input_path, b"plaintext data").unwrap();
+
+        // 设置有效的加密密钥（32 字节 base64）；用自定义 env var 避免与其他测试串扰
+        let (_key_bytes, key_b64) = make_test_key();
+        let enc_key_env = "TEST_ENCRYPT_READONLY_KEY";
+        std::env::set_var(enc_key_env, &key_b64);
+
+        // 将父目录设为只读
+        let original_perms = std::fs::metadata(temp_dir.path()).unwrap().permissions();
+        let mut readonly_perms = original_perms.clone();
+        readonly_perms.set_mode(0o555);
+        std::fs::set_permissions(temp_dir.path(), readonly_perms).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: input_path.clone(),
+            encrypt: true,
+            encryption_key_env: Some(enc_key_env.to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let output_path = temp_dir.path().join("nonexistent_encrypted.enc");
+        let result = sink.encrypt_file(&input_path, &output_path);
+
+        // 恢复权限
+        std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
+        std::env::remove_var(enc_key_env);
+
+        // root 用户会绕过权限检查；只在 result 为 Err 时断言错误类型
+        match result {
+            Err(InklogError::IoError(_)) => { /* 预期：非 root 下 File::create 失败 */ }
+            Ok(_) => {
+                let _ = std::fs::remove_file(&output_path);
+            }
+            other => panic!("expected IoError or Ok, got: {:?}", other),
+        }
+    }
+
+    // ==================== rotate_inner: rename 失败 fallback 分支 (L753-758) ====================
+
+    #[test]
+    fn test_rotate_inner_rename_failure_returns_error_when_copy_also_fails() {
+        // 覆盖行 753-758：rename 失败且 copy 也失败时返回 IoError
+        // 通过将父目录设为只读来使 rename 和 copy 都失败
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("rotate_rename_fail.log");
+        std::fs::write(&log_path, "rotation test data").unwrap();
+
+        // 将父目录设为只读
+        let original_perms = std::fs::metadata(temp_dir.path()).unwrap().permissions();
+        let mut readonly_perms = original_perms.clone();
+        readonly_perms.set_mode(0o555);
+        std::fs::set_permissions(temp_dir.path(), readonly_perms).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.rotate_inner(&mut inner);
+
+        // 恢复权限
+        std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
+
+        // root 用户会绕过权限检查；只在 result 为 Err 时断言错误类型
+        match result {
+            Err(InklogError::IoError(_)) => { /* 预期：非 root 下 rename+copy 失败 */ }
+            Ok(_) => {
+                // root 下 rename 成功——清理轮转产物
+                let _ = std::fs::remove_file(log_path);
+            }
+            other => panic!("expected IoError or Ok, got: {:?}", other),
+        }
+    }
+
+    // ==================== shutdown: fallback_sink.shutdown() 调用 (L1011-1014) ====================
+
+    #[tokio::test]
+    async fn test_shutdown_calls_fallback_sink_shutdown() {
+        // 覆盖 L1013：当 fallback_sink 存在时，shutdown() 应调用其 shutdown()
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("shutdown_fallback.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        // 注入 fallback sink
+        let shutdown_called = Arc::new(parking_lot::Mutex::new(false));
+        let mock_sink = MockFallbackSinkWithShutdownFlag {
+            shutdown_called: shutdown_called.clone(),
+        };
+        {
+            let mut inner = sink.inner.write();
+            inner.fallback_sink = Some(Arc::new(mock_sink));
+        }
+
+        // 调用 shutdown——应触发 fallback_sink.shutdown()
+        let result = sink.shutdown().await;
+        assert!(result.is_ok(), "shutdown should succeed");
+
+        // 验证 fallback sink 的 shutdown 被调用
+        assert!(
+            *shutdown_called.lock(),
+            "fallback sink shutdown should be called"
         );
     }
 }

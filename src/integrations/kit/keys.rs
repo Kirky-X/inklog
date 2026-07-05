@@ -16,7 +16,7 @@
 //! with a bare `ConfigKey` struct under glob imports of both
 //! `trait_kit::prelude::*` and `inklog::integrations::kit::*`.
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::integrations::infra::Database;
 use crate::integrations::infra::{Cache, Config};
 use crate::InklogConfig;
@@ -50,10 +50,10 @@ impl CapabilityKey for CacheCapabilityKey {
 /// Register an `Arc<dyn Database>` via
 /// `kit.provide::<DatabaseCapabilityKey>(value)` and retrieve it via
 /// `kit.require::<DatabaseCapabilityKey>()`.
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub struct DatabaseCapabilityKey;
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl CapabilityKey for DatabaseCapabilityKey {
     type Capability = dyn Database;
     const NAME: &'static str = "database";
@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(CacheCapabilityKey::NAME, "cache");
     }
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[test]
     fn database_capability_key_name() {
         assert_eq!(DatabaseCapabilityKey::NAME, "database");

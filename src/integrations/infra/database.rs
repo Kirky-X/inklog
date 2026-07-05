@@ -75,9 +75,9 @@ pub trait Database: Send + Sync {
 // DbNexusAdapter - dbnexus 适配器实现 (条件编译)
 // ============================================================================
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use dbnexus::database::pool::DbPool;
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use dbnexus::foundation::config::DbConfig;
 
 /// dbnexus 适配器
@@ -105,13 +105,13 @@ use dbnexus::foundation::config::DbConfig;
 ///     Ok(())
 /// }
 /// ```
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub struct DbNexusAdapter {
     pool: DbPool,
     table_name: String,
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 impl DbNexusAdapter {
     /// 创建新的 dbnexus 适配器
     ///
@@ -210,7 +210,7 @@ impl DbNexusAdapter {
     }
 }
 
-#[cfg(feature = "dbnexus")]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[async_trait]
 impl Database for DbNexusAdapter {
     async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {
@@ -305,7 +305,7 @@ impl Database for DbNexusAdapter {
 // 非 dbnexus feature 时的占位实现
 // ============================================================================
 
-#[cfg(not(feature = "dbnexus"))]
+#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 /// DbNexusAdapter - 仅在启用 `dbnexus` feature 时可用
 ///
 /// 当未启用 `dbnexus` feature 时，此类型不存在。
@@ -314,7 +314,7 @@ pub struct DbNexusAdapter {
     _phantom: (),
 }
 
-#[cfg(not(feature = "dbnexus"))]
+#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 impl DbNexusAdapter {
     /// 此方法仅在启用 `dbnexus` feature 时可用
     #[deprecated(note = "Enable 'dbnexus' feature to use DbNexusAdapter")]
@@ -465,7 +465,7 @@ mod tests {
     // DbNexusAdapter 测试 (需要 feature)
     // ============================================================================
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test]
     async fn test_dbnexus_adapter_health_check() {
         // 创建临时权限配置文件
@@ -548,7 +548,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(feature = "dbnexus")]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test]
     async fn test_dbnexus_adapter_insert_batch() {
         // 创建临时权限配置文件
@@ -630,7 +630,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(not(feature = "dbnexus"))]
+    #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
     #[allow(deprecated)]
     #[tokio::test]
     async fn test_dbnexus_adapter_not_available_without_feature() {
@@ -755,5 +755,72 @@ mod tests {
         let stored = db.get_records();
         assert_eq!(stored[0].message, "message1");
         assert_eq!(stored[1].message, "message2");
+    }
+
+    // ============================================================================
+    // DbNexusAdapter getter 与空批量插入测试
+    // 覆盖行：181-183 (Ok(Self)), 203-204 (pool()), 208-209 (table_name()), 218 (Ok(0))
+    // ============================================================================
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[tokio::test]
+    async fn test_dbnexus_adapter_with_table_name_creates_instance() {
+        // 覆盖行 181-183：with_table_name 成功路径返回 Ok(Self { pool, table_name })
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join("inklog_with_table_name.db");
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
+
+        let adapter = DbNexusAdapter::with_table_name(&db_url, 1, "custom_logs")
+            .await
+            .expect("with_table_name should succeed");
+
+        // 覆盖行 208-209：table_name() getter
+        assert_eq!(adapter.table_name(), "custom_logs");
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[tokio::test]
+    async fn test_dbnexus_adapter_pool_getter_returns_underlying_pool() {
+        // 覆盖行 203-204：pool() getter
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join("inklog_pool_getter.db");
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
+
+        let adapter = DbNexusAdapter::new(&db_url, 1)
+            .await
+            .expect("new should succeed");
+
+        // pool() 返回底层 DbPool 引用——验证可获取 admin 会话即可
+        let _session = adapter
+            .pool()
+            .get_session("admin")
+            .await
+            .expect("should get session from underlying pool");
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[tokio::test]
+    async fn test_dbnexus_adapter_insert_empty_batch_returns_zero() {
+        // 覆盖行 218：insert_batch 收到空切片时立即返回 Ok(0)
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join("inklog_empty_batch.db");
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
+
+        let adapter = DbNexusAdapter::new(&db_url, 1)
+            .await
+            .expect("new should succeed");
+
+        let empty: Vec<LogRecord> = vec![];
+        let count = adapter
+            .insert_batch(&empty)
+            .await
+            .expect("empty batch should succeed");
+        assert_eq!(count, 0, "empty batch must return 0");
+
+        let _ = std::fs::remove_file(&db_path);
     }
 }

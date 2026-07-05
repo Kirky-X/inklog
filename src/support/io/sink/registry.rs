@@ -12,6 +12,7 @@ use crate::support::io::sink::file::FileSink;
 use crate::support::io::sink::LogSink;
 use crate::FileSinkConfig;
 use crate::InklogError;
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
@@ -20,9 +21,10 @@ use tracing::info;
 ///
 /// Implement this trait to create custom sink factories that can be
 /// registered with the `SinkRegistry`.
+#[async_trait]
 pub trait SinkFactory: Send + Sync {
     /// Create a new sink instance.
-    fn create(&self) -> Result<Arc<dyn LogSink>, InklogError>;
+    async fn create(&self) -> Result<Arc<dyn LogSink>, InklogError>;
 
     /// Get the sink type name.
     fn sink_type(&self) -> &'static str;
@@ -71,12 +73,12 @@ impl SinkRegistry {
     }
 
     /// Create a sink by type name.
-    pub fn create(&self, sink_type: &str) -> Result<Arc<dyn LogSink>, InklogError> {
+    pub async fn create(&self, sink_type: &str) -> Result<Arc<dyn LogSink>, InklogError> {
         let factory = self
             .factories
             .get(sink_type)
             .ok_or_else(|| InklogError::ConfigError(format!("Unknown sink type: {}", sink_type)))?;
-        factory.create()
+        factory.create().await
     }
 
     /// List all registered sink types.
@@ -117,8 +119,9 @@ impl FileSinkFactory {
     }
 }
 
+#[async_trait]
 impl SinkFactory for FileSinkFactory {
-    fn create(&self) -> Result<Arc<dyn LogSink>, InklogError> {
+    async fn create(&self) -> Result<Arc<dyn LogSink>, InklogError> {
         let sink = FileSink::new(self.config.clone())?;
         Ok(Arc::new(sink))
     }
@@ -166,8 +169,8 @@ mod tests {
         assert!(!registry.has_sink("nonexistent"));
     }
 
-    #[test]
-    fn test_registry_create() {
+    #[tokio::test]
+    async fn test_registry_create() {
         let mut registry = SinkRegistry::new();
 
         let temp_dir = tempdir().unwrap();
@@ -180,10 +183,10 @@ mod tests {
         let factory = FileSinkFactory::new(config);
         registry.register(factory);
 
-        let sink = registry.create("file");
+        let sink = registry.create("file").await;
         assert!(sink.is_ok());
 
-        let nonexistent = registry.create("nonexistent");
+        let nonexistent = registry.create("nonexistent").await;
         assert!(nonexistent.is_err());
     }
 
@@ -288,8 +291,8 @@ mod tests {
         assert!(registry.get_metadata("nonexistent").is_none());
     }
 
-    #[test]
-    fn test_registry_create_after_unregister() {
+    #[tokio::test]
+    async fn test_registry_create_after_unregister() {
         let mut registry = SinkRegistry::new();
 
         let temp_dir = tempdir().unwrap();
@@ -303,7 +306,7 @@ mod tests {
         let _ = registry.unregister("file");
 
         // Creating after unregister should fail
-        let result = registry.create("file");
+        let result = registry.create("file").await;
         assert!(result.is_err());
     }
 

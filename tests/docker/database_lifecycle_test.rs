@@ -63,11 +63,11 @@ async fn test_lifecycle_init_write_flush_shutdown() {
 
     for i in 0..5 {
         let record = make_log_record("INFO", "lifecycle", &format!("step {}", i));
-        sink.write(&record).expect("write: should succeed");
+        sink.write(&record).await.expect("write: should succeed");
     }
 
-    sink.flush().expect("flush: should succeed");
-    sink.shutdown().expect("shutdown: should succeed");
+    sink.flush().await.expect("flush: should succeed");
+    sink.shutdown().await.expect("shutdown: should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -86,9 +86,10 @@ async fn test_lifecycle_write_after_flush() {
             "lifecycle",
             &format!("first {}", i),
         ))
+        .await
         .expect("write first batch");
     }
-    sink.flush().expect("first flush");
+    sink.flush().await.expect("first flush");
 
     for i in 0..3 {
         sink.write(&make_log_record(
@@ -96,11 +97,12 @@ async fn test_lifecycle_write_after_flush() {
             "lifecycle",
             &format!("second {}", i),
         ))
+        .await
         .expect("write second batch");
     }
-    sink.flush().expect("second flush");
+    sink.flush().await.expect("second flush");
 
-    sink.shutdown().expect("shutdown");
+    sink.shutdown().await.expect("shutdown");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -123,18 +125,18 @@ async fn test_lifecycle_concurrent_writes() {
     let handle = tokio::spawn(async move {
         for i in 0..10 {
             let record = make_log_record("INFO", "concurrent", &format!("thread1-{}", i));
-            let _ = sink_clone.write(&record);
+            let _ = sink_clone.write(&record).await;
         }
     });
 
     for i in 0..10 {
         let record = make_log_record("ERROR", "concurrent", &format!("main-{}", i));
-        let _ = sink.write(&record);
+        let _ = sink.write(&record).await;
     }
 
     handle.await.expect("tokio task should complete");
-    sink.flush().expect("flush after concurrent");
-    sink.shutdown().expect("shutdown");
+    sink.flush().await.expect("flush after concurrent");
+    sink.shutdown().await.expect("shutdown");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -154,13 +156,14 @@ async fn test_lifecycle_flush_repeatedly() {
                 "lifecycle",
                 &format!("round{}-{}", round, i),
             ))
+            .await
             .expect("write");
         }
-        sink.flush().expect("flush");
+        sink.flush().await.expect("flush");
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    sink.shutdown().expect("shutdown");
+    sink.shutdown().await.expect("shutdown");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -179,8 +182,9 @@ async fn test_lifecycle_shutdown_drains_buffer() {
             "drain",
             &format!("unflushed {}", i),
         ))
+        .await
         .expect("write");
     }
 
-    sink.shutdown().expect("shutdown should drain buffer");
+    sink.shutdown().await.expect("shutdown should drain buffer");
 }

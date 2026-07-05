@@ -222,10 +222,10 @@ cargo run --bin encryption
 使用 SQLite 内存数据库，无需文件管理：
 
 ```bash
-cargo run --bin database --features dbnexus
+cargo run --bin database --features sqlite
 ```
 
-**前提条件**：需要 dbnexus 功能启用。
+**前提条件**：需要 sqlite 功能启用。
 
 ### http.rs - HTTP 监控
 

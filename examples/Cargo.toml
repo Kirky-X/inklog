@@ -1,16 +1,20 @@
 [package]
 name = "inklog-examples"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 publish = false
 description = "Examples for inklog - Enterprise-grade Rust logging infrastructure"
 
 [features]
-dbnexus = ["inklog/dbnexus", "dep:dbnexus"]
+sqlite = ["inklog/sqlite", "dep:dbnexus", "dbnexus/sqlite"]
+postgres = ["inklog/postgres", "dep:dbnexus", "dbnexus/postgres"]
+mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
+duckdb = ["inklog/duckdb", "dep:dbnexus", "dbnexus/duckdb"]
 
 [dependencies]
-inklog = { path = "..", features = ["dbnexus"] }
-dbnexus = { path = "../../dbnexus", features = ["sqlite"], optional = true }
+inklog = { path = ".." }
+async-trait = "0.1"
+dbnexus = { path = "../../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"

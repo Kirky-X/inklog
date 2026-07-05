@@ -12,6 +12,7 @@
 
 # Build
 target/
+tarpaulin-report.html
 
 # Logs
 logs/
@@ -105,6 +106,9 @@ pnpm-lock.yaml
 # OpenSpec
 openspec/
 .opencode/
+
+# Specmark
+specmark/
 
 # Misc
 .cache/

@@ -594,7 +594,7 @@ impl Metrics {
 
         let count = self.latency_count.load(Ordering::Relaxed);
         let total = self.total_latency_us.load(Ordering::Relaxed);
-        let avg_latency = if count > 0 { total / count } else { 0 };
+        let avg_latency = total.checked_div(count).unwrap_or(0);
 
         HealthStatus {
             overall_status,
@@ -679,7 +679,7 @@ impl Metrics {
         //
         let count = self.latency_count.load(Ordering::Relaxed);
         let total = self.total_latency_us.load(Ordering::Relaxed);
-        let avg_latency = if count > 0 { total / count } else { 0 };
+        let avg_latency = total.checked_div(count).unwrap_or(0);
 
         s.push_str("# HELP inklog_avg_latency_us Average log processing latency in microseconds\n");
         s.push_str("# TYPE inklog_avg_latency_us gauge\n");
@@ -2082,5 +2082,21 @@ mod metrics_tests {
         let histogram = Histogram::new(vec![100, 500, 1000]);
         histogram.record(2000);
         assert_eq!(histogram.p99(), 1000);
+    }
+
+    #[test]
+    fn test_get_status_with_not_started_sink_returns_healthy() {
+        // 覆盖 L591：当 sinks 非空且仅含 NotStarted 状态（非 Healthy/Unhealthy/Degraded）时，
+        // get_status 的 else 分支返回 SinkStatus::Healthy
+        let metrics = Metrics::new();
+        if let Ok(mut map) = metrics.sink_health.lock() {
+            map.insert("not_started_sink".to_string(), SinkHealth::default());
+        }
+        let status = metrics.get_status(0, 100);
+        assert!(
+            matches!(status.overall_status, SinkStatus::Healthy),
+            "expected Healthy, got {:?}",
+            status.overall_status
+        );
     }
 }

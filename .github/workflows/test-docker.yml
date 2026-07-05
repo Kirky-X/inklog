@@ -68,17 +68,17 @@ jobs:
               ;;
           esac
 
-      - name: Build tests (dbnexus feature)
-        run: cargo build --tests --features dbnexus
+      - name: Build tests (${{ matrix.db }} feature)
+        run: cargo build --tests --features ${{ matrix.db }}
 
       - name: Run Docker integration tests
-        run: cargo test --test docker --features dbnexus -- --test-threads=1
+        run: cargo test --test docker --features ${{ matrix.db }} -- --test-threads=1
 
-      - name: Run lib tests (dbnexus feature)
-        run: cargo test --lib --features dbnexus
+      - name: Run lib tests (${{ matrix.db }} feature)
+        run: cargo test --lib --features ${{ matrix.db }}
 
-      - name: Clippy (dbnexus feature)
-        run: cargo clippy --all-targets --features dbnexus -- -D warnings
+      - name: Clippy (${{ matrix.db }} feature)
+        run: cargo clippy --all-targets --features ${{ matrix.db }} -- -D warnings
 
       - name: Format check
         run: cargo fmt --all -- --check

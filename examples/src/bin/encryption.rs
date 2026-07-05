@@ -135,10 +135,10 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
             "encryption".to_string(),
             line.to_string(),
         );
-        sink.write(&record)?;
+        sink.write(&record).await?;
     }
 
-    sink.flush()?;
+    sink.flush().await?;
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
     println!("✓ 明文日志写入完成: {}", file_path);
