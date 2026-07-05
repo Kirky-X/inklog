@@ -540,7 +540,7 @@ impl DataMasker {
 
 **自定义扩展建议**:
 
-如需添加自定义 PII 模式,可以修改 `src/masking.rs` 中的 `DataMasker::new()` 方法:
+如需添加自定义 PII 模式,可以修改 `src/support/processing/masking.rs` 中的 `DataMasker::new()` 方法:
 
 ```rust
 impl DataMasker {
@@ -805,7 +805,7 @@ Inklog 在文件、数据库和网络层面实施严格的访问控制,保护日
 #### Unix 文件权限设置
 
 ```rust
-// src/sink/file.rs:284-287
+// src/support/io/sink/file.rs:约284-287
 let mut perms = metadata.permissions();
 perms.set_mode(0o600);  // rw------- (仅所有者可读写)
 if let Err(e) = file.set_permissions(perms) {
@@ -851,7 +851,7 @@ fn create_log_file(path: &PathBuf) -> Result<File, InklogError> {
 #### 连接池管理
 
 ```rust
-// src/sink/database.rs:267-271
+// src/support/io/sink/database/mod.rs:约267-271
 let mut opt = ConnectOptions::new(url);
 opt.max_connections(pool_size)      // 最大连接数限制
    .min_connections(2)            // 最小连接数
@@ -868,7 +868,7 @@ Database::connect(opt).await
 
 #### SQL 注入防护
 
-**表名验证** (`src/sink/database.rs:141-173`):
+**表名验证** (`src/support/io/sink/database/mod.rs:约141-173`):
 
 ```rust
 /// 验证表名是否安全（防止 SQL 注入）
@@ -906,7 +906,7 @@ fn validate_table_name(name: &str) -> Result<String, InklogError> {
 }
 ```
 
-**分区名验证** (`src/sink/database.rs:175-213`):
+**分区名验证** (`src/support/io/sink/database/mod.rs:约175-213`):
 
 ```rust
 /// 验证分区名称格式 (必须是 logs_YYYY_MM 格式)
@@ -942,7 +942,7 @@ fn validate_partition_name(partition_name: &str) -> Result<String, InklogError> 
 }
 ```
 
-**使用验证后的名称** (`src/sink/database.rs:461-478`):
+**使用验证后的名称** (`src/support/io/sink/database/mod.rs:约461-478`):
 
 ```rust
 // 使用验证后的名称构建 SQL (避免 SQL 注入)

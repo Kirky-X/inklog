@@ -732,7 +732,7 @@ cargo fmt --all
 
 ```bash
 # 添加修改的文件
-git add src/sink/file.rs tests/integration_file_sink.rs
+git add src/support/io/sink/file.rs tests/integration_file_sink.rs
 
 # 提交 (遵循 Conventional Commits)
 git commit -m "feat(file): add LZ4 compression support
@@ -845,7 +845,7 @@ Closes #(issue number)
 **✅ 好的评论**:
 
 ```markdown
-在 `src/sink/file.rs:156` 行:
+在 `src/support/io/sink/file.rs:约156` 行:
 考虑使用 `BufWriter` 来减少系统调用次数:
 
 ```rust
@@ -1073,9 +1073,9 @@ inklog/
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| `src/manager.rs` | 1113 | 核心日志管理器 |
-| `src/config.rs` | 989 | 配置系统 |
-| `src/sink/file.rs` | 1513 | 文件 sink (最复杂) |
+| `src/domain/core/manager.rs` | 1113 | 核心日志管理器 |
+| `src/domain/config/config.rs` | 989 | 配置系统 |
+| `src/support/io/sink/file.rs` | 1513 | 文件 sink (最复杂) |
 | `docs/ARCHITECTURE.md` | 1103 | 架构文档 |
 | `docs/SECURITY.md` | 1979 | 安全指南 |
 
