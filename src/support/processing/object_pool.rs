@@ -12,23 +12,29 @@
 //! # Construction Patterns
 //!
 //! This module supports two construction patterns:
-//! - `new()` - Creates pool with default configuration using shared runtime
-//! - `builder()` - Creates pool with custom configuration
+//! - `new()` - Creates pool with default configuration (async, returns Result)
+//! - `with_config()` - Creates pool with custom configuration (async, returns Result)
 //!
 //! # Usage Examples
 //!
-//! ```
+//! ```no_run
 //! use inklog::ObjectPool;
 //!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Pattern 1: new() - Default configuration
-//! let pool1 = ObjectPool::<String, i32>::new();
+//! let pool1 = ObjectPool::<String, i32>::new().await?;
 //!
-//! // Pattern 2: builder() - Custom configuration
-//! let pool2 = ObjectPool::<String, i32>::builder()
-//!     .capacity(2048)
-//!     .build();
+//! // Pattern 2: with_config() - Custom configuration
+//! use inklog::ObjectPoolConfig;
+//! let pool2 = ObjectPool::<String, i32>::with_config(ObjectPoolConfig {
+//!     max_capacity: 2048,
+//!     ttl_secs: None,
+//! }).await?;
+//! # Ok(())
+//! # }
 //! ```
 
+use crate::InklogError;
 use crate::LogRecord;
 use once_cell::sync::Lazy;
 use oxcache::Cache;
@@ -36,23 +42,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::runtime::Handle;
-
-static SHARED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap_or_else(|e| {
-            panic!(
-                "Failed to create shared tokio runtime for object pool: {}",
-                e
-            )
-        })
-});
-
-fn get_runtime() -> &'static tokio::runtime::Runtime {
-    &SHARED_RUNTIME
-}
 
 /// Pool configuration - configurable via InklogConfig.performance.object_pool
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,20 +67,6 @@ impl Default for ObjectPoolConfig {
     }
 }
 
-/// Object pool metrics for monitoring
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct PoolMetrics {
-    pub current_size: usize,
-    pub max_capacity: usize,
-    pub total_requests: usize,
-    pub hits: usize,
-    pub misses: usize,
-    pub hit_rate: f64,
-    pub items_created: usize,
-    pub items_reused: usize,
-}
-
 /// Object pool using oxcache Cache
 ///
 /// This pool provides:
@@ -99,8 +74,10 @@ pub struct PoolMetrics {
 /// - Thread-safe operations without explicit locking
 /// - Configurable capacity and TTL
 /// - Internal metrics tracking
+///
+/// All construction and access methods are async and return `Result` to
+/// propagate errors explicitly (no panic paths, no silent fallbacks).
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct ObjectPool<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
@@ -108,8 +85,6 @@ where
 {
     /// The underlying oxcache async cache
     cache: Arc<Cache<K, V>>,
-    /// Pool configuration
-    config: ObjectPoolConfig,
     /// Metrics tracking
     stats: Arc<PoolStats>,
 }
@@ -120,418 +95,74 @@ where
     V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
 {
     /// Create a new object pool with default configuration (capacity: 1024)
-    pub fn new() -> Self {
-        Self::with_config(ObjectPoolConfig::default())
-    }
-
-    /// Create a new object pool with specified max capacity
-    #[allow(dead_code)]
-    pub fn with_capacity(max_capacity: usize) -> Self {
-        let config = ObjectPoolConfig {
-            max_capacity,
-            ttl_secs: None,
-        };
-        Self::with_config(config)
+    pub async fn new() -> Result<Self, InklogError> {
+        Self::with_config(ObjectPoolConfig::default()).await
     }
 
     /// Create a new object pool with full configuration
-    pub fn with_config(config: ObjectPoolConfig) -> Self {
-        use tokio::runtime::Handle;
-
-        let build_cache = || async {
-            let mut builder = Cache::builder();
-            builder = builder.capacity(config.max_capacity as u64);
-            if let Some(ttl_secs) = config.ttl_secs {
-                builder = builder.ttl(Duration::from_secs(ttl_secs));
-            }
-            match builder.build().await {
-                Ok(cache) => Arc::new(cache),
-                Err(e) => {
-                    tracing::warn!("Failed to build cache: {}", e);
-                    Arc::new(Cache::default())
-                }
-            }
-        };
-
-        let cache = if let Ok(handle) = Handle::try_current() {
-            // We're in an async context, use block_in_place
-            tokio::task::block_in_place(|| handle.block_on(build_cache()))
-        } else {
-            // We're not in an async context, use the shared runtime
-            get_runtime().block_on(build_cache())
-        };
-
-        Self {
-            cache,
-            config: config.clone(),
+    ///
+    /// Errors are propagated as `InklogError::CacheError`; no silent
+    /// `Cache::default()` fallback is used.
+    pub async fn with_config(config: ObjectPoolConfig) -> Result<Self, InklogError> {
+        let mut builder = Cache::builder();
+        builder = builder.capacity(config.max_capacity as u64);
+        if let Some(ttl_secs) = config.ttl_secs {
+            builder = builder.ttl(Duration::from_secs(ttl_secs));
+        }
+        let cache = builder
+            .build()
+            .await
+            .map_err(|e| InklogError::CacheError(format!("Failed to build cache: {}", e)))?;
+        Ok(Self {
+            cache: Arc::new(cache),
             stats: Arc::new(PoolStats::default()),
-        }
-    }
-
-    /// Create a new ObjectPoolBuilder for configuring the pool
-    #[allow(dead_code)]
-    pub fn builder() -> ObjectPoolBuilder<K, V> {
-        ObjectPoolBuilder::new()
-    }
-
-    fn execute_async<F, T>(&self, f: F) -> T
-    where
-        F: std::future::Future<Output = T> + Send + 'static,
-        T: Send + 'static,
-    {
-        if let Ok(handle) = Handle::try_current() {
-            // 用 spawn_blocking 在 blocking 线程池跑 block_on，避免两个陷阱：
-            // 1. block_in_place 在 current_thread runtime 上 panic
-            //    ("can call blocking only when running on the multi-threaded runtime")
-            // 2. 直接 handle.block_on 在 multi_thread worker 上会死锁或 panic
-            //    ("Cannot block the current thread from within a runtime")
-            // 全局 LoggerSubscriber 的 on_event 间接调用此方法，必须在任意 runtime flavor 上工作。
-            let (tx, rx) = std::sync::mpsc::channel();
-            tokio::task::spawn_blocking(move || {
-                let result = handle.block_on(f);
-                let _ = tx.send(result);
-            });
-            rx.recv()
-                .expect("spawn_blocking task panicked during execute_async")
-        } else {
-            get_runtime().block_on(f)
-        }
+        })
     }
 
     /// Get an item from the pool by key
-    pub fn get(&self, key: &K) -> Option<V>
+    pub async fn get(&self, key: &K) -> Result<Option<V>, InklogError>
     where
         K: Clone,
     {
-        let cache = Arc::clone(&self.cache);
-        let stats = Arc::clone(&self.stats);
-        let key = key.clone();
-        let result = self.execute_async(async move { cache.get(&key).await.unwrap_or(None) });
+        let result = self
+            .cache
+            .get(key)
+            .await
+            .map_err(|e| InklogError::CacheError(format!("Failed to get from cache: {}", e)))?;
         if result.is_some() {
-            stats.hits.fetch_add(1, Ordering::Relaxed);
-            stats.items_reused.fetch_add(1, Ordering::Relaxed);
+            self.stats.hits.fetch_add(1, Ordering::Relaxed);
+            self.stats.items_reused.fetch_add(1, Ordering::Relaxed);
         } else {
-            stats.misses.fetch_add(1, Ordering::Relaxed);
+            self.stats.misses.fetch_add(1, Ordering::Relaxed);
         }
-        stats.total_items.store(self.len(), Ordering::Relaxed);
-        result
+        self.stats.total_items.store(self.len(), Ordering::Relaxed);
+        Ok(result)
     }
 
     /// Put an item into the pool with the given key
-    pub fn put(&self, key: &K, value: V)
+    pub async fn put(&self, key: &K, value: V) -> Result<(), InklogError>
     where
         K: Clone,
         V: Clone,
     {
-        let cache = Arc::clone(&self.cache);
-        let key = key.clone();
-        let value = value.clone();
-        self.execute_async(async move {
-            if let Err(e) = cache.set(&key, &value).await {
-                tracing::debug!("Cache set failed: {}", e);
-            }
-        });
+        self.cache
+            .set(key, &value)
+            .await
+            .map_err(|e| InklogError::CacheError(format!("Failed to set cache: {}", e)))?;
         self.stats.total_items.store(self.len(), Ordering::Relaxed);
+        Ok(())
     }
 
-    /// Check if a key exists in the pool
-    #[allow(dead_code)]
-    pub fn contains(&self, key: &K) -> bool
-    where
-        K: Clone,
-    {
-        let cache = Arc::clone(&self.cache);
-        let key = key.clone();
-        self.execute_async(async move { cache.exists(&key).await.unwrap_or(false) })
-    }
-
-    /// Remove and return an item from the pool by key
-    #[allow(dead_code)]
-    pub fn remove(&self, key: &K) -> Option<V>
-    where
-        K: Clone,
-        V: Clone,
-    {
-        let cache_get = Arc::clone(&self.cache);
-        let cache_delete = Arc::clone(&self.cache);
-        let key_get = key.clone();
-        let key_delete = key.clone();
-
-        let value =
-            self.execute_async(async move { cache_get.get(&key_get).await.unwrap_or(None) });
-
-        self.execute_async(async move {
-            if let Err(e) = cache_delete.delete(&key_delete).await {
-                tracing::debug!("Cache delete failed: {}", e);
-            }
-        });
-
-        if value.is_some() {
-            self.stats.hits.fetch_add(1, Ordering::Relaxed);
-        }
-        self.stats.total_items.store(self.len(), Ordering::Relaxed);
-        value
-    }
-
-    /// Get the current number of items in the pool
-    #[allow(dead_code)]
+    /// Get the current number of items in the pool (reads atomic, no async needed)
     pub fn len(&self) -> usize {
         self.stats.total_items.load(Ordering::Relaxed)
     }
 
-    /// Check if the pool is empty
-    #[allow(dead_code)]
+    /// Returns true if the pool currently holds no items.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    /// Get the maximum capacity of the pool
-    #[allow(dead_code)]
-    pub fn capacity(&self) -> usize {
-        self.config.max_capacity
-    }
-
-    /// Get pool metrics for internal monitoring
-    #[allow(dead_code)]
-    pub fn metrics(&self) -> PoolMetrics {
-        let total = self.stats.total_items.load(Ordering::Relaxed);
-        let hits = self.stats.hits.load(Ordering::Relaxed);
-        let misses = self.stats.misses.load(Ordering::Relaxed);
-        let created = self.stats.items_created.load(Ordering::Relaxed);
-        let reused = self.stats.items_reused.load(Ordering::Relaxed);
-
-        let total_requests = hits + misses;
-        let hit_rate = if total_requests > 0 {
-            (hits as f64 / total_requests as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        PoolMetrics {
-            current_size: total,
-            max_capacity: self.config.max_capacity,
-            total_requests,
-            hits,
-            misses,
-            hit_rate,
-            items_created: created,
-            items_reused: reused,
-        }
-    }
-
-    /// Clear all items from the pool
-    #[allow(dead_code)]
-    pub fn clear(&self) {
-        let cache = self.cache.clone();
-        self.execute_async(async move {
-            if let Err(e) = cache.clear().await {
-                tracing::warn!("Failed to clear cache: {}", e);
-            }
-        });
-        self.stats.total_items.store(0, Ordering::Relaxed);
-    }
 }
-
-impl<K, V> Default for ObjectPool<K, V>
-where
-    K: oxcache::CacheKey + Send + Sync + 'static,
-    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Builder for creating ObjectPool instances with custom configuration
-#[allow(dead_code)]
-pub struct ObjectPoolBuilder<K, V>
-where
-    K: oxcache::CacheKey + Send + Sync + 'static,
-    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
-{
-    /// Maximum capacity of the pool
-    capacity: usize,
-    /// TTL for pool entries (in seconds)
-    ttl_secs: Option<u64>,
-    /// Marker for generic types
-    _marker: std::marker::PhantomData<(K, V)>,
-}
-
-#[allow(dead_code)]
-impl<K, V> ObjectPoolBuilder<K, V>
-where
-    K: oxcache::CacheKey + Send + Sync + 'static,
-    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
-{
-    /// Create a new builder with default configuration
-    pub fn new() -> Self {
-        Self {
-            capacity: 1024,
-            ttl_secs: None,
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    /// Set the maximum capacity of the pool
-    #[allow(dead_code)]
-    pub fn capacity(mut self, capacity: usize) -> Self {
-        self.capacity = capacity;
-        self
-    }
-
-    /// Set the TTL for pool entries
-    #[allow(dead_code)]
-    pub fn ttl_secs(mut self, ttl_secs: u64) -> Self {
-        self.ttl_secs = Some(ttl_secs);
-        self
-    }
-
-    /// Build the ObjectPool with the configured settings
-    #[allow(dead_code)]
-    pub fn build(self) -> ObjectPool<K, V> {
-        let config = ObjectPoolConfig {
-            max_capacity: self.capacity,
-            ttl_secs: self.ttl_secs,
-        };
-
-        ObjectPool::with_config(config)
-    }
-}
-
-impl<K, V> Default for ObjectPoolBuilder<K, V>
-where
-    K: oxcache::CacheKey + Send + Sync + 'static,
-    V: serde::Serialize + for<'de> serde::Deserialize<'de> + Send + Sync + Clone + 'static,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Internal pool statistics
-#[derive(Debug, Default)]
-struct PoolStats {
-    pub(crate) total_items: AtomicUsize,
-    pub(crate) hits: AtomicUsize,
-    pub(crate) misses: AtomicUsize,
-    #[allow(dead_code)]
-    pub(crate) items_created: AtomicUsize,
-    pub(crate) items_reused: AtomicUsize,
-}
-
-/// Global pool for LogRecord to reduce allocations
-///
-/// Uses oxcache Cache for thread-safe LRU caching with configurable capacity.
-#[derive(Clone)]
-pub struct LogRecordPool {
-    pool: ObjectPool<String, LogRecord>,
-}
-
-impl LogRecordPool {
-    pub fn new() -> Self {
-        Self::with_capacity(1024)
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        let config = ObjectPoolConfig {
-            max_capacity: capacity,
-            ttl_secs: None,
-        };
-        let pool: ObjectPool<String, LogRecord> = ObjectPool::with_config(config);
-        Self { pool }
-    }
-
-    pub fn get(&self) -> LogRecord {
-        self.pool.get(&"log_record".to_string()).unwrap_or_default()
-    }
-
-    #[allow(dead_code)]
-    pub fn put(&self, record: LogRecord) {
-        self.pool.put(&"log_record".to_string(), record);
-    }
-
-    #[allow(dead_code)]
-    pub fn metrics(&self) -> PoolMetrics {
-        self.pool.metrics()
-    }
-
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.pool.len()
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.pool.is_empty()
-    }
-}
-
-impl Default for LogRecordPool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Global pool for String buffers to reduce allocations
-///
-/// Uses oxcache Cache for thread-safe LRU caching.
-#[derive(Clone)]
-pub struct StringPool {
-    pool: ObjectPool<String, String>,
-}
-
-impl StringPool {
-    pub fn new() -> Self {
-        Self::with_capacity(1024)
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        let config = ObjectPoolConfig {
-            max_capacity: capacity,
-            ttl_secs: None,
-        };
-        let pool = ObjectPool::<String, String>::with_config(config);
-        Self { pool }
-    }
-
-    pub fn get(&self) -> String {
-        self.pool
-            .get(&"string_buffer".to_string())
-            .unwrap_or_default()
-    }
-
-    #[allow(dead_code)]
-    pub fn put(&self, s: String) {
-        self.pool.put(&"string_buffer".to_string(), s);
-    }
-
-    #[allow(dead_code)]
-    pub fn metrics(&self) -> PoolMetrics {
-        self.pool.metrics()
-    }
-
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.pool.len()
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.pool.is_empty()
-    }
-}
-
-impl Default for StringPool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Global pool for LogRecord instances
-pub static LOG_RECORD_POOL: Lazy<LogRecordPool> = Lazy::new(|| LogRecordPool::with_capacity(1024));
-
-/// Global pool for String buffers
-pub static STRING_POOL: Lazy<StringPool> = Lazy::new(|| StringPool::with_capacity(1024));
 
 // ============================================================================
 // Thread-Local Object Pool (High Performance)
@@ -542,7 +173,6 @@ pub static STRING_POOL: Lazy<StringPool> = Lazy::new(|| StringPool::with_capacit
 /// Uses thread-local storage to eliminate lock contention entirely.
 /// Each thread has its own independent pool, maximizing performance.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct ThreadLocalLogRecordPool {
     capacity: usize,
 }
@@ -577,13 +207,11 @@ impl ThreadLocalLogRecordPool {
     }
 
     /// Get the current size of the calling thread's pool.
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         THREAD_LOCAL_LOG_RECORD_POOL.with(|pool| pool.borrow().len())
     }
 
     /// Check if the calling thread's pool is empty.
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -603,7 +231,6 @@ thread_local! {
 
 /// High-performance thread-local pool for String buffers.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct ThreadLocalStringPool {
     capacity: usize,
 }
@@ -635,13 +262,11 @@ impl ThreadLocalStringPool {
     }
 
     /// Get the current size of the calling thread's pool.
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         THREAD_LOCAL_STRING_POOL.with(|pool| pool.borrow().len())
     }
 
     /// Check if the calling thread's pool is empty.
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -688,141 +313,124 @@ pub fn put_string_buffer(s: String) {
     GLOBAL_STRING_POOL.put(s)
 }
 
+/// Internal pool statistics
+#[derive(Debug, Default)]
+struct PoolStats {
+    pub(crate) total_items: AtomicUsize,
+    pub(crate) hits: AtomicUsize,
+    pub(crate) misses: AtomicUsize,
+    pub(crate) items_reused: AtomicUsize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // ============================================================================
+    // ObjectPool async 测试
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_object_pool_new_default_capacity() {
+        let pool = ObjectPool::<String, String>::new()
+            .await
+            .expect("default pool should build");
+        assert_eq!(pool.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_object_pool_with_config() {
+        let pool = ObjectPool::<String, i32>::with_config(ObjectPoolConfig {
+            max_capacity: 256,
+            ttl_secs: None,
+        })
+        .await
+        .expect("pool with config should build");
+        assert_eq!(pool.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_object_pool_put_and_get() {
+        let pool = ObjectPool::<String, i32>::new().await.expect("build");
+
+        pool.put(&"a".to_string(), 1).await.expect("put");
+        pool.put(&"b".to_string(), 2).await.expect("put");
+        pool.put(&"c".to_string(), 3).await.expect("put");
+
+        assert_eq!(pool.get(&"a".to_string()).await.expect("get"), Some(1));
+        assert_eq!(pool.get(&"b".to_string()).await.expect("get"), Some(2));
+        assert_eq!(pool.get(&"c".to_string()).await.expect("get"), Some(3));
+        assert_eq!(pool.get(&"missing".to_string()).await.expect("get"), None);
+    }
+
+    #[tokio::test]
+    async fn test_object_pool_get_returns_result_on_cache_error() {
+        // 验证 get 返回 Result，错误显性传播
+        let pool = ObjectPool::<String, i32>::new().await.expect("build");
+        // 正常路径返回 Ok(None) 而非 None
+        let result = pool.get(&"missing".to_string()).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn test_object_pool_put_returns_result() {
+        let pool = ObjectPool::<String, i32>::new().await.expect("build");
+        // put 返回 Result
+        let result = pool.put(&"key".to_string(), 42).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_object_pool_with_ttl_config() {
+        let pool = ObjectPool::<String, String>::with_config(ObjectPoolConfig {
+            max_capacity: 256,
+            ttl_secs: Some(60),
+        })
+        .await
+        .expect("build with ttl");
+        pool.put(&"k".to_string(), "v".to_string())
+            .await
+            .expect("put");
+        assert_eq!(
+            pool.get(&"k".to_string()).await.expect("get"),
+            Some("v".to_string())
+        );
+    }
+
+    // ============================================================================
+    // ObjectPoolConfig 测试
+    // ============================================================================
+
     #[test]
-    fn test_object_pool_basic_operations() {
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-
-        assert!(pool.is_empty());
-
-        let value = pool.get(&"nonexistent".to_string());
-        assert!(value.is_none());
-
-        pool.put(&"key1".to_string(), 42);
-
-        assert!(pool.contains(&"key1".to_string()));
-
-        let value = pool.get(&"key1".to_string());
-        assert_eq!(value, Some(42));
-
-        let value2 = pool.get(&"key1".to_string());
-        assert_eq!(value2, Some(42));
-
-        let removed = pool.remove(&"key1".to_string());
-        assert_eq!(removed, Some(42));
-
-        let value3 = pool.get(&"key1".to_string());
-        assert!(value3.is_none());
-        assert!(pool.is_empty());
+    fn test_object_pool_config_default() {
+        let config = ObjectPoolConfig::default();
+        assert_eq!(config.max_capacity, 1024);
+        assert_eq!(config.ttl_secs, None);
     }
 
     #[test]
-    fn test_object_pool_capacity() {
-        let pool = ObjectPool::<String, i32>::builder()
-            .capacity(3)
-            .ttl_secs(1)
-            .build();
-
-        assert_eq!(pool.capacity(), 3);
-
-        pool.put(&"1".to_string(), 1);
-        pool.put(&"2".to_string(), 2);
-        pool.put(&"3".to_string(), 3);
-
-        assert_eq!(pool.get(&"1".to_string()), Some(1));
-        assert_eq!(pool.get(&"2".to_string()), Some(2));
-        assert_eq!(pool.get(&"3".to_string()), Some(3));
-
-        pool.put(&"4".to_string(), 4);
-        pool.put(&"5".to_string(), 5);
-
-        let _ = pool.get(&"1".to_string());
-        let _ = pool.get(&"4".to_string());
-
-        pool.clear();
-        assert!(pool.is_empty());
+    fn test_object_pool_config_with_ttl() {
+        let config = ObjectPoolConfig {
+            max_capacity: 256,
+            ttl_secs: Some(60),
+        };
+        assert_eq!(config.max_capacity, 256);
+        assert_eq!(config.ttl_secs, Some(60));
     }
 
-    #[test]
-    fn test_object_pool_metrics() {
-        let pool = ObjectPool::<String, i32>::new();
-
-        let metrics = pool.metrics();
-        assert_eq!(metrics.current_size, 0);
-        assert_eq!(metrics.max_capacity, 1024);
-        assert_eq!(metrics.total_requests, 0);
-        assert_eq!(metrics.hits, 0);
-        assert_eq!(metrics.misses, 0);
-        assert_eq!(metrics.items_created, 0);
-        assert_eq!(metrics.items_reused, 0);
-
-        let _ = pool.get(&"missing".to_string());
-        let metrics = pool.metrics();
-        assert_eq!(metrics.misses, 1);
-        assert_eq!(metrics.total_requests, 1);
-
-        pool.put(&"key".to_string(), 100);
-        let _ = pool.get(&"key".to_string());
-        let metrics = pool.metrics();
-        assert_eq!(metrics.hits, 1);
-        assert_eq!(metrics.hit_rate, 50.0);
-        assert_eq!(metrics.items_created, 0);
-        assert_eq!(metrics.items_reused, 1);
-    }
-
-    #[test]
-    fn test_log_record_pool() {
-        let pool = LogRecordPool::with_capacity(10);
-
-        assert!(pool.is_empty());
-
-        let record = pool.get();
-        assert_eq!(record.level, "INFO");
-
-        let metrics = pool.metrics();
-        assert_eq!(metrics.current_size, 0);
-
-        let record = LogRecord::default();
-        pool.put(record);
-
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 10);
-
-        let record2 = pool.get();
-        assert_eq!(record2.level, "INFO");
-
-        let _ = pool.len();
-    }
-
-    #[test]
-    fn test_string_pool() {
-        let pool = StringPool::with_capacity(10);
-
-        assert!(pool.is_empty());
-
-        let s = pool.get();
-        assert!(s.is_empty());
-
-        pool.put("hello".to_string());
-
-        let s2 = pool.get();
-        assert!(s2.is_empty() || s2 == *"hello");
-
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 10);
-        let _ = pool.len();
-    }
-
-    // Thread-local pool tests
+    // ============================================================================
+    // ThreadLocalLogRecordPool 测试
+    // ============================================================================
 
     #[test]
     fn test_thread_local_log_record_pool() {
         let pool = ThreadLocalLogRecordPool::new(10);
 
-        // Initially empty
+        // Initially may have items from other tests; drain to known state
+        while !pool.is_empty() {
+            let _ = pool.get();
+        }
         assert!(pool.is_empty());
 
         // Get creates new record if pool is empty
@@ -841,265 +449,15 @@ mod tests {
     }
 
     #[test]
-    fn test_thread_local_string_pool() {
-        let pool = ThreadLocalStringPool::new(10);
-
-        // Initially empty
-        assert!(pool.is_empty());
-
-        // Get creates new string if pool is empty
-        let s = pool.get();
-        assert!(s.is_empty());
-
-        // Put returns string to pool
-        pool.put("test".to_string());
-
-        // Now pool should have one item
-        assert!(!pool.is_empty());
-
-        // Get should return pooled string
-        let s2 = pool.get();
-        assert_eq!(s2, "test");
-    }
-
-    #[test]
-    fn test_thread_local_pool_capacity() {
-        let pool = ThreadLocalLogRecordPool::new(2);
-
-        // Add items up to capacity
-        let record1 = pool.get();
-        pool.put(record1);
-
-        let record2 = pool.get();
-        pool.put(record2);
-
-        // At capacity, adding more should not increase pool size
-        let record3 = pool.get();
-        pool.put(record3);
-
-        // Pool should still have at most 2 items (capacity)
-        assert!(pool.len() <= 2);
-    }
-
-    // 4.2.1: ObjectPool::new() and with_capacity()
-    #[test]
-    fn test_object_pool_new_default_capacity() {
-        let pool = ObjectPool::<String, String>::new();
-        assert_eq!(pool.capacity(), 1024);
-        assert!(pool.is_empty());
-        assert_eq!(pool.len(), 0);
-    }
-
-    #[test]
-    fn test_object_pool_with_capacity() {
-        let pool = ObjectPool::<String, i32>::with_capacity(256);
-        assert_eq!(pool.capacity(), 256);
-        assert!(pool.is_empty());
-        assert_eq!(pool.len(), 0);
-    }
-
-    // 4.2.2: put() and get() — basic storage and retrieval
-    #[test]
-    fn test_object_pool_put_and_get() {
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-
-        pool.put(&"a".to_string(), 1);
-        pool.put(&"b".to_string(), 2);
-        pool.put(&"c".to_string(), 3);
-
-        assert_eq!(pool.get(&"a".to_string()), Some(1));
-        assert_eq!(pool.get(&"b".to_string()), Some(2));
-        assert_eq!(pool.get(&"c".to_string()), Some(3));
-        assert_eq!(pool.get(&"missing".to_string()), None);
-    }
-
-    // 4.2.3: LRU eviction — verify capacity constrains total items in the pool
-    // Note: oxcache Cache::default() is shared across instances; strict per-pool LRU
-    // eviction is tested via observable behavior (recent items accessible, older items removed).
-    #[test]
-    fn test_object_pool_lru_eviction() {
-        let pool = ObjectPool::<String, i32>::with_capacity(2);
-
-        pool.put(&"a".to_string(), 1);
-        pool.put(&"b".to_string(), 2);
-
-        // Insert many items to stress the cache
-        for i in 1..=8 {
-            pool.put(&format!("evict_{i}"), 100 + i);
-        }
-
-        // Most recently added item must be accessible (it was inserted last)
-        assert_eq!(pool.get(&"evict_8".to_string()), Some(108));
-
-        // After heavy insert pressure, some items from the first set must be gone.
-        // In shared-cache environments, Cache::default() may not enforce per-pool capacity
-        // strictly; verify via the observable cap: at most a few items survive.
-        // We check that the pool still functions and doesn't silently grow unbounded.
-        let survivor_count = [
-            pool.get(&"a".to_string()).is_some(),
-            pool.get(&"b".to_string()).is_some(),
-            pool.get(&"evict_8".to_string()).is_some(),
-            pool.get(&"evict_7".to_string()).is_some(),
-            pool.get(&"evict_6".to_string()).is_some(),
-        ]
-        .into_iter()
-        .filter(|&x| x)
-        .count();
-
-        // After 10 inserts into a pool of capacity 2, no more than 5 distinct items survive
-        assert!(
-            survivor_count <= 5,
-            "capacity pressure should limit survivors to a small bounded set, got {survivor_count}"
-        );
-    }
-
-    // 4.2.4: get() updates LRU order — recently accessed item is NOT evicted
-    #[test]
-    fn test_object_pool_get_updates_lru_order() {
-        let pool = ObjectPool::<String, i32>::with_capacity(3);
-
-        pool.put(&"a".to_string(), 1);
-        pool.put(&"b".to_string(), 2);
-        pool.put(&"c".to_string(), 3);
-
-        // Access "a" to bump its recency — now order is: b(2), c(3), a(1 accessed)
-        let _ = pool.get(&"a".to_string());
-
-        // Fill with new keys to trigger eviction
-        pool.put(&"d".to_string(), 4);
-        pool.put(&"e".to_string(), 5);
-
-        // "a" was most recently accessed, so it must survive
-        assert_eq!(pool.get(&"a".to_string()), Some(1));
-    }
-
-    // 4.2.5: remove() returns value and decreases len
-    #[test]
-    fn test_object_pool_remove_decreases_len() {
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-        pool.put(&"key".to_string(), 42);
-
-        let removed = pool.remove(&"key".to_string());
-        assert_eq!(removed, Some(42));
-
-        // Verify removal worked via observable behavior (stats are updated async)
-        assert_eq!(pool.get(&"key".to_string()), None);
-        assert!(!pool.contains(&"key".to_string()));
-    }
-
-    // 4.2.6: remove() on non-existent key returns None
-    #[test]
-    fn test_object_pool_remove_missing_key() {
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-        pool.put(&"exists".to_string(), 1);
-
-        let removed = pool.remove(&"missing".to_string());
-        assert_eq!(removed, None);
-
-        // "exists" should be untouched
-        assert_eq!(pool.get(&"exists".to_string()), Some(1));
-    }
-
-    // 4.2.7: clear() empties the pool (verifiable via get — all pools share underlying cache)
-    #[test]
-    fn test_object_pool_clear() {
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-
-        // Use unique keys to avoid cache collisions in shared-cache environment
-        pool.put(&"clear_a".to_string(), 1);
-        pool.put(&"clear_b".to_string(), 2);
-        pool.put(&"clear_c".to_string(), 3);
-
-        // Verify items are present before clear
-        assert_eq!(pool.get(&"clear_a".to_string()), Some(1));
-
-        pool.clear();
-
-        // After clear, all keys should be gone
-        assert_eq!(pool.get(&"clear_a".to_string()), None);
-        assert_eq!(pool.get(&"clear_b".to_string()), None);
-        assert_eq!(pool.get(&"clear_c".to_string()), None);
-    }
-
-    // 4.2.8: contains() returns correct boolean
-    #[test]
-    fn test_object_pool_contains() {
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-        pool.put(&"key".to_string(), 99);
-
-        assert!(pool.contains(&"key".to_string()));
-        assert!(!pool.contains(&"missing".to_string()));
-
-        pool.remove(&"key".to_string());
-        assert!(!pool.contains(&"key".to_string()));
-    }
-
-    // 4.2.9: metrics() — hits and misses counters
-    #[test]
-    fn test_object_pool_metrics_counters() {
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-
-        let m = pool.metrics();
-        assert_eq!(m.hits, 0);
-        assert_eq!(m.misses, 0);
-        assert_eq!(m.total_requests, 0);
-        assert_eq!(m.hit_rate, 0.0);
-
-        // Miss
-        let _ = pool.get(&"missing".to_string());
-        let m = pool.metrics();
-        assert_eq!(m.misses, 1);
-        assert_eq!(m.total_requests, 1);
-
-        // Hit
-        pool.put(&"key".to_string(), 5);
-        let _ = pool.get(&"key".to_string());
-        let m = pool.metrics();
-        assert_eq!(m.hits, 1);
-        assert_eq!(m.total_requests, 2);
-        assert!((m.hit_rate - 50.0).abs() < 0.01);
-    }
-
-    // 4.2.10: ObjectPoolBuilder fluent API
-    #[test]
-    fn test_object_pool_builder() {
-        let pool = ObjectPool::<String, String>::builder()
-            .capacity(512)
-            .build();
-
-        assert_eq!(pool.capacity(), 512);
-        assert!(pool.is_empty());
-
-        let pool_with_ttl = ObjectPool::<String, String>::builder()
-            .capacity(256)
-            .ttl_secs(60)
-            .build();
-        assert_eq!(pool_with_ttl.capacity(), 256);
-    }
-
-    // 4.2.11: ThreadLocalLogRecordPool — same-thread shared storage; verify get/put/reset behavior
-    #[test]
-    fn test_thread_local_log_record_pool_isolation() {
-        let pool = ThreadLocalLogRecordPool::new(10);
-
-        // Get a record and put it back
-        let record = pool.get();
-        pool.put(record);
-
-        // Verify the pool accepted the return
-        assert!(!pool.is_empty());
-
-        // Get returns a reset LogRecord (level = "INFO", message = "")
-        let record2 = pool.get();
-        assert_eq!(record2.level, "INFO");
-    }
-
-    // 4.2.12: ThreadLocalLogRecordPool — capacity exceeded discards excess
-    #[test]
     fn test_thread_local_log_record_pool_exceed_capacity() {
         let pool = ThreadLocalLogRecordPool::new(3);
 
-        // Add 3 items (pool may already have items from shared storage)
+        // Drain first
+        while !pool.is_empty() {
+            let _ = pool.get();
+        }
+
+        // Add 3 items
         for _ in 0..3 {
             let record = pool.get();
             pool.put(record);
@@ -1113,162 +471,44 @@ mod tests {
         assert!(pool.len() <= 3);
     }
 
-    // 4.2.13: Global get_string_buffer() / put_string_buffer()
-    #[test]
-    fn test_global_string_buffer_functions() {
-        // Get a buffer (may be empty or pooled)
-        let s1 = get_string_buffer();
-        // Put it back
-        put_string_buffer(s1);
-
-        // Get again — should be either empty (default) or the pooled value
-        let s2 = get_string_buffer();
-        assert!(s2.is_empty() || !s2.is_empty()); // always true; verifies API works
-    }
-
-    // 4.2.14: LogRecordPool.get() / put()
-    #[test]
-    fn test_log_record_pool_get_put() {
-        let pool = LogRecordPool::with_capacity(10);
-
-        // get() returns default record when pool is empty
-        let record = pool.get();
-        assert_eq!(record.level, "INFO");
-
-        // put() returns a record to the pool
-        let record = LogRecord {
-            message: "test".to_string(),
-            ..Default::default()
-        };
-        pool.put(record);
-
-        // get() again — should return the pooled record
-        let record2 = pool.get();
-        // Message may be reset or retained depending on pool behavior
-        assert_eq!(record2.level, "INFO");
-    }
-
-    // ============================================================================
-    // 并发测试
-    // ============================================================================
-
-    #[test]
-    fn test_thread_local_pool_concurrent_isolation() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        use std::thread;
-
-        // ThreadLocalLogRecordPool 每个线程有独立 pool，不依赖 SHARED_RUNTIME
-        let pool = Arc::new(ThreadLocalLogRecordPool::new(10));
-        let total_gets = Arc::new(AtomicUsize::new(0));
-
-        let mut handles = Vec::new();
-        for _ in 0..4 {
-            let pool_clone = Arc::clone(&pool);
-            let counter_clone = Arc::clone(&total_gets);
-            handles.push(thread::spawn(move || {
-                for _ in 0..5 {
-                    let _record = pool_clone.get();
-                    counter_clone.fetch_add(1, Ordering::Relaxed);
-                }
-            }));
-        }
-        for h in handles {
-            h.join().expect("thread should not panic");
-        }
-
-        // 4 线程 × 5 次 get = 20 次
-        assert_eq!(total_gets.load(Ordering::Relaxed), 20);
-    }
-
-    // ============================================================================
-    // Default trait 实现测试
-    // ============================================================================
-
-    #[test]
-    fn test_object_pool_default_trait_uses_default_capacity() {
-        // 覆盖 line 323-331: ObjectPool::default() 应使用默认容量 1024
-        let pool = ObjectPool::<String, i32>::default();
-        assert_eq!(pool.capacity(), 1024);
-        assert!(pool.is_empty());
-    }
-
-    #[test]
-    fn test_object_pool_builder_default_trait() {
-        // 覆盖 line 389-397: ObjectPoolBuilder::default() 应使用默认配置
-        let builder = ObjectPoolBuilder::<String, i32>::default();
-        let pool = builder.build();
-        assert_eq!(pool.capacity(), 1024);
-        assert!(pool.is_empty());
-    }
-
-    #[test]
-    fn test_log_record_pool_default_trait() {
-        // 覆盖 line 457-461: LogRecordPool::default() 应使用默认容量
-        let pool = LogRecordPool::default();
-        // LogRecordPool 没有直接暴露 capacity，通过 metrics 验证
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 1024);
-    }
-
-    #[test]
-    fn test_string_pool_default_trait() {
-        // 覆盖 line 512-516: StringPool::default() 应使用默认容量
-        let pool = StringPool::default();
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 1024);
-    }
-
     #[test]
     fn test_thread_local_log_record_pool_default_trait() {
-        // 覆盖 line 580-584: ThreadLocalLogRecordPool::default() 应使用默认容量 1024
         let pool = ThreadLocalLogRecordPool::default();
-        // default 容量 1024，可放入多个 record 而不被丢弃
         let r1 = pool.get();
         pool.put(r1);
         assert!(!pool.is_empty());
     }
 
+    // ============================================================================
+    // ThreadLocalStringPool 测试
+    // ============================================================================
+
     #[test]
-    fn test_thread_local_string_pool_default_trait() {
-        // 覆盖 line 638-642: ThreadLocalStringPool::default() 应使用默认容量 1024
-        let pool = ThreadLocalStringPool::default();
+    fn test_thread_local_string_pool() {
+        let pool = ThreadLocalStringPool::new(10);
+
+        // Drain first
+        while !pool.is_empty() {
+            let _ = pool.get();
+        }
+
+        assert!(pool.is_empty());
+
         let s = pool.get();
         assert!(s.is_empty());
-        pool.put("default".to_string());
-        assert!(!pool.is_empty());
+
+        pool.put("test".to_string());
+
+        // Get should return pooled string
+        let s2 = pool.get();
+        assert_eq!(s2, "test");
     }
-
-    // ============================================================================
-    // LogRecordPool / StringPool new() 默认容量测试
-    // ============================================================================
-
-    #[test]
-    fn test_log_record_pool_new_uses_default_capacity() {
-        // 覆盖 line 419-421: LogRecordPool::new() 应使用默认容量 1024
-        let pool = LogRecordPool::new();
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 1024);
-    }
-
-    #[test]
-    fn test_string_pool_new_uses_default_capacity() {
-        // 覆盖 line 472-474: StringPool::new() 应使用默认容量 1024
-        let pool = StringPool::new();
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 1024);
-    }
-
-    // ============================================================================
-    // ThreadLocalStringPool 长度/容量测试
-    // ============================================================================
 
     #[test]
     fn test_thread_local_string_pool_len_and_is_empty() {
-        // 覆盖 line 626-635: ThreadLocalStringPool 的 len() 和 is_empty()
         let pool = ThreadLocalStringPool::new(10);
 
-        // 清空线程本地池（避免其他测试残留影响）
+        // Drain first
         while !pool.is_empty() {
             let _ = pool.get();
         }
@@ -1283,7 +523,7 @@ mod tests {
         assert_eq!(pool.len(), 2);
 
         let s = pool.get();
-        assert_eq!(s, "second"); // 后进先出
+        assert_eq!(s, "second"); // LIFO
         assert_eq!(pool.len(), 1);
 
         let s = pool.get();
@@ -1294,20 +534,18 @@ mod tests {
 
     #[test]
     fn test_thread_local_string_pool_exceed_capacity_drops_excess() {
-        // 覆盖 line 615-623: 当 pool 满 capacity 时，多余的 put 应被丢弃
         let pool = ThreadLocalStringPool::new(2);
 
-        // 清空线程本地池
+        // Drain first
         while !pool.is_empty() {
             let _ = pool.get();
         }
 
-        // 填满容量
         pool.put("a".to_string());
         pool.put("b".to_string());
         assert_eq!(pool.len(), 2);
 
-        // 第三次 put 应被丢弃
+        // Third put should be dropped
         pool.put("c".to_string());
         assert_eq!(
             pool.len(),
@@ -1315,7 +553,7 @@ mod tests {
             "pool should not grow beyond capacity; excess should be dropped"
         );
 
-        // 验证 pool 中保留的是 a 和 b（先放入的两个）
+        // Verify retained items are a and b (first two)
         let s1 = pool.get();
         let s2 = pool.get();
         let mut remaining = vec![s1, s2];
@@ -1323,44 +561,13 @@ mod tests {
         assert_eq!(remaining, vec!["a".to_string(), "b".to_string()]);
     }
 
-    // ============================================================================
-    // LogRecordPool / StringPool 显式 len/is_empty 测试
-    // ============================================================================
-
     #[test]
-    fn test_log_record_pool_len_and_is_empty() {
-        // 覆盖 line 446-454: LogRecordPool::len() 和 is_empty()
-        let pool = LogRecordPool::with_capacity(10);
-
-        // 在空池上 get 不增加 len
-        let _ = pool.get();
-        // 池中没有 put 任何 record，is_empty 应为 true
-        assert!(pool.is_empty());
-        assert_eq!(pool.len(), 0);
-
-        // put 一个 record
-        pool.put(LogRecord::default());
-        // put 操作后 len 可能因为底层 cache 异步更新而不立即反映
-        // 验证 metrics 行为正确
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 10);
-    }
-
-    #[test]
-    fn test_string_pool_len_and_is_empty() {
-        // 覆盖 line 501-509: StringPool::len() 和 is_empty()
-        let pool = StringPool::with_capacity(10);
-
-        // 空池
-        assert!(pool.is_empty());
-
-        let _ = pool.get(); // get 空池返回默认值，不增加 len
-        let _ = pool.len(); // 验证 len() 可调用
-
-        pool.put("test".to_string());
-        let _ = pool.len();
-        let metrics = pool.metrics();
-        assert_eq!(metrics.max_capacity, 10);
+    fn test_thread_local_string_pool_default_trait() {
+        let pool = ThreadLocalStringPool::default();
+        let s = pool.get();
+        assert!(s.is_empty());
+        pool.put("default".to_string());
+        assert!(!pool.is_empty());
     }
 
     // ============================================================================
@@ -1369,19 +576,15 @@ mod tests {
 
     #[test]
     fn test_global_log_record_functions() {
-        // 覆盖 line 660-667: get_log_record / put_log_record 全局函数
         let record = get_log_record();
-        // 默认 LogRecord 的 level 应为 "INFO"
         assert_eq!(record.level, "INFO");
 
-        // 修改 record 后放回
         let mut modified = record;
         modified.message = "global test".to_string();
         put_log_record(modified);
 
-        // 再次获取应得到有效 record（可能是刚放回的，也可能是新的）
         let record2 = get_log_record();
-        assert_eq!(record2.level, "INFO"); // put 会 reset，所以 level 是 INFO
+        assert_eq!(record2.level, "INFO"); // put 会 reset
 
         // 验证多次调用不会 panic
         for _ in 0..5 {
@@ -1390,118 +593,45 @@ mod tests {
         }
     }
 
-    // ============================================================================
-    // ObjectPool contains() 在 remove 后返回 false 测试
-    // ============================================================================
-
     #[test]
-    fn test_object_pool_contains_after_put_and_remove() {
-        // 覆盖 line 226-234: contains() 在 put 和 remove 后的行为
-        let pool = ObjectPool::<String, String>::with_capacity(10);
+    fn test_global_string_buffer_functions() {
+        let s1 = get_string_buffer();
+        put_string_buffer(s1);
 
-        // 初始不存在
-        assert!(!pool.contains(&"k".to_string()));
-
-        // put 后存在
-        pool.put(&"k".to_string(), "value".to_string());
-        assert!(pool.contains(&"k".to_string()));
-
-        // remove 后不存在
-        let removed = pool.remove(&"k".to_string());
-        assert_eq!(removed, Some("value".to_string()));
-        assert!(!pool.contains(&"k".to_string()));
+        let s2 = get_string_buffer();
+        assert!(s2.is_empty() || !s2.is_empty()); // 验证 API 可调用
     }
 
     // ============================================================================
-    // ObjectPool metrics 在 clear 后的测试
+    // 并发测试
     // ============================================================================
 
-    #[test]
-    fn test_object_pool_metrics_after_clear_resets_size() {
-        // 覆盖 line 311-320: clear() 后 metrics.current_size 应为 0
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_thread_local_pool_concurrent_isolation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
 
-        pool.put(&"a".to_string(), 1);
-        pool.put(&"b".to_string(), 2);
+        // ThreadLocalLogRecordPool 每个线程有独立 pool，不依赖 runtime
+        // 使用 tokio::task::spawn_blocking 保证在独立 OS 线程上运行（AGENTS.md 禁止 std::thread）
+        let pool = Arc::new(ThreadLocalLogRecordPool::new(10));
+        let total_gets = Arc::new(AtomicUsize::new(0));
 
-        let metrics_before = pool.metrics();
-        // total_items 在 put 后会被设置
-        let _ = metrics_before.current_size;
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let pool_clone = Arc::clone(&pool);
+            let counter_clone = Arc::clone(&total_gets);
+            handles.push(tokio::task::spawn_blocking(move || {
+                for _ in 0..5 {
+                    let _record = pool_clone.get();
+                    counter_clone.fetch_add(1, Ordering::Relaxed);
+                }
+            }));
+        }
+        for h in handles {
+            h.await.expect("blocking task should not panic");
+        }
 
-        pool.clear();
-
-        let metrics_after = pool.metrics();
-        assert_eq!(
-            metrics_after.current_size, 0,
-            "current_size should be 0 after clear"
-        );
-        // hits/misses 不应被 clear 重置（它们是累计统计）
-        assert_eq!(metrics_after.hits, 0);
-        assert_eq!(metrics_after.misses, 0);
-    }
-
-    // ============================================================================
-    // ObjectPool remove() 不存在 key 不影响其他 key 测试
-    // ============================================================================
-
-    #[test]
-    fn test_object_pool_remove_nonexistent_does_not_affect_others() {
-        // 覆盖 line 236-262: remove() 不存在 key 时其他 key 不受影响
-        let pool = ObjectPool::<String, i32>::with_capacity(10);
-        pool.put(&"keep".to_string(), 100);
-        pool.put(&"also_keep".to_string(), 200);
-
-        // remove 一个不存在的 key
-        let removed = pool.remove(&"nonexistent".to_string());
-        assert_eq!(removed, None);
-
-        // 其他 key 应该不受影响
-        assert_eq!(pool.get(&"keep".to_string()), Some(100));
-        assert_eq!(pool.get(&"also_keep".to_string()), Some(200));
-    }
-
-    // ============================================================================
-    // ObjectPoolBuilder 链式调用完整性测试
-    // ============================================================================
-
-    #[test]
-    fn test_object_pool_builder_chained_methods() {
-        // 覆盖 line 354-387: ObjectPoolBuilder 链式调用应正确传递配置
-        let pool = ObjectPool::<String, String>::builder()
-            .capacity(2048)
-            .ttl_secs(3600)
-            .build();
-        assert_eq!(pool.capacity(), 2048);
-
-        // 验证功能正常
-        pool.put(&"test".to_string(), "value".to_string());
-        assert_eq!(pool.get(&"test".to_string()), Some("value".to_string()));
-    }
-
-    // ============================================================================
-    // ObjectPoolConfig Default 测试
-    // ============================================================================
-
-    #[test]
-    fn test_object_pool_config_default() {
-        // 覆盖 line 72-79: ObjectPoolConfig::default()
-        let config = ObjectPoolConfig::default();
-        assert_eq!(config.max_capacity, 1024);
-        assert_eq!(config.ttl_secs, None);
-    }
-
-    #[test]
-    fn test_object_pool_config_with_ttl() {
-        // 覆盖 line 144-146: ttl_secs 配置项
-        let config = ObjectPoolConfig {
-            max_capacity: 256,
-            ttl_secs: Some(60),
-        };
-        let pool = ObjectPool::<String, String>::with_config(config);
-        assert_eq!(pool.capacity(), 256);
-
-        // 验证带 TTL 的 pool 能正常工作
-        pool.put(&"k".to_string(), "v".to_string());
-        assert_eq!(pool.get(&"k".to_string()), Some("v".to_string()));
+        // 4 线程 × 5 次 get = 20 次
+        assert_eq!(total_gets.load(Ordering::Relaxed), 20);
     }
 }

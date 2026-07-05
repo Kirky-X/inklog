@@ -106,6 +106,9 @@ pnpm-lock.yaml
 openspec/
 .opencode/
 
+# Specmark
+specmark/
+
 # Misc
 .cache/
 *.pid

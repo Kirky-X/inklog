@@ -165,7 +165,7 @@ pub use support::observability::{
 };
 pub use support::processing::{
     get_log_record, get_string_buffer, put_log_record, put_string_buffer, DataMasker, LogTemplate,
-    ObjectPool, ObjectPoolBuilder, ObjectPoolConfig, PoolMetrics, LOG_RECORD_POOL, STRING_POOL,
+    ObjectPool, ObjectPoolConfig,
 };
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,

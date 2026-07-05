@@ -4,7 +4,7 @@
 // See LICENSE file in the project root for full license information.
 
 use crate::DataMasker;
-use crate::{LOG_RECORD_POOL, STRING_POOL};
+use crate::{get_log_record, get_string_buffer};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -30,8 +30,9 @@ use tracing::{Event, Level};
 ///
 /// # Performance
 ///
-/// `LogRecord` instances are pooled using [`crate::LOG_RECORD_POOL`] to reduce
-/// memory allocations in the hot path. Use [`reset()`](Self::reset) to reuse instances.
+/// `LogRecord` instances are pooled using the global thread-local pool (see
+/// [`crate::get_log_record`]) to reduce memory allocations in the hot path.
+/// Use [`reset()`](Self::reset) to reuse instances.
 ///
 /// # Sensitive Data
 ///
@@ -194,7 +195,7 @@ impl LogRecord {
     ///
     /// This method uses object pooling for both the `LogRecord` and the message
     /// string to minimize allocations in the hot path. The returned instance
-    /// is taken from [`LOG_RECORD_POOL`].
+    /// is taken from the global thread-local pool via [`crate::get_log_record`].
     ///
     /// # Sensitive Data
     ///
@@ -219,11 +220,11 @@ impl LogRecord {
     /// }
     /// ```
     pub fn from_event(event: &Event) -> Self {
-        let mut record = LOG_RECORD_POOL.get();
+        let mut record = get_log_record();
         record.reset();
 
         let mut fields = HashMap::with_capacity(4);
-        let mut message = STRING_POOL.get();
+        let mut message = get_string_buffer();
         message.clear();
 
         let mut visitor = LogVisitor {
