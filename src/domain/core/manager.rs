@@ -7,9 +7,6 @@ use crate::domain::core::subscriber::LoggerSubscriber;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::integrations::infra::Database;
 use crate::integrations::infra::{Cache, Config};
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::integrations::kit::keys::DatabaseCapabilityKey;
-use crate::integrations::kit::keys::{CacheCapabilityKey, ConfigCapabilityKey, InklogConfigKey};
 use crate::support::io::sink::console::ConsoleSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::support::io::sink::database::DatabaseSink;
@@ -38,7 +35,6 @@ use tracing::error;
 #[cfg(feature = "http")]
 use tracing::info;
 use tracing_subscriber::prelude::*;
-use trait_kit::kit::Kit;
 
 // Control messages for sink recovery
 /// Messages used to control sink recovery and status queries.
@@ -170,13 +166,6 @@ pub struct LoggerManager {
     /// 注入的数据库依赖（需要 dbnexus feature）
     #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     database: Option<Arc<dyn Database>>,
-    /// trait-kit 能力注册中心
-    ///
-    /// 存储 [`InklogConfig`]（通过 [`InklogConfigKey`]）和已注册的基础设施
-    /// 能力（[`ConfigCapabilityKey`]、[`CacheCapabilityKey`]、
-    /// [`DatabaseCapabilityKey`]）。使用 `kit.config::<InklogConfigKey>()`
-    /// 获取可热更新的配置句柄。
-    kit: Kit,
 }
 
 impl LoggerManager {
@@ -325,22 +314,6 @@ impl LoggerManager {
         #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         {
             manager.database = database;
-        }
-
-        // 将注入的依赖注册到 trait-kit 能力注册中心
-        if let Some(ref cache) = manager.cache {
-            manager.kit.replace::<CacheCapabilityKey>(cache.clone());
-        }
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-        if let Some(ref database) = manager.database {
-            manager
-                .kit
-                .replace::<DatabaseCapabilityKey>(database.clone());
-        }
-        if let Some(ref config_provider) = deps.config {
-            manager
-                .kit
-                .replace::<ConfigCapabilityKey>(config_provider.clone());
         }
 
         Ok(manager)
@@ -494,16 +467,6 @@ impl LoggerManager {
             database,
         })?;
 
-        // 构建 trait-kit 能力注册中心：注册 InklogConfig 和默认 Config 能力
-        let kit = {
-            let kit = Kit::new();
-            kit.set_config::<InklogConfigKey>(config.clone());
-            kit.replace::<ConfigCapabilityKey>(Arc::new(
-                crate::integrations::infra::InklogConfigAdapter::from_config(config.clone()),
-            ));
-            kit
-        };
-
         let manager = Self {
             config,
             sender,
@@ -519,7 +482,6 @@ impl LoggerManager {
             cache: None,
             #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
             database: None,
-            kit,
         };
 
         Ok((manager, subscriber, filter))
@@ -527,16 +489,6 @@ impl LoggerManager {
 
     pub fn builder() -> LoggerBuilder {
         LoggerBuilder::default()
-    }
-
-    /// 获取 trait-kit 能力注册中心的引用。
-    ///
-    /// 返回的 [`Kit`] 共享内部状态（`Kit: Clone`），可通过 `kit.clone()`
-    /// 获取独立句柄用于子组件。使用 `kit.config::<InklogConfigKey>()`
-    /// 获取可热更新的配置句柄，或 `kit.require::<CacheCapabilityKey>()`
-    /// 获取已注册的缓存能力。
-    pub fn kit(&self) -> &Kit {
-        &self.kit
     }
 
     /// 从配置文件初始化LoggerManager
@@ -2284,18 +2236,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_logger_manager_kit_is_accessible() {
-        let manager = LoggerManager::new()
-            .await
-            .expect("Failed to create manager");
-        // kit() 应返回有效引用
-        let kit = manager.kit();
-        // 验证 kit 包含 InklogConfigKey 配置（在 build_detached 中注册）
-        assert!(kit.contains_config::<InklogConfigKey>());
-        let _ = manager.shutdown();
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_logger_manager_get_health_status() {
         let manager = LoggerManager::new()
             .await
@@ -2347,8 +2287,6 @@ mod tests {
         let manager = LoggerManager::with_dependencies(deps)
             .await
             .expect("Failed to create manager with deps");
-        // 验证 cache 能力已注册到 kit
-        assert!(manager.kit().contains::<CacheCapabilityKey>());
         let _ = manager.shutdown();
     }
 
@@ -2365,8 +2303,6 @@ mod tests {
         let manager = LoggerManager::with_dependencies(deps)
             .await
             .expect("Failed to create manager with config provider");
-        // 验证 config 能力已注册到 kit
-        assert!(manager.kit().contains::<ConfigCapabilityKey>());
         let _ = manager.shutdown();
     }
 
@@ -2662,8 +2598,6 @@ mod tests {
             .await
             .expect("Failed to build manager with cache injection");
         assert_eq!(manager.effective_channel_capacity(), 1500);
-        assert!(manager.kit().contains::<CacheCapabilityKey>());
-        assert!(manager.kit().contains::<ConfigCapabilityKey>());
         let _ = manager.shutdown();
     }
 
@@ -2677,7 +2611,6 @@ mod tests {
             .build()
             .await
             .expect("Failed to build manager with config injection");
-        assert!(manager.kit().contains::<ConfigCapabilityKey>());
         let _ = manager.shutdown();
     }
 
@@ -3544,12 +3477,8 @@ worker_threads = 1
             .await
             .expect("Failed to create manager with config provider");
 
-        // 通过 kit 验证配置已应用到 InklogConfig
-        let kit = manager.kit();
-        let handle = kit
-            .config::<InklogConfigKey>()
-            .expect("InklogConfig should be registered in kit");
-        let config = handle.load();
+        // 验证配置已应用到 InklogConfig
+        let config = &manager.config;
         assert_eq!(config.global.level, "debug");
         assert_eq!(config.global.format, "{level} {message}");
         assert!(config.global.masking_enabled);
@@ -3588,11 +3517,7 @@ worker_threads = 1
             .expect("Failed to create manager with file_sink config");
 
         // 验证配置已应用到 InklogConfig
-        let kit = manager.kit();
-        let handle = kit
-            .config::<InklogConfigKey>()
-            .expect("InklogConfig should be registered");
-        let config = handle.load();
+        let config = &manager.config;
         let file_sink = config
             .file_sink
             .as_ref()
@@ -3654,11 +3579,7 @@ worker_threads = 1
             .expect("Failed to create manager with http_server config");
 
         // 验证配置已应用到 InklogConfig
-        let kit = manager.kit();
-        let handle = kit
-            .config::<InklogConfigKey>()
-            .expect("InklogConfig should be registered");
-        let config = handle.load();
+        let config = &manager.config;
         let http = config
             .http_server
             .as_ref()
@@ -3698,26 +3619,21 @@ worker_threads = 1
         );
 
         // 验证 worker_threads 也已应用到 InklogConfig
-        let kit = manager.kit();
-        let handle = kit
-            .config::<InklogConfigKey>()
-            .expect("InklogConfig should be registered");
-        let config = handle.load();
+        let config = &manager.config;
         assert_eq!(config.performance.worker_threads, 2);
 
         let _ = manager.shutdown();
     }
 
     // ============================================================================
-    // build_with_deps 注入 database 到 kit 测试 (lines 336-340)
+    // build_with_deps 注入 database 测试 (lines 336-340)
     // 需要 dbnexus feature
     // ============================================================================
 
     #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_build_with_deps_injects_database_to_kit() {
-        // 验证通过 LoggerDependencies.database 注入的 Database 实现
-        // 被注册到 kit 的 DatabaseCapabilityKey
+    async fn test_build_with_deps_injects_database() {
+        // 验证通过 LoggerDependencies.database 注入的 Database 实现不会导致创建失败
         use crate::integrations::infra::MockDatabaseAdapter;
         let deps = LoggerDependencies {
             cache: None,
@@ -3728,12 +3644,6 @@ worker_threads = 1
         let manager = LoggerManager::with_dependencies(deps)
             .await
             .expect("Failed to create manager with database injection");
-
-        // 验证 database 能力已注册到 kit
-        assert!(
-            manager.kit().contains::<DatabaseCapabilityKey>(),
-            "DatabaseCapabilityKey should be registered in kit after database injection"
-        );
 
         let _ = manager.shutdown();
     }
@@ -3788,16 +3698,6 @@ worker_threads = 1
             filter,
             tracing_subscriber::filter::LevelFilter::WARN,
             "filter should reflect config.global.level 'warn'"
-        );
-
-        // 验证 kit 中 InklogConfig 已注册
-        assert!(
-            manager.kit().contains_config::<InklogConfigKey>(),
-            "InklogConfigKey should be registered in kit"
-        );
-        assert!(
-            manager.kit().contains::<ConfigCapabilityKey>(),
-            "ConfigCapabilityKey should be registered in kit"
         );
 
         let _ = manager.shutdown();
@@ -4082,16 +3982,7 @@ worker_threads = 1
             .await
             .expect("Failed to create manager with cache and config");
 
-        // 验证 cache 和 config 能力都注册到 kit
-        assert!(
-            manager.kit().contains::<CacheCapabilityKey>(),
-            "CacheCapabilityKey should be registered"
-        );
-        assert!(
-            manager.kit().contains::<ConfigCapabilityKey>(),
-            "ConfigCapabilityKey should be registered"
-        );
-
+        // 验证 cache 和 config 同时注入不会导致创建失败
         let _ = manager.shutdown();
     }
 
@@ -4114,11 +4005,7 @@ worker_threads = 1
             .await
             .expect("Failed to create manager with all deps");
 
-        // 验证三个能力都注册到 kit
-        assert!(manager.kit().contains::<CacheCapabilityKey>());
-        assert!(manager.kit().contains::<ConfigCapabilityKey>());
-        assert!(manager.kit().contains::<DatabaseCapabilityKey>());
-
+        // 验证三个依赖同时注入不会导致创建失败
         let _ = manager.shutdown();
     }
 
