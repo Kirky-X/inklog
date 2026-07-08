@@ -14,7 +14,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\"))"] }
 
 [features]
 default = ["http", "cli"]
@@ -30,6 +30,7 @@ test-local = []
 cli = ["dep:clap", "dep:glob"]
 debug = []
 metrics = []
+kit = ["dep:trait-kit", "dbnexus/kit"]
 
 [dependencies]
 log = "0.4"
@@ -44,6 +45,9 @@ regex = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = { version = "1.1" }
+# Uses path until trait-kit 0.2.2 is published to crates.io; the version
+# constraint is kept so the published artifact resolves the same.
+trait-kit = { version = "0.2.2", path = "../trait-kit", features = ["async"], optional = true, default-features = false }
 thiserror = "2.0"
 anyhow = "1.0"
 async-trait = "0.1"
@@ -63,7 +67,7 @@ base64 = "0.22"
 parquet = { version = "59.0", features = ["async"] }
 arrow-array = "59.0"
 arrow-schema = "59.0"
-dbnexus = { version = "0.3.1", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
+dbnexus = { version = "0.3.1", path = "../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"
 zeroize = "1.9"
