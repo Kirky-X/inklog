@@ -30,7 +30,7 @@ test-local = []
 cli = ["dep:clap", "dep:glob"]
 debug = []
 metrics = []
-kit = ["dep:trait-kit", "dbnexus/kit"]
+kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
 
 [dependencies]
 log = "0.4"
@@ -59,7 +59,7 @@ nix = { version = "0.31", features = ["fs"] }
 bytes = "1.12"
 dirs = "6.0"
 parking_lot = "0.12"
-oxcache = { version = "0.3.3", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
+oxcache = { version = "0.3.3", path = "../oxcache", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
 zstd = "0.13"
 aes-gcm = "0.11"
 rand = "0.10"

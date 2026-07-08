@@ -154,6 +154,16 @@ pub use domain::config::{
 pub use domain::db_provider::LogDbProvider;
 pub use domain::types::error::InklogError;
 pub use domain::types::log_record::LogRecord;
+#[cfg(all(
+    feature = "kit",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
+pub use integrations::dbnexus_adapter::DbNexusLogDbAdapter;
+#[cfg(all(
+    feature = "kit",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
+pub use integrations::kit::InklogModule;
 
 pub use domain::core::{
     InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,

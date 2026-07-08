@@ -11,3 +11,8 @@
 ))]
 pub mod dbnexus_adapter;
 pub mod infra;
+#[cfg(all(
+    feature = "kit",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
+pub mod kit;
