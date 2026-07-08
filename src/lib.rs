@@ -151,6 +151,7 @@ pub use domain::config::{
     GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig, ParquetConfig,
     PartitionStrategy, PerformanceConfig,
 };
+pub use domain::db_provider::LogDbProvider;
 pub use domain::types::error::InklogError;
 pub use domain::types::log_record::LogRecord;
 
