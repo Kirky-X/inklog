@@ -101,9 +101,9 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         enabled: true,
         driver: DatabaseDriver::SQLite,
         url: "sqlite::memory:".to_string(),
-        pool_size: 5,                    // 连接池大小
-        batch_size: 10,                   // 批次大小
-        flush_interval_ms: 100,          // 刷新间隔 100ms
+        pool_size: 5,           // 连接池大小
+        batch_size: 10,         // 批次大小
+        flush_interval_ms: 100, // 刷新间隔 100ms
         partition: inklog::config::PartitionStrategy::Monthly,
         table_name: "logs".to_string(),
         archive_format: "json".to_string(),
@@ -239,8 +239,8 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         driver: DatabaseDriver::SQLite,
         url: "sqlite::memory:".to_string(),
         pool_size: 3,
-        batch_size: 5,                    // 小批次大小
-        flush_interval_ms: 50,           // 快速刷新
+        batch_size: 5,         // 小批次大小
+        flush_interval_ms: 50, // 快速刷新
         partition: inklog::config::PartitionStrategy::Monthly,
         table_name: "logs".to_string(),
         archive_format: "json".to_string(),

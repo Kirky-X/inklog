@@ -13,11 +13,11 @@
 //! cargo run --example di_example
 //! ```
 
-use std::sync::Arc;
-use inklog::{InklogContainer, LoggerDependencies, LoggerManager, InklogConfig};
-use inklog::integrations::infra::{OxCacheAdapter, InklogConfigAdapter};
 use inklog::integrations::infra::{Cache, Config, Database};
+use inklog::integrations::infra::{InklogConfigAdapter, OxCacheAdapter};
 use inklog::integrations::infra::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::{InklogConfig, InklogContainer, LoggerDependencies, LoggerManager};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,7 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - 创建容器...");
     let _container = InklogContainer::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(
+            InklogConfig::default(),
+        )))
         .build()?;
     println!("   - 缓存实例: 已创建 (Arc<dyn Cache>)");
     println!("   - 配置实例: 已创建 (Arc<dyn Config>)");
@@ -37,7 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n2. 使用 LoggerBuilder 注入依赖 (真实适配器):");
     let _logger = LoggerManager::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(
+            InklogConfig::default(),
+        )))
         .level("info")
         .console(true)
         .build()
@@ -48,7 +52,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n3. 使用 with_dependencies (真实适配器):");
     let deps = LoggerDependencies {
         cache: Some(Arc::new(OxCacheAdapter::new()?)),
-        config: Some(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default()))),
+        config: Some(Arc::new(InklogConfigAdapter::from_config(
+            InklogConfig::default(),
+        ))),
         ..Default::default()
     };
     let _logger = LoggerManager::with_dependencies(deps).await?;
@@ -58,7 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n4. 容器共享依赖实例演示 (真实适配器):");
     let container = InklogContainer::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(
+            InklogConfig::default(),
+        )))
         .build()?;
 
     // 获取共享的缓存实例
@@ -72,13 +80,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 从另一个实例读取
     let value = cache2.get("shared_key").await?;
     println!("   - cache2 读取 shared_key = {:?}", value);
-    println!("   - 两个实例共享同一底层数据: {}", value == Some("shared_value".to_string()));
+    println!(
+        "   - 两个实例共享同一底层数据: {}",
+        value == Some("shared_value".to_string())
+    );
 
     // 模式 5: 从容器创建多个 Logger（共享依赖）
     println!("\n5. 从容器创建多个 Logger:");
     let container = InklogContainer::builder()
         .cache(Arc::new(OxCacheAdapter::new()?))
-        .config(Arc::new(InklogConfigAdapter::from_config(InklogConfig::default())))
+        .config(Arc::new(InklogConfigAdapter::from_config(
+            InklogConfig::default(),
+        )))
         .build()?;
 
     let _logger1 = container.create_logger().await?;
@@ -117,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MockConfig::new()
             .with_value("global.level", "debug")
             .with_value("http_server.port", "9090")
-            .with_value("file_sink.enabled", "true")
+            .with_value("file_sink.enabled", "true"),
     );
 
     let level = mock_config.get_string("global.level");
@@ -129,7 +142,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 运行时修改配置
     mock_config.set("global.level", "trace");
-    println!("   - 修改后 global.level: {:?}", mock_config.get_string("global.level"));
+    println!(
+        "   - 修改后 global.level: {:?}",
+        mock_config.get_string("global.level")
+    );
 
     // 模式 8: 使用 MockDatabaseAdapter 进行测试
     println!("\n8. 使用 MockDatabaseAdapter 进行测试:");
@@ -154,7 +170,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n9. 使用 Mock 类型创建 Logger:");
     let container = InklogContainer::builder()
         .cache(Arc::new(MockCache::new()))
-        .config(Arc::new(MockConfig::new().with_value("global.level", "info")))
+        .config(Arc::new(
+            MockConfig::new().with_value("global.level", "info"),
+        ))
         .database(Arc::new(MockDatabaseAdapter::new()))
         .build()?;
 
@@ -166,7 +184,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let delayed_cache = MockCache::with_delay(10); // 10ms 延迟
 
     let start = std::time::Instant::now();
-    delayed_cache.set("slow_key", "slow_value".to_string()).await?;
+    delayed_cache
+        .set("slow_key", "slow_value".to_string())
+        .await?;
     let elapsed = start.elapsed();
     println!("   - 设置操作耗时: {:?}", elapsed);
     println!("   - 验证延迟生效: {}ms >= 10ms", elapsed.as_millis());

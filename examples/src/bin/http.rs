@@ -67,8 +67,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::sleep;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::sleep;
 
 /// 启动随机端口 HTTP 服务器
 ///
@@ -170,10 +170,7 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
 }
 
 /// 处理单个 HTTP 连接
-async fn handle_connection(
-    mut stream: TcpStream,
-    metrics: &std::sync::Arc<Metrics>,
-) -> Result<()> {
+async fn handle_connection(mut stream: TcpStream, metrics: &std::sync::Arc<Metrics>) -> Result<()> {
     // 读取请求
     let mut buffer = Vec::new();
     let mut temp_buf = [0u8; 8192];
@@ -222,11 +219,13 @@ async fn handle_connection(
         }
         "/metrics" => {
             let metrics_output = metrics.export_prometheus();
-            ("HTTP/1.1 200 OK", "text/plain; version=0.0.4", metrics_output)
+            (
+                "HTTP/1.1 200 OK",
+                "text/plain; version=0.0.4",
+                metrics_output,
+            )
         }
-        "/favicon.ico" => {
-            ("HTTP/1.1 204 No Content", "image/x-icon", String::new())
-        }
+        "/favicon.ico" => ("HTTP/1.1 204 No Content", "image/x-icon", String::new()),
         _ => {
             let body = serde_json::to_string_pretty(&serde_json::json!({
                 "error": "Not Found",
@@ -238,7 +237,10 @@ async fn handle_connection(
 
     // 构建响应头
     let response = if body.is_empty() {
-        format!("{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", status_line)
+        format!(
+            "{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            status_line
+        )
     } else {
         format!(
             "{}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -293,16 +295,19 @@ fn build_health_response(metrics: &Metrics) -> HealthResponse {
 
     let mut sinks = HashMap::new();
     for (name, health) in &status.sinks {
-        sinks.insert(name.clone(), SinkHealthResponse {
-            status: match &health.status {
-                SinkStatus::Healthy => "Healthy".to_string(),
-                SinkStatus::Degraded { reason } => format!("Degraded: {}", reason),
-                SinkStatus::Unhealthy { error } => format!("Unhealthy: {}", error),
-                SinkStatus::NotStarted => "NotStarted".to_string(),
+        sinks.insert(
+            name.clone(),
+            SinkHealthResponse {
+                status: match &health.status {
+                    SinkStatus::Healthy => "Healthy".to_string(),
+                    SinkStatus::Degraded { reason } => format!("Degraded: {}", reason),
+                    SinkStatus::Unhealthy { error } => format!("Unhealthy: {}", error),
+                    SinkStatus::NotStarted => "NotStarted".to_string(),
+                },
+                consecutive_failures: health.consecutive_failures,
+                last_error: health.last_error.clone(),
             },
-            consecutive_failures: health.consecutive_failures,
-            last_error: health.last_error.clone(),
-        });
+        );
     }
 
     HealthResponse {
@@ -342,7 +347,10 @@ async fn http_get(url: &str) -> Result<(u16, String, String)> {
     };
 
     let (host, port) = if let Some(idx) = host_port.find(':') {
-        (&host_port[..idx], host_port[idx + 1..].parse().unwrap_or(80))
+        (
+            &host_port[..idx],
+            host_port[idx + 1..].parse().unwrap_or(80),
+        )
     } else {
         (host_port, 80)
     };
@@ -352,7 +360,10 @@ async fn http_get(url: &str) -> Result<(u16, String, String)> {
     let mut stream = TcpStream::connect(&addr).await?;
 
     // 发送 HTTP 请求
-    let request = format!("GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", path, host);
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        path, host
+    );
     stream.write_all(request.as_bytes()).await?;
 
     // 读取响应
@@ -418,9 +429,15 @@ async fn health_endpoint(port: u16) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&json)?);
 
     // 验证响应结构
-    assert!(json.get("overall_status").is_some(), "缺少 overall_status 字段");
+    assert!(
+        json.get("overall_status").is_some(),
+        "缺少 overall_status 字段"
+    );
     assert!(json.get("sinks").is_some(), "缺少 sinks 字段");
-    assert!(json.get("uptime_seconds").is_some(), "缺少 uptime_seconds 字段");
+    assert!(
+        json.get("uptime_seconds").is_some(),
+        "缺少 uptime_seconds 字段"
+    );
     assert!(json.get("metrics").is_some(), "缺少 metrics 字段");
 
     let overall_status = json["overall_status"].as_str().unwrap();
@@ -458,13 +475,20 @@ async fn metrics_endpoint(port: u16) -> Result<()> {
     println!("{}", body);
 
     // 验证关键指标存在（uptime_seconds 只在运行时间 > 0 时输出）
-    assert!(body.contains("inklog_logs_written_total"), "缺少 logs_written_total 指标");
-    assert!(body.contains("inklog_sink_healthy"), "缺少 sink_healthy 指标");
+    assert!(
+        body.contains("inklog_logs_written_total"),
+        "缺少 logs_written_total 指标"
+    );
+    assert!(
+        body.contains("inklog_sink_healthy"),
+        "缺少 sink_healthy 指标"
+    );
 
     // 解析并显示关键指标
     print_section("关键指标摘要");
 
-    let metrics: Vec<&str> = body.lines()
+    let metrics: Vec<&str> = body
+        .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
         .collect();
 

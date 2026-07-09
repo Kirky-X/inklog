@@ -42,5 +42,9 @@ pub fn format_duration(duration: Duration) -> String {
 
 /// 生成临时文件路径
 pub fn temp_file_path(prefix: &str) -> String {
-    format!("/tmp/inklog_example_{}_{}.log", prefix, uuid::Uuid::new_v4())
+    format!(
+        "/tmp/inklog_example_{}_{}.log",
+        prefix,
+        uuid::Uuid::new_v4()
+    )
 }

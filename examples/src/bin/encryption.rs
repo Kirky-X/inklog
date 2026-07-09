@@ -57,8 +57,8 @@
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes256Gcm;
 use inklog::sink::encryption::get_encryption_key;
-use inklog::{FileSinkConfig, LogRecord};
 use inklog::sink::LogSink;
+use inklog::{FileSinkConfig, LogRecord};
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
 use rand::Rng;
 use std::io::Write;
@@ -130,11 +130,7 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
 
     // 逐行写入
     for line in plaintext.lines() {
-        let record = LogRecord::new(
-            Level::INFO,
-            "encryption".to_string(),
-            line.to_string(),
-        );
+        let record = LogRecord::new(Level::INFO, "encryption".to_string(), line.to_string());
         sink.write(&record).await?;
     }
 
@@ -172,8 +168,8 @@ fn encrypt_log_file(
     println!("✓ 密钥获取成功: {} 字节", key.len());
 
     // 创建 AES-256-GCM 密码器
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Failed to create cipher: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     // 生成随机 nonce
     let mut nonce_bytes = [0u8; 12];
@@ -189,16 +185,19 @@ fn encrypt_log_file(
         .encrypt(nonce, plaintext.as_slice())
         .map_err(|e| format!("Encryption failed: {}", e))?;
 
-    println!("✓ 加密完成: {} bytes -> {} bytes (含认证标签)",
-        plaintext.len(), ciphertext.len());
+    println!(
+        "✓ 加密完成: {} bytes -> {} bytes (含认证标签)",
+        plaintext.len(),
+        ciphertext.len()
+    );
 
     // 写入加密文件
     let mut file = std::fs::File::create(encrypted_path)?;
-    file.write_all(MAGIC_HEADER)?;                          // Magic Header
-    file.write_all(&VERSION.to_le_bytes())?;                 // Version
-    file.write_all(&ALGO_AES_GCM.to_le_bytes())?;           // Algorithm ID
-    file.write_all(&nonce_bytes)?;                           // Nonce
-    file.write_all(&ciphertext)?;                            // Ciphertext + Auth Tag
+    file.write_all(MAGIC_HEADER)?; // Magic Header
+    file.write_all(&VERSION.to_le_bytes())?; // Version
+    file.write_all(&ALGO_AES_GCM.to_le_bytes())?; // Algorithm ID
+    file.write_all(&nonce_bytes)?; // Nonce
+    file.write_all(&ciphertext)?; // Ciphertext + Auth Tag
 
     println!("✓ 加密文件写入完成: {}", encrypted_path);
 
@@ -234,7 +233,10 @@ fn parse_encrypted_format(file_path: &str) -> Result<(), Box<dyn std::error::Err
 
     // Magic Header (8 bytes)
     let magic = &header[..8];
-    println!("  Magic Header (8 bytes): {:?}", String::from_utf8_lossy(magic));
+    println!(
+        "  Magic Header (8 bytes): {:?}",
+        String::from_utf8_lossy(magic)
+    );
     println!("    └─ 标识文件为 inklog 加密格式");
 
     // Version (2 bytes)
@@ -244,10 +246,14 @@ fn parse_encrypted_format(file_path: &str) -> Result<(), Box<dyn std::error::Err
 
     // Algorithm ID (2 bytes)
     let algo = u16::from_le_bytes([header[10], header[11]]);
-    println!("  Algorithm ID (2 bytes):  {} ({})", algo, match algo {
-        1 => "AES-256-GCM",
-        _ => "Unknown",
-    });
+    println!(
+        "  Algorithm ID (2 bytes):  {} ({})",
+        algo,
+        match algo {
+            1 => "AES-256-GCM",
+            _ => "Unknown",
+        }
+    );
     println!("    └─ 加密算法标识");
 
     // Nonce (12 bytes)
@@ -324,8 +330,8 @@ fn decrypt_and_verify(
     std::io::Read::read_to_end(&mut file, &mut ciphertext)?;
 
     // 创建密码器并解密
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Failed to create cipher: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     let plaintext = cipher
         .decrypt(nonce, ciphertext.as_ref())

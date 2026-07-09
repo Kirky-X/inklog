@@ -31,10 +31,10 @@ use async_trait::async_trait;
 use chrono::Utc;
 use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 use inklog::log_record::LogRecord;
-use inklog::support::observability::{SinkHealth, SinkStatus};
 use inklog::sink::console::ConsoleSink;
 use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
+use inklog::support::observability::{SinkHealth, SinkStatus};
 use inklog::support::processing::LogTemplate;
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
 use std::fs;
@@ -118,10 +118,12 @@ impl LogSink for FailingSink {
         }
 
         // 触发故障
-        Err(inklog::InklogError::IoError(std::io::Error::other(format!(
-            "{} sink failed after {} writes",
-            self.original_name, self.fail_after
-        ))))
+        Err(inklog::InklogError::IoError(std::io::Error::other(
+            format!(
+                "{} sink failed after {} writes",
+                self.original_name, self.fail_after
+            ),
+        )))
     }
 
     async fn flush(&self) -> Result<(), inklog::InklogError> {
@@ -168,10 +170,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         stderr_levels: vec!["error".to_string(), "warn".to_string()],
         masking_enabled: false,
     };
-    let console_sink = ConsoleSink::new(
-        console_config,
-        LogTemplate::new("[{level}] {message}"),
-    );
+    let console_sink = ConsoleSink::new(console_config, LogTemplate::new("[{level}] {message}"));
     println!("Console Sink: 已配置");
 
     // 2. 配置 File Sink
@@ -309,10 +308,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         stderr_levels: vec![],
         masking_enabled: false,
     };
-    let console_sink = ConsoleSink::new(
-        primary_config,
-        LogTemplate::new("[{level}] {message}"),
-    );
+    let console_sink = ConsoleSink::new(primary_config, LogTemplate::new("[{level}] {message}"));
 
     // 包装为会故障的 Sink（在第 5 次写入后故障）
     let primary_sink = FailingSink::new(Box::new(console_sink), 5, "Console");
@@ -536,9 +532,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
                 "\n[{}] *** 主 Sink 发生故障 ***",
                 Utc::now().format("%H:%M:%S%.3f")
             );
-            println!(
-                "     触发降级: File(primary) -> File(fallback)"
-            );
+            println!("     触发降级: File(primary) -> File(fallback)");
             current_sink = "fallback";
         }
 

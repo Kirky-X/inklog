@@ -627,6 +627,8 @@ The `examples/` crate provides 10 dedicated examples demonstrating specific feat
 
 </div>
 
+> **Note**: `inklog-examples` is now part of the workspace.
+
 ---
 
 ## <span id="architecture">🏗️ Architecture</span>

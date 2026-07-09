@@ -1,12 +1,16 @@
 [package]
 name = "inklog"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Kirky.X"]
 description = "Enterprise-grade Rust logging infrastructure"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Kirky-X/inklog"
+
+[workspace]
+resolver = "2"
+members = [".", "examples"]
 
 [package.metadata.docs.rs]
 features = ["default", "http", "cli"]
@@ -47,7 +51,7 @@ serde_json = "1.0"
 toml = { version = "1.1" }
 # Uses path until trait-kit 0.2.2 is published to crates.io; the version
 # constraint is kept so the published artifact resolves the same.
-trait-kit = { version = "0.2.2", path = "../trait-kit", features = ["async"], optional = true, default-features = false }
+trait-kit = { version = "0.2.3", path = "../trait-kit", features = ["async"], optional = true, default-features = false }
 thiserror = "2.0"
 anyhow = "1.0"
 async-trait = "0.1"
@@ -59,7 +63,7 @@ nix = { version = "0.31", features = ["fs"] }
 bytes = "1.12"
 dirs = "6.0"
 parking_lot = "0.12"
-oxcache = { version = "0.3.3", path = "../oxcache", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
+oxcache = { version = "0.3.4", path = "../oxcache", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
 zstd = "0.13"
 aes-gcm = "0.11"
 rand = "0.10"
@@ -67,7 +71,7 @@ base64 = "0.22"
 parquet = { version = "59.0", features = ["async"] }
 arrow-array = "59.0"
 arrow-schema = "59.0"
-dbnexus = { version = "0.3.1", path = "../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
+dbnexus = { version = "0.3.2", path = "../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"
 zeroize = "1.9"
