@@ -143,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 🔍 | **Compression** | ZSTD, GZIP, Brotli, LZ4 support (`zstd`, `flate2`, etc.) |
 | 🔒 | **Encryption** | AES-256-GCM file encryption (`aes-gcm`) |
 | 🗄️ | **Database Sink** | PostgreSQL, MySQL, SQLite via Sea-ORM |
-| 📊 | **Parquet Export** | Analytics-ready log format (`parquet` feature) |
+| 📊 | **Parquet Export** | Analytics-ready log format (always available) |
 | 🌐 | **HTTP Endpoint** | Axum-based health check server (`http` feature) |
 | 🔧 | **CLI Tools** | Utility commands for log management (`cli` feature) |
 
@@ -368,13 +368,15 @@ inklog = { version = "0.1", features = [
 | Feature | Dependencies | Description |
 |---------|-------------|-------------|
 | **http** | axum | HTTP health check endpoint |
-| **cli** | clap, glob, toml | Command-line utilities |
+| **cli** | clap, glob | Command-line utilities |
 | **sqlite** | dbnexus, sea-orm | SQLite database sink |
 | **postgres** | dbnexus, sea-orm | PostgreSQL database sink |
 | **mysql** | dbnexus, sea-orm | MySQL database sink |
-| **duckdb** | dbnexus | DuckDB backend (only for `--all-features` testing; DatabaseSink does not directly support duckdb driver) |
+| **duckdb** | dbnexus, sea-orm | DuckDB backend (only for `--all-features` testing; DatabaseSink does not directly support duckdb driver) |
 | **test-local** | - | Local testing mode |
 | **debug** | - | Security audit logging |
+| **metrics** | - | Health metrics collection |
+| **kit** | trait-kit, dbnexus, oxcache | Dependency injection kit integration |
 
 ---
 

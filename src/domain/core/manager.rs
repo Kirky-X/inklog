@@ -30,6 +30,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+#[cfg(feature = "http")]
 use subtle::ConstantTimeEq;
 use tracing::error;
 #[cfg(feature = "http")]
@@ -2122,6 +2123,7 @@ mod tests {
         assert_eq!(builder.config.file_sink.as_ref().unwrap().keep_files, 7);
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn test_builder_enable_http_server_creates_config() {
         let builder = LoggerBuilder::new().enable_http_server(true);
@@ -2129,6 +2131,7 @@ mod tests {
         assert!(builder.config.http_server.as_ref().unwrap().enabled);
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn test_builder_http_host_sets_config() {
         let builder = LoggerBuilder::new()
@@ -2137,6 +2140,7 @@ mod tests {
         assert_eq!(builder.config.http_server.as_ref().unwrap().host, "0.0.0.0");
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn test_builder_http_port_sets_config() {
         let builder = LoggerBuilder::new()

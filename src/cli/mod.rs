@@ -14,7 +14,7 @@ mod validate;
 #[derive(Parser, Debug)]
 #[command(name = "inklog")]
 #[command(author = "Kirky.X")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "inklog - Enterprise-grade Rust logging infrastructure CLI", long_about = None)]
 struct Cli {
     #[command(subcommand)]

@@ -3,6 +3,8 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
+#![doc(html_root_url = "https://docs.rs/inklog/0.1.3")]
+
 //! # inklog - 企业级 Rust 日志基础设施
 //!
 //! inklog 是一个高性能、可扩展的日志库，专为生产环境设计。
@@ -38,10 +40,13 @@
 //! ### 使用 Builder 模式配置
 //!
 //! ```rust,no_run
-//! use inklog::LoggerManager;
-//!
+//! # #[cfg(not(feature = "http"))]
+//! # fn main() {}
+//! # #[cfg(feature = "http")]
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     use inklog::LoggerManager;
+//!
 //!     let _logger = LoggerManager::builder()
 //!         .level("debug")
 //!         .console(true)
@@ -50,7 +55,7 @@
 //!         .http_port(9090)
 //!         .build()
 //!         .await?;
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
