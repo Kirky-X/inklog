@@ -46,6 +46,9 @@ jobs:
       - name: Set up Docker Compose
         uses: docker/setup-compose-action@v1
 
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Start PostgreSQL and MySQL (only for pg/mysql jobs)
         if: matrix.db != 'sqlite'
         run: |
