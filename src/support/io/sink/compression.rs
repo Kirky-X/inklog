@@ -134,8 +134,8 @@ impl Default for GzipCompression {
 
 impl CompressionStrategy for GzipCompression {
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>, InklogError> {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::new(self.level));
         std::io::Write::write_all(&mut encoder, data)
@@ -166,8 +166,8 @@ impl CompressionStrategy for GzipCompression {
     }
 
     fn compress_file(&self, path: &Path, level: i32) -> Result<PathBuf, InklogError> {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
 
         let compressed_path = path.with_extension("gz");
 

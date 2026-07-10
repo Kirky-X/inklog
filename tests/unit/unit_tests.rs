@@ -4,8 +4,8 @@
 // See LICENSE file in the project root for full license information.
 
 use inklog::log_record::LogRecord;
-use inklog::sink::console::ConsoleSink;
 use inklog::sink::LogSink;
+use inklog::sink::console::ConsoleSink;
 use inklog::template::LogTemplate;
 use inklog::{ConsoleSinkConfig, FileSinkConfig, InklogConfig, LoggerManager};
 use tempfile::TempDir;

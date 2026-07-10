@@ -8,10 +8,10 @@
 //! This module provides a registry pattern for creating sinks dynamically,
 //! enabling third-party sink implementations and runtime configuration.
 
-use crate::support::io::sink::file::FileSink;
-use crate::support::io::sink::LogSink;
 use crate::FileSinkConfig;
 use crate::InklogError;
+use crate::support::io::sink::LogSink;
+use crate::support::io::sink::file::FileSink;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;

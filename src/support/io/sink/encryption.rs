@@ -8,7 +8,7 @@
 //! 提供文件加密所需的密钥派生和加密功能
 
 use crate::InklogError;
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use pbkdf2::pbkdf2_hmac;
 use rand::Rng;
 use sha2::Sha256;
@@ -123,9 +123,13 @@ mod tests {
     #[test]
     fn test_get_encryption_key_from_base64() {
         let key_b64 = "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
-        std::env::set_var("INKLOG_TEST_KEY", key_b64);
+        unsafe {
+            std::env::set_var("INKLOG_TEST_KEY", key_b64);
+        }
         let result = get_encryption_key("INKLOG_TEST_KEY");
-        std::env::remove_var("INKLOG_TEST_KEY");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_KEY");
+        }
         assert!(result.is_ok());
         let key = result.unwrap();
         assert_eq!(key.len(), 32);
@@ -134,9 +138,13 @@ mod tests {
     #[test]
     fn test_get_encryption_key_from_raw_bytes() {
         let key_raw = "abcdefghijklmnopqrstuvwxyz123456";
-        std::env::set_var("INKLOG_TEST_KEY", key_raw);
+        unsafe {
+            std::env::set_var("INKLOG_TEST_KEY", key_raw);
+        }
         let result = get_encryption_key("INKLOG_TEST_KEY");
-        std::env::remove_var("INKLOG_TEST_KEY");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_KEY");
+        }
         assert!(result.is_ok());
         let key = result.unwrap();
         assert_eq!(key.len(), 32);
@@ -144,7 +152,9 @@ mod tests {
 
     #[test]
     fn test_get_encryption_key_missing() {
-        std::env::remove_var("INKLOG_NONEXISTENT_KEY");
+        unsafe {
+            std::env::remove_var("INKLOG_NONEXISTENT_KEY");
+        }
         let result = get_encryption_key("INKLOG_NONEXISTENT_KEY");
         assert!(result.is_err());
     }
@@ -200,9 +210,13 @@ mod tests {
     #[test]
     fn test_get_encryption_key_from_password() {
         // Test PBKDF2 password derivation branch (1-127 chars)
-        std::env::set_var("INKLOG_TEST_PWD_DERIVE", "my_password");
+        unsafe {
+            std::env::set_var("INKLOG_TEST_PWD_DERIVE", "my_password");
+        }
         let result = get_encryption_key("INKLOG_TEST_PWD_DERIVE");
-        std::env::remove_var("INKLOG_TEST_PWD_DERIVE");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_PWD_DERIVE");
+        }
         assert!(result.is_ok());
         let key = result.unwrap();
         assert_eq!(key.len(), 32);
@@ -212,12 +226,16 @@ mod tests {
     fn test_get_encryption_key_base64_wrong_length() {
         // Base64 decodes successfully but length is not 32 bytes
         // Use a valid Base64 string that decodes to 16 bytes (not 32)
-        use base64::{engine::general_purpose, Engine as _};
+        use base64::{Engine as _, engine::general_purpose};
         let key_16_bytes = [0u8; 16];
         let b64 = general_purpose::STANDARD.encode(key_16_bytes);
-        std::env::set_var("INKLOG_TEST_B64_WRONG_LEN", &b64);
+        unsafe {
+            std::env::set_var("INKLOG_TEST_B64_WRONG_LEN", &b64);
+        }
         let result = get_encryption_key("INKLOG_TEST_B64_WRONG_LEN");
-        std::env::remove_var("INKLOG_TEST_B64_WRONG_LEN");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_B64_WRONG_LEN");
+        }
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("32 bytes") || err_msg.contains("256 bits"));
@@ -227,9 +245,13 @@ mod tests {
     fn test_get_encryption_key_too_long_input() {
         // Input longer than 127 bytes should return error
         let long_password = "a".repeat(128);
-        std::env::set_var("INKLOG_TEST_TOO_LONG", &long_password);
+        unsafe {
+            std::env::set_var("INKLOG_TEST_TOO_LONG", &long_password);
+        }
         let result = get_encryption_key("INKLOG_TEST_TOO_LONG");
-        std::env::remove_var("INKLOG_TEST_TOO_LONG");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_TOO_LONG");
+        }
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("32 bytes") || err_msg.contains("password"));
@@ -238,9 +260,13 @@ mod tests {
     #[test]
     fn test_get_encryption_key_empty_string() {
         // Empty string should return error (is_empty check)
-        std::env::set_var("INKLOG_TEST_EMPTY", "");
+        unsafe {
+            std::env::set_var("INKLOG_TEST_EMPTY", "");
+        }
         let result = get_encryption_key("INKLOG_TEST_EMPTY");
-        std::env::remove_var("INKLOG_TEST_EMPTY");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_EMPTY");
+        }
         assert!(result.is_err());
     }
 
@@ -268,9 +294,13 @@ mod tests {
         // 覆盖行 75-78: 长度 >= 128 且不是有效 Base64 时返回错误
         // 使用 128 个 '!' 字符（非 Base64 字符），确保到达最后的 Err 分支
         let long_non_base64 = "!".repeat(128);
-        std::env::set_var("INKLOG_TEST_LONG_NON_B64", &long_non_base64);
+        unsafe {
+            std::env::set_var("INKLOG_TEST_LONG_NON_B64", &long_non_base64);
+        }
         let result = get_encryption_key("INKLOG_TEST_LONG_NON_B64");
-        std::env::remove_var("INKLOG_TEST_LONG_NON_B64");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_LONG_NON_B64");
+        }
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(

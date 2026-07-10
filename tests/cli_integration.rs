@@ -154,7 +154,7 @@ fn test_cli_decrypt_nonexistent_input() {
 fn test_cli_decrypt_success() {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Nonce};
-    use base64::{engine::general_purpose, Engine as _};
+    use base64::{Engine as _, engine::general_purpose};
     use std::io::Write;
 
     let dir = TempDir::new().expect("tempdir");

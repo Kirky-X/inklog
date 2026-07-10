@@ -8,9 +8,9 @@ use std::fmt;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::path::PathBuf;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::sync::Arc;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::time::{Duration, Instant};
 
@@ -22,10 +22,6 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::support::io::sink::circuit_breaker::CircuitBreaker;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::support::io::sink::file::FileSink;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::DataMasker;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::FileSinkConfig;
@@ -35,6 +31,10 @@ use crate::InklogError;
 use crate::LogRecord;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::Metrics;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use crate::support::io::sink::circuit_breaker::CircuitBreaker;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use crate::support::io::sink::file::FileSink;
 
 const DEFAULT_BATCH_SIZE: usize = 100;
 const DEFAULT_FLUSH_INTERVAL_MS: u64 = 500;
@@ -343,11 +343,11 @@ pub fn convert_logs_to_parquet(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integrations::infra::database::MockDatabaseAdapter;
-    use crate::support::io::sink::LogSink;
     use crate::DatabaseSinkConfig;
     use crate::LogRecord;
     use crate::Metrics;
+    use crate::integrations::infra::database::MockDatabaseAdapter;
+    use crate::support::io::sink::LogSink;
     use std::sync::Arc;
 
     #[test]

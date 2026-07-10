@@ -45,19 +45,31 @@ use thiserror::Error;
 /// Each tuple contains (pattern, replacement).
 const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
     // AWS Access Key ID pattern (20 characters, starts with AKIA, ABIA, ACCA, ASIA)
-    ("(?i)(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\\b", "[AWS_ACCESS_KEY_ID]"),
+    (
+        "(?i)(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\\b",
+        "[AWS_ACCESS_KEY_ID]",
+    ),
     // AWS Secret Key pattern (40 characters, base64-like with word boundary)
     ("[0-9a-zA-Z+/]{40}={0,2}\\b", "[AWS_SECRET_ACCESS_KEY]"),
     // JWT Token pattern (with word boundaries)
-    ("\\beyJ[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\b", "[JWT_TOKEN]"),
+    (
+        "\\beyJ[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\b",
+        "[JWT_TOKEN]",
+    ),
     // Database connection strings (postgres, mysql, sqlite)
     ("(?i)(postgres|postgresql)://[^@]+:[^@]+@", "$1://***:***@"),
     ("(?i)mysql://[^@]+:[^@]+@", "mysql://***:***@"),
     ("(?i)sqlite://[^?]*\\?[^&]*", "sqlite://***"),
     // API keys (generic pattern)
-    ("(?i)(api[_-]?key|access[_-]?key|secret[_-]?key)[\"']?\\s*[=:]\\s*[\"']?[a-zA-Z0-9_\\-]{20,}", "$1=***REDACTED***"),
+    (
+        "(?i)(api[_-]?key|access[_-]?key|secret[_-]?key)[\"']?\\s*[=:]\\s*[\"']?[a-zA-Z0-9_\\-]{20,}",
+        "$1=***REDACTED***",
+    ),
     // Bearer tokens
-    ("(?i)(bearer|authorization)\\s*:\\s*[a-zA-Z0-9_\\-\\.]+", "$1: ***REDACTED***"),
+    (
+        "(?i)(bearer|authorization)\\s*:\\s*[a-zA-Z0-9_\\-\\.]+",
+        "$1: ***REDACTED***",
+    ),
     // Sensitive paths
     ("/home/[a-zA-Z0-9_-]+/", "[USER_HOME_PATH]"),
     ("/etc/inklog/", "[CONFIG_PATH]"),
@@ -65,11 +77,17 @@ const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
     // Passwords in URLs
     ("(?i)(password|passwd|pwd)=[^&\\s]+", "$1=***"),
     // Email addresses
-    ("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "***@***.***"),
+    (
+        "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+        "***@***.***",
+    ),
     // Phone numbers (Chinese)
     ("\\b1[3-9]\\d{9}\\b", "***-****-****"),
     // Credit card numbers (basic pattern)
-    ("\\b\\d{4}[ -]?\\d{4}[ -]?\\d{4}[ -]?\\d{4}\\b", "****-****-****-****"),
+    (
+        "\\b\\d{4}[ -]?\\d{4}[ -]?\\d{4}[ -]?\\d{4}\\b",
+        "****-****-****-****",
+    ),
 ];
 
 /// Sanitizes a message by removing sensitive information.
@@ -284,33 +302,51 @@ mod tests {
     #[test]
     fn test_safe_message_all_variants() {
         // 验证所有错误变体的 safe_message() 都返回正确前缀
-        assert!(InklogError::ConfigError("x".into())
-            .safe_message()
-            .contains("Configuration error:"));
-        assert!(InklogError::DatabaseError("x".into())
-            .safe_message()
-            .contains("Database error:"));
-        assert!(InklogError::CacheError("x".into())
-            .safe_message()
-            .contains("Cache error:"));
-        assert!(InklogError::EncryptionError("x".into())
-            .safe_message()
-            .contains("Encryption error:"));
-        assert!(InklogError::Shutdown("x".into())
-            .safe_message()
-            .contains("Shutdown error:"));
-        assert!(InklogError::ChannelError("x".into())
-            .safe_message()
-            .contains("Channel error:"));
-        assert!(InklogError::CompressionError("x".into())
-            .safe_message()
-            .contains("Compression error:"));
-        assert!(InklogError::RuntimeError("x".into())
-            .safe_message()
-            .contains("Runtime error:"));
-        assert!(InklogError::Unknown("x".into())
-            .safe_message()
-            .contains("Unknown error:"));
+        assert!(
+            InklogError::ConfigError("x".into())
+                .safe_message()
+                .contains("Configuration error:")
+        );
+        assert!(
+            InklogError::DatabaseError("x".into())
+                .safe_message()
+                .contains("Database error:")
+        );
+        assert!(
+            InklogError::CacheError("x".into())
+                .safe_message()
+                .contains("Cache error:")
+        );
+        assert!(
+            InklogError::EncryptionError("x".into())
+                .safe_message()
+                .contains("Encryption error:")
+        );
+        assert!(
+            InklogError::Shutdown("x".into())
+                .safe_message()
+                .contains("Shutdown error:")
+        );
+        assert!(
+            InklogError::ChannelError("x".into())
+                .safe_message()
+                .contains("Channel error:")
+        );
+        assert!(
+            InklogError::CompressionError("x".into())
+                .safe_message()
+                .contains("Compression error:")
+        );
+        assert!(
+            InklogError::RuntimeError("x".into())
+                .safe_message()
+                .contains("Runtime error:")
+        );
+        assert!(
+            InklogError::Unknown("x".into())
+                .safe_message()
+                .contains("Unknown error:")
+        );
     }
 
     #[test]

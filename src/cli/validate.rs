@@ -669,10 +669,12 @@ level = "invalid"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid log level"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid log level")
+        );
     }
 
     #[test]
@@ -684,10 +686,12 @@ driver = "invalid_driver"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid database driver"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid database driver")
+        );
     }
 
     #[test]
@@ -699,10 +703,12 @@ url = "invalid://url"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid database URL"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid database URL")
+        );
     }
 
     #[test]
@@ -734,10 +740,12 @@ encrypt = true
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("encryption_key_env"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("encryption_key_env")
+        );
     }
 
     #[test]
@@ -750,10 +758,12 @@ encryption_key_env = ""
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("encryption_key_env is empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("encryption_key_env is empty")
+        );
     }
 
     #[test]
@@ -860,10 +870,12 @@ enabled = true
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err(), "should use first [console] table and fail");
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("console_sink.enabled must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("console_sink.enabled must be a boolean")
+        );
     }
 
     #[test]
@@ -878,10 +890,12 @@ enabled = true
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("file_sink.enabled must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("file_sink.enabled must be a boolean")
+        );
     }
 
     #[test]
@@ -977,10 +991,12 @@ level = 123
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid log level"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid log level")
+        );
     }
 
     #[test]
@@ -1006,10 +1022,12 @@ enabled = "yes"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("console_sink.enabled must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("console_sink.enabled must be a boolean")
+        );
     }
 
     #[test]
@@ -1022,10 +1040,12 @@ colored = "yes"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("console_sink.colored must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("console_sink.colored must be a boolean")
+        );
     }
 
     #[test]
@@ -1051,10 +1071,12 @@ stderr_levels = [123, "error"]
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("stderr_levels must be an array of strings"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("stderr_levels must be an array of strings")
+        );
     }
 
     #[test]
@@ -1067,10 +1089,12 @@ enabled = "yes"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("file_sink.enabled must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("file_sink.enabled must be a boolean")
+        );
     }
 
     #[test]
@@ -1083,10 +1107,12 @@ path = ""
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("file_sink.path cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("file_sink.path cannot be empty")
+        );
     }
 
     #[test]
@@ -1099,10 +1125,12 @@ max_size = "100XX"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid file_sink.max_size format"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid file_sink.max_size format")
+        );
     }
 
     #[test]
@@ -1115,10 +1143,12 @@ keep_files = 0
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("file_sink.keep_files must be >= 1"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("file_sink.keep_files must be >= 1")
+        );
     }
 
     #[test]
@@ -1131,10 +1161,12 @@ retention_days = 0
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("file_sink.retention_days must be >= 1"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("file_sink.retention_days must be >= 1")
+        );
     }
 
     #[test]
@@ -1147,10 +1179,12 @@ compress = "yes"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("file_sink.compress must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("file_sink.compress must be a boolean")
+        );
     }
 
     #[test]
@@ -1163,10 +1197,12 @@ encrypt = "yes"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("file_sink.encrypt must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("file_sink.encrypt must be a boolean")
+        );
     }
 
     #[test]
@@ -1180,10 +1216,12 @@ encryption_key_env = 123
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("encryption_key_env must be a string"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("encryption_key_env must be a string")
+        );
     }
 
     #[test]
@@ -1208,10 +1246,12 @@ enabled = "yes"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("db_config.enabled must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("db_config.enabled must be a boolean")
+        );
     }
 
     #[test]
@@ -1237,10 +1277,12 @@ url = ""
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("db_config.url cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("db_config.url cannot be empty")
+        );
     }
 
     #[test]
@@ -1253,10 +1295,12 @@ pool_size = 0
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("pool_size must be between 1 and 100"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("pool_size must be between 1 and 100")
+        );
     }
 
     #[test]
@@ -1269,10 +1313,12 @@ pool_size = 200
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("pool_size must be between 1 and 100"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("pool_size must be between 1 and 100")
+        );
     }
 
     #[test]
@@ -1285,10 +1331,12 @@ batch_size = 0
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("db_config.batch_size must be >= 1"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("db_config.batch_size must be >= 1")
+        );
     }
 
     #[test]
@@ -1301,10 +1349,12 @@ table_name = ""
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("db_config.table_name cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("db_config.table_name cannot be empty")
+        );
     }
 
     #[test]
@@ -1317,10 +1367,12 @@ table_name = "invalid-name!"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("table_name must contain only alphanumeric"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("table_name must contain only alphanumeric")
+        );
     }
 
     #[test]
@@ -1333,10 +1385,12 @@ enabled = "yes"
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("http_server.enabled must be a boolean"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("http_server.enabled must be a boolean")
+        );
     }
 
     #[test]
@@ -1349,10 +1403,12 @@ host = ""
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("http_server.host cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("http_server.host cannot be empty")
+        );
     }
 
     #[test]
@@ -1365,10 +1421,12 @@ channel_capacity = 0
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("performance.channel_capacity must be >= 1"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("performance.channel_capacity must be >= 1")
+        );
     }
 
     #[test]
@@ -1381,10 +1439,12 @@ worker_threads = 0
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("performance.worker_threads must be >= 1"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("performance.worker_threads must be >= 1")
+        );
     }
 
     #[test]

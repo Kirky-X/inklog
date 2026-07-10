@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use tracing::{Event, Subscriber};
-use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Context;
 
 const DEFAULT_SEND_TIMEOUT_MS: u64 = 100;
 const FALLBACK_BUFFER_SIZE: usize = 100;

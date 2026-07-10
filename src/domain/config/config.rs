@@ -2169,9 +2169,13 @@ level = "trace"
         )
         .expect("failed to write config");
 
-        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        unsafe {
+            env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        }
         let config = InklogConfig::from_search_paths().expect("should load from env path");
-        env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
 
         assert_eq!(config.global.level, "trace");
     }
@@ -2180,7 +2184,9 @@ level = "trace"
     #[serial]
     fn test_from_search_paths_missing_env_falls_back_to_default() {
         // 清除 env，且确保当前目录没有 inklog_config.toml（依赖搜索路径回退到默认）
-        env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
         // 注意：若当前目录恰好存在 inklog_config.toml，则此测试会从文件加载而非默认值。
         // 为保证测试确定性，仅验证函数返回 Ok 且配置有效。
         let config = InklogConfig::from_search_paths().expect("should not error");
@@ -2194,9 +2200,13 @@ level = "trace"
         let config_path = dir.path().join("bad_config.toml");
         std::fs::write(&config_path, "not = valid = toml").expect("failed to write");
 
-        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        unsafe {
+            env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        }
         let result = InklogConfig::from_search_paths();
-        env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
 
         let err = result.expect_err("malformed TOML should error");
         assert!(
@@ -2219,9 +2229,13 @@ level = "error"
         )
         .expect("failed to write");
 
-        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        unsafe {
+            env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        }
         let config = InklogConfig::load_sync().expect("load_sync should succeed");
-        env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
 
         assert_eq!(config.global.level, "error");
     }
@@ -2233,10 +2247,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_global_level() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_GLOBAL_LEVEL");
+        unsafe {
+            env::remove_var("INKLOG_GLOBAL_LEVEL");
+        }
 
         assert_eq!(config.global.level, "debug");
     }
@@ -2244,10 +2264,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_performance_capacity() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "5000");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "5000");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY");
+        unsafe {
+            env::remove_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY");
+        }
 
         assert_eq!(config.performance.channel_capacity, 5000);
     }
@@ -2255,10 +2281,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_file_sink_enabled() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_FILE_SINK_ENABLED");
+        unsafe {
+            env::remove_var("INKLOG_FILE_SINK_ENABLED");
+        }
 
         let file = config
             .file_sink
@@ -2269,10 +2301,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_http_server_enabled() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        }
 
         let http = config
             .http_server
@@ -2283,11 +2321,17 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_invalid_bool_ignored() {
-        env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
         // 非法 bool → parse 失败 → unwrap_or 返回原默认值
-        env::set_var("INKLOG_GLOBAL_MASKING_ENABLED", "not_a_bool");
+        unsafe {
+            env::set_var("INKLOG_GLOBAL_MASKING_ENABLED", "not_a_bool");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_GLOBAL_MASKING_ENABLED");
+        unsafe {
+            env::remove_var("INKLOG_GLOBAL_MASKING_ENABLED");
+        }
 
         // 默认 masking_enabled 值（来自 GlobalConfig::default）
         assert_eq!(
@@ -2299,10 +2343,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_invalid_int_ignored() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "not_an_int");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "not_an_int");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY");
+        unsafe {
+            env::remove_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY");
+        }
 
         assert_eq!(
             config.performance.channel_capacity,
@@ -2313,12 +2363,22 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_http_error_mode_strict() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
-        env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "strict");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "strict");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
-        env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        }
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        }
 
         let http = config.http_server.expect("http_server should be Some");
         assert!(matches!(http.error_mode, HttpErrorMode::Strict));
@@ -2327,12 +2387,22 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_http_error_mode_warn() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
-        env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
-        env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        }
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        }
 
         let http = config.http_server.expect("http_server should be Some");
         assert!(matches!(http.error_mode, HttpErrorMode::Warn));
@@ -2341,14 +2411,28 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_file_sink_path_and_max_size() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
-        env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test_app.log");
-        env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "250MB");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
+        }
+        unsafe {
+            env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test_app.log");
+        }
+        unsafe {
+            env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "250MB");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_FILE_SINK_ENABLED");
-        env::remove_var("INKLOG_FILE_SINK_PATH");
-        env::remove_var("INKLOG_FILE_SINK_MAX_SIZE");
+        unsafe {
+            env::remove_var("INKLOG_FILE_SINK_ENABLED");
+        }
+        unsafe {
+            env::remove_var("INKLOG_FILE_SINK_PATH");
+        }
+        unsafe {
+            env::remove_var("INKLOG_FILE_SINK_MAX_SIZE");
+        }
 
         let file = config.file_sink.expect("file_sink should be Some");
         assert_eq!(file.path, std::path::PathBuf::from("/tmp/test_app.log"));
@@ -2358,14 +2442,28 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_http_server_host_port() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
-        env::set_var("INKLOG_HTTP_SERVER_HOST", "0.0.0.0");
-        env::set_var("INKLOG_HTTP_SERVER_PORT", "8080");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_HOST", "0.0.0.0");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_PORT", "8080");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
-        env::remove_var("INKLOG_HTTP_SERVER_HOST");
-        env::remove_var("INKLOG_HTTP_SERVER_PORT");
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        }
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_HOST");
+        }
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_PORT");
+        }
 
         let http = config.http_server.expect("http_server should be Some");
         assert_eq!(http.host, "0.0.0.0");
@@ -2379,10 +2477,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_global_format() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_GLOBAL_FORMAT", "{level} {message}");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_GLOBAL_FORMAT", "{level} {message}");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_GLOBAL_FORMAT");
+        unsafe {
+            env::remove_var("INKLOG_GLOBAL_FORMAT");
+        }
 
         assert_eq!(config.global.format, "{level} {message}");
     }
@@ -2390,10 +2494,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_global_auto_fallback() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_GLOBAL_AUTO_FALLBACK", "false");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_GLOBAL_AUTO_FALLBACK", "false");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_GLOBAL_AUTO_FALLBACK");
+        unsafe {
+            env::remove_var("INKLOG_GLOBAL_AUTO_FALLBACK");
+        }
 
         assert!(!config.global.auto_fallback);
     }
@@ -2401,14 +2511,28 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_http_server_metrics_and_health_path() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
-        env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/custom_metrics");
-        env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/custom_health");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/custom_metrics");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/custom_health");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
-        env::remove_var("INKLOG_HTTP_SERVER_METRICS_PATH");
-        env::remove_var("INKLOG_HTTP_SERVER_HEALTH_PATH");
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        }
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_METRICS_PATH");
+        }
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_HEALTH_PATH");
+        }
 
         let http = config.http_server.expect("http_server should be Some");
         assert_eq!(http.metrics_path, "/custom_metrics");
@@ -2418,13 +2542,23 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_http_error_mode_unknown_keeps_default() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+        }
         // 未知值应保留默认的 Strict 模式
-        env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "unknown_mode");
+        unsafe {
+            env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "unknown_mode");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
-        env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+        }
+        unsafe {
+            env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        }
 
         let http = config.http_server.expect("http_server should be Some");
         assert!(
@@ -2436,10 +2570,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_performance_worker_threads() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+        unsafe {
+            env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+        }
 
         assert_eq!(config.performance.worker_threads, 8);
     }
@@ -2447,10 +2587,16 @@ level = "error"
     #[test]
     #[serial]
     fn test_load_with_env_overrides_performance_worker_threads_invalid_ignored() {
-        env::remove_var("INKLOG_CONFIG_PATH");
-        env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "not_a_number");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        unsafe {
+            env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "not_a_number");
+        }
         let config = InklogConfig::load_with_env_overrides().expect("should load");
-        env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+        unsafe {
+            env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+        }
 
         assert_eq!(
             config.performance.worker_threads,
@@ -2592,9 +2738,13 @@ level = "error"
         perms.set_mode(0o000);
         std::fs::set_permissions(&config_path, perms).unwrap();
 
-        env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        unsafe {
+            env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        }
         let result = InklogConfig::from_search_paths();
-        env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            env::remove_var("INKLOG_CONFIG_PATH");
+        }
 
         // 恢复权限以便 tempdir 清理
         let mut perms = std::fs::metadata(&config_path).unwrap().permissions();

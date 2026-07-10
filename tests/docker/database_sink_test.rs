@@ -11,10 +11,10 @@
 use super::get_test_db_url_or_skip;
 use super::make_log_record;
 use inklog::config::DatabaseSinkConfig;
-use inklog::integrations::infra::database::DbNexusAdapter;
 use inklog::integrations::infra::Database as DatabaseTrait;
-use inklog::sink::database::DatabaseSink;
+use inklog::integrations::infra::database::DbNexusAdapter;
 use inklog::sink::LogSink;
+use inklog::sink::database::DatabaseSink;
 use serial_test::serial;
 use std::sync::Arc;
 use std::time::Duration;

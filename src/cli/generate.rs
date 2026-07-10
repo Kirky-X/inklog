@@ -29,7 +29,7 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
             return Err(anyhow::anyhow!(
                 "Unknown config type: {}. Use: minimal, full, database, file",
                 config_type
-            ))
+            ));
         }
     };
 
