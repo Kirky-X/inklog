@@ -129,7 +129,6 @@ impl ChannelBufferedFileSink {
         let file = self.file.clone();
         let shutdown_flag = self.shutdown_flag.clone();
         let bytes_written = self.bytes_written.clone();
-        let dropped_count = self.dropped_count.clone();
         let batch_size = self.config.flush_batch_size;
 
         let handle = thread::spawn(move || {
@@ -156,11 +155,6 @@ impl ChannelBufferedFileSink {
 
                 if recv_count == 0 {
                     continue;
-                }
-
-                if recv_count < batch_size {
-                    dropped_count.fetch_add(batch_size - recv_count, Ordering::Relaxed);
-                    batch.truncate(recv_count);
                 }
 
                 let mut file_guard = file.lock();
@@ -435,7 +429,12 @@ mod tests {
         let tmpl = LogTemplate::default();
         let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
-        for i in 0..64 {
+        // Write far more messages than the channel can buffer. The IO thread
+        // drains in batches of `flush_batch_size` (2) with a `flush()` syscall
+        // per batch; 10_000 synchronous `try_send` calls complete in
+        // microseconds and overwhelm the IO thread, guaranteeing the channel
+        // fills and DropNewest kicks in.
+        for i in 0..10_000 {
             let rec = make_record(&format!("drop-newest-{i}"));
             sink.write(&rec).await.unwrap();
         }
@@ -464,7 +463,9 @@ mod tests {
         let tmpl = LogTemplate::default();
         let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
-        for i in 0..64 {
+        // Same rationale as test_backpressure_drop_newest: 10_000 writes
+        // overwhelm the IO thread's drain rate, guaranteeing channel overflow.
+        for i in 0..10_000 {
             let rec = make_record(&format!("drop-oldest-{i}"));
             sink.write(&rec).await.unwrap();
         }

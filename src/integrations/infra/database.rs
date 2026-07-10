@@ -465,7 +465,7 @@ mod tests {
     // DbNexusAdapter 测试 (需要 feature)
     // ============================================================================
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn test_dbnexus_adapter_health_check() {
         // 创建临时权限配置文件
@@ -548,7 +548,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn test_dbnexus_adapter_insert_batch() {
         // 创建临时权限配置文件
@@ -762,7 +762,7 @@ mod tests {
     // 覆盖行：181-183 (Ok(Self)), 203-204 (pool()), 208-209 (table_name()), 218 (Ok(0))
     // ============================================================================
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn test_dbnexus_adapter_with_table_name_creates_instance() {
         // 覆盖行 181-183：with_table_name 成功路径返回 Ok(Self { pool, table_name })
@@ -780,7 +780,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn test_dbnexus_adapter_pool_getter_returns_underlying_pool() {
         // 覆盖行 203-204：pool() getter
@@ -802,7 +802,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn test_dbnexus_adapter_insert_empty_batch_returns_zero() {
         // 覆盖行 218：insert_batch 收到空切片时立即返回 Ok(0)

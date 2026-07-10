@@ -1467,39 +1467,13 @@ dependencies = [
 [[package]]
 name = "dbnexus"
 version = "0.3.2"
-dependencies = [
- "anyhow",
- "async-trait",
- "dashmap",
- "dbnexus-macros 0.3.2",
- "duckdb",
- "futures",
- "once_cell",
- "oxcache",
- "parking_lot",
- "regex",
- "sea-orm",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sqlparser",
- "thiserror",
- "time",
- "tokio",
- "unicode-normalization",
- "url",
-]
-
-[[package]]
-name = "dbnexus"
-version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fed346f3d00845bb97c085ad03a754b282ec4c9caaf1e7f963cde0ab82695c35"
 dependencies = [
  "anyhow",
  "async-trait",
  "dashmap",
- "dbnexus-macros 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dbnexus-macros",
  "duckdb",
  "futures",
  "once_cell",
@@ -1517,18 +1491,6 @@ dependencies = [
  "trait-kit",
  "unicode-normalization",
  "url",
-]
-
-[[package]]
-name = "dbnexus-macros"
-version = "0.3.2"
-dependencies = [
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "regex",
- "serde",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -2435,7 +2397,7 @@ dependencies = [
  "clap",
  "criterion",
  "crossbeam-channel",
- "dbnexus 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dbnexus",
  "dirs",
  "filetime",
  "flate2",
@@ -2483,7 +2445,7 @@ dependencies = [
  "base64",
  "chrono",
  "crossbeam-channel",
- "dbnexus 0.3.2",
+ "dbnexus",
  "inklog",
  "log",
  "parking_lot",
