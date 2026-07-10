@@ -95,5 +95,10 @@
 
 /// 共享辅助函数（可选）
 pub mod common;
+pub mod console_ops;
+pub mod crypto_ops;
+pub mod file_ops;
+pub mod perf_ops;
+pub mod template_ops;
 
 pub use common::*;

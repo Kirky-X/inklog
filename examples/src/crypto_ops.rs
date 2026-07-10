@@ -93,15 +93,15 @@ pub fn generate_temp_key() -> String {
 /// - AES 加密失败（极少见）。
 pub fn encrypt_log_file(plaintext_path: &str, encrypted_path: &str, key_env: &str) -> Result<()> {
     let key = inklog::support::io::sink::encryption::get_encryption_key(key_env)?;
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(key));
 
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
 
     let plaintext = std::fs::read(plaintext_path)?;
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_slice())
+        .encrypt(&nonce, plaintext.as_slice())
         .map_err(|e| anyhow!("Encryption failed: {}", e))?;
 
     let mut file = std::fs::File::create(encrypted_path)?;
@@ -131,8 +131,8 @@ pub fn decrypt_file(encrypted_path: &str, key_env: &str) -> Result<String> {
     }
 
     let key = inklog::support::io::sink::encryption::get_encryption_key(key_env)?;
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-    let nonce = Nonce::from_slice(&header.nonce);
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(key));
+    let nonce = Nonce::from(header.nonce);
 
     let mut file = std::fs::File::open(encrypted_path)?;
     // 跳过文件头
@@ -142,7 +142,7 @@ pub fn decrypt_file(encrypted_path: &str, key_env: &str) -> Result<String> {
     file.read_to_end(&mut ciphertext)?;
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
+        .decrypt(&nonce, ciphertext.as_ref())
         .map_err(|e| anyhow!("Decryption failed: {}", e))?;
 
     String::from_utf8(plaintext).map_err(|e| anyhow!("Invalid UTF-8 in decrypted data: {}", e))

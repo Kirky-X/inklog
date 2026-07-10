@@ -174,7 +174,7 @@ fn encrypt_log_file(
     // 生成随机 nonce
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
-    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+    let nonce = aes_gcm::Nonce::from(nonce_bytes);
 
     // 读取明文
     let plaintext = std::fs::read(plaintext_path)?;
@@ -182,7 +182,7 @@ fn encrypt_log_file(
 
     // 加密
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_slice())
+        .encrypt(&nonce, plaintext.as_slice())
         .map_err(|e| format!("Encryption failed: {}", e))?;
 
     println!(
@@ -322,8 +322,8 @@ fn decrypt_and_verify(
     println!("✓ 密钥获取成功");
 
     // 提取 nonce
-    let nonce_bytes = &header[12..24];
-    let nonce = aes_gcm::Nonce::from_slice(nonce_bytes);
+    let nonce_bytes: [u8; 12] = header[12..24].try_into().unwrap();
+    let nonce = aes_gcm::Nonce::from(nonce_bytes);
 
     // 读取密文
     let mut ciphertext = Vec::new();
@@ -334,7 +334,7 @@ fn decrypt_and_verify(
         Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
+        .decrypt(&nonce, ciphertext.as_ref())
         .map_err(|e| format!("Decryption failed: {}", e))?;
 
     let plaintext_str = String::from_utf8(plaintext.clone())

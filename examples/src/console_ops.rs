@@ -100,7 +100,9 @@ mod tests {
         // 验证：空用例列表返回 0。
         let config = create_console_config(false, vec![]);
         let sink = ConsoleSink::new(config, LogTemplate::default());
-        let written = write_test_cases(&sink, &[]).await.expect("写入空列表应成功");
+        let written = write_test_cases(&sink, &[])
+            .await
+            .expect("写入空列表应成功");
         assert_eq!(written, 0);
     }
 }

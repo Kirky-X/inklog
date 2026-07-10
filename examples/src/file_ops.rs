@@ -182,7 +182,9 @@ mod tests {
         let log_path = dir.path().join("empty.log");
         let config = create_file_config(log_path.to_str().unwrap(), "10MB", false);
         let sink = FileSink::new(config).expect("创建 FileSink 失败");
-        let written = write_level_records(&sink, &[]).await.expect("写入空列表应成功");
+        let written = write_level_records(&sink, &[])
+            .await
+            .expect("写入空列表应成功");
         assert_eq!(written, 0);
     }
 

@@ -31,8 +31,8 @@ use std::time::Duration;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// 端到端：file_ops 创建文件 → 写入多级别 → 读取验证 → 清理。
-#[test]
-fn integration_file_ops_end_to_end() {
+#[tokio::test]
+async fn integration_file_ops_end_to_end() {
     let dir = tempfile::tempdir().expect("创建临时目录失败");
     let log_path = dir.path().join("integration.log");
     let path_str = log_path.to_str().unwrap();
@@ -43,7 +43,7 @@ fn integration_file_ops_end_to_end() {
 
     // 2. 写入多级别日志
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
-    let written = write_level_records(&sink, &levels).expect("写入失败");
+    let written = write_level_records(&sink, &levels).await.expect("写入失败");
     assert_eq!(written, 5);
 
     // 3. 验证文件存在且包含所有级别
@@ -61,9 +61,8 @@ fn integration_file_ops_end_to_end() {
 }
 
 /// 端到端：file_ops 写入明文 → crypto_ops 加密 → crypto_ops 解密 → 内容一致。
-#[test]
-fn integration_file_then_crypto_roundtrip() {
-    let _guard = ENV_LOCK.lock().unwrap();
+#[tokio::test]
+async fn integration_file_then_crypto_roundtrip() {
     let dir = tempfile::tempdir().expect("创建临时目录失败");
     let plain_path = dir.path().join("plain.log");
     let enc_path = dir.path().join("plain.log.enc");
@@ -74,9 +73,10 @@ fn integration_file_then_crypto_roundtrip() {
     let config = create_file_config(plain_str, "10MB", false);
     let sink = FileSink::new(config).expect("创建 FileSink 失败");
     let levels = ["INFO", "WARN", "ERROR"];
-    write_level_records(&sink, &levels).expect("写入失败");
+    write_level_records(&sink, &levels).await.expect("写入失败");
 
-    // 2. 用 crypto_ops 加密
+    // 2. 用 crypto_ops 加密（持有锁以保护环境变量）
+    let _guard = ENV_LOCK.lock().unwrap();
     let key = generate_temp_key();
     std::env::set_var("LOG_ENCRYPTION_KEY", &key);
     encrypt_log_file(plain_str, enc_str, "LOG_ENCRYPTION_KEY").expect("加密失败");
@@ -151,8 +151,8 @@ fn integration_template_render_pipeline() {
 }
 
 /// 端到端：console_ops 写入测试用例 + perf_ops 计算延迟百分位。
-#[test]
-fn integration_console_write_with_perf_stats() {
+#[tokio::test]
+async fn integration_console_write_with_perf_stats() {
     // 1. 用 console_ops 写入 5 个用例（捕获延迟）
     let config = create_console_config(false, vec![]);
     let sink = ConsoleSink::new(config, LogTemplate::default());
@@ -169,7 +169,7 @@ fn integration_console_write_with_perf_stats() {
     for (level, msg) in cases {
         let start = std::time::Instant::now();
         let single = [(level, msg)];
-        write_test_cases(&sink, &single).expect("写入失败");
+        write_test_cases(&sink, &single).await.expect("写入失败");
         latencies.push(start.elapsed());
     }
 
