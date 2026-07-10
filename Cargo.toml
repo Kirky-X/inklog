@@ -18,7 +18,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"i18n\"))"] }
 
 [features]
 default = ["http", "cli"]
@@ -35,6 +35,7 @@ cli = ["dep:clap", "dep:glob"]
 debug = []
 metrics = []
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
+i18n = ["dep:icu", "dep:writeable"]
 
 [dependencies]
 log = "0.4"
@@ -49,7 +50,7 @@ regex = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = { version = "1.1" }
-trait-kit = { version = "0.2.3", features = ["async"], optional = true, default-features = false }
+trait-kit = { version = "0.2", features = ["async"], optional = true, default-features = false }
 thiserror = "2.0"
 anyhow = "1.0"
 async-trait = "0.1"
@@ -61,7 +62,7 @@ nix = { version = "0.31", features = ["fs"] }
 bytes = "1.12"
 dirs = "6.0"
 parking_lot = "0.12"
-oxcache = { version = "0.3.4", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
+oxcache = { version = "0.3", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
 zstd = "0.13"
 aes-gcm = "0.11"
 rand = "0.10"
@@ -69,7 +70,7 @@ base64 = "0.22"
 parquet = { version = "59.0", features = ["async"] }
 arrow-array = "59.0"
 arrow-schema = "59.0"
-dbnexus = { version = "0.3.2", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
+dbnexus = { version = "0.3", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"
 zeroize = "1.9"
@@ -79,6 +80,8 @@ clap = { version = "4.6", features = ["derive", "env"], optional = true }
 glob = { version = "0.3", optional = true }
 ipnet = "2.12"
 subtle = "2.6"
+icu = { version = "2.2", optional = true }
+writeable = { version = "0.6", optional = true }
 
 [dev-dependencies]
 tempfile = "3.27"

@@ -132,6 +132,10 @@
 pub mod log_level;
 pub mod validation;
 
+// ICU4X-backed internationalization (optional, enabled via `i18n` feature)
+#[cfg(feature = "i18n")]
+pub mod i18n;
+
 // Backwards compatibility - expose modules at root level
 pub use domain::config;
 pub use domain::types::log_record;
