@@ -317,7 +317,7 @@ impl LogRecord {
     pub fn mask_sensitive_fields(&mut self) {
         let masker = DataMasker::new();
         self.message = masker.mask(&self.message);
-        for (_, v) in self.fields.iter_mut() {
+        for v in self.fields.values_mut() {
             masker.mask_value(v);
         }
         for (k, v) in self.fields.iter_mut() {

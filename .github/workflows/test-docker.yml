@@ -61,7 +61,7 @@ jobs:
         run: |
           case "${{ matrix.db }}" in
             sqlite)
-              echo "INKLOG_TEST_DB_URL=sqlite:///tmp/inklog_ci_test.db" >> $GITHUB_ENV
+              echo "INKLOG_TEST_DB_URL=sqlite:///tmp/inklog_ci_test.db?mode=rwc" >> $GITHUB_ENV
               ;;
             postgres)
               echo "INKLOG_TEST_DB_URL=postgres://inklog:inklog@localhost:5432/inklog_test" >> $GITHUB_ENV

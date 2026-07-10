@@ -228,7 +228,7 @@ impl DataMasker {
     }
 
     pub fn mask_hashmap(&self, map: &mut HashMap<String, Value>) {
-        for (_, v) in map.iter_mut() {
+        for v in map.values_mut() {
             self.mask_value(v);
         }
     }
