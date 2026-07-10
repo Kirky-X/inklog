@@ -14,7 +14,7 @@ duckdb = ["inklog/duckdb", "dep:dbnexus", "dbnexus/duckdb"]
 [dependencies]
 inklog = { path = ".." }
 async-trait = "0.1"
-dbnexus = { path = "../../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
+dbnexus = { path = "../../dbnexus", version = "0.3", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
