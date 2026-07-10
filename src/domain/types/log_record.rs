@@ -854,9 +854,9 @@ mod tests {
     fn test_log_record_from_event_with_f64_field() {
         use std::sync::{Arc, Mutex};
         use tracing::subscriber::with_default;
+        use tracing_subscriber::Layer;
         use tracing_subscriber::layer::Context;
         use tracing_subscriber::prelude::*;
-        use tracing_subscriber::Layer;
 
         // 自定义捕获层：记录 on_event 产生的 LogRecord
         struct CaptureLayer(Arc<Mutex<Option<LogRecord>>>);
@@ -909,9 +909,9 @@ mod tests {
     fn test_log_record_from_event_with_multiple_f64_fields() {
         use std::sync::{Arc, Mutex};
         use tracing::subscriber::with_default;
+        use tracing_subscriber::Layer;
         use tracing_subscriber::layer::Context;
         use tracing_subscriber::prelude::*;
-        use tracing_subscriber::Layer;
 
         struct CaptureLayer(Arc<Mutex<Option<LogRecord>>>);
 

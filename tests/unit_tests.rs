@@ -20,9 +20,9 @@ mod unit;
 #[allow(unused_imports)]
 use inklog::log_record::LogRecord;
 #[allow(unused_imports)]
-use inklog::sink::console::ConsoleSink;
-#[allow(unused_imports)]
 use inklog::sink::LogSink;
+#[allow(unused_imports)]
+use inklog::sink::console::ConsoleSink;
 #[allow(unused_imports)]
 use inklog::template::LogTemplate;
 #[allow(unused_imports)]

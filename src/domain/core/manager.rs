@@ -3,25 +3,25 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-use crate::domain::core::subscriber::LoggerSubscriber;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::integrations::infra::Database;
-use crate::integrations::infra::{Cache, Config};
-use crate::support::io::sink::console::ConsoleSink;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::support::io::sink::database::DatabaseSink;
-use crate::support::io::sink::file::FileSink;
-use crate::support::io::sink::LogSink;
-use crate::support::io::{LogAdapter, LogLogger};
 #[allow(unused_imports)]
 use crate::ConsoleSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use crate::domain::core::subscriber::LoggerSubscriber;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use crate::integrations::infra::Database;
+use crate::integrations::infra::{Cache, Config};
+use crate::support::io::sink::LogSink;
+use crate::support::io::sink::console::ConsoleSink;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use crate::support::io::sink::database::DatabaseSink;
+use crate::support::io::sink::file::FileSink;
+use crate::support::io::{LogAdapter, LogLogger};
 use crate::{FileSinkConfig, InklogConfig};
 use crate::{HealthStatus, Metrics};
 use chrono::Utc;
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, bounded};
 #[allow(unused_imports)]
 use std::path::Path;
 use std::path::PathBuf;
@@ -552,12 +552,12 @@ impl LoggerManager {
     #[cfg(feature = "http")]
     async fn start_http_server(&self, config: &crate::HttpServerConfig) -> Result<(), InklogError> {
         use axum::{
+            Router,
             extract::{ConnectInfo, State},
-            http::{header, Request, StatusCode},
+            http::{Request, StatusCode, header},
             middleware::{self, Next},
             response::{IntoResponse, Response},
             routing::get,
-            Router,
         };
         use std::net::SocketAddr;
 
@@ -1072,7 +1072,9 @@ impl LoggerManager {
                                     if !write_succeeded && consecutive_failures > 5 {
                                         if let Some(last_failure) = last_failure_time {
                                             if last_failure.elapsed() > Duration::from_secs(60) {
-                                                eprintln!("File sink: Triggering auto-recovery due to consecutive failures");
+                                                eprintln!(
+                                                    "File sink: Triggering auto-recovery due to consecutive failures"
+                                                );
                                                 // Attempt to recreate the sink
                                                 if let Ok(new_sink) =
                                                     FileSink::new(cfg_clone.clone())
@@ -1197,7 +1199,9 @@ impl LoggerManager {
                                                         if last_failure.elapsed()
                                                             > Duration::from_secs(60)
                                                         {
-                                                            eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
+                                                            eprintln!(
+                                                                "Database sink: Triggering auto-recovery due to consecutive failures"
+                                                            );
                                                             if let Ok(new_sink) = DatabaseSink::new(
                                                                 db_for_recovery.clone(),
                                                             ) {
@@ -1213,8 +1217,8 @@ impl LoggerManager {
                                                                     "database", true, None,
                                                                 );
                                                                 eprintln!(
-                                                        "Database sink: Auto-recovery successful"
-                                                    );
+                                                                    "Database sink: Auto-recovery successful"
+                                                                );
                                                             }
                                                         }
                                                     }
@@ -1325,7 +1329,9 @@ impl LoggerManager {
                                                     if last_failure.elapsed()
                                                         > Duration::from_secs(60)
                                                     {
-                                                        eprintln!("Database sink: Triggering auto-recovery due to consecutive failures");
+                                                        eprintln!(
+                                                            "Database sink: Triggering auto-recovery due to consecutive failures"
+                                                        );
                                                         if let Ok(new_sink) = DatabaseSink::new(
                                                             db_for_recovery.clone(),
                                                         ) {
@@ -1339,8 +1345,8 @@ impl LoggerManager {
                                                                 "database", true, None,
                                                             );
                                                             eprintln!(
-                                                        "Database sink: Auto-recovery successful"
-                                                    );
+                                                                "Database sink: Auto-recovery successful"
+                                                            );
                                                         }
                                                     }
                                                 }
@@ -3212,7 +3218,9 @@ worker_threads = 1
         let port = find_available_http_port();
         // 使用唯一的环境变量名，确保它未设置
         let token_env = "INKLOG_TEST_TOKEN_MISSING_ENV_VAR";
-        std::env::remove_var(token_env);
+        unsafe {
+            std::env::remove_var(token_env);
+        }
         let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
             .await
             .expect("Manager should start with HTTP server");
@@ -3245,7 +3253,9 @@ worker_threads = 1
         let port = find_available_http_port();
         let token_env = "INKLOG_TEST_TOKEN_VALID";
         let token_value = "secret-token-12345";
-        std::env::set_var(token_env, token_value);
+        unsafe {
+            std::env::set_var(token_env, token_value);
+        }
         let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
             .await
             .expect("Manager should start with HTTP server");
@@ -3268,7 +3278,9 @@ worker_threads = 1
             "valid Bearer token should return 200"
         );
         let _ = manager.shutdown();
-        std::env::remove_var(token_env);
+        unsafe {
+            std::env::remove_var(token_env);
+        }
     }
 
     /// auth 启用但 Bearer token 错误时返回 401
@@ -3278,7 +3290,9 @@ worker_threads = 1
     async fn test_http_server_auth_invalid_token_returns_401() {
         let port = find_available_http_port();
         let token_env = "INKLOG_TEST_TOKEN_INVALID";
-        std::env::set_var(token_env, "correct-secret");
+        unsafe {
+            std::env::set_var(token_env, "correct-secret");
+        }
         let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
             .await
             .expect("Manager should start with HTTP server");
@@ -3307,7 +3321,9 @@ worker_threads = 1
             body
         );
         let _ = manager.shutdown();
-        std::env::remove_var(token_env);
+        unsafe {
+            std::env::remove_var(token_env);
+        }
     }
 
     /// auth 启用但缺少 Authorization header 时返回 401
@@ -3317,7 +3333,9 @@ worker_threads = 1
     async fn test_http_server_auth_missing_header_returns_401() {
         let port = find_available_http_port();
         let token_env = "INKLOG_TEST_TOKEN_MISSING_HEADER";
-        std::env::set_var(token_env, "some-secret");
+        unsafe {
+            std::env::set_var(token_env, "some-secret");
+        }
         let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
             .await
             .expect("Manager should start with HTTP server");
@@ -3340,7 +3358,9 @@ worker_threads = 1
             body
         );
         let _ = manager.shutdown();
-        std::env::remove_var(token_env);
+        unsafe {
+            std::env::remove_var(token_env);
+        }
     }
 
     /// IP 白名单精确匹配 127.0.0.1 时允许访问
@@ -4025,12 +4045,16 @@ worker_threads = 1
         let dir = tempfile::tempdir().expect("Failed to create tempdir");
         let config_path = dir.path().join("load_test.toml");
         std::fs::write(&config_path, "[global]\nlevel = \"info\"\n").unwrap();
-        std::env::set_var("INKLOG_CONFIG_PATH", &config_path);
+        unsafe {
+            std::env::set_var("INKLOG_CONFIG_PATH", &config_path);
+        }
 
         let manager = LoggerManager::load().await.expect("load should succeed");
         let _ = manager.shutdown();
 
-        std::env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -4041,7 +4065,9 @@ worker_threads = 1
         let dir = tempfile::tempdir().expect("Failed to create tempdir");
         let config_path = dir.path().join("invalid.toml");
         std::fs::write(&config_path, "this is = not = valid toml\n").unwrap();
-        std::env::set_var("INKLOG_CONFIG_PATH", &config_path);
+        unsafe {
+            std::env::set_var("INKLOG_CONFIG_PATH", &config_path);
+        }
 
         let result = LoggerManager::load().await;
         assert!(result.is_err(), "load should fail with invalid TOML");
@@ -4052,7 +4078,9 @@ worker_threads = 1
             err_msg
         );
 
-        std::env::remove_var("INKLOG_CONFIG_PATH");
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
     }
 
     // ============================================================================

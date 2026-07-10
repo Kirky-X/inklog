@@ -3,15 +3,15 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use inklog::masking::{self, DataMasker};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::convert_logs_to_parquet;
 use inklog::{
+    InklogConfig, LoggerManager,
     config::{FileSinkConfig, PerformanceConfig},
     log_record::LogRecord,
     template::LogTemplate,
-    InklogConfig, LoggerManager,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use rand::RngExt;

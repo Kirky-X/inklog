@@ -5,19 +5,19 @@
 
 //! High-performance file sink using crossbeam channels.
 
-use crate::support::io::sink::LogSink;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use crate::support::io::sink::LogSink;
 use async_trait::async_trait;
 use crossbeam_channel;
 use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 
@@ -194,18 +194,20 @@ impl ChannelBufferedFileSink {
         let interval_ms = self.config.flush_interval_ms;
         let flush_count = self.flush_count.clone();
 
-        let handle = thread::spawn(move || loop {
-            if shutdown_flag.load(Ordering::Relaxed) {
-                break;
-            }
-            thread::sleep(StdDuration::from_millis(interval_ms));
-            if shutdown_flag.load(Ordering::Relaxed) {
-                break;
-            }
-            let mut file_guard = file.lock();
-            if let Some(writer) = file_guard.as_mut() {
-                let _ = writer.flush();
-                flush_count.fetch_add(1, Ordering::Relaxed);
+        let handle = thread::spawn(move || {
+            loop {
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                thread::sleep(StdDuration::from_millis(interval_ms));
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                let mut file_guard = file.lock();
+                if let Some(writer) = file_guard.as_mut() {
+                    let _ = writer.flush();
+                    flush_count.fetch_add(1, Ordering::Relaxed);
+                }
             }
         });
 

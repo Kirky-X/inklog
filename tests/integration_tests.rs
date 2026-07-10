@@ -18,8 +18,8 @@
 
 // ============ 通用集成测试 ============
 
-use inklog::sink::LogSink;
 use inklog::LoggerManager;
+use inklog::sink::LogSink;
 use serial_test::serial;
 use std::time::Duration;
 use tracing::{error, info};
@@ -210,16 +210,16 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
 
 // ============ 批量写入集成测试 (integration::batch) ============
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use inklog::DatabaseSinkConfig as BatchDatabaseSinkConfig;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::DatabaseDriver as BatchDatabaseDriver;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::log_record::LogRecord as BatchLogRecord;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[allow(unused_imports)]
 use inklog::sink::LogSink as BatchLogSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use inklog::DatabaseSinkConfig as BatchDatabaseSinkConfig;
+use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::time::Duration as BatchDuration;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -357,7 +357,9 @@ fn clear_all_inklog_env_vars() {
     // 清除所有可能的 INKLOG_* 环境变量
     for (key, _) in std::env::vars() {
         if key.starts_with("INKLOG_") {
-            std::env::remove_var(&key);
+            unsafe {
+                std::env::remove_var(&key);
+            }
         }
     }
 }
@@ -367,11 +369,21 @@ fn clear_all_inklog_env_vars() {
 fn test_config_from_env_overrides() {
     clear_all_inklog_env_vars();
 
-    std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
-    std::env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
-    std::env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test_logs/app.log");
-    std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "50MB");
-    std::env::set_var("INKLOG_FILE_SINK_COMPRESS", "true");
+    unsafe {
+        std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test_logs/app.log");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "50MB");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_FILE_SINK_COMPRESS", "true");
+    }
 
     // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
     let config = ConfigInklogConfig::load_with_env_overrides().unwrap();
@@ -391,11 +403,21 @@ fn test_config_from_env_overrides() {
 fn test_config_env_override_http_server() {
     clear_all_inklog_env_vars();
 
-    std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
-    std::env::set_var("INKLOG_HTTP_SERVER_HOST", "127.0.0.1");
-    std::env::set_var("INKLOG_HTTP_SERVER_PORT", "9090");
-    std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/prometheus");
-    std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_HOST", "127.0.0.1");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_PORT", "9090");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/prometheus");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
+    }
 
     // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
     let config = ConfigInklogConfig::load_with_env_overrides().unwrap();
@@ -414,8 +436,12 @@ fn test_config_env_override_http_server() {
 fn test_config_env_override_performance() {
     clear_all_inklog_env_vars();
 
-    std::env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");
-    std::env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "20000");
+    unsafe {
+        std::env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "20000");
+    }
 
     // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
     let config = ConfigInklogConfig::load_with_env_overrides().unwrap();
@@ -426,14 +452,16 @@ fn test_config_env_override_performance() {
 
 // ============ HTTP 服务器集成测试 (integration::http) ============
 
-use inklog::config::{HttpErrorMode, HttpServerConfig};
 use inklog::InklogConfig as HttpInklogConfig;
+use inklog::config::{HttpErrorMode, HttpServerConfig};
 use serial_test::serial as http_serial;
 
 fn clear_inklog_env() {
     for (key, _) in std::env::vars() {
         if key.starts_with("INKLOG_") {
-            std::env::remove_var(&key);
+            unsafe {
+                std::env::remove_var(&key);
+            }
         }
     }
 }
@@ -543,10 +571,18 @@ async fn test_http_server_error_mode_strict() {
 async fn test_http_server_with_logger_manager() {
     clear_inklog_env();
 
-    std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
-    std::env::set_var("INKLOG_HTTP_SERVER_HOST", "127.0.0.1");
-    std::env::set_var("INKLOG_HTTP_SERVER_PORT", "18084");
-    std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_HOST", "127.0.0.1");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_PORT", "18084");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
+    }
 
     // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
     let config = HttpInklogConfig::load_with_env_overrides().unwrap();
@@ -561,10 +597,18 @@ async fn test_http_server_with_logger_manager() {
         _ => panic!("Expected Warn mode from env"),
     }
 
-    std::env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
-    std::env::remove_var("INKLOG_HTTP_SERVER_HOST");
-    std::env::remove_var("INKLOG_HTTP_SERVER_PORT");
-    std::env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+    unsafe {
+        std::env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+    }
+    unsafe {
+        std::env::remove_var("INKLOG_HTTP_SERVER_HOST");
+    }
+    unsafe {
+        std::env::remove_var("INKLOG_HTTP_SERVER_PORT");
+    }
+    unsafe {
+        std::env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+    }
 }
 
 #[http_serial]
@@ -572,9 +616,15 @@ async fn test_http_server_with_logger_manager() {
 async fn test_http_metrics_path_configuration() {
     clear_inklog_env();
 
-    std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
-    std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/prometheus/metrics");
-    std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/prometheus/metrics");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
+    }
 
     // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
     let config = HttpInklogConfig::load_with_env_overrides().unwrap();
@@ -929,11 +979,11 @@ use inklog::sink::file::FileSink as VerifyFileSink;
 // LogSink already imported at line 29
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::{
-    log_record::LogRecord as VerifyLogRecord, DatabaseSinkConfig as VerifyDatabaseSinkConfig,
-    FileSinkConfig as VerifyFileSinkConfig,
+    DatabaseSinkConfig as VerifyDatabaseSinkConfig, FileSinkConfig as VerifyFileSinkConfig,
+    log_record::LogRecord as VerifyLogRecord,
 };
 #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
-use inklog::{log_record::LogRecord as VerifyLogRecord, FileSinkConfig as VerifyFileSinkConfig};
+use inklog::{FileSinkConfig as VerifyFileSinkConfig, log_record::LogRecord as VerifyLogRecord};
 use std::fs::File as VerifyFile;
 use std::io::Read as VerifyRead;
 use std::path::PathBuf;
@@ -1021,7 +1071,9 @@ async fn verify_file_sink_encryption() {
 
     // Use a proper base64-encoded 32-byte key (44 characters)
     // Uses mixed alphanumeric chars for sufficient entropy (>= 4.0)
-    std::env::set_var("LOG_KEY", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=");
+    unsafe {
+        std::env::set_var("LOG_KEY", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=");
+    }
 
     let config = VerifyFileSinkConfig {
         enabled: true,
@@ -1097,8 +1149,8 @@ async fn verify_database_sink_sqlite() {
     // 可选：验证真实数据库（使用不同的数据库路径避免冲突）
     {
         use inklog::sink::entity::{
-            sea_orm::{Database, EntityTrait},
             Entity,
+            sea_orm::{Database, EntityTrait},
         };
 
         let db = Database::connect(&url)
@@ -1307,7 +1359,9 @@ async fn test_concurrent_file_writes() {
 
     if !probe_ok {
         // Global logger 未生效（被其他测试占用），跳过
-        println!("Global logger not effective (already set by other test), skipping test_concurrent_file_writes");
+        println!(
+            "Global logger not effective (already set by other test), skipping test_concurrent_file_writes"
+        );
         drop(logger);
         return;
     }
@@ -1392,7 +1446,9 @@ async fn test_memory_stability() {
 
     if !probe_ok {
         // Global logger 未生效（被其他测试占用），跳过
-        println!("Global logger not effective (already set by other test), skipping test_memory_stability");
+        println!(
+            "Global logger not effective (already set by other test), skipping test_memory_stability"
+        );
         drop(logger);
         return;
     }

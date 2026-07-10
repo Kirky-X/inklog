@@ -3,10 +3,10 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes256Gcm;
-use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose, Engine as _};
+use aes_gcm::aead::{Aead, KeyInit};
+use anyhow::{Context, Result, anyhow};
+use base64::{Engine as _, engine::general_purpose};
 use inklog::sink::encryption::derive_key_from_password;
 #[cfg(test)]
 use sha2::Digest as Sha256Digest;
@@ -426,8 +426,8 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::Aes256Gcm;
+    use aes_gcm::aead::{Aead, KeyInit};
     use rand::RngExt;
     use std::io::Write;
 

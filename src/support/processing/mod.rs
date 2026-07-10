@@ -11,7 +11,7 @@ pub mod template;
 
 pub use masking::DataMasker;
 pub use object_pool::{
-    get_log_record, get_string_buffer, put_log_record, put_string_buffer, ObjectPool,
-    ObjectPoolConfig,
+    ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record,
+    put_string_buffer,
 };
 pub use template::LogTemplate;

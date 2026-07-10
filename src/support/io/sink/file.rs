@@ -8,15 +8,15 @@
 //! This module provides the FileSink implementation for writing logs to files
 //! with support for automatic rotation, compression, and encryption.
 
-use crate::support::io::sink::circuit_breaker::CircuitBreaker;
-use crate::support::io::sink::rotation::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
-use crate::support::io::sink::LogSink;
 use crate::DataMasker;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
-use aes_gcm::aead::Aead;
+use crate::support::io::sink::LogSink;
+use crate::support::io::sink::circuit_breaker::CircuitBreaker;
+use crate::support::io::sink::rotation::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
 use aes_gcm::KeyInit;
+use aes_gcm::aead::Aead;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, Utc};
@@ -25,8 +25,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 use tracing::{debug, error, info, warn};
@@ -1232,7 +1232,9 @@ mod tests {
 
         // Set a valid 32-byte test key (base64 encoded, mixed characters for entropy)
         // "abcdefghijklmnopqrstuvwxyz123456" = 32 varied bytes
-        std::env::set_var("TEST_KEY", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=");
+        unsafe {
+            std::env::set_var("TEST_KEY", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=");
+        }
 
         let sink = create_test_file_sink(config);
 
@@ -1241,7 +1243,9 @@ mod tests {
         assert_eq!(key_result.unwrap().len(), 32);
 
         // Clean up
-        std::env::remove_var("TEST_KEY");
+        unsafe {
+            std::env::remove_var("TEST_KEY");
+        }
     }
 
     #[test]
@@ -1359,7 +1363,9 @@ mod tests {
         };
 
         // Ensure the env var doesn't exist
-        std::env::remove_var("MISSING_KEY");
+        unsafe {
+            std::env::remove_var("MISSING_KEY");
+        }
 
         let sink = create_test_file_sink(config);
 
@@ -1467,16 +1473,20 @@ mod tests {
         };
 
         // 设置一个太短的密钥（Base64 编码前 < 16 字符）
-        std::env::set_var("TEST_SHORT_KEY", "YWJjZA=="); // "abcd"
+        unsafe {
+            std::env::set_var("TEST_SHORT_KEY", "YWJjZA==");
+        } // "abcd"
 
         let sink = create_test_file_sink(config);
 
         let result = sink.get_encryption_key();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("at least 16 characters"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("at least 16 characters")
+        );
     }
 
     #[test]
@@ -1979,7 +1989,9 @@ mod tests {
         std::fs::write(&original_path, original_content).unwrap();
 
         let (key_bytes, key_b64) = make_test_key();
-        std::env::set_var("TEST_COMPRESS_ENC_KEY", &key_b64);
+        unsafe {
+            std::env::set_var("TEST_COMPRESS_ENC_KEY", &key_b64);
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2014,7 +2026,9 @@ mod tests {
         std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
         assert_eq!(decompressed, original_content);
 
-        std::env::remove_var("TEST_COMPRESS_ENC_KEY");
+        unsafe {
+            std::env::remove_var("TEST_COMPRESS_ENC_KEY");
+        }
     }
 
     // ==================== encrypt_file 测试 ====================
@@ -2029,7 +2043,9 @@ mod tests {
         std::fs::write(&input_path, original_content).unwrap();
 
         let (key_bytes, key_b64) = make_test_key();
-        std::env::set_var("TEST_ENC_KEY_RT", &key_b64);
+        unsafe {
+            std::env::set_var("TEST_ENC_KEY_RT", &key_b64);
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2055,7 +2071,9 @@ mod tests {
         let decrypted = cipher.decrypt(&nonce, ciphertext).unwrap();
         assert_eq!(decrypted, original_content);
 
-        std::env::remove_var("TEST_ENC_KEY_RT");
+        unsafe {
+            std::env::remove_var("TEST_ENC_KEY_RT");
+        }
     }
 
     #[test]
@@ -2065,7 +2083,9 @@ mod tests {
         let input_path = temp_dir.path().join("input.log");
         let output_path = temp_dir.path().join("output.log.enc");
         std::fs::write(&input_path, "content").unwrap();
-        std::env::remove_var("TEST_MISSING_ENC_KEY_VAR");
+        unsafe {
+            std::env::remove_var("TEST_MISSING_ENC_KEY_VAR");
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2088,7 +2108,9 @@ mod tests {
         let output_path = temp_dir.path().join("output.log.enc");
 
         let (_key_bytes, key_b64) = make_test_key();
-        std::env::set_var("TEST_ENC_KEY_NI", &key_b64);
+        unsafe {
+            std::env::set_var("TEST_ENC_KEY_NI", &key_b64);
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2100,7 +2122,9 @@ mod tests {
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err());
-        std::env::remove_var("TEST_ENC_KEY_NI");
+        unsafe {
+            std::env::remove_var("TEST_ENC_KEY_NI");
+        }
     }
 
     #[test]
@@ -2111,7 +2135,9 @@ mod tests {
         let output_path = temp_dir.path().join("output.log.enc");
         std::fs::write(&input_path, "content").unwrap();
         // 长度 >= 16 但不是有效 base64
-        std::env::set_var("TEST_INVALID_B64_KEY", "not_valid_base64!!!*@$");
+        unsafe {
+            std::env::set_var("TEST_INVALID_B64_KEY", "not_valid_base64!!!*@$");
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2123,7 +2149,9 @@ mod tests {
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err());
-        std::env::remove_var("TEST_INVALID_B64_KEY");
+        unsafe {
+            std::env::remove_var("TEST_INVALID_B64_KEY");
+        }
     }
 
     #[test]
@@ -2135,7 +2163,9 @@ mod tests {
         std::fs::write(&input_path, "content").unwrap();
         // 解码后 16 字节（非 32），但 base64 字符串长度 >= 16
         let short_key = base64::engine::general_purpose::STANDARD.encode(b"1234567890123456");
-        std::env::set_var("TEST_WRONG_LEN_KEY", &short_key);
+        unsafe {
+            std::env::set_var("TEST_WRONG_LEN_KEY", &short_key);
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2148,7 +2178,9 @@ mod tests {
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("32 bytes"));
-        std::env::remove_var("TEST_WRONG_LEN_KEY");
+        unsafe {
+            std::env::remove_var("TEST_WRONG_LEN_KEY");
+        }
     }
 
     // ==================== perform_cleanup 测试 ====================
@@ -2539,17 +2571,23 @@ mod tests {
             ..Default::default()
         };
         // 设置非法 base64 字符串（长度足够但不是有效 base64）
-        std::env::set_var("TEST_INVALID_B64", "this_is_not_valid_base64!!!@#$");
+        unsafe {
+            std::env::set_var("TEST_INVALID_B64", "this_is_not_valid_base64!!!@#$");
+        }
 
         let sink = create_test_file_sink(config);
         let result = sink.get_encryption_key();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid base64 encoding"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid base64 encoding")
+        );
 
-        std::env::remove_var("TEST_INVALID_B64");
+        unsafe {
+            std::env::remove_var("TEST_INVALID_B64");
+        }
     }
 
     #[test]
@@ -2563,14 +2601,18 @@ mod tests {
             ..Default::default()
         };
         // 16 字节（足够长，但解码后不是 32 字节）
-        std::env::set_var("TEST_WRONG_LEN", "YWJjZGVmZ2hpamtsbW5v"); // 16 字节
+        unsafe {
+            std::env::set_var("TEST_WRONG_LEN", "YWJjZGVmZ2hpamtsbW5v");
+        } // 16 字节
 
         let sink = create_test_file_sink(config);
         let result = sink.get_encryption_key();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("32 bytes"));
 
-        std::env::remove_var("TEST_WRONG_LEN");
+        unsafe {
+            std::env::remove_var("TEST_WRONG_LEN");
+        }
     }
 
     // ==================== get_disk_space_info 错误路径测试 ====================
@@ -2705,10 +2747,12 @@ mod tests {
             ..Default::default()
         };
         // 设置有效密钥（32 字节，高熵）
-        std::env::set_var(
-            "TEST_ENCRYPT_KEY",
-            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
-        );
+        unsafe {
+            std::env::set_var(
+                "TEST_ENCRYPT_KEY",
+                "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
+            );
+        }
 
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
@@ -2721,7 +2765,9 @@ mod tests {
             "encrypted file should contain nonce + ciphertext"
         );
 
-        std::env::remove_var("TEST_ENCRYPT_KEY");
+        unsafe {
+            std::env::remove_var("TEST_ENCRYPT_KEY");
+        }
     }
 
     #[test]
@@ -2739,15 +2785,19 @@ mod tests {
             encryption_key_env: Some("MISSING_ENCRYPT_KEY_ENV_VAR".to_string()),
             ..Default::default()
         };
-        std::env::remove_var("MISSING_ENCRYPT_KEY_ENV_VAR");
+        unsafe {
+            std::env::remove_var("MISSING_ENCRYPT_KEY_ENV_VAR");
+        }
 
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err(), "encrypt_file should fail without key");
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Encryption key not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Encryption key not found")
+        );
     }
 
     #[test]
@@ -2764,10 +2814,12 @@ mod tests {
             encryption_key_env: Some("TEST_ENCRYPT_KEY_2".to_string()),
             ..Default::default()
         };
-        std::env::set_var(
-            "TEST_ENCRYPT_KEY_2",
-            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
-        );
+        unsafe {
+            std::env::set_var(
+                "TEST_ENCRYPT_KEY_2",
+                "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
+            );
+        }
 
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
@@ -2776,7 +2828,9 @@ mod tests {
             "encrypt_file should fail for nonexistent input"
         );
 
-        std::env::remove_var("TEST_ENCRYPT_KEY_2");
+        unsafe {
+            std::env::remove_var("TEST_ENCRYPT_KEY_2");
+        }
     }
 
     // ==================== compress_file with encryption 测试 ====================
@@ -2796,10 +2850,12 @@ mod tests {
             encryption_key_env: Some("TEST_COMPRESS_ENC_KEY".to_string()),
             ..Default::default()
         };
-        std::env::set_var(
-            "TEST_COMPRESS_ENC_KEY",
-            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
-        );
+        unsafe {
+            std::env::set_var(
+                "TEST_COMPRESS_ENC_KEY",
+                "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=",
+            );
+        }
 
         let sink = create_test_file_sink(config);
         let result = sink.compress_file(&log_path);
@@ -2814,7 +2870,9 @@ mod tests {
         );
         assert!(encrypted_path.extension().is_some_and(|e| e == "enc"));
 
-        std::env::remove_var("TEST_COMPRESS_ENC_KEY");
+        unsafe {
+            std::env::remove_var("TEST_COMPRESS_ENC_KEY");
+        }
     }
 
     // ==================== rotate_inner 测试 ====================
@@ -2902,7 +2960,9 @@ mod tests {
         let log_path = temp_dir.path().join("rotate_encrypt.log");
 
         let (_key_bytes, key_b64) = make_test_key();
-        std::env::set_var("TEST_ROTATE_ENC_KEY", &key_b64);
+        unsafe {
+            std::env::set_var("TEST_ROTATE_ENC_KEY", &key_b64);
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2936,7 +2996,9 @@ mod tests {
             "encrypted rotated file (.enc) should exist in encrypt-only mode"
         );
 
-        std::env::remove_var("TEST_ROTATE_ENC_KEY");
+        unsafe {
+            std::env::remove_var("TEST_ROTATE_ENC_KEY");
+        }
     }
 
     // ==================== compress_file 加密失败回退测试 ====================
@@ -2952,7 +3014,9 @@ mod tests {
 
         // 设置一个无效的加密密钥（长度足够但解码后不是 32 字节）
         let invalid_key = base64::engine::general_purpose::STANDARD.encode(b"1234567890123456");
-        std::env::set_var("TEST_COMPRESS_ENC_FAIL_KEY", &invalid_key);
+        unsafe {
+            std::env::set_var("TEST_COMPRESS_ENC_FAIL_KEY", &invalid_key);
+        }
 
         let config = FileSinkConfig {
             enabled: true,
@@ -2991,7 +3055,9 @@ mod tests {
             "preserved file should be valid zst compressed data"
         );
 
-        std::env::remove_var("TEST_COMPRESS_ENC_FAIL_KEY");
+        unsafe {
+            std::env::remove_var("TEST_COMPRESS_ENC_FAIL_KEY");
+        }
     }
 
     // ==================== open_file_inner 错误路径测试 ====================
@@ -3514,7 +3580,9 @@ mod tests {
         // 设置有效的加密密钥（32 字节 base64）；用自定义 env var 避免与其他测试串扰
         let (_key_bytes, key_b64) = make_test_key();
         let enc_key_env = "TEST_ENCRYPT_READONLY_KEY";
-        std::env::set_var(enc_key_env, &key_b64);
+        unsafe {
+            std::env::set_var(enc_key_env, &key_b64);
+        }
 
         // 将父目录设为只读
         let original_perms = std::fs::metadata(temp_dir.path()).unwrap().permissions();
@@ -3535,7 +3603,9 @@ mod tests {
 
         // 恢复权限
         std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
-        std::env::remove_var(enc_key_env);
+        unsafe {
+            std::env::remove_var(enc_key_env);
+        }
 
         // root 用户会绕过权限检查；只在 result 为 Err 时断言错误类型
         match result {

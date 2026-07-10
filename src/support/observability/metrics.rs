@@ -53,8 +53,8 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Represents the health status of a sink component.
@@ -1866,14 +1866,18 @@ mod metrics_tests {
     #[test]
     fn test_sink_status_is_operational() {
         assert!(SinkStatus::Healthy.is_operational());
-        assert!(SinkStatus::Degraded {
-            reason: "slow".to_string()
-        }
-        .is_operational());
-        assert!(!SinkStatus::Unhealthy {
-            error: "crashed".to_string()
-        }
-        .is_operational());
+        assert!(
+            SinkStatus::Degraded {
+                reason: "slow".to_string()
+            }
+            .is_operational()
+        );
+        assert!(
+            !SinkStatus::Unhealthy {
+                error: "crashed".to_string()
+            }
+            .is_operational()
+        );
         assert!(!SinkStatus::NotStarted.is_operational());
     }
 

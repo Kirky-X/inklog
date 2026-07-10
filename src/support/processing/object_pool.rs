@@ -39,8 +39,8 @@ use crate::LogRecord;
 use once_cell::sync::Lazy;
 use oxcache::Cache;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// Pool configuration - configurable via InklogConfig.performance.object_pool
@@ -626,8 +626,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_thread_local_pool_concurrent_isolation() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         // ThreadLocalLogRecordPool 每个线程有独立 pool，不依赖 runtime
         // 使用 tokio::task::spawn_blocking 保证在独立 OS 线程上运行（AGENTS.md 禁止 std::thread）

@@ -408,10 +408,12 @@ mod tests {
             let result = validator.validate(&symlink_path);
             // Now symlinks ARE detected and rejected
             assert!(!result.valid, "Symlink should be detected and rejected");
-            assert!(result
-                .error
-                .as_ref()
-                .is_some_and(|m| m.contains("Symlinks are not allowed")));
+            assert!(
+                result
+                    .error
+                    .as_ref()
+                    .is_some_and(|m| m.contains("Symlinks are not allowed"))
+            );
         }
     }
 
@@ -456,11 +458,13 @@ mod tests {
         let validator = PathValidator::new();
         let result = validator.validate(Path::new("/some/passwd/file"));
         assert!(!result.valid);
-        assert!(result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Dangerous path component"));
+        assert!(
+            result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Dangerous path component")
+        );
     }
 
     #[test]
@@ -468,11 +472,13 @@ mod tests {
         let validator = PathValidator::new();
         let result = validator.validate(Path::new("/etc/shadow"));
         assert!(!result.valid);
-        assert!(result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Dangerous path component"));
+        assert!(
+            result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Dangerous path component")
+        );
     }
 
     #[test]
@@ -480,11 +486,13 @@ mod tests {
         let validator = PathValidator::new();
         let result = validator.validate(Path::new("project/.git/config"));
         assert!(!result.valid);
-        assert!(result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Dangerous path component"));
+        assert!(
+            result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Dangerous path component")
+        );
     }
 
     // ========================================================================

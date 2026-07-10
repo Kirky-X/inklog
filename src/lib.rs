@@ -184,8 +184,8 @@ pub use support::observability::{
     FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
 };
 pub use support::processing::{
-    get_log_record, get_string_buffer, put_log_record, put_string_buffer, DataMasker, LogTemplate,
-    ObjectPool, ObjectPoolConfig,
+    DataMasker, LogTemplate, ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer,
+    put_log_record, put_string_buffer,
 };
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,

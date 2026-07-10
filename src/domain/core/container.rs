@@ -79,14 +79,14 @@
 
 use std::sync::Arc;
 
-use crate::domain::core::manager::{LoggerDependencies, LoggerManager};
-#[cfg(test)]
-use crate::integrations::infra::cache::MockCache;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::integrations::infra::Database;
-use crate::integrations::infra::{Cache, Config, InklogConfigAdapter, OxCacheAdapter};
 use crate::InklogConfig;
 use crate::InklogError;
+use crate::domain::core::manager::{LoggerDependencies, LoggerManager};
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use crate::integrations::infra::Database;
+#[cfg(test)]
+use crate::integrations::infra::cache::MockCache;
+use crate::integrations::infra::{Cache, Config, InklogConfigAdapter, OxCacheAdapter};
 
 /// 应用级依赖注入容器
 ///
@@ -662,8 +662,8 @@ mod tests {
     #[tokio::test]
     async fn test_container_set_database_and_get() {
         // 覆盖 set_database() 方法（行 323-324）
-        use crate::integrations::infra::MockDatabaseAdapter;
         use crate::LogRecord;
+        use crate::integrations::infra::MockDatabaseAdapter;
 
         let mut container = InklogContainer::builder()
             .cache(Arc::new(MockCache::new()))

@@ -3,12 +3,12 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-use crate::support::io::sink::LogSink;
 use crate::ConsoleSinkConfig;
 use crate::DataMasker;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use crate::support::io::sink::LogSink;
 use async_trait::async_trait;
 use is_terminal::IsTerminal;
 use owo_colors::OwoColorize;
@@ -200,9 +200,13 @@ mod tests {
     #[serial]
     fn test_no_color_env() {
         let sink = get_sink();
-        env::set_var("NO_COLOR", "1");
+        unsafe {
+            env::set_var("NO_COLOR", "1");
+        }
         assert!(!sink.should_colorize(false));
-        env::remove_var("NO_COLOR");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
     }
 
     #[test]
@@ -210,10 +214,16 @@ mod tests {
     fn test_force_color_env() {
         let sink = get_sink();
         // Remove NO_COLOR to ensure deterministic test result
-        env::remove_var("NO_COLOR");
-        env::set_var("CLICOLOR_FORCE", "1");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
+        unsafe {
+            env::set_var("CLICOLOR_FORCE", "1");
+        }
         assert!(sink.should_colorize(false));
-        env::remove_var("CLICOLOR_FORCE");
+        unsafe {
+            env::remove_var("CLICOLOR_FORCE");
+        }
     }
 
     #[test]
@@ -221,12 +231,20 @@ mod tests {
     fn test_term_dumb() {
         let sink = get_sink();
         // Remove NO_COLOR to ensure deterministic test result
-        env::remove_var("NO_COLOR");
-        env::set_var("TERM", "dumb");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
+        unsafe {
+            env::set_var("TERM", "dumb");
+        }
         // Ensure no other conflicting envs
-        env::remove_var("CLICOLOR_FORCE");
+        unsafe {
+            env::remove_var("CLICOLOR_FORCE");
+        }
         assert!(!sink.should_colorize(false));
-        env::remove_var("TERM");
+        unsafe {
+            env::remove_var("TERM");
+        }
     }
 
     #[test]
@@ -234,12 +252,18 @@ mod tests {
     fn test_config_disabled() {
         let mut sink = get_sink();
         // Remove NO_COLOR to ensure deterministic test result
-        env::remove_var("NO_COLOR");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
         sink.config.colored = false;
-        env::set_var("CLICOLOR_FORCE", "1"); // Config should override force?
-                                             // My logic: if !config.colored return false.
+        unsafe {
+            env::set_var("CLICOLOR_FORCE", "1");
+        } // Config should override force?
+        // My logic: if !config.colored return false.
         assert!(!sink.should_colorize(false));
-        env::remove_var("CLICOLOR_FORCE");
+        unsafe {
+            env::remove_var("CLICOLOR_FORCE");
+        }
     }
 
     #[test]
@@ -269,9 +293,15 @@ mod tests {
     #[test]
     #[serial]
     fn test_should_colorize_defaults() {
-        env::remove_var("CLICOLOR_FORCE");
-        env::remove_var("TERM");
-        env::set_var("NO_COLOR", "1");
+        unsafe {
+            env::remove_var("CLICOLOR_FORCE");
+        }
+        unsafe {
+            env::remove_var("TERM");
+        }
+        unsafe {
+            env::set_var("NO_COLOR", "1");
+        }
         let config = ConsoleSinkConfig {
             enabled: true,
             colored: true,
@@ -284,7 +314,9 @@ mod tests {
             !result,
             "should_colorize should return false when NO_COLOR is set"
         );
-        env::remove_var("NO_COLOR");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
     }
 
     #[test]
@@ -566,13 +598,23 @@ mod tests {
         // CLICOLOR_FORCE=0 means "do not force", so it should fall through to
         // the TERM check. Setting TERM=dumb makes the result deterministically
         // false, exercising the val != "0" false branch.
-        env::remove_var("NO_COLOR");
-        env::set_var("CLICOLOR_FORCE", "0");
-        env::set_var("TERM", "dumb");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
+        unsafe {
+            env::set_var("CLICOLOR_FORCE", "0");
+        }
+        unsafe {
+            env::set_var("TERM", "dumb");
+        }
         let sink = get_sink();
         assert!(!sink.should_colorize(false));
-        env::remove_var("CLICOLOR_FORCE");
-        env::remove_var("TERM");
+        unsafe {
+            env::remove_var("CLICOLOR_FORCE");
+        }
+        unsafe {
+            env::remove_var("TERM");
+        }
     }
 
     #[test]
@@ -580,11 +622,17 @@ mod tests {
     fn test_should_colorize_stderr_path_with_force() {
         // CLICOLOR_FORCE=1 forces true, exercising the is_stderr=true branch
         // of the final terminal check (short-circuited by the force).
-        env::remove_var("NO_COLOR");
-        env::set_var("CLICOLOR_FORCE", "1");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
+        unsafe {
+            env::set_var("CLICOLOR_FORCE", "1");
+        }
         let sink = get_sink();
         assert!(sink.should_colorize(true));
-        env::remove_var("CLICOLOR_FORCE");
+        unsafe {
+            env::remove_var("CLICOLOR_FORCE");
+        }
     }
 
     #[test]
@@ -593,13 +641,23 @@ mod tests {
         // TERM set to a non-dumb value exercises the `term == "dumb"` false
         // branch. Combined with CLICOLOR_FORCE=1 to make the result
         // deterministically true.
-        env::remove_var("NO_COLOR");
-        env::set_var("TERM", "xterm-256color");
-        env::set_var("CLICOLOR_FORCE", "1");
+        unsafe {
+            env::remove_var("NO_COLOR");
+        }
+        unsafe {
+            env::set_var("TERM", "xterm-256color");
+        }
+        unsafe {
+            env::set_var("CLICOLOR_FORCE", "1");
+        }
         let sink = get_sink();
         assert!(sink.should_colorize(false));
-        env::remove_var("TERM");
-        env::remove_var("CLICOLOR_FORCE");
+        unsafe {
+            env::remove_var("TERM");
+        }
+        unsafe {
+            env::remove_var("CLICOLOR_FORCE");
+        }
     }
 
     // ========================================================================
