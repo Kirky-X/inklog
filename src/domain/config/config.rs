@@ -2725,6 +2725,7 @@ level = "error"
     // =========================================================================
 
     #[test]
+    #[cfg(unix)]
     #[serial]
     fn test_from_search_paths_unreadable_file_errors() {
         use std::os::unix::fs::PermissionsExt;

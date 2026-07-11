@@ -424,6 +424,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
 }
 
 #[cfg(test)]
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
     use aes_gcm::Aes256Gcm;
@@ -538,12 +539,16 @@ mod tests {
     fn test_get_encryption_key_base64() {
         let test_key = generate_test_key();
         let key_base64 = general_purpose::STANDARD.encode(test_key);
-        std::env::set_var("TEST_ENCRYPTION_KEY", &key_base64);
+        unsafe {
+            std::env::set_var("TEST_ENCRYPTION_KEY", &key_base64);
+        };
 
         let key = get_encryption_key_cli("TEST_ENCRYPTION_KEY").unwrap();
         assert_eq!(key, test_key);
 
-        std::env::remove_var("TEST_ENCRYPTION_KEY");
+        unsafe {
+            std::env::remove_var("TEST_ENCRYPTION_KEY");
+        };
     }
 
     #[test]
@@ -568,12 +573,16 @@ mod tests {
     #[test]
     fn test_get_encryption_key_raw_32_bytes() {
         let raw_key = [0x42u8; 32];
-        std::env::set_var("TEST_RAW_KEY", std::str::from_utf8(&raw_key).unwrap());
+        unsafe {
+            std::env::set_var("TEST_RAW_KEY", std::str::from_utf8(&raw_key).unwrap());
+        };
 
         let key = get_encryption_key_cli("TEST_RAW_KEY").unwrap();
         assert_eq!(key, raw_key);
 
-        std::env::remove_var("TEST_RAW_KEY");
+        unsafe {
+            std::env::remove_var("TEST_RAW_KEY");
+        };
     }
 
     #[test]
@@ -587,14 +596,18 @@ mod tests {
         create_encrypted_file_v1(&input_file, plaintext, &test_key).unwrap();
 
         let key_base64 = general_purpose::STANDARD.encode(test_key);
-        std::env::set_var("TEST_KEY_V1", key_base64);
+        unsafe {
+            std::env::set_var("TEST_KEY_V1", key_base64);
+        };
 
         decrypt_file(&input_file, &output_file, "TEST_KEY_V1").unwrap();
 
         let decrypted_content = std::fs::read(&output_file).unwrap();
         assert_eq!(decrypted_content, plaintext);
 
-        std::env::remove_var("TEST_KEY_V1");
+        unsafe {
+            std::env::remove_var("TEST_KEY_V1");
+        };
     }
 
     #[test]
@@ -602,7 +615,9 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let test_key = generate_test_key();
         let key_base64 = general_purpose::STANDARD.encode(test_key);
-        std::env::set_var("TEST_KEY_COMPAT", &key_base64);
+        unsafe {
+            std::env::set_var("TEST_KEY_COMPAT", &key_base64);
+        };
 
         // Test V1 format
         let v1_file = temp_dir.path().join("v1.enc");
@@ -622,7 +637,9 @@ mod tests {
         decrypt_file_compatible(&legacy_file, &legacy_out, "TEST_KEY_COMPAT").unwrap();
         assert_eq!(std::fs::read(&legacy_out).unwrap(), legacy_text);
 
-        std::env::remove_var("TEST_KEY_COMPAT");
+        unsafe {
+            std::env::remove_var("TEST_KEY_COMPAT");
+        };
     }
 
     #[test]
@@ -686,31 +703,43 @@ mod tests {
     fn test_get_encryption_key_base64_wrong_length() {
         // 覆盖 L271-277: Base64 解码成功但长度不是 32
         let wrong_key = general_purpose::STANDARD.encode([0u8; 16]);
-        std::env::set_var("TEST_WRONG_LEN_KEY", &wrong_key);
+        unsafe {
+            std::env::set_var("TEST_WRONG_LEN_KEY", &wrong_key);
+        };
         let result = get_encryption_key_cli("TEST_WRONG_LEN_KEY");
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
         assert!(err.contains("32 bytes"));
-        std::env::remove_var("TEST_WRONG_LEN_KEY");
+        unsafe {
+            std::env::remove_var("TEST_WRONG_LEN_KEY");
+        };
     }
 
     #[test]
     fn test_get_encryption_key_password_via_cli() {
         // 覆盖 L281-288: 通过 get_encryption_key_cli 调用 PBKDF2 派生
         // "my-short-password" 不是 32 字节，也不是有效 Base64（含 '-'），长度 < 128
-        std::env::set_var("TEST_PASSWORD_KEY_CLI", "my-short-password");
+        unsafe {
+            std::env::set_var("TEST_PASSWORD_KEY_CLI", "my-short-password");
+        };
         let result = get_encryption_key_cli("TEST_PASSWORD_KEY_CLI");
         assert!(result.is_ok());
-        std::env::remove_var("TEST_PASSWORD_KEY_CLI");
+        unsafe {
+            std::env::remove_var("TEST_PASSWORD_KEY_CLI");
+        };
     }
 
     #[test]
     fn test_get_encryption_key_too_long() {
         // 覆盖 L291-295: 密钥长度 >= 128 且非有效 Base64
         let long_key = "!".repeat(128);
-        std::env::set_var("TEST_LONG_KEY", &long_key);
+        unsafe {
+            std::env::set_var("TEST_LONG_KEY", &long_key);
+        };
         let result = get_encryption_key_cli("TEST_LONG_KEY");
         assert!(result.is_err());
-        std::env::remove_var("TEST_LONG_KEY");
+        unsafe {
+            std::env::remove_var("TEST_LONG_KEY");
+        };
     }
 }

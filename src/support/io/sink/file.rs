@@ -34,6 +34,16 @@ use tracing::{debug, error, info, warn};
 // 类型别名，保持向后兼容
 pub use super::circuit_breaker::{CircuitBreakerConfig, CircuitState};
 
+#[cfg(windows)]
+extern "system" {
+    fn GetDiskFreeSpaceExW(
+        directory_name: *const u16,
+        free_bytes_available: *mut u64,
+        total_bytes: *mut u64,
+        total_free_bytes: *mut u64,
+    ) -> i32;
+}
+
 /// FileSink 的可变内部状态
 ///
 /// 所有需要 `&mut self` 访问的字段都封装在这里，
@@ -447,18 +457,44 @@ impl FileSink {
 
     /// Returns disk space information for the log file's filesystem.
     pub fn get_disk_space_info(&self) -> Result<(u64, u64), InklogError> {
-        if let Some(parent) = self.config.path.parent() {
-            if let Ok(_metadata) = fs::metadata(parent) {
-                if let Ok(stat) = nix::sys::statfs::statfs(parent) {
-                    let total_blocks = stat.blocks();
-                    let available_blocks = stat.blocks_available();
+        #[cfg(unix)]
+        {
+            if let Some(parent) = self.config.path.parent() {
+                if let Ok(_metadata) = fs::metadata(parent) {
+                    if let Ok(stat) = nix::sys::statfs::statfs(parent) {
+                        let total_blocks = stat.blocks();
+                        let available_blocks = stat.blocks_available();
 
-                    // 获取块大小
-                    let block_size = stat.block_size() as u64;
-                    let total_bytes = total_blocks * block_size;
-                    let available_bytes = available_blocks * block_size;
+                        // 获取块大小
+                        let block_size = stat.block_size() as u64;
+                        let total_bytes = total_blocks * block_size;
+                        let available_bytes = available_blocks * block_size;
 
-                    return Ok((total_bytes, available_bytes));
+                        return Ok((total_bytes, available_bytes));
+                    }
+                }
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            if let Some(parent) = self.config.path.parent() {
+                let mut wide_path: Vec<u16> = parent.as_os_str().encode_wide().collect();
+                wide_path.push(0);
+                let mut free_bytes_available: u64 = 0;
+                let mut total_bytes: u64 = 0;
+                let mut total_free_bytes: u64 = 0;
+                let result = unsafe {
+                    GetDiskFreeSpaceExW(
+                        wide_path.as_ptr(),
+                        &mut free_bytes_available,
+                        &mut total_bytes,
+                        &mut total_free_bytes,
+                    )
+                };
+                if result != 0 {
+                    return Ok((total_bytes, free_bytes_available));
                 }
             }
         }
@@ -3531,6 +3567,7 @@ mod tests {
     // ==================== compress_file: File::create 失败分支 (L643-644) ====================
 
     #[test]
+    #[cfg(unix)]
     fn test_compress_file_fails_when_output_dir_readonly() {
         // 覆盖行 643-644：File::create(compressed_path) 失败时返回 IoError
         // 通过将父目录设为只读来触发 File::create 失败
@@ -3570,6 +3607,7 @@ mod tests {
     // ==================== encrypt_file: File::create 失败分支 (L716-717) ====================
 
     #[test]
+    #[cfg(unix)]
     fn test_encrypt_file_fails_when_output_dir_readonly() {
         // 覆盖行 716-717：File::create(output_path) 失败时返回 IoError
         use std::os::unix::fs::PermissionsExt;
@@ -3620,6 +3658,7 @@ mod tests {
     // ==================== rotate_inner: rename 失败 fallback 分支 (L753-758) ====================
 
     #[test]
+    #[cfg(unix)]
     fn test_rotate_inner_rename_failure_returns_error_when_copy_also_fails() {
         // 覆盖行 753-758：rename 失败且 copy 也失败时返回 IoError
         // 通过将父目录设为只读来使 rename 和 copy 都失败
