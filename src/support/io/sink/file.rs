@@ -35,7 +35,7 @@ use tracing::{debug, error, info, warn};
 pub use super::circuit_breaker::{CircuitBreakerConfig, CircuitState};
 
 #[cfg(windows)]
-extern "system" {
+unsafe extern "system" {
     fn GetDiskFreeSpaceExW(
         directory_name: *const u16,
         free_bytes_available: *mut u64,
