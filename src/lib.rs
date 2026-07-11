@@ -126,6 +126,7 @@
 //! port = 8080
 //! ```
 
+pub mod error;
 pub mod log_level;
 pub mod validation;
 
@@ -158,8 +159,9 @@ pub use domain::config::{
     PartitionStrategy, PerformanceConfig,
 };
 pub use domain::db_provider::LogDbProvider;
-pub use domain::types::error::InklogError;
 pub use domain::types::log_record::LogRecord;
+pub use error::InklogError;
+pub use error::InklogResult;
 #[cfg(all(
     feature = "kit",
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
