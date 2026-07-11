@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-11
+
 ### Changed
+
+- 无代码变更，版本号对齐 workspace 同步升级
+
+### Changed（Phase 6 前置）
 
 - **edition 升级**: 从 edition 2021 升级至 edition 2024
 - **MSRV 声明**: `rust-version = "1.85"` 显式声明最低支持 Rust 版本
@@ -180,7 +186,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/Kirky-X/inklog/compare/v0.1.2...v0.1.5
 [0.1.2]: https://github.com/Kirky-X/inklog/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Kirky-X/inklog/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Kirky-X/inklog/compare/v0.0.0...v0.1.0

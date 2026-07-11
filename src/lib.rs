@@ -3,7 +3,7 @@
 // Licensed under the MIT License
 // See LICENSE file in the project root for full license information.
 
-#![doc(html_root_url = "https://docs.rs/inklog/0.1.3")]
+#![doc(html_root_url = "https://docs.rs/inklog/0.1.5")]
 
 //! # inklog - 企业级 Rust 日志基础设施
 //!
