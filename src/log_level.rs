@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 日志级别枚举定义
 //!
 //! 提供类型安全的日志级别表示，消除硬编码字符串字面量

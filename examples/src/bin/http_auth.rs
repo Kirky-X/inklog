@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! HTTP 认证与 IP 白名单示例
 //!
 //! 演示 `inklog::HttpAuthConfig` 和 `HttpServerConfig.ip_whitelist` 的配置：

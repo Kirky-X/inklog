@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 断路器实现，用于 Sink 的故障隔离与自动恢复
 
 use std::sync::{Arc, Mutex};

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Kirky.X
+// SPDX-License-Identifier: MIT
 //! Database sink implementation using dbnexus.
 //!
 //! This module provides database logging functionality with support for

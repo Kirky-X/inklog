@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! DI (Dependency Injection) 模式示例
 //!
 //! 展示如何使用依赖注入模式创建 LoggerManager，包括真实适配器和 Mock 实现。

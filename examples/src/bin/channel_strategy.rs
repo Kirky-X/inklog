@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 自适应 Channel 策略示例
 //!
 //! 演示 `inklog::ChannelStrategy` 枚举和 `PerformanceConfig` 的自适应阈值参数：

@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License.
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! ConsoleSink 配置构造与测试用例写入工具。
 //!
 //! 从 `examples/src/bin/console.rs` 提取共享逻辑：

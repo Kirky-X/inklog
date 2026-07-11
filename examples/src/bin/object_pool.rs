@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 对象池示例（Layer 0 零依赖）
 //!
 //! 演示 ObjectPool、ObjectPoolConfig 的 async API 使用，

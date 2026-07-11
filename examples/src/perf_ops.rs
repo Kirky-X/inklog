@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License.
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 性能统计：百分位计算与吞吐量格式化。
 //!
 //! 从 `examples/src/bin/performance.rs` 提取纯计算逻辑（不依赖 sink）：

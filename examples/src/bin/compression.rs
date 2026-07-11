@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Zstd 压缩/解压缩示例（Layer 1 本地资源）
 //!
 //! 演示 inklog 的日志压缩能力，使用临时目录自动清理：

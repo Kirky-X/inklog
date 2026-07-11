@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License.
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! FileSink 配置构造与文件操作工具。
 //!
 //! 把 `examples/src/bin/file.rs` 中可复用的逻辑提取出来，便于单元测试覆盖：

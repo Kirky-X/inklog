@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Database trait - 抽象数据库操作
 //!
 //! 提供日志记录批量写入和健康检查的抽象接口。

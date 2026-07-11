@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Sink registry for dynamic sink creation.
 //!
 //! This module provides a registry pattern for creating sinks dynamically,

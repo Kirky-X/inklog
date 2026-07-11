@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 路径验证器示例（Layer 0 零依赖）
 //!
 //! 演示 PathValidator、PathValidatorConfig、ValidationResult 的使用，

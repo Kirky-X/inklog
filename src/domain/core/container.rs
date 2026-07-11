@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Application Container - 应用级依赖注入容器
 //!
 //! 提供统一的依赖管理，确保组件间共享同一实例。

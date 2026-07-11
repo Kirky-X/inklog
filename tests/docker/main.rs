@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Docker 数据库集成测试入口
 //!
 //! 通过 `INKLOG_TEST_DB_URL` 环境变量连接真实数据库，覆盖需要真实 DB 连接的代码路径。

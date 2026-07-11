@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 断路器示例（Layer 2 外部服务）
 //!
 //! 演示 CircuitBreaker 的故障隔离与自动恢复机制，覆盖完整的状态机：

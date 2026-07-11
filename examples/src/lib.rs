@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! inklog 示例库
 //!
 //! 本 crate 提供 inklog 库的使用示例，按分层架构组织：

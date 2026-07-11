@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 配置 inspect 示例：sinks_enabled() + LoggerManager::load()
 //!
 //! 演示 `InklogConfig::sinks_enabled()` 和 `LoggerManager::load()` 的使用：

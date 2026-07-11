@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 // 加密文件功能测试
 // 测试加密日志文件写入、AES-256-GCM 加密功能、密钥管理，
 // 确保生产环境中的敏感日志数据安全。

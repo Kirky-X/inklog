@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! CLI 集成测试
 //!
 //! 使用 assert_cmd 测试 inklog-cli 二进制的端到端行为。

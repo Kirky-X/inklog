@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 单元测试入口文件
 //!
 //! 此文件作为单元测试的入口点，包含所有单元测试模块的测试用例。

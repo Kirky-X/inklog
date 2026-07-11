@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Kirky.X
+// SPDX-License-Identifier: MIT
 //! # 错误类型模块
 //!
 //! 定义 Inklog 项目中使用的所有错误类型。

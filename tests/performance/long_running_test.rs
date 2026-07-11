@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 长时间运行内存泄漏测试
 //!
 //! 验证系统在长时间运行条件下的内存稳定性

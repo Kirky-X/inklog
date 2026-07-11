@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Infrastructure module
 //!
 //! 提供基础设施层的抽象 trait 接口和适配器实现，用于依赖注入。

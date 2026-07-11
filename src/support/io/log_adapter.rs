@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! `log` crate 原生支持适配器
 //!
 //! 此模块实现 `log::Log` trait，使得 inklog 可以直接接收来自 `log` crate 的日志，

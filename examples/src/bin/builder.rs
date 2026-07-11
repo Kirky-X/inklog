@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Builder 模式配置示例
 //!
 //! 演示 LoggerManager::builder() 链式 API 的各种用法。

@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Cache trait - 抽象缓存操作
 //!
 //! 提供 CRUD 操作的抽象接口，支持不同缓存后端的统一访问。
