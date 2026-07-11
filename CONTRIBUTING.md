@@ -8,6 +8,9 @@
 - [快速开始](#快速开始)
 - [开发环境](#开发环境)
 - [构建项目](#构建项目)
+- [TDD 开发流程](#tdd-开发流程)
+- [Pre-commit Hooks](#pre-commit-hooks)
+- [代码质量工具](#代码质量工具)
 - [测试](#测试)
 - [代码风格](#代码风格)
 - [文档](#文档)
@@ -177,7 +180,6 @@ rustup default stable-msvc
 |------|------|------|
 | **Docker** | 数据库集成测试 | https://docs.docker.com/get-docker/ |
 | **Docker Compose** | 多服务测试 | https://docs.docker.com/compose/install/ |
-| **AWS CLI** | S3 归档测试 | `pip install awscli` |
 | **just** | 命令行任务运行 | `cargo install just` |
 
 ### 环境验证
@@ -217,7 +219,6 @@ cargo build --release
 
 # 构建特定包
 cargo build -p inklog
-cargo build -p inklog-cli
 ```
 
 ### 构建诊断
@@ -237,32 +238,6 @@ cargo tree
 cargo tree -i dependency_name
 ```
 
-### 构建优化
-
-#### 开发模式 (快速构建)
-
-```bash
-# 使用更快的优化级别
-cargo build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort
-
-# 或使用 cargo-incremental
-cargo install cargo-incremental
-cargo incremental build
-```
-
-#### 发布模式 (优化构建)
-
-```bash
-# LTO 优化
-cargo build --release -Z merge-functions=trampolines
-
-# 链接时优化
-cargo build --release -C lto=fat
-
-# 针对特定 CPU 优化 (可能影响可移植性)
-RUSTFLAGS="-C target-cpu=native" cargo build --release
-```
-
 ### 常见构建问题
 
 #### 问题 1: OpenSSL 找不到
@@ -276,9 +251,6 @@ brew install openssl
 export OPENSSL_ROOT_DIR=$(brew --prefix openssl)
 export OPENSSL_LIB_DIR=$OPENSSL_ROOT_DIR/lib
 export OPENSSL_INCLUDE_DIR=$OPENSSL_ROOT_DIR/include
-
-# Windows
-# 使用 MSVC 工具链或安装 vcpkg
 ```
 
 #### 问题 2: 内存不足
@@ -286,41 +258,195 @@ export OPENSSL_INCLUDE_DIR=$OPENSSL_ROOT_DIR/include
 ```bash
 # 减少并行构建任务
 cargo build -j 2
-
-# 或设置环境变量
-MAKEFLAGS="-j 2" cargo build
 ```
 
-#### 问题 3: 依赖下载慢
+---
+
+## TDD 开发流程
+
+本项目遵循 **TDD（测试驱动开发）** 循环。每个开发任务组必须按照以下步骤执行:
+
+### 循环: Red → Green → Commit → Analyze → Next
+
+#### 1. 定接口
+
+先定义 trait / API 签名,不写实现:
+
+```rust
+pub trait LogSink: Send + Sync {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
+    async fn flush(&self) -> Result<(), InklogError>;
+    async fn shutdown(&self) -> Result<(), InklogError>;
+}
+```
+
+#### 2. 写测试 (Red)
+
+基于接口编写单元测试,此时测试应失败:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_sink_write() {
+        let sink = MockSink::new();
+        let record = LogRecord::new(LogLevel::Info, "test message");
+        assert!(sink.write(&record).await.is_ok());
+    }
+}
+```
+
+#### 3. 写代码 (Green)
+
+实现接口,使测试通过:
+
+```rust
+pub struct MockSink {
+    records: Arc<Mutex<Vec<LogRecord>>>,
+}
+
+impl LogSink for MockSink {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        self.records.lock().unwrap().push(record.clone());
+        Ok(())
+    }
+    // ...
+}
+```
+
+#### 4. 跑测试
 
 ```bash
-# 使用中国镜像 (如果在中国)
-export CARGO_HTTP_TIMEOUT=120
-export RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
-export RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static
-export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git
-
-# 配置 Cargo 镜像
-mkdir -p ~/.cargo
-cat > ~/.cargo/config.toml << 'EOF'
-[net]
-retry = 5
-git-fetch-with-cli = true
-
-[http]
-timeout = 120
-check-revoke = false
-
-[registries.crates-io]
-protocol = "git"
-
-[source.crates-io]
-replace-with = "ustc"
-
-[source.ustc]
-registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
-EOF
+cargo test --features <对应特性> --lib
 ```
+
+确保所有测试通过。
+
+#### 5. Commit
+
+```bash
+git add . && git commit -m "feat(<模块>): <描述>"
+```
+
+#### 6. Gitnexus Analyze
+
+用 gitnexus 工具分析本任务对其他模块的影响,识别需联动修改的代码:
+
+```bash
+npx gitnexus analyze
+```
+
+#### 7. 继续下一个
+
+基于 analyze 结果调整后续任务,再开始下一轮循环。
+
+### 测试要求
+
+- 测试要验证正确行为的有意义属性（值、结构、副作用、错误类型）
+- "所有测试通过"是必要条件但非充分条件
+- 测试太弱时要明确指出并改进
+
+---
+
+## Pre-commit Hooks
+
+本项目使用自定义 pre-commit 脚本 (`scripts/pre-commit`) 来确保代码质量。
+
+### 安装
+
+```bash
+# 安装 pre-commit hook
+./scripts/install-pre-commit.sh
+```
+
+### Hook 执行内容
+
+pre-commit 脚本会在每次 `git commit` 时运行以下检查:
+
+| 检查项 | 命令 | 说明 |
+|--------|------|------|
+| **代码格式化** | `cargo fmt -- --check` | 确保代码格式一致 |
+| **Clippy 检查** | `cargo clippy --all-features -- -D warnings` | 所有警告视为错误 |
+| **编译检查** | `cargo check --all-features` | 确保代码可编译 |
+| **单元测试** | `cargo test --lib --all-features -- --test-threads=4` | 运行完整测试套件 |
+
+> **注意**: pre-commit 脚本运行完整测试套件（837+ 测试），可能需要 30-60 秒。
+
+### 禁止事项
+
+- **禁止使用 `--no-verify`** 跳过 pre-commit hooks
+- **禁止直接提交到 main 分支** — 必须创建 feature 分支
+- **禁止通过注释 CI 步骤来绕过质量门禁**
+- **禁止临时降低覆盖率门禁阈值以通过 CI**
+
+### 分支策略
+
+```bash
+# 创建 feature 分支
+git checkout -b feature/your-feature
+
+# 提交变更
+git add <specific-files>
+git commit -m "feat(scope): description"
+
+# 合并回 main
+git checkout main
+git merge feature/your-feature
+```
+
+---
+
+## 代码质量工具
+
+本项目使用以下工具进行代码质量保证:
+
+### diting — 代码质量审查
+
+用于代码质量审查任务,包括 review、audit、tech debt 分析和 agent 审计。
+
+```bash
+# 触发代码审查
+# 在 PR 中使用 diting 进行自动化代码审查
+```
+
+**适用场景**:
+- PR 审查 (pull request review)
+- 代码质量审计 (audit)
+- 技术债务分析 (tech debt)
+- 过度工程检测 (over-engineering)
+- 代码简化 (simplify)
+
+### tiangang — SAST 安全审查
+
+专业 SAST 安全审查工具集,运行 Semgrep/CodeQL 等扫描器产出统一报告。
+
+```bash
+# 发布前安全审查
+# tiangang 扫描 0 个 CRITICAL 漏洞才允许继续
+```
+
+**适用场景**:
+- 安全审查 (security audit)
+- 漏洞扫描 (vulnerability scan)
+- SAST 代码安全检查
+- 发布前安全检查
+
+**发布前强制流程**:
+1. tiangang SAST 扫描 — 0 个 CRITICAL 漏洞才允许继续
+2. diting 代码审查 — 无 HIGH 级别问题才允许打 tag
+
+### kueiku — 方法论导航
+
+用于需要结构化思考和决策的场景,提供分析方法论框架。
+
+**适用场景**:
+- 技术选型决策
+- 根因分析
+- 优先级排序
+- 风险预演
+- 架构优化分析
 
 ---
 
@@ -354,9 +480,6 @@ cargo test --all-features -- --test-threads=4
 
 # 显示测试输出
 cargo test --all-features -- --nocapture
-
-# 仅运行失败的测试
-cargo test --all-features -- --failed
 ```
 
 ### 测试数据库集成
@@ -386,9 +509,6 @@ cargo fmt --all
 
 # 检查格式(不修改文件)
 cargo fmt --all -- --check
-
-# 格式化特定包
-cargo fmt -p inklog
 ```
 
 ### Clippy 检查
@@ -398,56 +518,13 @@ Clippy 是 Rust 的 Lint 工具,我们将其警告视为错误:
 ```bash
 # 运行 Clippy (所有警告作为错误)
 cargo clippy --all-targets --all-features -- -D warnings
-
-# 仅检查库代码
-cargo clippy --lib --all-features -- -D warnings
-
-# 允许特定警告(谨慎使用)
-cargo clippy --all-features -- -D warnings --allow clippy::too_many_arguments
 ```
 
 ### 命名约定
 
-#### 变量和函数: snake_case
-
-```rust
-// ✅ 正确
-let file_path = PathBuf::from("logs/app.log");
-fn write_log_record(record: &LogRecord) -> Result<(), InklogError> {}
-
-// ❌ 错误
-let filePath = PathBuf::from("logs/app.log");
-fn WriteLogRecord(record: &LogRecord) -> Result<(), InklogError> {}
-```
-
-#### 结构体和枚举: PascalCase
-
-```rust
-// ✅ 正确
-pub struct LoggerManager {}
-pub enum SinkStatus {
-    Healthy,
-    Unhealthy(String),
-}
-// ❌ 错误
-pub struct logger_manager {}
-pub enum sink_status {}
-    Healthy,
-    Unhealthy(String),
-}
-```
-
-#### 常量: UPPER_SNAKE_CASE
-
-```rust
-// ✅ 正确
-const DEFAULT_CHANNEL_CAPACITY: usize = 10000;
-const MAX_RETRY_ATTEMPTS: u32 = 3;
-
-// ❌ 错误
-const default_channel_capacity: usize = 10000;
-const MaxRetryAttempts: u32 = 3;
-```
+- **变量和函数**: snake_case (`file_path`, `write_log_record`)
+- **结构体和枚举**: PascalCase (`LoggerManager`, `SinkStatus`)
+- **常量**: UPPER_SNAKE_CASE (`DEFAULT_CHANNEL_CAPACITY`, `MAX_RETRY_ATTEMPTS`)
 
 ### 文档注释
 
@@ -461,18 +538,6 @@ const MaxRetryAttempts: u32 = 3;
 /// - 压缩支持 (ZSTD, GZIP, Brotli, LZ4)
 /// - AES-256-GCM 加密
 /// - 断路器保护
-///
-/// # Examples
-///
-/// ```
-/// use inklog::{FileSinkConfig, LoggerManager};
-///
-/// let config = FileSinkConfig {
-///     enabled: true,
-///     path: "logs/app.log".into(),
-///     ..Default::default()
-/// };
-/// ```
 pub struct FileSink {
     config: FileSinkConfig,
     // ...
@@ -481,98 +546,21 @@ pub struct FileSink {
 
 ### 错误处理规范
 
-#### 错误类型定义: thiserror
-
-```rust
-use thiserror::Error;
-
-/// Inklog 错误类型
-#[derive(Error, Debug)]
-pub enum InklogError {
-    /// 配置错误
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
-
-    /// I/O 错误
-    #[error("I/O error: {0}")]
-    IoError(#[from] std::io::Error),
-
-    /// 数据库错误
-    #[error("Database error: {0}")]
-    DatabaseError(String),
-
-    /// 加密错误
-    #[error("Encryption error: {0}")]
-    EncryptionError(String),
-}
-```
-
-#### 错误上下文: anyhow
-
-```rust
-use anyhow::{Context, Result};
-
-async fn process_logs() -> Result<()> {
-    let logs = fetch_logs()
-        .await
-        .context("Failed to fetch logs from database")?;
-
-    write_to_file(&logs)
-        .context("Failed to write logs to file")?;
-
-    Ok(())
-}
-```
+- **错误类型定义**: 使用 `thiserror`
+- **错误上下文**: 使用 `anyhow::Context`
+- **禁止** `unwrap()` 或 `expect()` 在生产代码中
+- **错误必须显性化**: 抛出、返回或上报,严禁吞掉
 
 ### 异步编程规范
 
-#### 使用 Tokio 异步运行时
-
-```rust
-// ✅ 正确: 使用 tokio spawn 进行并发
-use tokio::task::JoinHandle;
-
-let handles: Vec<JoinHandle<Result<()>>> = sinks
-    .into_iter()
-    .map(|sink| {
-        tokio::spawn(async move {
-            sink.write(&record).await
-        })
-    })
-    .collect();
-```
-
-#### 禁止在异步上下文中阻塞
-
-```rust
-// ❌ 错误: 阻塞异步上下文
-async fn process_record() {
-    std::thread::sleep(Duration::from_secs(1)); // 阻塞!
-}
-
-// ✅ 正确: 使用 tokio sleep
-async fn process_record() {
-    tokio::time::sleep(Duration::from_secs(1)).await;
-}
-
-// ❌ 错误: 同步文件 I/O
-async fn write_file() {
-    let mut file = std::fs::File::open("log.txt").unwrap();
-    file.write_all(b"data").unwrap(); // 阻塞!
-}
-
-// ✅ 正确: 使用 tokio fs 或线程池
-async fn write_file() {
-    tokio::fs::write("log.txt", b"data").await;
-}
-```
+- 使用 Tokio 异步运行时
+- **禁止** 在异步上下文中阻塞 (使用 `tokio::spawn` 或 `tokio::task::spawn_blocking`)
+- **禁止** 使用 `std::thread` (使用 tokio tasks)
 
 ### 反模式 (Anti-Patterns)
 
-以下是在 Inklog 项目中应避免的模式:
-
-| ❌ 反模式 | ✅ 正确做法 |
-|----------|-----------|
+| 反模式 | 正确做法 |
+|--------|----------|
 | 在 async 上下文中使用 `std::thread` | 使用 `tokio::spawn` |
 | 阻塞操作在 async 函数中 | 使用 `tokio::task::spawn_blocking` |
 | 提交 `logs/` 目录到 git | 添加到 `.gitignore` |
@@ -586,114 +574,25 @@ async fn write_file() {
 
 ### 文档类型
 
-Inklog 项目包含多种文档:
-
 - **README.md**: 项目概述和快速开始
 - **CONTRIBUTING.md**: 贡献指南 (本文档)
+- **CHANGELOG.md**: 变更日志
+- **AGENTS.md**: AI Agent 指南
 - **docs/ARCHITECTURE.md**: 系统架构和设计决策
 - **docs/SECURITY.md**: 安全最佳实践和特性
 - **Rustdoc**: API 文档 (`cargo doc`)
 
-### API 文档
-
-```bash
-# 生成 API 文档
-cargo doc --all-features
-
-# 打开文档在浏览器
-cargo doc --all-features --open
-
-# 生成私有 API 文档
-cargo doc --all-features --document-private-items
-```
-
-### 文档注释规范
-
-#### 模块级文档
-
-```rust
-//! # File Sink 模块
-//!
-//! 提供文件日志输出功能,包括:
-//!
-//! - 自动日志轮转 (基于大小或时间)
-//! - 多种压缩算法 (ZSTD, GZIP, Brotli, LZ4)
-//! - AES-256-GCM 加密支持
-//! - 断路器保护机制
-//!
-//! # Examples
-//!
-//! ```rust
-//! use inklog::{FileSinkConfig, LoggerManager};
-//!
-//! let config = FileSinkConfig {
-//!     enabled: true,
-//!     path: "logs/app.log".into(),
-//!     max_size: "100MB".to_string(),
-//!     ..Default::default()
-//! };
-//! ```
-```
-
-#### 函数文档
-
-```rust
-/// 创建新的 FileSink 实例
-///
-/// # Arguments
-///
-/// * `config` - File sink 配置
-///
-/// # Returns
-///
-/// 返回 `Result<FileSink, InklogError>`
-///
-/// # Errors
-///
-/// - `InklogError::IoError`: 文件创建失败
-/// - `InklogError::ConfigError`: 配置验证失败
-///
-/// # Examples
-///
-/// ```
-/// use inklog::FileSink;
-/// use inklog::config::FileSinkConfig;
-///
-/// let sink = FileSink::new(FileSinkConfig {
-///     enabled: true,
-///     path: "logs/app.log".into(),
-///     ..Default::default()
-/// })?;
-/// # Ok::<(), inklog::InklogError>(())
-/// ```
-pub fn new(config: FileSinkConfig) -> Result<Self, InklogError> {
-    // ...
-}
-```
-
-### 示例代码
-
-```bash
-# 运行示例
-cargo run --example basic_logging
-cargo run --example file_rotation
-cargo run --example encrypted_logging
-
-# 运行所有示例
-for example in examples/*.rs; do
-    cargo run --example $(basename $example .rs)
-done
-```
-
 ### 文档更新清单
 
-当修改代码时,请更新以下文档:
+当修改代码时,请同步更新以下文档:
 
 - [ ] API 文档 (rustdoc 注释)
 - [ ] README.md (如果影响用户可见功能)
 - [ ] CHANGELOG.md (记录变更)
 - [ ] 示例代码 (如果添加新功能)
 - [ ] ARCHITECTURE.md (如果是架构变更)
+
+> **规则**: 禁止"先发布再补文档"——文档是发布的一部分。
 
 ---
 
@@ -731,7 +630,7 @@ cargo fmt --all
 #### 3. 提交变更
 
 ```bash
-# 添加修改的文件
+# 添加修改的文件 (优先指定文件名,避免 git add .)
 git add src/support/io/sink/file.rs tests/integration_file_sink.rs
 
 # 提交 (遵循 Conventional Commits)
@@ -749,9 +648,6 @@ Closes #123"
 ```bash
 # 推送分支到远程仓库
 git push origin feature/your-feature
-
-# 或设置上游分支
-git push -u origin feature/your-feature
 ```
 
 #### 5. 创建 Pull Request
@@ -802,11 +698,9 @@ Closes #(issue number)
 
 | 检查 | 说明 | 失败处理 |
 |------|------|----------|
-| **Rust 版本** | 验证 Rust 版本兼容性 | 更新最低版本 |
 | **格式化** | `cargo fmt -- --check` | 运行 `cargo fmt` |
 | **Clippy** | `cargo clippy` | 修复警告 |
 | **测试** | `cargo test --all-features` | 修复失败的测试 |
-| **文档** | `cargo doc` | 修复文档警告 |
 | **安全审计** | `cargo deny check` | 更新或移除不安全依赖 |
 
 ### PR 合并策略
@@ -830,62 +724,11 @@ Closes #(issue number)
 5. **测试**: 测试是否充分
 6. **文档**: 文档是否准确完整
 
-### 审查流程
-
-#### 作为审查者
-
-1. 在 PR 中查看代码变更
-2. 逐行审查代码
-3. 提出具体、建设性的评论
-4. 标记需要修改的行
-5. 批准通过或请求修改
-
-#### 审查评论示例
-
-**✅ 好的评论**:
-
-```markdown
-在 `src/support/io/sink/file.rs:约156` 行:
-考虑使用 `BufWriter` 来减少系统调用次数:
-
-```rust
-use std::io::BufWriter;
-
-let mut writer = BufWriter::new(file);
-writer.write_all(&buffer)?;
-```
-
-这样可以提高文件写入性能,特别是在频繁写入的场景。
-```
-
-**❌ 不好的评论**:
-
-```markdown
-这段代码看起来不太好。
-```
-
 ### 审查响应时间
 
 - **小改动**: 1-2 个工作日
 - **中等改动**: 3-5 个工作日
 - **大改动**: 1-2 周
-
-### 提交审查修改
-
-```bash
-# 对审查反馈进行修改
-# ...
-
-# 提交修改
-git add .
-git commit -m "fix: address review comments
-
-- Use BufWriter for file writes
-- Add error handling for file permission issues"
-
-# 推送到同一分支
-git push origin feature/your-feature
-```
 
 ---
 
@@ -901,109 +744,22 @@ git push origin feature/your-feature
 
 ### 行为准则
 
-我们致力于为所有贡献者提供友好的环境:
-
 - **尊重**: 尊重不同的观点和经验
 - **包容**: 欢迎所有背景的贡献者
 - **建设性**: 提供建设性的反馈
 - **专注**: 关注对项目最有利的事情
 
-### 获取帮助
-
-如果您需要帮助:
-
-1. **搜索现有文档**: 查看 README.md、ARCHITECTURE.md、SECURITY.md
-2. **搜索 Issues**: 查看是否已有相关讨论
-3. **创建 Discussion**: 在 GitHub Discussions 提问
-4. **创建 Issue**: 报告 Bug 或请求功能
-
-### 问题报告
-
-#### Bug 报告模板
-
-```markdown
-## Bug 描述
-
-清晰简洁地描述 Bug。
-
-## 复现步骤
-
-1. 运行 '...'
-2. 点击 '....'
-3. 向下滚动到 '....'
-4. 看到 Bug
-
-## 期望行为
-
-描述您期望发生的事情。
-
-## 实际行为
-
-描述实际发生的事情。
-
-## 环境
-
-- Inklog 版本: 0.1.1
-- Rust 版本: 1.85.0
-- 操作系统: Linux / macOS / Windows
-- 特性标志: http, cli
-
-## 日志/错误信息
-
-```
-粘贴相关的日志或错误信息
-```
-
-## 额外上下文
-
-添加任何其他上下文、截图或关于问题的其他信息。
-```
-
-#### 功能请求模板
-
-```markdown
-## 功能描述
-
-清晰简洁地描述您想要的功能。
-
-## 问题或动机
-
-您想要此功能的原因是什么?
-当前是否有限制或问题?
-
-## 提议的解决方案
-
-描述您希望如何实现此功能。
-
-## 替代方案
-
-描述您考虑过的替代解决方案或功能。
-
-## 额外上下文
-
-添加任何其他上下文、示例或关于功能的截图。
-```
-
 ---
 
 ## 致谢
 
-### 贡献者
-
 感谢所有为 Inklog 项目做出贡献的人!
-
-<!-- 您的姓名将在这里 -->
-
-### 如何添加您的名字
-
-当您的 PR 被合并后,您将自动添加到贡献者列表。
 
 ### 特别感谢
 
 - **tracing**: Rust 结构化日志生态系统
 - **tokio**: 异步运行时
 - **Sea-ORM**: 异步 ORM
-- **AWS SDK for Rust**: AWS 集成
 - **Rust 社区**: 提供优秀的工具和库
 
 ---
@@ -1029,6 +785,9 @@ cargo doc --all-features
 
 # 覆盖率
 cargo tarpaulin --out Html --all-features
+
+# 安全审计
+cargo deny check
 ```
 
 ### 项目结构
@@ -1037,53 +796,38 @@ cargo tarpaulin --out Html --all-features
 inklog/
 - src/
   - lib.rs              # 公共 API 入口
-  - manager.rs          # LoggerManager 核心实现
-  - config.rs           # 配置结构体
-  - error.rs            # 错误类型定义
-  - masking.rs          # 数据脱敏
-  - metrics.rs          # 健康监控指标
-  - sink/               # 输出目标实现
-    - mod.rs
-    - console.rs      # 控制台输出
-    - file.rs         # 文件输出 (1513 行)
-    - database.rs     # 数据库输出
-    - async_file.rs   # 异步文件输出
-    - ring_buffered_file.rs
-  - archive/            # S3 云归档
-    - mod.rs
-    - service.rs
+  - domain/             # 领域层
+    - core/             # 核心日志管理 (manager.rs, container.rs)
+    - config/           # 配置系统
+    - types/            # 类型定义 (error, log_record)
+    - db_provider.rs    # 数据库提供者
+  - support/            # 支撑层
+    - io/               # I/O (sink, log_adapter)
+    - processing/       # 处理 (masking, template, object_pool)
+    - observability/     # 可观测性 (metrics)
+  - integrations/       # 集成层
+    - kit/               # DI kit
+    - infra/             # 基础设施适配器
+    - dbnexus_adapter.rs # DB Nexus 适配器
   - cli/                # 命令行工具
-    - mod.rs
-    - decrypt.rs
-    - generate.rs
-    - validate.rs
-- tests/                  # 集成测试
-- examples/               # 使用示例
-- docs/                   # 项目文档
-  - ARCHITECTURE.md
-  - SECURITY.md
-- benches/                # 基准测试
-- Cargo.toml              # 项目配置
-- README.md               # 项目说明
-- CONTRIBUTING.md         # 贡献指南 (本文档)
-- CHANGELOG.md            # 变更日志
+  - validation/         # 验证 (path, sanitize)
+  - log_level.rs        # 日志级别
+- tests/                # 测试
+- examples/             # 示例
+- docs/                 # 文档
+- scripts/              # 脚本 (pre-commit 等)
+- Cargo.toml            # 项目配置
+- README.md             # 项目说明
+- CONTRIBUTING.md       # 贡献指南 (本文档)
+- CHANGELOG.md          # 变更日志
+- AGENTS.md             # AI Agent 指南
 ```
-
-### 关键文件说明
-
-| 文件 | 行数 | 说明 |
-|------|------|------|
-| `src/domain/core/manager.rs` | 1113 | 核心日志管理器 |
-| `src/domain/config/config.rs` | 989 | 配置系统 |
-| `src/support/io/sink/file.rs` | 1513 | 文件 sink (最复杂) |
-| `docs/ARCHITECTURE.md` | 1103 | 架构文档 |
-| `docs/SECURITY.md` | 1979 | 安全指南 |
 
 ---
 
-**文档版本**: 1.0  
-**最后更新**: 2026-01-18  
-**项目**: Inklog - Enterprise-grade Rust Logging Infrastructure  
+**文档版本**: 2.0
+**最后更新**: 2026-07-11
+**项目**: Inklog - Enterprise-grade Rust Logging Infrastructure
 
 ---
 

@@ -41,6 +41,10 @@
   <a href="#contributing" style="color:#3B82F6;">🤝 Contributing</a>
 </p>
 
+<p align="center">
+  <a href="README.md">English</a> | <a href="README_zh.md">简体中文</a>
+</p>
+
 </div>
 
 ---
@@ -99,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [🔒 Security](#security)
 - [🧪 Testing](#testing)
 - [🤝 Contributing](#contributing)
+- [📋 更新日志](#更新日志)
 - [📄 License](#license)
 - [🙏 Acknowledgments](#acknowledgments)
 
@@ -842,7 +847,7 @@ docker-compose down
 
 <div align="center" style="margin: 24px 0;">
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! 详见 [CONTRIBUTING.md](CONTRIBUTING.md)
 
 </div>
 
@@ -887,16 +892,23 @@ cargo fmt --all
 
 ---
 
+## 📋 更新日志
+
+详见 [CHANGELOG.md](CHANGELOG.md)
+
+---
+
 ## <span id="license">📄 License</span>
 
 <div align="center" style="margin: 24px 0;">
 
-This project is dual-licensed under **MIT / Apache-2.0**:
+This project is licensed under the **MIT License**.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE-MIT)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE-APACHE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
+
+MIT License, Copyright (c) 2026 Kirky.X
 
 ---
 

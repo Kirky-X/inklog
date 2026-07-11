@@ -49,7 +49,6 @@ secrets/
 
 # Project docs and configs
 .sisyphus/
-AGENTS.md
 CLAUDE.md
 di.md
 docs/prd.md

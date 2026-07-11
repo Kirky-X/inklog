@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **edition 升级**: 从 edition 2021 升级至 edition 2024
+- **MSRV 声明**: `rust-version = "1.85"` 显式声明最低支持 Rust 版本
+- **MIT license 统一**: 许可证从 `"MIT OR Apache-2.0"` 统一为 `"MIT"`，移除 Apache-2.0 选项
+
+### Security
+
+- **edition 2024 unsafe 要求**: `std::env::set_var` / `std::env::remove_var` 调用包裹 `unsafe` 块（edition 2024 将其标记为 unsafe 操作）
+
 ## [0.1.2] - 2026-07-05
 
 ### BREAKING CHANGES
@@ -170,8 +180,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/kirkyx/inklog/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/kirkyx/inklog/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/kirkyx/inklog/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/kirkyx/inklog/compare/v0.0.0...v0.1.0
-[0.0.0]: https://github.com/kirkyx/inklog/releases/tag/v0.0.0
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Kirky-X/inklog/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/Kirky-X/inklog/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Kirky-X/inklog/compare/v0.0.0...v0.1.0
+[0.0.0]: https://github.com/Kirky-X/inklog/releases/tag/v0.0.0
