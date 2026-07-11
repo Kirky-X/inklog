@@ -424,3 +424,6 @@ mod tests {
         );
     }
 }
+
+/// Convenience `Result` type alias using [`InklogError`] as the error type.
+pub type InklogResult<T> = std::result::Result<T, InklogError>;

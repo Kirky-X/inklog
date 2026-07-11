@@ -2,5 +2,4 @@
 // SPDX-License-Identifier: MIT
 //! Domain types module - core data types for inklog.
 
-pub mod error;
 pub mod log_record;
