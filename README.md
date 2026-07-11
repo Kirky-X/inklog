@@ -3,60 +3,33 @@
 <img src="docs/image/inklog.png" alt="Inklog Logo" width="200" style="margin-bottom: 16px;">
 
 <p>
-  <!-- CI/CD Status -->
-  <a href="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml">
-    <img src="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg" alt="CI Status" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- Version -->
-  <a href="https://crates.io/crates/inklog">
-    <img src="https://img.shields.io/crates/v/inklog.svg" alt="Version" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- Documentation -->
-  <a href="https://docs.rs/inklog">
-    <img src="https://docs.rs/inklog/badge.svg" alt="Documentation" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- Downloads -->
-  <a href="https://crates.io/crates/inklog">
-    <img src="https://img.shields.io/crates/d/inklog.svg" alt="Downloads" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- License -->
-  <a href="https://github.com/Kirky-X/inklog/blob/main/LICENSE">
-    <img src="https://img.shields.io/crates/l/inklog.svg" alt="License" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- Rust Version -->
-  <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/rust-1.85+-orange.svg" alt="Rust 1.85+" style="display:inline;margin:0 4px;">
-  </a>
+  <a href="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml"><img src="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg" alt="CI Status" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/v/inklog.svg" alt="Version" style="display:inline;margin:0 4px;"></a><a href="https://docs.rs/inklog"><img src="https://docs.rs/inklog/badge.svg" alt="Documentation" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/d/inklog.svg" alt="Downloads" style="display:inline;margin:0 4px;"></a><a href="https://github.com/Kirky-X/inklog/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/inklog.svg" alt="License" style="display:inline;margin:0 4px;"></a><a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.85+-orange.svg" alt="Rust 1.85+" style="display:inline;margin:0 4px;"></a>
 </p>
 
 <p align="center">
-  <strong>Enterprise-grade Rust Logging Infrastructure</strong>
+  <strong>企业级 Rust 日志基础设施</strong>
 </p>
 
 <p align="center">
-  <a href="#features" style="color:#3B82F6;">✨ Features</a> •
-  <a href="#quick-start" style="color:#3B82F6;">🚀 Quick Start</a> •
-  <a href="#documentation" style="color:#3B82F6;">📚 Documentation</a> •
-  <a href="#examples" style="color:#3B82F6;">💻 Examples</a> •
-  <a href="#contributing" style="color:#3B82F6;">🤝 Contributing</a>
-</p>
-
-<p align="center">
-  <a href="README.md">English</a> | <a href="README_zh.md">简体中文</a>
+  <a href="#features" style="color:#3B82F6;">✨ 特性</a> •
+  <a href="#quick-start" style="color:#3B82F6;">🚀 快速开始</a> •
+  <a href="#documentation" style="color:#3B82F6;">📚 文档</a> •
+  <a href="#examples" style="color:#3B82F6;">💻 示例</a> •
+  <a href="#contributing" style="color:#3B82F6;">🤝 贡献</a>
 </p>
 
 </div>
 
 ---
 
-### 🎯 A high-performance, secure, and feature-rich logging infrastructure built on Tokio
+### 🎯 基于 Tokio 构建的高性能、安全、功能丰富的日志基础设施
 
-Inklog provides a **comprehensive** logging solution for enterprise applications:
+Inklog 为企业级应用提供**全面**的日志解决方案：
 
-| ⚡ High Performance | 🔒 Security First | 🌐 Multi-Target | 📊 Observability |
+| ⚡ 高性能 | 🔒 安全优先 | 🌐 多目标输出 | 📊 可观测性 |
 |:---------:|:----------:|:--------------:|:--------:|
-| Async I/O with Tokio | AES-256-GCM encryption | Console, File, DB | Health monitoring |
-| Batch writes & compression | Zeroized secret memory | Automatic rotation | Metrics & tracing |
+| 基于 Tokio 的异步 I/O | AES-256-GCM 加密 | 控制台、文件、数据库 | 健康监控 |
+| 批量写入和压缩 | 密钥内存清零 | 自动轮转 | 指标和追踪 |
 
 ```rust
 use inklog::{InklogConfig, LoggerManager};
@@ -86,38 +59,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-## 📋 Table of Contents
+## 📋 目录
 
 <details open style="border-radius:8px; padding:16px; border:1px solid #E2E8F0;">
-<summary style="cursor:pointer; font-weight:600; color:#1E293B;">📑 Table of Contents (Click to expand)</summary>
+<summary style="cursor:pointer; font-weight:600; color:#1E293B;">📑 目录（点击展开）</summary>
 
-- [✨ Features](#features)
-- [🚀 Quick Start](#quick-start)
-  - [📦 Installation](#installation)
-  - [💡 Basic Usage](#basic-usage)
-  - [🔧 Advanced Configuration](#advanced-configuration)
-- [🎨 Feature Flags](#feature-flags)
-- [📚 Documentation](#documentation)
-- [💻 Examples](#examples)
-- [🏗️ Architecture](#architecture)
-- [🔒 Security](#security)
-- [🧪 Testing](#testing)
-- [🤝 Contributing](#contributing)
+- [✨ 特性](#features)
+- [🚀 快速开始](#quick-start)
+  - [📦 安装](#installation)
+  - [💡 基础用法](#basic-usage)
+  - [🔧 高级配置](#advanced-configuration)
+- [🎨 特性标志](#feature-flags)
+- [📚 文档](#documentation)
+- [💻 示例](#examples)
+- [🏗️ 架构](#architecture)
+- [🔒 安全](#security)
+- [🧪 测试](#testing)
+- [🤝 贡献](#contributing)
 - [📋 更新日志](#更新日志)
-- [📄 License](#license)
-- [🙏 Acknowledgments](#acknowledgments)
+- [📄 许可证](#license)
+- [🙏 致谢](#acknowledgments)
 
 </details>
 
 ---
 
-## <span id="features">✨ Features</span>
+## <span id="features">✨ 特性</span>
 
 <div align="center" style="margin: 24px 0;">
 
-| 🎯 Core Features | ⚡ Enterprise Features |
+| 🎯 核心特性 | ⚡ 企业特性 |
 |:----------:|:----------:|
-| Always Available | Optional |
+| 始终可用 | 可选 |
 
 </div>
 
@@ -125,70 +98,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 <tr>
 <td width="50%" style="vertical-align:top; padding: 16px; border-radius:8px; border:1px solid #E2E8F0;">
 
-### 🎯 Core Features (Always Available)
+### 🎯 核心特性（始终可用）
 
-| Status | Feature | Description |
+| 状态 | 特性 | 描述 |
 |:----:|------|------|
-| ✅ | **Async I/O** | Tokio-powered non-blocking logging |
-| ✅ | **Multi-Target Output** | Console, file, database, custom sinks |
-| ✅ | **Structured Logging** | tracing ecosystem integration |
-| ✅ | **Custom Formatting** | Template-based log format |
-| ✅ | **File Rotation** | Size-based and time-based rotation |
-| ✅ | **Data Masking** | Regex-based PII redaction |
-| ✅ | **Health Monitoring** | Sink status and metrics tracking |
-| ✅ | **CLI Tools** | decrypt, generate, validate commands |
+| ✅ | **异步 I/O** | 基于 Tokio 的非阻塞日志 |
+| ✅ | **多目标输出** | 控制台、文件、数据库、自定义 Sink |
+| ✅ | **结构化日志** | 集成 tracing 生态系统 |
+| ✅ | **自定义格式化** | 基于模板的日志格式 |
+| ✅ | **文件轮转** | 基于大小和时间的轮转 |
+| ✅ | **数据脱敏** | 基于正则的 PII 脱敏 |
+| ✅ | **健康监控** | Sink 状态和指标追踪 |
+| ✅ | **CLI 工具** | decrypt、generate、validate 命令 |
 
 </td>
 <td width="50%" style="vertical-align:top; padding: 16px; border-radius:8px; border:1px solid #E2E8F0;">
 
-### ⚡ Enterprise Features
+### ⚡ 企业特性
 
-| Status | Feature | Description |
+| 状态 | 特性 | 描述 |
 |:----:|------|------|
-| 🔍 | **Compression** | ZSTD, GZIP, Brotli, LZ4 support (`zstd`, `flate2`, etc.) |
-| 🔒 | **Encryption** | AES-256-GCM file encryption (`aes-gcm`) |
-| 🗄️ | **Database Sink** | PostgreSQL, MySQL, SQLite via Sea-ORM |
-| 📊 | **Parquet Export** | Analytics-ready log format (always available) |
-| 🌐 | **HTTP Endpoint** | Axum-based health check server (`http` feature) |
-| 🔧 | **CLI Tools** | Utility commands for log management (`cli` feature) |
+| 🔍 | **压缩** | 支持 ZSTD、GZIP、Brotli、LZ4（`zstd`、`flate2` 等） |
+| 🔒 | **加密** | AES-256-GCM 文件加密（`aes-gcm`） |
+| 🗄️ | **数据库日志输出** | 通过 Sea-ORM 支持 PostgreSQL、MySQL、SQLite |
+| 📊 | **Parquet 导出** | 适用于分析的日志格式（始终可用） |
+| 🌐 | **HTTP 端点** | 基于 Axum 的健康检查服务器（`http` 特性） |
+| 🔧 | **CLI 工具** | 日志管理实用命令（`cli` 特性） |
 
 </td>
 </tr>
 </table>
 
-### 📦 Feature Presets
+### 📦 特性预设
 
-| Preset | Features | Use Case |
+| 预设 | 特性 | 使用场景 |
 |------|------|----------|
-| <span style="color:#166534; padding:4px 8px; border-radius:4px;">minimal</span> | No optional features | Core logging only |
-| <span style="color:#1E40AF; padding:4px 8px; border-radius:4px;">standard</span> | `http`, `cli` | Standard development setup |
-| <span style="color:#991B1B; padding:4px 8px; border-radius:4px;">full</span> | All default features | Production-ready logging |
+| <span style="color:#166534; padding:4px 8px; border-radius:4px;">minimal</span> | 无可选特性 | 仅核心日志功能 |
+| <span style="color:#1E40AF; padding:4px 8px; border-radius:4px;">standard</span> | `http`、`cli` | 标准开发环境 |
+| <span style="color:#991B1B; padding:4px 8px; border-radius:4px;">full</span> | 所有默认特性 | 生产就绪日志 |
 
 ---
 
-## <span id="quick-start">🚀 Quick Start</span>
+## <span id="quick-start">🚀 快速开始</span>
 
-### <span id="installation">📦 Installation</span>
+### <span id="installation">📦 安装</span>
 
-Add this to your `Cargo.toml`:
+将以下内容添加到你的 `Cargo.toml`：
 
 ```toml
 [dependencies]
 inklog = "0.1"
 ```
 
-For full feature set:
+完整特性集：
 
 ```toml
 [dependencies]
 inklog = { version = "0.1", features = ["default"] }
 ```
 
-### <span id="basic-usage">💡 Basic Usage</span>
+### <span id="basic-usage">💡 基础用法</span>
 
 <div align="center" style="margin: 24px 0;">
 
-#### 🎬 5-Minute Quick Start
+#### 🎬 5 分钟快速开始
 
 </div>
 
@@ -196,7 +169,7 @@ inklog = { version = "0.1", features = ["default"] }
 <tr>
 <td width="50%" style="padding: 16px; vertical-align:top;">
 
-**Step 1: Initialize Logger**
+**步骤 1：初始化日志器**
 
 ```rust
 use inklog::LoggerManager;
@@ -213,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 </td>
 <td width="50%" style="padding: 16px; vertical-align:top;">
 
-**Step 2: Log Messages**
+**步骤 2：记录日志**
 
 ```rust
 use inklog::LoggerManager;
@@ -237,7 +210,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 <tr>
 <td width="50%" style="padding: 16px; vertical-align:top;">
 
-**Step 3: File Logging**
+**步骤 3：文件日志**
 
 ```rust
 use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
@@ -261,7 +234,7 @@ let _logger = LoggerManager::with_config(config).await?;
 </td>
 <td width="50%" style="padding: 16px; vertical-align:top;">
 
-**Step 4: Database Logging**
+**步骤 4：数据库日志**
 
 ```rust
 use inklog::{DatabaseSinkConfig, InklogConfig};
@@ -285,9 +258,9 @@ let _logger = LoggerManager::with_config(config).await?;
 </tr>
 </table>
 
-### <span id="advanced-configuration">🔧 Advanced Configuration</span>
+### <span id="advanced-configuration">🔧 高级配置</span>
 
-#### Encrypted File Logging
+#### 加密文件日志
 
 ```rust
 use inklog::{FileSinkConfig, InklogConfig};
@@ -311,7 +284,7 @@ let config = InklogConfig {
 let _logger = LoggerManager::with_config(config).await?;
 ```
 
-#### Custom Log Format
+#### 自定义日志格式
 
 ```rust
 use inklog::{InklogConfig, config::GlobalConfig};
@@ -333,15 +306,15 @@ let _logger = LoggerManager::with_config(config).await?;
 
 ---
 
-## <span id="feature-flags">🎨 Feature Flags</span>
+## <span id="feature-flags">🎨 特性标志</span>
 
-### Default Features
+### 默认特性
 
 ```toml
 inklog = "0.1"  # Includes: http, cli
 ```
 
-### Optional Features
+### 可选特性
 
 ```toml
 # HTTP Server
@@ -368,24 +341,24 @@ inklog = { version = "0.1", features = [
 ] }
 ```
 
-### Feature Details
+### 特性详情
 
-| Feature | Dependencies | Description |
+| 特性 | 依赖 | 描述 |
 |---------|-------------|-------------|
-| **http** | axum | HTTP health check endpoint |
-| **cli** | clap, glob | Command-line utilities |
-| **sqlite** | dbnexus, sea-orm | SQLite database sink |
-| **postgres** | dbnexus, sea-orm | PostgreSQL database sink |
-| **mysql** | dbnexus, sea-orm | MySQL database sink |
-| **duckdb** | dbnexus, sea-orm | DuckDB backend (only for `--all-features` testing; DatabaseSink does not directly support duckdb driver) |
-| **test-local** | - | Local testing mode |
-| **debug** | - | Security audit logging |
-| **metrics** | - | Health metrics collection |
-| **kit** | trait-kit, dbnexus, oxcache | Dependency injection kit integration |
+| **http** | axum | HTTP 健康检查端点 |
+| **cli** | clap, glob | 命令行工具 |
+| **sqlite** | dbnexus, sea-orm | SQLite 数据库日志输出 |
+| **postgres** | dbnexus, sea-orm | PostgreSQL 数据库日志输出 |
+| **mysql** | dbnexus, sea-orm | MySQL 数据库日志输出 |
+| **duckdb** | dbnexus, sea-orm | DuckDB 后端（仅用于 `--all-features` 测试；DatabaseSink 不直接支持 duckdb 驱动） |
+| **test-local** | - | 本地测试模式 |
+| **debug** | - | 安全审计日志 |
+| **metrics** | - | 健康指标采集 |
+| **kit** | trait-kit, dbnexus, oxcache | 依赖注入工具包集成 |
 
 ---
 
-## <span id="documentation">📚 Documentation</span>
+## <span id="documentation">📚 文档</span>
 
 <div align="center" style="margin: 24px 0;">
 
@@ -394,48 +367,48 @@ inklog = { version = "0.1", features = [
 <td align="center" width="33%" style="padding: 16px;">
 <a href="https://docs.rs/inklog" style="text-decoration:none;">
 <div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">📘 API Reference</b>
+<b style="color:#1E293B;">📘 API 参考</b>
 </div>
 </a>
-<br><span style="color:#64748B;">Complete API docs</span>
+<br><span style="color:#64748B;">完整的 API 文档</span>
 </td>
 <td align="center" width="33%" style="padding: 16px;">
 <a href="examples/" style="text-decoration:none;">
 <div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">💻 Examples</b>
+<b style="color:#1E293B;">💻 示例</b>
 </div>
 </a>
-<br><span style="color:#64748B;">Working code examples</span>
+<br><span style="color:#64748B;">可运行的代码示例</span>
 </td>
 <td align="center" width="33%" style="padding: 16px;">
 <a href="docs/" style="text-decoration:none;">
 <div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">📖 Guides</b>
+<b style="color:#1E293B;">📖 指南</b>
 </div>
 </a>
-<br><span style="color:#64748B;">In-depth guides</span>
+<br><span style="color:#64748B;">深入指南</span>
 </td>
 </tr>
 </table>
 
 </div>
 
-### 📖 Additional Resources
+### 📖 附加资源
 
-| Resource | Description |
+| 资源 | 描述 |
 |----------|-------------|
-| 📘 [API Reference](https://docs.rs/inklog) | Complete API documentation on docs.rs |
-| 🏗️ [Architecture](docs/ARCHITECTURE.md) | System architecture and design decisions |
-| 🔒 [Security](docs/SECURITY.md) | Security best practices and features |
-| 📦 [Examples](examples/) | Working code examples for all features |
+| 📘 [API 参考](https://docs.rs/inklog) | docs.rs 上的完整 API 文档 |
+| 🏗️ [架构](docs/ARCHITECTURE.md) | 系统架构和设计决策 |
+| 🔒 [安全](docs/SECURITY.md) | 安全最佳实践和特性 |
+| 📦 [示例](examples/) | 所有特性的可运行代码示例 |
 
 ---
 
-## <span id="examples">💻 Examples</span>
+## <span id="examples">💻 示例</span>
 
 <div align="center" style="margin: 24px 0;">
 
-### 💡 Real-world Examples
+### 💡 实际应用示例
 
 </div>
 
@@ -443,7 +416,7 @@ inklog = { version = "0.1", features = [
 <tr>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### 📝 Basic Logging
+#### 📝 基础日志
 
 ```rust
 use inklog::LoggerManager;
@@ -462,7 +435,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 </td>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### 📁 File Logging with Rotation
+#### 📁 带轮转的文件日志
 
 ```rust
 use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
@@ -488,7 +461,7 @@ let _logger = LoggerManager::with_config(config).await?;
 <tr>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### 🔒 Encrypted Logging
+#### 🔒 加密日志
 
 ```rust
 use inklog::{FileSinkConfig, InklogConfig};
@@ -512,7 +485,7 @@ let _logger = LoggerManager::with_config(config).await?;
 </td>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### 🗄️ Database Logging
+#### 🗄️ 数据库日志
 
 ```rust
 use inklog::{DatabaseSinkConfig, InklogConfig};
@@ -537,7 +510,7 @@ let _logger = LoggerManager::with_config(config).await?;
 <tr>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### 🏥 HTTP Health Endpoint
+#### 🏥 HTTP 健康检查端点
 
 ```rust
 use axum::{routing::get, Json, Router};
@@ -562,7 +535,7 @@ let app = Router::new().route(
 <tr>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### 🎨 Custom Format
+#### 🎨 自定义格式
 
 ```rust
 use inklog::{InklogConfig, config::GlobalConfig};
@@ -585,7 +558,7 @@ let _logger = LoggerManager::with_config(config).await?;
 </td>
 <td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
 
-#### 🔍 Data Masking
+#### 🔍 数据脱敏
 
 ```rust
 use inklog::{InklogConfig, config::GlobalConfig};
@@ -611,38 +584,38 @@ log::info!("User email: user@example.com");
 </tr>
 </table>
 
-### 📦 Runnable Examples
+### 📦 可运行示例
 
-The `examples/` crate provides 10 dedicated examples demonstrating specific features. Run them with `cargo run --example <name>` (from the `examples/` directory or with `--package inklog-examples`).
+`examples/` crate 提供了 10 个专门的示例，演示特定功能。使用 `cargo run --example <name>` 运行（在 `examples/` 目录下或使用 `--package inklog-examples`）。
 
-| Example | Description | Run Command |
+| 示例 | 描述 | 运行命令 |
 |---------|-------------|-------------|
-| `object_pool` | Object pool reuse for allocation-heavy paths | `cargo run --example object_pool` |
-| `path_validator` | Path validation for safe file sink targets | `cargo run --example path_validator` |
-| `log_sanitizer` | Log input sanitization to prevent log injection | `cargo run --example log_sanitizer` |
-| `log_adapter` | Bridging `log` and `tracing` ecosystems | `cargo run --example log_adapter` |
-| `compression` | File sink compression (ZSTD/GZIP/Brotli/LZ4) | `cargo run --example compression` |
-| `rotation` | Size-based and time-based file rotation | `cargo run --example rotation` |
-| `ring_buffered_file` | Ring-buffered file sink for high throughput | `cargo run --example ring_buffered_file` |
-| `config_file` | TOML configuration file loading | `cargo run --example config_file` |
-| `metrics` | Health metrics and Prometheus export | `cargo run --example metrics` |
-| `circuit_breaker` | Sink circuit breaker and failure recovery | `cargo run --example circuit_breaker` |
+| `object_pool` | 对象池复用，适用于频繁分配的场景 | `cargo run --example object_pool` |
+| `path_validator` | 路径验证，确保文件 Sink 目标安全 | `cargo run --example path_validator` |
+| `log_sanitizer` | 日志输入净化，防止日志注入 | `cargo run --example log_sanitizer` |
+| `log_adapter` | 桥接 `log` 和 `tracing` 生态系统 | `cargo run --example log_adapter` |
+| `compression` | 文件 Sink 压缩（ZSTD/GZIP/Brotli/LZ4） | `cargo run --example compression` |
+| `rotation` | 基于大小和时间的文件轮转 | `cargo run --example rotation` |
+| `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
+| `config_file` | TOML 配置文件加载 | `cargo run --example config_file` |
+| `metrics` | 健康指标和 Prometheus 导出 | `cargo run --example metrics` |
+| `circuit_breaker` | Sink 熔断器和故障恢复 | `cargo run --example circuit_breaker` |
 
 <div align="center" style="margin: 24px 0;">
 
-**[📂 View all examples →](examples/)**
+**[📂 查看所有示例 →](examples/)**
 
 </div>
 
-> **Note**: `inklog-examples` is now part of the workspace.
+> **注意**：`inklog-examples` 现在是 workspace 的一部分。
 
 ---
 
-## <span id="architecture">🏗️ Architecture</span>
+## <span id="architecture">🏗️ 架构</span>
 
 <div align="center" style="margin: 24px 0;">
 
-### 🏗️ System Architecture
+### 🏗️ 系统架构
 
 </div>
 
@@ -658,67 +631,67 @@ flowchart TD
     App --> API --> Sink --> Core --> IO --> Store
 ```
 
-### Layer-by-Layer Explanation
+### 逐层说明
 
-**Application Layer**
-- Application code uses standard `log!` macros from the `log` crate
-- Compatible with existing Rust logging patterns
+**应用层**
+- 应用代码使用 `log` crate 的标准 `log!` 宏
+- 兼容现有的 Rust 日志模式
 
-**Inklog API Layer**
-- `LoggerManager`: Main orchestrator for all logging operations
-- `LoggerBuilder`: Fluent builder pattern for configuration
-- Health status tracking and metrics collection
+**Inklog API 层**
+- `LoggerManager`：所有日志操作的主要协调器
+- `LoggerBuilder`：流式构建器模式用于配置
+- 健康状态追踪和指标采集
 
-**Sink Abstraction Layer**
-- Multiple sink implementations for different output targets
-- Console output for development
-- File output with rotation, compression, and encryption
-- Database output with batch writes (PostgreSQL, MySQL, SQLite)
-- Async and buffered file sinks for high-throughput scenarios
+**Sink 抽象层**
+- 针对不同输出目标的多种 Sink 实现
+- 用于开发环境的控制台输出
+- 支持轮转、压缩和加密的文件输出
+- 支持批量写入的数据库输出（PostgreSQL、MySQL、SQLite）
+- 用于高吞吐场景的异步和缓冲文件 Sink
 
-**Core Processing Layer**
-- Template-based log formatting
-- Regex-based PII data masking (emails, SSNs, credit cards)
-- AES-256-GCM encryption for sensitive logs
-- Multiple compression algorithms (ZSTD, GZIP, Brotli, LZ4)
+**核心处理层**
+- 基于模板的日志格式化
+- 基于正则的 PII 数据脱敏（邮箱、SSN、信用卡）
+- 用于敏感日志的 AES-256-GCM 加密
+- 多种压缩算法（ZSTD、GZIP、Brotli、LZ4）
 
-**Concurrency & I/O Layer**
-- Tokio async runtime for non-blocking I/O
-- Crossbeam channels for inter-task communication
-- Rayon for CPU-intensive parallel processing
+**并发与 I/O 层**
+- 用于非阻塞 I/O 的 Tokio 异步运行时
+- 用于任务间通信的 Crossbeam 通道
+- 用于 CPU 密集型并行处理的 Rayon
 
-**Storage & External Services Layer**
-- Local filesystem access
-- Database connectivity via Sea-ORM
-- Parquet format for analytics workflows
+**存储与外部服务层**
+- 本地文件系统访问
+- 通过 Sea-ORM 实现的数据库连接
+- 用于分析工作流的 Parquet 格式
 
 ---
 
-## <span id="security">🔒 Security</span>
+## <span id="security">🔒 安全</span>
 
 <div align="center" style="margin: 24px 0;">
 
-### 🛡️ Security Features
+### 🛡️ 安全特性
 
 </div>
 
-Inklog is built with security as a top priority:
+Inklog 将安全作为最高优先级来构建：
 
-#### 🔒 Encryption
+#### 🔒 加密
 
-- **AES-256-GCM**: Military-grade encryption for log files
-- **Key Management**: Environment variable-based key injection
-- **Zeroized Memory**: Secrets are securely cleared after use via `zeroize` crate
-- **SHA-256 Hashing**: Integrity verification for encrypted logs
+- **AES-256-GCM**：用于日志文件的军事级加密
+- **密钥管理**：基于环境变量的密钥注入
+- **内存清零**：通过 `zeroize` crate 在使用后安全清除密钥
+- **SHA-256 哈希**：用于加密日志的完整性验证
 
-#### 🎭 Data Masking
+#### 🎭 数据脱敏
 
-- **Regex-Based Patterns**: Automatic PII detection and redaction
-- **Email Masking**: `user@example.com` → `***@***.***`
-- **SSN Masking**: Credit card and social security number redaction
-- **Custom Patterns**: Configurable regex patterns for sensitive data
+- **基于正则的模式**：自动 PII 检测和脱敏
+- **邮箱脱敏**：`user@example.com` → `***@***.***`
+- **SSN 脱敏**：信用卡和社会安全号码脱敏
+- **自定义模式**：可配置的正则表达式模式用于敏感数据
 
-#### 🔐 Secure Key Handling
+#### 🔐 安全密钥处理
 
 ```rust
 // Set encryption key securely from environment
@@ -728,20 +701,20 @@ std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
 // Never hardcode keys in your application
 ```
 
-#### 🛡️ Security Best Practices
+#### 🛡️ 安全最佳实践
 
-- **No hardcoded secrets**: Keys loaded from environment variables
-- **Minimal privileged operations**: Only necessary file/database access
-- **Audit logging**: Debug feature for security audit trails
-- **Compliance-ready**: Supports GDPR, HIPAA, PCI-DSS logging requirements
+- **无硬编码密钥**：密钥从环境变量加载
+- **最小权限操作**：仅必要的文件/数据库访问
+- **审计日志**：用于安全审计追踪的 Debug 特性
+- **合规就绪**：支持 GDPR、HIPAA、PCI-DSS 日志要求
 
 ---
 
-## <span id="testing">🧪 Testing</span>
+## <span id="testing">🧪 测试</span>
 
 <div align="center" style="margin: 24px 0;">
 
-### 🎯 Run Tests
+### 🎯 运行测试
 
 </div>
 
@@ -759,16 +732,16 @@ cargo test --release
 cargo bench
 ```
 
-### Test Coverage
+### 测试覆盖率
 
-Inklog targets **95%+ code coverage**:
+Inklog 目标是 **95%+ 代码覆盖率**：
 
 ```bash
 # Generate coverage report
 cargo tarpaulin --out Html --all-features
 ```
 
-### Linting and Formatting
+### 代码检查和格式化
 
 ```bash
 # Format code
@@ -781,7 +754,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-### Security Audit
+### 安全审计
 
 ```bash
 # Run cargo deny for security checks
@@ -794,9 +767,9 @@ cargo deny check advisories
 cargo deny check bans
 ```
 
-### Dependency Injection Testing
+### 依赖注入测试
 
-Inklog provides Mock implementations for unit testing without external dependencies:
+Inklog 提供 Mock 实现，用于在没有外部依赖的情况下进行单元测试：
 
 ```rust
 use inklog::{LoggerManager, LoggerDependencies};
@@ -822,14 +795,14 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-**Mock Implementations**:
-- **MockCache**: In-memory HashMap with delay simulation
-- **MockConfig**: Runtime-modifiable configuration
-- **MockDatabaseAdapter**: In-memory log storage with health state control
+**Mock 实现**：
+- **MockCache**：内置 HashMap 的内存缓存，支持延迟模拟
+- **MockConfig**：运行时可修改的配置
+- **MockDatabaseAdapter**：内存日志存储，支持健康状态控制
 
-See [User Guide](docs/USER_GUIDE.md#using-mock-implementations-for-testing) for detailed usage.
+详细用法请参阅 [用户指南](docs/USER_GUIDE.md#using-mock-implementations-for-testing)。
 
-### Integration Tests
+### 集成测试
 
 ```bash
 # Run integration tests
@@ -843,15 +816,15 @@ docker-compose down
 
 ---
 
-## <span id="contributing">🤝 Contributing</span>
+## <span id="contributing">🤝 贡献</span>
 
 <div align="center" style="margin: 24px 0;">
 
-Contributions are welcome! 详见 [CONTRIBUTING.md](CONTRIBUTING.md)
+欢迎贡献！详见 [CONTRIBUTING.md](CONTRIBUTING.md)
 
 </div>
 
-### Development Setup
+### 开发环境设置
 
 ```bash
 # Clone repository
@@ -871,24 +844,24 @@ cargo clippy --all-features
 cargo fmt --all
 ```
 
-### Pull Request Process
+### Pull Request 流程
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests and ensure all pass (`cargo test --all-features`)
-5. Run clippy and fix warnings (`cargo clippy --all-features`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+1. Fork 仓库
+2. 创建功能分支（`git checkout -b feature/amazing-feature`）
+3. 进行修改
+4. 运行测试并确保全部通过（`cargo test --all-features`）
+5. 运行 clippy 并修复警告（`cargo clippy --all-features`）
+6. 提交修改（`git commit -m 'Add amazing feature'`）
+7. 推送到分支（`git push origin feature/amazing-feature`）
+8. 发起 Pull Request
 
-### Code Style
+### 代码风格
 
-- Follow Rust naming conventions (snake_case for variables, PascalCase for types)
-- Use `thiserror` for error types
-- Use `anyhow` for error contexts
-- Add doc comments to all public APIs
-- Run `cargo fmt` before committing
+- 遵循 Rust 命名规范（变量使用 snake_case，类型使用 PascalCase）
+- 错误类型使用 `thiserror`
+- 错误上下文使用 `anyhow`
+- 为所有公共 API 添加文档注释
+- 提交前运行 `cargo fmt`
 
 ---
 
@@ -898,40 +871,40 @@ cargo fmt --all
 
 ---
 
-## <span id="license">📄 License</span>
+## <span id="license">📄 许可证</span>
 
 <div align="center" style="margin: 24px 0;">
 
-This project is licensed under the **MIT License**.
+本项目基于 **MIT 许可证** 授权。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
-MIT License, Copyright (c) 2026 Kirky.X
+MIT 许可证，版权所有 (c) 2026 Kirky.X
 
 ---
 
-## <span id="acknowledgments">🙏 Acknowledgments</span>
+## <span id="acknowledgments">🙏 致谢</span>
 
 <div align="center" style="margin: 24px 0;">
 
-### 🌟 Built on Excellent Tools
+### 🌟 基于优秀工具构建
 
 </div>
 
-Inklog wouldn't be possible without these amazing projects:
+没有这些优秀的项目，Inklog 将无法实现：
 
-- [tracing](https://github.com/tokio-rs/tracing) - The foundation of Rust structured logging
-- [tokio](https://tokio.rs/) - Async runtime for Rust
-- [Sea-ORM](https://www.sea-ql.org/SeaORM/) - Async ORM for database operations
-- [axum](https://github.com/tokio-rs/axum) - Web framework for HTTP endpoints
-- [serde](https://serde.rs/) - Serialization framework
-- The entire Rust ecosystem for amazing tools and libraries
+- [tracing](https://github.com/tokio-rs/tracing) - Rust 结构化日志的基础
+- [tokio](https://tokio.rs/) - Rust 的异步运行时
+- [Sea-ORM](https://www.sea-ql.org/SeaORM/) - 用于数据库操作的异步 ORM
+- [axum](https://github.com/tokio-rs/axum) - 用于 HTTP 端点的 Web 框架
+- [serde](https://serde.rs/) - 序列化框架
+- 整个 Rust 生态系统提供的优秀工具和库
 
 ---
 
-## 📞 Support
+## 📞 支持
 
 <div align="center" style="margin: 24px 0;">
 
@@ -940,18 +913,18 @@ Inklog wouldn't be possible without these amazing projects:
 <td align="center" width="33%">
 <a href="https://github.com/Kirky-X/inklog/issues">
 <div style="padding: 16px; border-radius:8px;">
-<b style="color:#991B1B;">📋 Issues</b>
+<b style="color:#991B1B;">📋 问题</b>
 </div>
 </a>
-<br><span style="color:#64748B;">Report bugs and issues</span>
+<br><span style="color:#64748B;">报告 Bug 和问题</span>
 </td>
 <td align="center" width="33%">
 <a href="https://github.com/Kirky-X/inklog/discussions">
 <div style="padding: 16px; border-radius:8px;">
-<b style="color:#1E40AF;">💬 Discussions</b>
+<b style="color:#1E40AF;">💬 讨论</b>
 </div>
 </a>
-<br><span style="color:#64748B;">Ask questions and share ideas</span>
+<br><span style="color:#64748B;">提问和分享想法</span>
 </td>
 <td align="center" width="33%">
 <a href="https://github.com/Kirky-X/inklog">
@@ -959,7 +932,7 @@ Inklog wouldn't be possible without these amazing projects:
 <b style="color:#1E293B;">🐙 GitHub</b>
 </div>
 </a>
-<br><span style="color:#64748B;">View source code</span>
+<br><span style="color:#64748B;">查看源代码</span>
 </td>
 </tr>
 </table>
@@ -968,7 +941,7 @@ Inklog wouldn't be possible without these amazing projects:
 
 ---
 
-## ⭐ Star History
+## ⭐ Star 历史
 
 <div align="center">
 
@@ -980,18 +953,18 @@ Inklog wouldn't be possible without these amazing projects:
 
 <div align="center" style="margin: 32px 0; padding: 24px; border-radius: 12px;">
 
-### 💝 Support This Project
+### 💝 支持本项目
 
-If you find this project useful, please consider giving it a ⭐️!
+如果你觉得这个项目有用，请考虑给它一个 ⭐️！
 
-**Built with ❤️ by Inklog Team**
-
----
-
-**[⬆ Back to Top](#inklog)**
+**由 Inklog 团队用 ❤️ 构建**
 
 ---
 
-<sub>© 2026 Inklog Project. All rights reserved.</sub>
+**[⬆ 返回顶部](#inklog)**
+
+---
+
+<sub>© 2026 Inklog 项目。保留所有权利。</sub>
 
 </div>
