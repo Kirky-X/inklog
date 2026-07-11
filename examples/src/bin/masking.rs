@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 数据脱敏示例
 //!
 //! 演示如何使用 DataMasker 对敏感信息进行脱敏处理。

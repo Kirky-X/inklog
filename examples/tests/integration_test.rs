@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License.
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 集成测试：验证各 lib 模块端到端协同工作。
 //!
 //! 这些测试与单元测试的区别：单元测试覆盖单个函数，集成测试覆盖多个模块的协同

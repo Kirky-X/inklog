@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Parquet 归档示例
 //!
 //! 演示 `inklog::ParquetConfig` 和 `convert_logs_to_parquet()` 的使用：

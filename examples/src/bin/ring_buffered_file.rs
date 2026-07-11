@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! ChannelBufferedFileSink 示例（Layer 1 本地资源）
 //!
 //! 演示基于 crossbeam channel 的高性能文件 sink，使用临时目录自动清理：

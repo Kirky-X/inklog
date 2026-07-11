@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 性能测试示例
 //!
 //! 演示 inklog 的性能特征，包括吞吐量、延迟和并发能力。

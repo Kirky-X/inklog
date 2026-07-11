@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 健康监控与指标收集示例（Layer 2 外部服务）
 //!
 //! 演示 Metrics、HealthStatus、SinkHealthMonitor、SinkStatus、GaugeF64 的使用，

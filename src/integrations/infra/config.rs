@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! Config trait - 抽象配置访问
 //!
 //! 提供配置值的统一访问接口，支持多种基本类型。

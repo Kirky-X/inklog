@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Kirky.X
+// SPDX-License-Identifier: MIT
 //! Database entity definitions for inklog database sink.
 //!
 //! This module provides entity definitions for database logging.

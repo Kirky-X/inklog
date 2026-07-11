@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-//
+// SPDX-License-Identifier: MIT
 // 真实数据写入和特性验证测试
 // 这个测试会真实写入大量数据，并验证所有inklog特性是否正常工作
 

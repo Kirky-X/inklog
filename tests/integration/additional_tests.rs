@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! 额外的测试用例集合
 //!
 //! 为 inklog 添加额外的测试用例，将测试数量提升到 200+

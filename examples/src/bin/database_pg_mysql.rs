@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! PostgreSQL/MySQL 数据库驱动示例
 //!
 //! 演示 `inklog::DatabaseDriver` 枚举和 PostgreSQL/MySQL 数据库 Sink 配置：

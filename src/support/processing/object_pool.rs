@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! # Object Pool
 //!
 //! High-performance object pool using oxcache for LRU caching and thread-safe operations.

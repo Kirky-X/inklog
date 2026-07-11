@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License.
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! AES-256-GCM 日志加解密与加密文件头解析。
 //!
 //! 从 `examples/src/bin/encryption.rs` 提取核心逻辑：

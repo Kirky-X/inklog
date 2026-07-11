@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use inklog::masking::{self, DataMasker};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]

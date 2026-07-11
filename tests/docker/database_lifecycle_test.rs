@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! DatabaseSink 完整生命周期 Docker 集成测试
 //!
 //! 覆盖 init → write → flush → shutdown 完整流程，以及并发写入场景。

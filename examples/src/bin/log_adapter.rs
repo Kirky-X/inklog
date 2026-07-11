@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 //! `log` crate 适配器示例（Layer 0 零依赖）
 //!
 //! 演示 LogAdapter、LogLogger 的使用，展示 inklog 兼容标准 `log` crate。

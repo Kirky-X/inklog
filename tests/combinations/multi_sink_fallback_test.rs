@@ -1,8 +1,5 @@
 // Copyright (c) 2026 Kirky.X
-//
-// Licensed under the MIT License
-// See LICENSE file in the project root for full license information.
-
+// SPDX-License-Identifier: MIT
 // 多 Sink 降级功能测试
 // 测试 File Sink 故障时降级到 Database，Database 故障时降级到 Console
 // 验证降级后消息不丢失，以及恢复后自动切回
