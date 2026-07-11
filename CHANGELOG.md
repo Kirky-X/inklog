@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ⚠️ BREAKING CHANGES
+
+- `error` module moved from `src/domain/types/error.rs` to `src/error.rs`, import path `crate::domain::types::error::` → `crate::error::`
+- Added `InklogResult<T>` type alias
+
 ## [0.1.5] - 2026-07-11
 
 ### Changed
