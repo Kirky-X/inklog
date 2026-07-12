@@ -14,9 +14,9 @@ use crate::support::io::sink::console::ConsoleSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::support::io::sink::database::DatabaseSink;
 use crate::support::io::sink::file::FileSink;
-use crate::support::io::{LogAdapter, LogLogger};
 use crate::{FileSinkConfig, InklogConfig};
 use crate::{HealthStatus, Metrics};
+use crate::{LogAdapter, LogLogger};
 use chrono::Utc;
 use crossbeam_channel::{Receiver, Sender, bounded};
 #[allow(unused_imports)]

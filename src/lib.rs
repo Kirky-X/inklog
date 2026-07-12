@@ -126,9 +126,9 @@
 //! port = 8080
 //! ```
 
-pub mod error;
-pub mod log_level;
-pub mod validation;
+mod error;
+mod log_level;
+mod validation;
 
 // ICU4X-backed internationalization (optional, enabled via `i18n` feature)
 #[cfg(feature = "i18n")]
@@ -177,7 +177,7 @@ pub use domain::core::{
     InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,
 };
 
-pub use log_level::LogLevel;
+pub use log_level::{LogLevel, LogLevelParseError};
 pub use support::io::{LogAdapter, LogLogger};
 pub use support::observability::{
     FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
