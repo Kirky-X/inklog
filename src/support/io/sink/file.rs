@@ -11,7 +11,7 @@ use crate::InklogError;
 use crate::LogRecord;
 use crate::support::io::sink::LogSink;
 use crate::support::io::sink::circuit_breaker::CircuitBreaker;
-use crate::support::io::sink::rotation::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
+use crate::support::io::sink::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
 use aes_gcm::KeyInit;
 use aes_gcm::aead::Aead;
 use async_trait::async_trait;
@@ -130,9 +130,10 @@ impl FileSink {
                     TimeBasedRotation::from_interval_string("daily")
                         .expect("hardcoded 'daily' interval is valid")
                 });
-            Box::new(crate::support::io::sink::rotation::CompositeRotation::new(
-                vec![Box::new(size_strategy), Box::new(time_strategy)],
-            ))
+            Box::new(crate::support::io::sink::CompositeRotation::new(vec![
+                Box::new(size_strategy),
+                Box::new(time_strategy),
+            ]))
         };
 
         let inner = FileSinkInner {
@@ -823,9 +824,9 @@ impl FileSink {
                     timer_handle: None,
                     rotation_timer: None,
                     cleanup_timer_handle: None,
-                    rotation_strategy: Box::new(
-                        crate::support::io::sink::rotation::CompositeRotation::new(vec![]),
-                    ),
+                    rotation_strategy: Box::new(crate::support::io::sink::CompositeRotation::new(
+                        vec![],
+                    )),
                 };
                 let sink = FileSink {
                     config,
@@ -859,9 +860,9 @@ impl FileSink {
                     timer_handle: None,
                     rotation_timer: None,
                     cleanup_timer_handle: None,
-                    rotation_strategy: Box::new(
-                        crate::support::io::sink::rotation::CompositeRotation::new(vec![]),
-                    ),
+                    rotation_strategy: Box::new(crate::support::io::sink::CompositeRotation::new(
+                        vec![],
+                    )),
                 };
                 let sink = FileSink {
                     config,
@@ -1198,9 +1199,7 @@ mod tests {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
-            rotation_strategy: Box::new(
-                crate::support::io::sink::rotation::CompositeRotation::new(vec![]),
-            ),
+            rotation_strategy: Box::new(crate::support::io::sink::CompositeRotation::new(vec![])),
         };
 
         FileSink {
