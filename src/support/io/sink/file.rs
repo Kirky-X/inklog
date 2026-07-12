@@ -7,11 +7,11 @@
 
 use super::CircuitBreaker;
 use super::LogSink;
+use super::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
 use crate::DataMasker;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
-use crate::support::io::sink::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
 use aes_gcm::KeyInit;
 use aes_gcm::aead::Aead;
 use async_trait::async_trait;
