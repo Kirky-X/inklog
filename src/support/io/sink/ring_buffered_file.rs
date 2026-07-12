@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 //! High-performance file sink using crossbeam channels.
 
+use super::LogSink;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
-use crate::support::io::sink::LogSink;
 use async_trait::async_trait;
 use crossbeam_channel;
 use parking_lot::Mutex;

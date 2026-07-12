@@ -8,3 +8,4 @@ pub mod subscriber;
 
 pub use container::{InklogContainer, InklogContainerBuilder};
 pub use manager::{LoggerBuilder, LoggerDependencies, LoggerManager};
+pub use subscriber::LoggerSubscriber;

@@ -11,12 +11,12 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use async_trait::async_trait;
 
+use super::CircuitBreaker;
+use super::FileSink;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::Metrics;
-use crate::support::io::sink::circuit_breaker::CircuitBreaker;
-use crate::support::io::sink::file::FileSink;
 
 use super::{DatabaseSink, DatabaseSinkInner};
 

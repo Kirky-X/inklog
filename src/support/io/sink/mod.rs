@@ -13,7 +13,12 @@ pub mod registry;
 pub mod ring_buffered_file;
 pub mod rotation;
 
+pub use circuit_breaker::CircuitBreaker;
 pub use compression::{CompressionStrategy, GzipCompression, NoCompression, ZstdCompression};
+pub use console::ConsoleSink;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+pub use database::DatabaseSink;
+pub use file::FileSink;
 pub use registry::{FileSinkFactory, SinkFactory, SinkMetadata, SinkRegistry};
 pub use rotation::{
     CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,

@@ -48,7 +48,7 @@ use trait_kit::prelude::*;
 
 use dbnexus::DbNexusModule;
 
-use crate::integrations::dbnexus_adapter::DbNexusLogDbAdapter;
+use crate::integrations::DbNexusLogDbAdapter;
 use crate::{InklogError, LogDbProvider};
 
 /// trait-kit `AsyncKit` module that constructs an inklog `LogDbProvider`.

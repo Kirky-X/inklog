@@ -26,7 +26,7 @@ use crate::{InklogError, LogRecord};
 /// Database provider abstraction consumed by inklog's trait-kit integration.
 ///
 /// Defines the minimal execute/batch-insert interface for persisting log
-/// records. Implementations include [`DbNexusLogDbAdapter`](crate::integrations::dbnexus_adapter::DbNexusLogDbAdapter)
+/// records. Implementations include [`DbNexusLogDbAdapter`](crate::integrations::DbNexusLogDbAdapter)
 /// (feature-gated behind `kit`) and any custom adapter the user supplies.
 ///
 /// # Object safety

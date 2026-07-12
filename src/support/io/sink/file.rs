@@ -5,12 +5,12 @@
 //! This module provides the FileSink implementation for writing logs to files
 //! with support for automatic rotation, compression, and encryption.
 
+use super::CircuitBreaker;
+use super::LogSink;
 use crate::DataMasker;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
-use crate::support::io::sink::LogSink;
-use crate::support::io::sink::circuit_breaker::CircuitBreaker;
 use crate::support::io::sink::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
 use aes_gcm::KeyInit;
 use aes_gcm::aead::Aead;
