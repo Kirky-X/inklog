@@ -5,15 +5,15 @@ use crate::ConsoleSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
-use crate::domain::core::subscriber::LoggerSubscriber;
+use crate::domain::core::LoggerSubscriber;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::integrations::infra::Database;
-use crate::integrations::infra::{Cache, Config};
-use crate::support::io::sink::LogSink;
-use crate::support::io::sink::console::ConsoleSink;
+use crate::integrations::Database;
+use crate::integrations::{Cache, Config};
+use crate::support::io::ConsoleSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::support::io::sink::database::DatabaseSink;
-use crate::support::io::sink::file::FileSink;
+use crate::support::io::DatabaseSink;
+use crate::support::io::FileSink;
+use crate::support::io::LogSink;
 use crate::{FileSinkConfig, InklogConfig};
 use crate::{HealthStatus, Metrics};
 use crate::{LogAdapter, LogLogger};
@@ -2284,7 +2284,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_logger_manager_with_dependencies_injects_cache() {
-        use crate::integrations::infra::MockCache;
+        use crate::integrations::MockCache;
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: None,
@@ -2299,7 +2299,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_logger_manager_with_dependencies_injects_config() {
-        use crate::integrations::infra::InklogConfigAdapter;
+        use crate::integrations::InklogConfigAdapter;
         let config = InklogConfig::default();
         let deps = LoggerDependencies {
             cache: None,
@@ -2564,7 +2564,7 @@ mod tests {
     #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[test]
     fn test_builder_with_database_injects_dep() {
-        use crate::integrations::infra::MockDatabaseAdapter;
+        use crate::integrations::MockDatabaseAdapter;
         let builder = LoggerBuilder::new().with_database(Arc::new(MockDatabaseAdapter::new()));
         assert!(builder.deps.database.is_some());
     }
@@ -2575,14 +2575,14 @@ mod tests {
 
     #[test]
     fn test_builder_cache_injects_dep() {
-        use crate::integrations::infra::MockCache;
+        use crate::integrations::MockCache;
         let builder = LoggerBuilder::new().cache(Arc::new(MockCache::new()));
         assert!(builder.deps.cache.is_some());
     }
 
     #[test]
     fn test_builder_config_injects_dep() {
-        use crate::integrations::infra::MockConfig;
+        use crate::integrations::MockConfig;
         let builder = LoggerBuilder::new().config(Arc::new(MockConfig::new()));
         assert!(builder.deps.config.is_some());
     }
@@ -2595,7 +2595,7 @@ mod tests {
     async fn test_builder_build_with_cache_injection_mixed_mode() {
         // 注入 cache 但不注入 config → has_deps=true, deps.config.is_none() 分支
         // 应创建 InklogConfigAdapter 包装 self.config
-        use crate::integrations::infra::MockCache;
+        use crate::integrations::MockCache;
         let manager = LoggerManager::builder()
             .level("info")
             .channel_capacity(1500)
@@ -2611,7 +2611,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_builder_build_with_config_injection() {
         // 注入 config → has_deps=true, deps.config.is_some() 分支（不创建 adapter）
-        use crate::integrations::infra::MockConfig;
+        use crate::integrations::MockConfig;
         let manager = LoggerManager::builder()
             .config(Arc::new(MockConfig::new()))
             .worker_threads(1)
@@ -3480,7 +3480,7 @@ worker_threads = 1
     async fn test_build_with_deps_applies_global_config_from_provider() {
         // 验证 Config trait 的 global.level/format/masking_enabled/auto_fallback
         // 被正确应用到 InklogConfig
-        use crate::integrations::infra::MockConfig;
+        use crate::integrations::MockConfig;
         let mock_config = MockConfig::new()
             .with_value("global.level", "debug")
             .with_value("global.format", "{level} {message}")
@@ -3512,7 +3512,7 @@ worker_threads = 1
     async fn test_build_with_deps_configures_file_sink_from_provider() {
         // 验证 Config trait 的 file_sink.* 配置被正确应用到 InklogConfig.file_sink
         // 并触发 file worker 实际写入文件
-        use crate::integrations::infra::MockConfig;
+        use crate::integrations::MockConfig;
         let dir = tempfile::tempdir().expect("Failed to create tempdir");
         let log_path = dir.path().join("from_provider.log");
         let path_str = log_path
@@ -3582,7 +3582,7 @@ worker_threads = 1
         // 验证 Config trait 的 http_server.* 配置被正确应用到 InklogConfig.http_server
         // 注意：with_dependencies 不启动 HTTP 服务器（只有 with_config 才启动），
         // 所以本测试只验证配置构建，不实际启动 HTTP 服务
-        use crate::integrations::infra::MockConfig;
+        use crate::integrations::MockConfig;
         let mock_config = MockConfig::new()
             .with_value("http_server.enabled", "true")
             .with_value("http_server.host", "127.0.0.1")
@@ -3616,7 +3616,7 @@ worker_threads = 1
     async fn test_build_with_deps_configures_performance_from_provider() {
         // 验证 Config trait 的 performance.worker_threads/channel_capacity
         // 被正确应用到 InklogConfig.performance
-        use crate::integrations::infra::MockConfig;
+        use crate::integrations::MockConfig;
         let mock_config = MockConfig::new()
             .with_value("performance.worker_threads", "2")
             .with_value("performance.channel_capacity", "3000");
@@ -3655,7 +3655,7 @@ worker_threads = 1
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_database() {
         // 验证通过 LoggerDependencies.database 注入的 Database 实现不会导致创建失败
-        use crate::integrations::infra::MockDatabaseAdapter;
+        use crate::integrations::MockDatabaseAdapter;
         let deps = LoggerDependencies {
             cache: None,
             config: None,
@@ -3960,7 +3960,7 @@ worker_threads = 1
     #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[test]
     fn test_logger_dependencies_debug_includes_database_field() {
-        use crate::integrations::infra::{MockCache, MockDatabaseAdapter};
+        use crate::integrations::{MockCache, MockDatabaseAdapter};
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: None,
@@ -3990,7 +3990,7 @@ worker_threads = 1
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_both_cache_and_config() {
-        use crate::integrations::infra::{InklogConfigAdapter, MockCache};
+        use crate::integrations::{InklogConfigAdapter, MockCache};
         let config = InklogConfig::default();
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
@@ -4014,7 +4014,7 @@ worker_threads = 1
     #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_all_three_deps() {
-        use crate::integrations::infra::{InklogConfigAdapter, MockCache, MockDatabaseAdapter};
+        use crate::integrations::{InklogConfigAdapter, MockCache, MockDatabaseAdapter};
         let config = InklogConfig::default();
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),

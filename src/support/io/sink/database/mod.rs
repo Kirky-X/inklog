@@ -16,15 +16,15 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use super::CircuitBreaker;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use super::FileSink;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::DataMasker;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::LogRecord;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::Metrics;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::support::io::sink::circuit_breaker::CircuitBreaker;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use crate::support::io::sink::file::FileSink;
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 mod database_impl;
@@ -63,13 +63,13 @@ pub struct DatabaseSink {
 
 #[cfg(test)]
 mod tests {
+    use super::super::LogSink;
     use super::*;
     use crate::DatabaseSinkConfig;
     use crate::InklogError;
     use crate::LogRecord;
     use crate::Metrics;
-    use crate::integrations::infra::database::MockDatabaseAdapter;
-    use crate::support::io::sink::LogSink;
+    use crate::integrations::MockDatabaseAdapter;
     use std::sync::Arc;
 
     #[test]

@@ -166,12 +166,12 @@ pub use error::InklogResult;
     feature = "kit",
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
-pub use integrations::dbnexus_adapter::DbNexusLogDbAdapter;
+pub use integrations::DbNexusLogDbAdapter;
 #[cfg(all(
     feature = "kit",
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
-pub use integrations::kit::InklogModule;
+pub use integrations::InklogModule;
 
 pub use domain::core::{
     InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,

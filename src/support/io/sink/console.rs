@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
+use super::LogSink;
 use crate::ConsoleSinkConfig;
 use crate::DataMasker;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
-use crate::support::io::sink::LogSink;
 use async_trait::async_trait;
 use is_terminal::IsTerminal;
 use owo_colors::OwoColorize;
