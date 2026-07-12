@@ -189,7 +189,7 @@ fn show_helper_methods() {
 fn show_error_handling() {
     print_section("示例 6：错误处理（LogLevelParseError）");
 
-    use inklog::log_level::LogLevelParseError;
+    use inklog::LogLevelParseError;
 
     let invalid_inputs = ["", "invalid", "TRACE_LEVEL", "123"];
     for input in invalid_inputs {
