@@ -103,5 +103,5 @@ harness = false
 
 [[bin]]
 name = "inklog-cli"
-path = "src/cli/mod.rs"
+path = "src/cli/main.rs"
 required-features = ["cli"]
