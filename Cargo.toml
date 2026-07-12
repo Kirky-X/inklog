@@ -1,6 +1,6 @@
 [package]
 name = "inklog"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Kirky.X"]
@@ -25,7 +25,7 @@ default = ["http", "cli"]
 sqlite = ["dep:dbnexus", "dep:sea-orm", "dbnexus/sqlite", "sea-orm/sqlx-sqlite"]
 postgres = ["dep:dbnexus", "dep:sea-orm", "dbnexus/postgres", "sea-orm/sqlx-postgres"]
 mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
-# duckdb feature 仅用于绕过 dbnexus 0.3.1+ 的 compile_error 规则 2 例外：
+# duckdb feature 仅用于绕过 dbnexus 0.4.0+ 的 compile_error 规则 2 例外：
 # 当 sqlite+duckdb+postgres+mysql 全部 4 个后端都启用时允许共存（用于 --all-features 测试）。
 # DatabaseSink 仅支持 sea-orm 后端（sqlite/postgres/mysql），不直接支持 duckdb 驱动。
 duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb"]
@@ -50,7 +50,7 @@ regex = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = { version = "1.1" }
-trait-kit = { version = "0.2", features = ["async"], optional = true, default-features = false }
+trait-kit = { version = "0.3", features = ["async"], optional = true, default-features = false }
 thiserror = "2.0"
 anyhow = "1.0"
 async-trait = "0.1"
@@ -69,7 +69,7 @@ base64 = "0.22"
 parquet = { version = "59.0", features = ["async"] }
 arrow-array = "59.0"
 arrow-schema = "59.0"
-dbnexus = { version = "0.3", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
+dbnexus = { version = "0.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"
 zeroize = "1.9"
