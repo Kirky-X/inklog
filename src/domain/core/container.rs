@@ -78,12 +78,12 @@ use std::sync::Arc;
 
 use crate::InklogConfig;
 use crate::InklogError;
-use crate::domain::core::manager::{LoggerDependencies, LoggerManager};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use crate::integrations::infra::Database;
 #[cfg(test)]
 use crate::integrations::infra::cache::MockCache;
 use crate::integrations::infra::{Cache, Config, InklogConfigAdapter, OxCacheAdapter};
+use crate::{LoggerDependencies, LoggerManager};
 
 /// 应用级依赖注入容器
 ///
