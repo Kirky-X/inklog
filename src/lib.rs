@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-#![doc(html_root_url = "https://docs.rs/inklog/0.1.5")]
+#![doc(html_root_url = "https://docs.rs/inklog/0.1.6")]
 
 //! # inklog - 企业级 Rust 日志基础设施
 //!
