@@ -30,12 +30,9 @@ use crate::support::io::sink::file::FileSink;
 mod database_impl;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub use database_impl::convert_logs_to_parquet;
-
-const DEFAULT_BATCH_SIZE: usize = 100;
-const DEFAULT_FLUSH_INTERVAL_MS: u64 = 500;
-const MIN_BATCH_SIZE: usize = 10;
-const MAX_BATCH_SIZE: usize = 1000;
-const ADAPTIVE_WINDOW_SIZE: usize = 10;
+// Import constants for test access (tests use `use super::*;`)
+#[cfg(all(any(feature = "sqlite", feature = "postgres", feature = "mysql"), test))]
+use database_impl::{ADAPTIVE_WINDOW_SIZE, MAX_BATCH_SIZE, MIN_BATCH_SIZE};
 
 /// DatabaseSink 的可变内部状态
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]

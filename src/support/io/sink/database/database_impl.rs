@@ -18,10 +18,13 @@ use crate::Metrics;
 use crate::support::io::sink::circuit_breaker::CircuitBreaker;
 use crate::support::io::sink::file::FileSink;
 
-use super::{
-    ADAPTIVE_WINDOW_SIZE, DEFAULT_BATCH_SIZE, DEFAULT_FLUSH_INTERVAL_MS, DatabaseSink,
-    DatabaseSinkInner, MAX_BATCH_SIZE, MIN_BATCH_SIZE,
-};
+use super::{DatabaseSink, DatabaseSinkInner};
+
+pub(super) const DEFAULT_BATCH_SIZE: usize = 100;
+pub(super) const DEFAULT_FLUSH_INTERVAL_MS: u64 = 500;
+pub(super) const MIN_BATCH_SIZE: usize = 10;
+pub(super) const MAX_BATCH_SIZE: usize = 1000;
+pub(super) const ADAPTIVE_WINDOW_SIZE: usize = 10;
 
 impl DatabaseSink {
     /// 创建 DatabaseSink（使用默认配置）
