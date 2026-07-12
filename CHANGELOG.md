@@ -7,10 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-13
+
+### ⚠️ BREAKING CHANGES（仅影响启用 db 后端 feature 的用户）
+
+- dbnexus 0.3 → 0.4（pre-1.0 minor bump，Cargo 视为不兼容）；启用 `sqlite`/`postgres`/`mysql`/`duckdb`/`kit` feature 的用户需同步升级
+- trait-kit 0.2 → 0.3（同上，仅影响 `kit` feature 用户）
+
+### Dependencies
+
+- dbnexus 0.3 → 0.4（对齐下游 sdforge/limiteron 依赖链）
+- trait-kit 0.2 → 0.3（dbnexus 0.4 依赖 trait-kit 0.3）
+- oxcache 0.3.4 → 0.3.8
+
+## [0.1.6] - 2026-07-12
+
 ### ⚠️ BREAKING CHANGES
 
 - `error` module moved from `src/domain/types/error.rs` to `src/error.rs`, import path `crate::domain::types::error::` → `crate::error::`
 - Added `InklogResult<T>` type alias
+
+### Changed
+
+- 文件级 import 扁平化为 mod 级 import
+- `pub mod` 收敛为 `mod`（lib.rs 收敛）
+- `mod.rs` 拆分为 `mod.rs` + `<module>.rs`（impl 提取）
+- 导入路径统一为最浅 re-export 路径
+- README 翻译为中文，新增 README_EN 英文版，徽章下添加语言切换链接
+- AGENTS.md 添加到 .gitignore（禁止 AI 文件入库）
 
 ## [0.1.5] - 2026-07-11
 
@@ -191,7 +215,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/Kirky-X/inklog/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Kirky-X/inklog/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Kirky-X/inklog/compare/v0.1.2...v0.1.5
 [0.1.2]: https://github.com/Kirky-X/inklog/compare/v0.1.1...v0.1.2
