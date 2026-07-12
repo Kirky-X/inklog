@@ -41,9 +41,9 @@
   <a href="#贡献" style="color:#3B82F6;">🤝 贡献</a>
 </p>
 
-</div>
-
 [English](./README_EN.md)
+
+</div>
 
 ---
 
