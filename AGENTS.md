@@ -4,7 +4,7 @@
 
 inklog 是 Rust 企业级结构化日志库，基于 Tokio 异步运行时，提供多输出目标（Console/File/Database）、日志轮转、压缩（ZSTD/GZIP/Brotli/LZ4）、AES-256-GCM 加密、数据掩码、健康监控等企业级功能。
 
-- **版本**: 0.1.5
+- **版本**: 0.1.6
 - **edition**: 2024
 - **MSRV**: Rust 1.85+
 - **许可证**: MIT

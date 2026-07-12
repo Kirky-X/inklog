@@ -191,7 +191,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/Kirky-X/inklog/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Kirky-X/inklog/compare/v0.1.2...v0.1.5
 [0.1.2]: https://github.com/Kirky-X/inklog/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Kirky-X/inklog/compare/v0.1.0...v0.1.1
