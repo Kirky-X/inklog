@@ -100,11 +100,11 @@ impl InklogConfig {
         }
 
         // File sink overrides
-        if let Ok(val) = std::env::var("INKLOG_FILE_SINK_ENABLED") {
-            if val.parse::<bool>().unwrap_or(false) {
-                let file_config = config.file_sink.get_or_insert_with(Default::default);
-                file_config.enabled = true;
-            }
+        if let Ok(val) = std::env::var("INKLOG_FILE_SINK_ENABLED")
+            && val.parse::<bool>().unwrap_or(false)
+        {
+            let file_config = config.file_sink.get_or_insert_with(Default::default);
+            file_config.enabled = true;
         }
         if let Ok(val) = std::env::var("INKLOG_FILE_SINK_PATH") {
             let file_config = config.file_sink.get_or_insert_with(Default::default);
@@ -116,11 +116,11 @@ impl InklogConfig {
         }
 
         // HTTP server overrides
-        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_ENABLED") {
-            if val.parse::<bool>().unwrap_or(false) {
-                let http_config = config.http_server.get_or_insert_with(Default::default);
-                http_config.enabled = true;
-            }
+        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_ENABLED")
+            && val.parse::<bool>().unwrap_or(false)
+        {
+            let http_config = config.http_server.get_or_insert_with(Default::default);
+            http_config.enabled = true;
         }
         if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_HOST") {
             let http_config = config.http_server.get_or_insert_with(Default::default);

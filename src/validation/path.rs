@@ -122,12 +122,11 @@ impl PathValidator {
             return ValidationResult::invalid("Absolute paths are not allowed");
         }
 
-        if !self.config.allow_symlinks {
-            if let Ok(metadata) = std::fs::symlink_metadata(path) {
-                if metadata.file_type().is_symlink() {
-                    return ValidationResult::invalid("Symlinks are not allowed");
-                }
-            }
+        if !self.config.allow_symlinks
+            && let Ok(metadata) = std::fs::symlink_metadata(path)
+            && metadata.file_type().is_symlink()
+        {
+            return ValidationResult::invalid("Symlinks are not allowed");
         }
 
         if let Some(ref base_dir) = self.config.base_dir {

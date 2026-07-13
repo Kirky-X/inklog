@@ -387,17 +387,16 @@ impl LoggerManager {
 
         // 3. 启动HTTP监控服务器（如果配置启用）
         #[cfg(feature = "http")]
-        if let Some(ref http_cfg) = config.http_server {
-            if http_cfg.enabled {
-                if let Err(e) = manager.start_http_server(http_cfg).await {
-                    match http_cfg.error_mode {
-                        crate::HttpErrorMode::Warn => {
-                            tracing::warn!("HTTP server startup failed (continuing): {}", e);
-                        }
-                        crate::HttpErrorMode::Strict => {
-                            return Err(e);
-                        }
-                    }
+        if let Some(ref http_cfg) = config.http_server
+            && http_cfg.enabled
+            && let Err(e) = manager.start_http_server(http_cfg).await
+        {
+            match http_cfg.error_mode {
+                crate::HttpErrorMode::Warn => {
+                    tracing::warn!("HTTP server startup failed (continuing): {}", e);
+                }
+                crate::HttpErrorMode::Strict => {
+                    return Err(e);
                 }
             }
         }
@@ -592,41 +591,41 @@ impl LoggerManager {
             request: Request<axum::body::Body>,
             next: Next,
         ) -> Response {
-            if state.auth_enabled {
-                if let Some(ref token_env) = state.token_env {
-                    let expected_token = match std::env::var(token_env) {
-                        Ok(t) => t,
-                        Err(_) => {
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "Auth token not configured",
-                            )
-                                .into_response();
-                        }
-                    };
+            if state.auth_enabled
+                && let Some(ref token_env) = state.token_env
+            {
+                let expected_token = match std::env::var(token_env) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Auth token not configured",
+                        )
+                            .into_response();
+                    }
+                };
 
-                    let auth_header = request
-                        .headers()
-                        .get(header::AUTHORIZATION)
-                        .and_then(|h: &axum::http::HeaderValue| h.to_str().ok());
+                let auth_header = request
+                    .headers()
+                    .get(header::AUTHORIZATION)
+                    .and_then(|h: &axum::http::HeaderValue| h.to_str().ok());
 
-                    match auth_header {
-                        Some(h) if h.starts_with("Bearer ") => {
-                            let token = &h[7..];
-                            if !subtle_constant_time_compare(
-                                token.as_bytes(),
-                                expected_token.as_bytes(),
-                            ) {
-                                return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-                            }
+                match auth_header {
+                    Some(h) if h.starts_with("Bearer ") => {
+                        let token = &h[7..];
+                        if !subtle_constant_time_compare(
+                            token.as_bytes(),
+                            expected_token.as_bytes(),
+                        ) {
+                            return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
                         }
-                        _ => {
-                            return (
-                                StatusCode::UNAUTHORIZED,
-                                "Missing or invalid Authorization header",
-                            )
-                                .into_response();
-                        }
+                    }
+                    _ => {
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            "Missing or invalid Authorization header",
+                        )
+                            .into_response();
                     }
                 }
             }
@@ -867,139 +866,29 @@ impl LoggerManager {
             let runtime_handle = runtime_handle.clone();
             tokio::task::spawn_blocking(move || {
                 metrics_file.active_workers.inc();
-                if let Some(cfg) = file_config {
-                    if cfg.enabled {
-                        let cfg_clone = cfg.clone(); // Clone for recovery attempts
-                        if let Ok(mut sink) = FileSink::new(cfg) {
-                            let mut consecutive_failures = 0;
-                            #[allow(unused_assignments)]
-                            let mut last_failure_time = None::<Instant>;
+                if let Some(cfg) = file_config
+                    && cfg.enabled
+                {
+                    let cfg_clone = cfg.clone(); // Clone for recovery attempts
+                    if let Ok(mut sink) = FileSink::new(cfg) {
+                        let mut consecutive_failures = 0;
+                        #[allow(unused_assignments)]
+                        let mut last_failure_time = None::<Instant>;
 
-                            loop {
-                                // Check for shutdown
-                                if shutdown_file.try_recv().is_ok() {
-                                    // Drain with 30s timeout
-                                    let deadline = Instant::now() + Duration::from_secs(30);
-                                    while let Ok(record) = rx_file.try_recv() {
-                                        let latency = Utc::now()
-                                            .signed_duration_since(record.timestamp)
-                                            .to_std()
-                                            .unwrap_or(Duration::ZERO);
-                                        metrics_file.record_latency(latency);
-
-                                        // Retry logic
-                                        let mut attempts = 0;
-                                        while attempts < 3 {
-                                            match runtime_handle
-                                                .block_on(async { sink.write(&record).await })
-                                            {
-                                                Ok(_) => {
-                                                    metrics_file.inc_logs_written();
-                                                    metrics_file
-                                                        .update_sink_health("file", true, None);
-                                                    break;
-                                                }
-                                                Err(e) => {
-                                                    attempts += 1;
-                                                    // Log error to error.log
-                                                    if let Ok(mut error_sink_guard) =
-                                                        error_sink.lock()
-                                                    {
-                                                        if let Some(sink) =
-                                                            error_sink_guard.as_mut()
-                                                        {
-                                                            let error_record = LogRecord {
-                                                                timestamp: Utc::now(),
-                                                                level: "ERROR".to_string(),
-                                                                target: "inklog::file_sink"
-                                                                    .to_string(),
-                                                                message: format!(
-                                                                    "File sink error: {}",
-                                                                    e
-                                                                ),
-                                                                fields: Default::default(),
-                                                                file: None,
-                                                                line: None,
-                                                                thread_id: thread::current()
-                                                                    .name()
-                                                                    .unwrap_or("unknown")
-                                                                    .to_string(),
-                                                            };
-                                                            let _ =
-                                                                runtime_handle.block_on(async {
-                                                                    sink.write(&error_record).await
-                                                                });
-                                                        }
-                                                    }
-
-                                                    if attempts == 3 {
-                                                        metrics_file.inc_sink_error();
-                                                        metrics_file.update_sink_health(
-                                                            "file",
-                                                            false,
-                                                            Some(e.to_string()),
-                                                        );
-                                                        // Fallback to console
-                                                        if let Ok(cs) = console_sink_file.lock() {
-                                                            let _ =
-                                                                runtime_handle.block_on(async {
-                                                                    cs.write(&record).await
-                                                                });
-                                                        }
-                                                    } else {
-                                                        thread::sleep(Duration::from_millis(
-                                                            10 * attempts as u64,
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if Instant::now() > deadline {
-                                            break;
-                                        }
-                                    }
-                                    let _ =
-                                        runtime_handle.block_on(async { sink.shutdown().await });
-                                    break;
-                                }
-
-                                // Check for control messages
-                                if let Ok(control_msg) = control_rx_file.try_recv() {
-                                    match control_msg {
-                                        SinkControlMessage::RecoverSink(sink_name)
-                                            if sink_name == "file" =>
-                                        {
-                                            eprintln!("File sink: Received recovery command");
-                                            // Attempt to recreate the sink
-                                            if let Ok(new_sink) = FileSink::new(cfg_clone.clone()) {
-                                                sink = new_sink;
-                                                consecutive_failures = 0;
-                                                last_failure_time = None;
-                                                metrics_file.update_sink_health("file", true, None);
-                                                eprintln!("File sink: Successfully recovered");
-                                            } else {
-                                                eprintln!("File sink: Recovery failed");
-                                            }
-                                        }
-                                        SinkControlMessage::GetStatus => {
-                                            // Status is already tracked in metrics
-                                        }
-                                        _ => {} // Ignore messages for other sinks
-                                    }
-                                }
-
-                                if let Ok(record) = rx_file.recv_timeout(Duration::from_millis(100))
-                                {
+                        loop {
+                            // Check for shutdown
+                            if shutdown_file.try_recv().is_ok() {
+                                // Drain with 30s timeout
+                                let deadline = Instant::now() + Duration::from_secs(30);
+                                while let Ok(record) = rx_file.try_recv() {
                                     let latency = Utc::now()
                                         .signed_duration_since(record.timestamp)
                                         .to_std()
                                         .unwrap_or(Duration::ZERO);
                                     metrics_file.record_latency(latency);
 
-                                    // Retry logic with recovery detection
+                                    // Retry logic
                                     let mut attempts = 0;
-                                    let mut write_succeeded = false;
                                     while attempts < 3 {
                                         match runtime_handle
                                             .block_on(async { sink.write(&record).await })
@@ -1007,40 +896,30 @@ impl LoggerManager {
                                             Ok(_) => {
                                                 metrics_file.inc_logs_written();
                                                 metrics_file.update_sink_health("file", true, None);
-                                                consecutive_failures = 0;
-                                                last_failure_time = None;
-                                                write_succeeded = true;
                                                 break;
                                             }
                                             Err(e) => {
                                                 attempts += 1;
-                                                consecutive_failures += 1;
-                                                last_failure_time = Some(Instant::now());
-
                                                 // Log error to error.log
                                                 if let Ok(mut error_sink_guard) = error_sink.lock()
+                                                    && let Some(sink) = error_sink_guard.as_mut()
                                                 {
-                                                    if let Some(sink) = error_sink_guard.as_mut() {
-                                                        let error_record = LogRecord {
-                                                            timestamp: Utc::now(),
-                                                            level: "ERROR".to_string(),
-                                                            target: "inklog::file_sink".to_string(),
-                                                            message: format!(
-                                                                "File sink error: {}",
-                                                                e
-                                                            ),
-                                                            fields: Default::default(),
-                                                            file: None,
-                                                            line: None,
-                                                            thread_id: thread::current()
-                                                                .name()
-                                                                .unwrap_or("unknown")
-                                                                .to_string(),
-                                                        };
-                                                        let _ = runtime_handle.block_on(async {
-                                                            sink.write(&error_record).await
-                                                        });
-                                                    }
+                                                    let error_record = LogRecord {
+                                                        timestamp: Utc::now(),
+                                                        level: "ERROR".to_string(),
+                                                        target: "inklog::file_sink".to_string(),
+                                                        message: format!("File sink error: {}", e),
+                                                        fields: Default::default(),
+                                                        file: None,
+                                                        line: None,
+                                                        thread_id: thread::current()
+                                                            .name()
+                                                            .unwrap_or("unknown")
+                                                            .to_string(),
+                                                    };
+                                                    let _ = runtime_handle.block_on(async {
+                                                        sink.write(&error_record).await
+                                                    });
                                                 }
 
                                                 if attempts == 3 {
@@ -1065,33 +944,131 @@ impl LoggerManager {
                                         }
                                     }
 
-                                    // Auto-recovery trigger: if we have too many consecutive failures
-                                    if !write_succeeded && consecutive_failures > 5 {
-                                        if let Some(last_failure) = last_failure_time {
-                                            if last_failure.elapsed() > Duration::from_secs(60) {
-                                                eprintln!(
-                                                    "File sink: Triggering auto-recovery due to consecutive failures"
+                                    if Instant::now() > deadline {
+                                        break;
+                                    }
+                                }
+                                let _ = runtime_handle.block_on(async { sink.shutdown().await });
+                                break;
+                            }
+
+                            // Check for control messages
+                            if let Ok(control_msg) = control_rx_file.try_recv() {
+                                match control_msg {
+                                    SinkControlMessage::RecoverSink(sink_name)
+                                        if sink_name == "file" =>
+                                    {
+                                        eprintln!("File sink: Received recovery command");
+                                        // Attempt to recreate the sink
+                                        if let Ok(new_sink) = FileSink::new(cfg_clone.clone()) {
+                                            sink = new_sink;
+                                            consecutive_failures = 0;
+                                            last_failure_time = None;
+                                            metrics_file.update_sink_health("file", true, None);
+                                            eprintln!("File sink: Successfully recovered");
+                                        } else {
+                                            eprintln!("File sink: Recovery failed");
+                                        }
+                                    }
+                                    SinkControlMessage::GetStatus => {
+                                        // Status is already tracked in metrics
+                                    }
+                                    _ => {} // Ignore messages for other sinks
+                                }
+                            }
+
+                            if let Ok(record) = rx_file.recv_timeout(Duration::from_millis(100)) {
+                                let latency = Utc::now()
+                                    .signed_duration_since(record.timestamp)
+                                    .to_std()
+                                    .unwrap_or(Duration::ZERO);
+                                metrics_file.record_latency(latency);
+
+                                // Retry logic with recovery detection
+                                let mut attempts = 0;
+                                let mut write_succeeded = false;
+                                while attempts < 3 {
+                                    match runtime_handle
+                                        .block_on(async { sink.write(&record).await })
+                                    {
+                                        Ok(_) => {
+                                            metrics_file.inc_logs_written();
+                                            metrics_file.update_sink_health("file", true, None);
+                                            consecutive_failures = 0;
+                                            last_failure_time = None;
+                                            write_succeeded = true;
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            attempts += 1;
+                                            consecutive_failures += 1;
+                                            last_failure_time = Some(Instant::now());
+
+                                            // Log error to error.log
+                                            if let Ok(mut error_sink_guard) = error_sink.lock()
+                                                && let Some(sink) = error_sink_guard.as_mut()
+                                            {
+                                                let error_record = LogRecord {
+                                                    timestamp: Utc::now(),
+                                                    level: "ERROR".to_string(),
+                                                    target: "inklog::file_sink".to_string(),
+                                                    message: format!("File sink error: {}", e),
+                                                    fields: Default::default(),
+                                                    file: None,
+                                                    line: None,
+                                                    thread_id: thread::current()
+                                                        .name()
+                                                        .unwrap_or("unknown")
+                                                        .to_string(),
+                                                };
+                                                let _ = runtime_handle.block_on(async {
+                                                    sink.write(&error_record).await
+                                                });
+                                            }
+
+                                            if attempts == 3 {
+                                                metrics_file.inc_sink_error();
+                                                metrics_file.update_sink_health(
+                                                    "file",
+                                                    false,
+                                                    Some(e.to_string()),
                                                 );
-                                                // Attempt to recreate the sink
-                                                if let Ok(new_sink) =
-                                                    FileSink::new(cfg_clone.clone())
-                                                {
-                                                    sink = new_sink;
-                                                    consecutive_failures = 0;
-                                                    last_failure_time = None;
-                                                    metrics_file
-                                                        .update_sink_health("file", true, None);
-                                                    eprintln!(
-                                                        "File sink: Auto-recovery successful"
-                                                    );
+                                                // Fallback to console
+                                                if let Ok(cs) = console_sink_file.lock() {
+                                                    let _ = runtime_handle.block_on(async {
+                                                        cs.write(&record).await
+                                                    });
                                                 }
+                                            } else {
+                                                thread::sleep(Duration::from_millis(
+                                                    10 * attempts as u64,
+                                                ));
                                             }
                                         }
                                     }
-                                } else {
-                                    // Timeout, flush buffer
-                                    let _ = runtime_handle.block_on(async { sink.flush().await });
                                 }
+
+                                // Auto-recovery trigger: if we have too many consecutive failures
+                                if !write_succeeded
+                                    && consecutive_failures > 5
+                                    && let Some(last_failure) = last_failure_time
+                                    && last_failure.elapsed() > Duration::from_secs(60)
+                                {
+                                    eprintln!(
+                                        "File sink: Triggering auto-recovery due to consecutive failures"
+                                    );
+                                    // Attempt to recreate the sink
+                                    if let Ok(new_sink) = FileSink::new(cfg_clone.clone()) {
+                                        sink = new_sink;
+                                        consecutive_failures = 0;
+                                        last_failure_time = None;
+                                        metrics_file.update_sink_health("file", true, None);
+                                        eprintln!("File sink: Auto-recovery successful");
+                                    }
+                                }
+                            } else {
+                                // Timeout, flush buffer
+                                let _ = runtime_handle.block_on(async { sink.flush().await });
                             }
                         }
                     }
@@ -1118,242 +1095,210 @@ impl LoggerManager {
                 #[allow(unused_assignments)]
                 move || {
                     metrics_db.active_workers.inc();
-                    if let Some(cfg) = db_config {
-                        if cfg.enabled {
-                            if let Some(ref db) = database {
-                                // Clone once before the loop for recovery use
-                                let db_for_recovery = db.clone();
-                                if let Ok(sink_result) = DatabaseSink::new(db.clone()) {
-                                    let mut sink: DatabaseSink = sink_result;
-                                    runtime_handle.block_on(async {
-                                        sink.set_metrics(metrics_db.clone()).await
-                                    });
-                                    let mut consecutive_failures = 0;
-                                    #[allow(unused_assignments)]
-                                    let mut last_failure_time = None::<Instant>;
+                    if let Some(cfg) = db_config
+                        && cfg.enabled
+                        && let Some(ref db) = database
+                    {
+                        // Clone once before the loop for recovery use
+                        let db_for_recovery = db.clone();
+                        if let Ok(sink_result) = DatabaseSink::new(db.clone()) {
+                            let mut sink: DatabaseSink = sink_result;
+                            runtime_handle
+                                .block_on(async { sink.set_metrics(metrics_db.clone()).await });
+                            let mut consecutive_failures = 0;
+                            #[allow(unused_assignments)]
+                            let mut last_failure_time = None::<Instant>;
 
-                                    loop {
-                                        if shutdown_db.try_recv().is_ok() {
-                                            // Drain with 30s timeout
-                                            let deadline = Instant::now() + Duration::from_secs(30);
-                                            while let Ok(record) = rx_db.try_recv() {
-                                                let latency = Utc::now()
-                                                    .signed_duration_since(record.timestamp)
-                                                    .to_std()
-                                                    .unwrap_or(Duration::ZERO);
-                                                metrics_db.record_latency(latency);
+                            loop {
+                                if shutdown_db.try_recv().is_ok() {
+                                    // Drain with 30s timeout
+                                    let deadline = Instant::now() + Duration::from_secs(30);
+                                    while let Ok(record) = rx_db.try_recv() {
+                                        let latency = Utc::now()
+                                            .signed_duration_since(record.timestamp)
+                                            .to_std()
+                                            .unwrap_or(Duration::ZERO);
+                                        metrics_db.record_latency(latency);
 
-                                                // Retry logic
-                                                let mut attempts = 0;
-                                                let mut write_succeeded = false;
-                                                let write_result: Result<(), InklogError> =
-                                                    runtime_handle.block_on(async {
-                                                        sink.write(&record).await
-                                                    });
-                                                match write_result {
-                                                    Ok(_) => {
-                                                        metrics_db.inc_logs_written();
-                                                        metrics_db.update_sink_health(
-                                                            "database", true, None,
-                                                        );
-                                                        consecutive_failures = 0;
-                                                        last_failure_time = None;
-                                                        write_succeeded = true;
+                                        // Retry logic
+                                        let mut attempts = 0;
+                                        let mut write_succeeded = false;
+                                        let write_result: Result<(), InklogError> = runtime_handle
+                                            .block_on(async { sink.write(&record).await });
+                                        match write_result {
+                                            Ok(_) => {
+                                                metrics_db.inc_logs_written();
+                                                metrics_db
+                                                    .update_sink_health("database", true, None);
+                                                consecutive_failures = 0;
+                                                last_failure_time = None;
+                                                write_succeeded = true;
+                                            }
+                                            Err(ref e) => {
+                                                attempts += 1;
+                                                consecutive_failures += 1;
+                                                last_failure_time = Some(Instant::now());
+
+                                                if attempts == 3 {
+                                                    metrics_db.inc_sink_error();
+                                                    let error_msg =
+                                                        crate::InklogError::to_string(e);
+                                                    metrics_db.update_sink_health(
+                                                        "database",
+                                                        false,
+                                                        Some(error_msg),
+                                                    );
+                                                    // Fallback to console
+                                                    if let Ok(cs) = console_sink_db.lock() {
+                                                        let _ = runtime_handle.block_on(async {
+                                                            cs.write(&record).await
+                                                        });
                                                     }
-                                                    Err(ref e) => {
-                                                        attempts += 1;
-                                                        consecutive_failures += 1;
-                                                        last_failure_time = Some(Instant::now());
-
-                                                        if attempts == 3 {
-                                                            metrics_db.inc_sink_error();
-                                                            let error_msg =
-                                                                crate::InklogError::to_string(e);
-                                                            metrics_db.update_sink_health(
-                                                                "database",
-                                                                false,
-                                                                Some(error_msg),
-                                                            );
-                                                            // Fallback to console
-                                                            if let Ok(cs) = console_sink_db.lock() {
-                                                                let _ = runtime_handle.block_on(
-                                                                    async {
-                                                                        cs.write(&record).await
-                                                                    },
-                                                                );
-                                                            }
-                                                        } else {
-                                                            thread::sleep(Duration::from_millis(
-                                                                10 * attempts as u64,
-                                                            ));
-                                                        }
-                                                    }
-                                                }
-
-                                                // Auto-recovery trigger
-                                                if !write_succeeded && consecutive_failures > 5 {
-                                                    if let Some(last_failure) = last_failure_time {
-                                                        if last_failure.elapsed()
-                                                            > Duration::from_secs(60)
-                                                        {
-                                                            eprintln!(
-                                                                "Database sink: Triggering auto-recovery due to consecutive failures"
-                                                            );
-                                                            if let Ok(new_sink) = DatabaseSink::new(
-                                                                db_for_recovery.clone(),
-                                                            ) {
-                                                                sink = new_sink;
-                                                                runtime_handle.block_on(async {
-                                                                    sink.set_metrics(
-                                                                        metrics_db.clone(),
-                                                                    )
-                                                                    .await
-                                                                });
-                                                                consecutive_failures = 0;
-                                                                metrics_db.update_sink_health(
-                                                                    "database", true, None,
-                                                                );
-                                                                eprintln!(
-                                                                    "Database sink: Auto-recovery successful"
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                }
-
-                                                if Instant::now() > deadline {
-                                                    break;
+                                                } else {
+                                                    thread::sleep(Duration::from_millis(
+                                                        10 * attempts as u64,
+                                                    ));
                                                 }
                                             }
-                                            let _ = runtime_handle
-                                                .block_on(async { sink.shutdown().await });
+                                        }
+
+                                        // Auto-recovery trigger
+                                        if !write_succeeded
+                                            && consecutive_failures > 5
+                                            && let Some(last_failure) = last_failure_time
+                                            && last_failure.elapsed() > Duration::from_secs(60)
+                                        {
+                                            eprintln!(
+                                                "Database sink: Triggering auto-recovery due to consecutive failures"
+                                            );
+                                            if let Ok(new_sink) =
+                                                DatabaseSink::new(db_for_recovery.clone())
+                                            {
+                                                sink = new_sink;
+                                                runtime_handle.block_on(async {
+                                                    sink.set_metrics(metrics_db.clone()).await
+                                                });
+                                                consecutive_failures = 0;
+                                                metrics_db
+                                                    .update_sink_health("database", true, None);
+                                                eprintln!(
+                                                    "Database sink: Auto-recovery successful"
+                                                );
+                                            }
+                                        }
+
+                                        if Instant::now() > deadline {
                                             break;
                                         }
+                                    }
+                                    let _ =
+                                        runtime_handle.block_on(async { sink.shutdown().await });
+                                    break;
+                                }
 
-                                        // Check for control messages
-                                        if let Ok(control_msg) = control_rx_db.try_recv() {
-                                            match control_msg {
-                                                SinkControlMessage::RecoverSink(sink_name)
-                                                    if sink_name == "database" =>
-                                                {
-                                                    eprintln!(
-                                                        "Database sink: Received recovery command"
-                                                    );
-                                                    // Attempt to recreate the sink
-                                                    if let Ok(new_sink) =
-                                                        DatabaseSink::new(db_for_recovery.clone())
-                                                    {
-                                                        sink = new_sink;
-                                                        runtime_handle.block_on(async {
-                                                            sink.set_metrics(metrics_db.clone())
-                                                                .await
-                                                        });
-                                                        consecutive_failures = 0;
-                                                        last_failure_time = None;
-                                                        metrics_db.update_sink_health(
-                                                            "database", true, None,
-                                                        );
-                                                        eprintln!(
-                                                            "Database sink: Successfully recovered"
-                                                        );
-                                                    } else {
-                                                        eprintln!("Database sink: Recovery failed");
-                                                    }
-                                                }
-                                                SinkControlMessage::GetStatus => {
-                                                    // Status is already tracked in metrics
-                                                }
-                                                _ => {} // Ignore messages for other sinks
+                                // Check for control messages
+                                if let Ok(control_msg) = control_rx_db.try_recv() {
+                                    match control_msg {
+                                        SinkControlMessage::RecoverSink(sink_name)
+                                            if sink_name == "database" =>
+                                        {
+                                            eprintln!("Database sink: Received recovery command");
+                                            // Attempt to recreate the sink
+                                            if let Ok(new_sink) =
+                                                DatabaseSink::new(db_for_recovery.clone())
+                                            {
+                                                sink = new_sink;
+                                                runtime_handle.block_on(async {
+                                                    sink.set_metrics(metrics_db.clone()).await
+                                                });
+                                                consecutive_failures = 0;
+                                                last_failure_time = None;
+                                                metrics_db
+                                                    .update_sink_health("database", true, None);
+                                                eprintln!("Database sink: Successfully recovered");
+                                            } else {
+                                                eprintln!("Database sink: Recovery failed");
                                             }
                                         }
+                                        SinkControlMessage::GetStatus => {
+                                            // Status is already tracked in metrics
+                                        }
+                                        _ => {} // Ignore messages for other sinks
+                                    }
+                                }
 
-                                        if let Ok(record) =
-                                            rx_db.recv_timeout(Duration::from_millis(100))
-                                        {
-                                            let latency = Utc::now()
-                                                .signed_duration_since(record.timestamp)
-                                                .to_std()
-                                                .unwrap_or(Duration::ZERO);
-                                            metrics_db.record_latency(latency);
+                                if let Ok(record) = rx_db.recv_timeout(Duration::from_millis(100)) {
+                                    let latency = Utc::now()
+                                        .signed_duration_since(record.timestamp)
+                                        .to_std()
+                                        .unwrap_or(Duration::ZERO);
+                                    metrics_db.record_latency(latency);
 
-                                            // Retry logic
-                                            let mut attempts = 0;
-                                            let mut write_succeeded = false;
-                                            let write_result: Result<(), InklogError> =
-                                                runtime_handle
-                                                    .block_on(async { sink.write(&record).await });
-                                            match write_result {
-                                                Ok(_) => {
-                                                    metrics_db.inc_logs_written();
-                                                    metrics_db
-                                                        .update_sink_health("database", true, None);
-                                                    consecutive_failures = 0;
-                                                    last_failure_time = None;
-                                                    write_succeeded = true;
+                                    // Retry logic
+                                    let mut attempts = 0;
+                                    let mut write_succeeded = false;
+                                    let write_result: Result<(), InklogError> = runtime_handle
+                                        .block_on(async { sink.write(&record).await });
+                                    match write_result {
+                                        Ok(_) => {
+                                            metrics_db.inc_logs_written();
+                                            metrics_db.update_sink_health("database", true, None);
+                                            consecutive_failures = 0;
+                                            last_failure_time = None;
+                                            write_succeeded = true;
+                                        }
+                                        Err(ref e) => {
+                                            attempts += 1;
+                                            consecutive_failures += 1;
+                                            last_failure_time = Some(Instant::now());
+
+                                            if attempts == 3 {
+                                                metrics_db.inc_sink_error();
+                                                let error_msg = format!("{e}");
+                                                metrics_db.update_sink_health(
+                                                    "database",
+                                                    false,
+                                                    Some(error_msg),
+                                                );
+
+                                                // Fallback chain: DB -> File -> Console
+                                                if let Ok(cs) = console_sink_db.lock() {
+                                                    let _ = runtime_handle.block_on(async {
+                                                        cs.write(&record).await
+                                                    });
                                                 }
-                                                Err(ref e) => {
-                                                    attempts += 1;
-                                                    consecutive_failures += 1;
-                                                    last_failure_time = Some(Instant::now());
-
-                                                    if attempts == 3 {
-                                                        metrics_db.inc_sink_error();
-                                                        let error_msg = format!("{e}");
-                                                        metrics_db.update_sink_health(
-                                                            "database",
-                                                            false,
-                                                            Some(error_msg),
-                                                        );
-
-                                                        // Fallback chain: DB -> File -> Console
-                                                        if let Ok(cs) = console_sink_db.lock() {
-                                                            let _ =
-                                                                runtime_handle.block_on(async {
-                                                                    cs.write(&record).await
-                                                                });
-                                                        }
-                                                    } else {
-                                                        thread::sleep(Duration::from_millis(
-                                                            10 * attempts as u64,
-                                                        ));
-                                                    }
-                                                }
+                                            } else {
+                                                thread::sleep(Duration::from_millis(
+                                                    10 * attempts as u64,
+                                                ));
                                             }
-
-                                            // Auto-recovery trigger
-                                            if !write_succeeded && consecutive_failures > 5 {
-                                                if let Some(last_failure) = last_failure_time {
-                                                    if last_failure.elapsed()
-                                                        > Duration::from_secs(60)
-                                                    {
-                                                        eprintln!(
-                                                            "Database sink: Triggering auto-recovery due to consecutive failures"
-                                                        );
-                                                        if let Ok(new_sink) = DatabaseSink::new(
-                                                            db_for_recovery.clone(),
-                                                        ) {
-                                                            sink = new_sink;
-                                                            runtime_handle.block_on(async {
-                                                                sink.set_metrics(metrics_db.clone())
-                                                                    .await
-                                                            });
-                                                            consecutive_failures = 0;
-                                                            metrics_db.update_sink_health(
-                                                                "database", true, None,
-                                                            );
-                                                            eprintln!(
-                                                                "Database sink: Auto-recovery successful"
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            // Timeout, flush buffer
-                                            let _ = runtime_handle
-                                                .block_on(async { sink.flush().await });
                                         }
                                     }
+
+                                    // Auto-recovery trigger
+                                    if !write_succeeded
+                                        && consecutive_failures > 5
+                                        && let Some(last_failure) = last_failure_time
+                                        && last_failure.elapsed() > Duration::from_secs(60)
+                                    {
+                                        eprintln!(
+                                            "Database sink: Triggering auto-recovery due to consecutive failures"
+                                        );
+                                        if let Ok(new_sink) =
+                                            DatabaseSink::new(db_for_recovery.clone())
+                                        {
+                                            sink = new_sink;
+                                            runtime_handle.block_on(async {
+                                                sink.set_metrics(metrics_db.clone()).await
+                                            });
+                                            consecutive_failures = 0;
+                                            metrics_db.update_sink_health("database", true, None);
+                                            eprintln!("Database sink: Auto-recovery successful");
+                                        }
+                                    }
+                                } else {
+                                    // Timeout, flush buffer
+                                    let _ = runtime_handle.block_on(async { sink.flush().await });
                                 }
                             }
                         }
@@ -1540,11 +1485,11 @@ impl LoggerManager {
         // 关闭HTTP服务器
         #[cfg(feature = "http")]
         {
-            if let Ok(mut handle_guard) = self.http_server_handle.lock() {
-                if let Some(handle) = handle_guard.take() {
-                    handle.abort();
-                    info!("HTTP server shutdown signal sent");
-                }
+            if let Ok(mut handle_guard) = self.http_server_handle.lock()
+                && let Some(handle) = handle_guard.take()
+            {
+                handle.abort();
+                info!("HTTP server shutdown signal sent");
             }
         }
 

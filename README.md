@@ -25,7 +25,7 @@
   </a>
   <!-- Rust 版本 -->
   <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/rust-1.85+-orange.svg" alt="Rust 1.85+" style="display:inline;margin:0 4px;">
+    <img src="https://img.shields.io/badge/rust-1.94+-orange.svg" alt="Rust 1.94+" style="display:inline;margin:0 4px;">
   </a>
 </p>
 
@@ -171,14 +171,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-inklog = "0.1"
+inklog = "0.1.7"
 ```
 
-完整功能集：
+完整功能集（显式启用）：
 
 ```toml
 [dependencies]
-inklog = { version = "0.1", features = ["default"] }
+inklog = { version = "0.1.7", default-features = false, features = ["http", "cli", "sqlite"] }
 ```
 
 ### <span id="基础使用">💡 基础使用</span>
@@ -334,31 +334,31 @@ let _logger = LoggerManager::with_config(config).await?;
 ### 默认功能
 
 ```toml
-inklog = "0.1"  # 包含: http, cli
+inklog = "0.1.7"  # 默认不包含可选 feature (default = [])
 ```
 
 ### 可选功能
 
 ```toml
 # HTTP 服务器
-inklog = { version = "0.1", features = [
+inklog = { version = "0.1.7", features = [
     "http",       # Axum HTTP 健康端点
 ] }
 
 # 命令行工具
-inklog = { version = "0.1", features = [
+inklog = { version = "0.1.7", features = [
     "cli",        # decrypt, generate, validate 命令
 ] }
 
 # 数据库 Sink (可选一个或多个)
-inklog = { version = "0.1", features = [
+inklog = { version = "0.1.7", features = [
     "sqlite",     # SQLite 数据库 Sink
     "postgres",   # PostgreSQL 数据库 Sink
     "mysql",      # MySQL 数据库 Sink
 ] }
 
 # 开发
-inklog = { version = "0.1", features = [
+inklog = { version = "0.1.7", features = [
     "test-local", # 本地测试模式
     "debug",      # 额外安全审计日志
 ] }
@@ -376,6 +376,9 @@ inklog = { version = "0.1", features = [
 | **duckdb** | dbnexus | DuckDB 后端（仅用于 `--all-features` 测试场景；DatabaseSink 不直接支持 duckdb 驱动） |
 | **test-local** | - | 本地测试模式 |
 | **debug** | - | 安全审计日志 |
+| **metrics** | - | Metrics collection support |
+| **kit** | trait-kit, dbnexus, oxcache | trait-kit AsyncKit integration (InklogModule) |
+| **i18n** | icu, writeable | Internationalization support |
 
 ---
 

@@ -109,10 +109,10 @@ impl ChannelBufferedFileSink {
     }
 
     fn open_file(path: &PathBuf) -> Result<File, InklogError> {
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(InklogError::IoError)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent).map_err(InklogError::IoError)?;
         }
         OpenOptions::new()
             .create(true)

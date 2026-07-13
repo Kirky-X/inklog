@@ -56,13 +56,13 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
     }
 
     // 检查符号链接
-    if let Ok(metadata) = file_path.metadata() {
-        if metadata.file_type().is_symlink() {
-            return Err(anyhow!(
-                "Symbolic links are not allowed: {}",
-                file_path.display()
-            ));
-        }
+    if let Ok(metadata) = file_path.metadata()
+        && metadata.file_type().is_symlink()
+    {
+        return Err(anyhow!(
+            "Symbolic links are not allowed: {}",
+            file_path.display()
+        ));
     }
 
     Ok(())
@@ -324,30 +324,30 @@ pub fn decrypt_directory_compatible(
         let path = entry.path();
 
         if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "enc" {
-                    let file_name = path.file_name().unwrap();
-                    let output_path = output_dir.join(file_name).with_extension("log");
+            if let Some(ext) = path.extension()
+                && ext == "enc"
+            {
+                let file_name = path.file_name().unwrap();
+                let output_path = output_dir.join(file_name).with_extension("log");
 
-                    // 验证输出路径是否在允许的目录内
-                    if let Err(e) = validate_file_path(&output_path, output_dir) {
-                        eprintln!(
-                            "Path validation failed for {}: {}",
-                            output_path.display(),
-                            e
-                        );
-                        continue;
-                    }
-
-                    println!(
-                        "Decrypting: {} -> {}",
-                        path.display(),
-                        output_path.display()
+                // 验证输出路径是否在允许的目录内
+                if let Err(e) = validate_file_path(&output_path, output_dir) {
+                    eprintln!(
+                        "Path validation failed for {}: {}",
+                        output_path.display(),
+                        e
                     );
+                    continue;
+                }
 
-                    if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
-                        eprintln!("Failed to decrypt {}: {}", path.display(), e);
-                    }
+                println!(
+                    "Decrypting: {} -> {}",
+                    path.display(),
+                    output_path.display()
+                );
+
+                if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
+                    eprintln!("Failed to decrypt {}: {}", path.display(), e);
                 }
             }
         } else if recursive && path.is_dir() {

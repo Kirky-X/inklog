@@ -88,17 +88,17 @@ impl ConsoleSink {
         }
 
         // FORCE_COLOR standard
-        if let Ok(val) = std::env::var("CLICOLOR_FORCE") {
-            if val != "0" {
-                return true;
-            }
+        if let Ok(val) = std::env::var("CLICOLOR_FORCE")
+            && val != "0"
+        {
+            return true;
         }
 
         // TERM=dumb
-        if let Ok(term) = std::env::var("TERM") {
-            if term == "dumb" {
-                return false;
-            }
+        if let Ok(term) = std::env::var("TERM")
+            && term == "dumb"
+        {
+            return false;
         }
 
         if is_stderr {

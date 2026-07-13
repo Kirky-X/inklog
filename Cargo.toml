@@ -2,7 +2,7 @@
 name = "inklog"
 version = "0.1.7"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.94"
 authors = ["Kirky.X"]
 description = "Enterprise-grade Rust logging infrastructure"
 license = "MIT"
@@ -21,7 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"i18n\"))"] }
 
 [features]
-default = ["http", "cli"]
+default = []
 sqlite = ["dep:dbnexus", "dep:sea-orm", "dbnexus/sqlite", "sea-orm/sqlx-sqlite"]
 postgres = ["dep:dbnexus", "dep:sea-orm", "dbnexus/postgres", "sea-orm/sqlx-postgres"]
 mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
@@ -70,7 +70,7 @@ parquet = { version = "59.0", features = ["async"] }
 arrow-array = "59.0"
 arrow-schema = "59.0"
 dbnexus = { version = "0.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
-sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
+sea-orm = { version = "2.0.0-rc.42", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"
 zeroize = "1.9"
 sha2 = "0.11"
