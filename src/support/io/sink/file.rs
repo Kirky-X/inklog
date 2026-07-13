@@ -303,11 +303,11 @@ impl FileSink {
     }
 
     fn open_file_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
-        if let Some(parent) = self.config.path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                error!("Failed to create log directory {}: {}", parent.display(), e);
-                return Err(InklogError::IoError(e));
-            }
+        if let Some(parent) = self.config.path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            error!("Failed to create log directory {}: {}", parent.display(), e);
+            return Err(InklogError::IoError(e));
         }
 
         match OpenOptions::new()
@@ -457,20 +457,19 @@ impl FileSink {
     pub fn get_disk_space_info(&self) -> Result<(u64, u64), InklogError> {
         #[cfg(unix)]
         {
-            if let Some(parent) = self.config.path.parent() {
-                if let Ok(_metadata) = fs::metadata(parent) {
-                    if let Ok(stat) = nix::sys::statfs::statfs(parent) {
-                        let total_blocks = stat.blocks();
-                        let available_blocks = stat.blocks_available();
+            if let Some(parent) = self.config.path.parent()
+                && let Ok(_metadata) = fs::metadata(parent)
+                && let Ok(stat) = nix::sys::statfs::statfs(parent)
+            {
+                let total_blocks = stat.blocks();
+                let available_blocks = stat.blocks_available();
 
-                        // 获取块大小
-                        let block_size = stat.block_size() as u64;
-                        let total_bytes = total_blocks * block_size;
-                        let available_bytes = available_blocks * block_size;
+                // 获取块大小
+                let block_size = stat.block_size() as u64;
+                let total_bytes = total_blocks * block_size;
+                let available_bytes = available_blocks * block_size;
 
-                        return Ok((total_bytes, available_bytes));
-                    }
-                }
+                return Ok((total_bytes, available_bytes));
             }
         }
 
@@ -543,18 +542,17 @@ impl FileSink {
         let now = Utc::now();
         let current_date = now.date_naive().num_days_from_ce();
 
-        if self.config.rotation_time == "daily" || self.config.rotation_time == "weekly" {
-            if let Some(last_date) = inner.last_rotation_date {
-                if current_date > last_date {
-                    return true;
-                }
-            }
+        if (self.config.rotation_time == "daily" || self.config.rotation_time == "weekly")
+            && let Some(last_date) = inner.last_rotation_date
+            && current_date > last_date
+        {
+            return true;
         }
 
-        if let Some(next_time) = inner.next_rotation_time {
-            if now >= next_time {
-                return true;
-            }
+        if let Some(next_time) = inner.next_rotation_time
+            && now >= next_time
+        {
+            return true;
         }
 
         false
@@ -782,15 +780,15 @@ impl FileSink {
         };
 
         // 尝试重命名
-        if self.config.path.exists() {
-            if let Err(e) = fs::rename(&self.config.path, &new_path) {
-                error!("Failed to rename log file: {}", e);
-                // 尝试复制后删除
-                if fs::copy(&self.config.path, &new_path).is_ok() {
-                    let _ = fs::remove_file(&self.config.path);
-                } else {
-                    return Err(InklogError::IoError(e));
-                }
+        if self.config.path.exists()
+            && let Err(e) = fs::rename(&self.config.path, &new_path)
+        {
+            error!("Failed to rename log file: {}", e);
+            // 尝试复制后删除
+            if fs::copy(&self.config.path, &new_path).is_ok() {
+                let _ = fs::remove_file(&self.config.path);
+            } else {
+                return Err(InklogError::IoError(e));
             }
         }
 

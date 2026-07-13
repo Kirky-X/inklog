@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - trait-kit 0.2 → 0.3（dbnexus 0.4 依赖 trait-kit 0.3）
 - oxcache 0.3.4 → 0.3.8
 
+### Fixed
+
+- `src/error.rs`: Moved `InklogResult<T>` type alias from after `#[cfg(test)] mod tests` to before it, fixing clippy `items_after_test_module` lint
+- `Cargo.toml`: MSRV updated from `1.85` to `1.94` to match actual requirement (sea-orm 2.0.0-rc + sqlx 0.9)
+
 ## [0.1.6] - 2026-07-12
 
 ### ⚠️ BREAKING CHANGES

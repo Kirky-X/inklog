@@ -211,6 +211,9 @@ impl InklogError {
     }
 }
 
+/// Convenience `Result` type alias using [`InklogError`] as the error type.
+pub type InklogResult<T> = std::result::Result<T, InklogError>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,6 +427,3 @@ mod tests {
         );
     }
 }
-
-/// Convenience `Result` type alias using [`InklogError`] as the error type.
-pub type InklogResult<T> = std::result::Result<T, InklogError>;

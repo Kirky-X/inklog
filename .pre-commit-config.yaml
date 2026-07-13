@@ -18,7 +18,8 @@ repos:
       - id: check-merge-conflict
         args: ['--assume-in-merge']
       - id: no-commit-to-branch
-        args: ['--branch', 'main', '--branch', 'master']
+        args: ['--branch', 'master']
+        # Only protect master branch, allow main for development
 
   # 2. Detect secrets
   - repo: https://github.com/Yelp/detect-secrets

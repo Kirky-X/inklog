@@ -81,13 +81,13 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
         println!("  ✓ Global level: {}", level_str);
     }
 
-    if let Some(format) = global.get("format") {
-        if let Some(format_str) = format.as_str() {
-            if format_str.is_empty() {
-                return Err(anyhow::anyhow!("Global format cannot be empty"));
-            }
-            println!("  ✓ Global format: {} chars", format_str.len());
+    if let Some(format) = global.get("format")
+        && let Some(format_str) = format.as_str()
+    {
+        if format_str.is_empty() {
+            return Err(anyhow::anyhow!("Global format cannot be empty"));
         }
+        println!("  ✓ Global format: {} chars", format_str.len());
     }
 
     Ok(())
@@ -101,23 +101,23 @@ fn validate_console_sink(console: &toml::Table) -> Result<()> {
         println!("  ✓ Console sink enabled: {}", enabled);
     }
 
-    if let Some(colored) = console.get("colored") {
-        if !colored.is_bool() {
-            return Err(anyhow::anyhow!("console_sink.colored must be a boolean"));
-        }
+    if let Some(colored) = console.get("colored")
+        && !colored.is_bool()
+    {
+        return Err(anyhow::anyhow!("console_sink.colored must be a boolean"));
     }
 
-    if let Some(stderr_levels) = console.get("stderr_levels") {
-        if let Some(levels) = stderr_levels.as_array() {
-            for level in levels {
-                if !level.is_str() {
-                    return Err(anyhow::anyhow!(
-                        "console_sink.stderr_levels must be an array of strings"
-                    ));
-                }
+    if let Some(stderr_levels) = console.get("stderr_levels")
+        && let Some(levels) = stderr_levels.as_array()
+    {
+        for level in levels {
+            if !level.is_str() {
+                return Err(anyhow::anyhow!(
+                    "console_sink.stderr_levels must be an array of strings"
+                ));
             }
-            println!("  ✓ Console stderr_levels: {} levels", levels.len());
         }
+        println!("  ✓ Console stderr_levels: {} levels", levels.len());
     }
 
     Ok(())
@@ -131,47 +131,45 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         println!("  ✓ File sink enabled: {}", enabled);
     }
 
-    if let Some(path) = file.get("path") {
-        if let Some(path_str) = path.as_str() {
-            if path_str.is_empty() {
-                return Err(anyhow::anyhow!("file_sink.path cannot be empty"));
-            }
-            println!("  ✓ File path: {}", path_str);
+    if let Some(path) = file.get("path")
+        && let Some(path_str) = path.as_str()
+    {
+        if path_str.is_empty() {
+            return Err(anyhow::anyhow!("file_sink.path cannot be empty"));
         }
+        println!("  ✓ File path: {}", path_str);
     }
 
-    if let Some(max_size) = file.get("max_size") {
-        if let Some(size_str) = max_size.as_str() {
-            if parse_size(size_str).is_err() {
-                return Err(anyhow::anyhow!(
-                    "Invalid file_sink.max_size format: {}. Use format like '100MB', '1GB'",
-                    size_str
-                ));
-            }
-            println!("  ✓ Max size: {}", size_str);
+    if let Some(max_size) = file.get("max_size")
+        && let Some(size_str) = max_size.as_str()
+    {
+        if parse_size(size_str).is_err() {
+            return Err(anyhow::anyhow!(
+                "Invalid file_sink.max_size format: {}. Use format like '100MB', '1GB'",
+                size_str
+            ));
         }
+        println!("  ✓ Max size: {}", size_str);
     }
 
-    if let Some(keep_files) = file.get("keep_files") {
-        if let Some(n) = keep_files.as_integer() {
-            if n < 1 {
-                return Err(anyhow::anyhow!("file_sink.keep_files must be >= 1"));
-            }
-        }
+    if let Some(keep_files) = file.get("keep_files")
+        && let Some(n) = keep_files.as_integer()
+        && n < 1
+    {
+        return Err(anyhow::anyhow!("file_sink.keep_files must be >= 1"));
     }
 
-    if let Some(retention_days) = file.get("retention_days") {
-        if let Some(n) = retention_days.as_integer() {
-            if n < 1 {
-                return Err(anyhow::anyhow!("file_sink.retention_days must be >= 1"));
-            }
-        }
+    if let Some(retention_days) = file.get("retention_days")
+        && let Some(n) = retention_days.as_integer()
+        && n < 1
+    {
+        return Err(anyhow::anyhow!("file_sink.retention_days must be >= 1"));
     }
 
-    if let Some(compress) = file.get("compress") {
-        if !compress.is_bool() {
-            return Err(anyhow::anyhow!("file_sink.compress must be a boolean"));
-        }
+    if let Some(compress) = file.get("compress")
+        && !compress.is_bool()
+    {
+        return Err(anyhow::anyhow!("file_sink.compress must be a boolean"));
     }
 
     if let Some(encrypt) = file.get("encrypt") {
@@ -214,22 +212,22 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
 }
 
 fn validate_performance(perf: &toml::Table) -> Result<()> {
-    if let Some(capacity) = perf.get("channel_capacity") {
-        if let Some(n) = capacity.as_integer() {
-            if n < 1 {
-                return Err(anyhow::anyhow!("performance.channel_capacity must be >= 1"));
-            }
-            println!("  ✓ Channel capacity: {}", n);
+    if let Some(capacity) = perf.get("channel_capacity")
+        && let Some(n) = capacity.as_integer()
+    {
+        if n < 1 {
+            return Err(anyhow::anyhow!("performance.channel_capacity must be >= 1"));
         }
+        println!("  ✓ Channel capacity: {}", n);
     }
 
-    if let Some(threads) = perf.get("worker_threads") {
-        if let Some(n) = threads.as_integer() {
-            if n < 1 {
-                return Err(anyhow::anyhow!("performance.worker_threads must be >= 1"));
-            }
-            println!("  ✓ Worker threads: {}", n);
+    if let Some(threads) = perf.get("worker_threads")
+        && let Some(n) = threads.as_integer()
+    {
+        if n < 1 {
+            return Err(anyhow::anyhow!("performance.worker_threads must be >= 1"));
         }
+        println!("  ✓ Worker threads: {}", n);
     }
 
     Ok(())
@@ -243,58 +241,56 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         println!("  ✓ Database sink enabled: {}", enabled);
     }
 
-    if let Some(driver) = db.get("driver") {
-        if let Some(driver_str) = driver.as_str() {
-            let valid_drivers = ["postgres", "postgresql", "mysql", "sqlite", "sqlite3"];
-            if !valid_drivers.contains(&driver_str.to_lowercase().as_str()) {
-                return Err(anyhow::anyhow!(
-                    "Invalid database driver '{}'. Valid drivers: {:?}",
-                    driver_str,
-                    valid_drivers
-                ));
-            }
-            println!("  ✓ Database driver: {}", driver_str);
+    if let Some(driver) = db.get("driver")
+        && let Some(driver_str) = driver.as_str()
+    {
+        let valid_drivers = ["postgres", "postgresql", "mysql", "sqlite", "sqlite3"];
+        if !valid_drivers.contains(&driver_str.to_lowercase().as_str()) {
+            return Err(anyhow::anyhow!(
+                "Invalid database driver '{}'. Valid drivers: {:?}",
+                driver_str,
+                valid_drivers
+            ));
         }
+        println!("  ✓ Database driver: {}", driver_str);
     }
 
-    if let Some(url) = db.get("url") {
-        if let Some(url_str) = url.as_str() {
-            if url_str.is_empty() {
-                return Err(anyhow::anyhow!("db_config.url cannot be empty"));
-            }
-            validate_database_url(url_str)?;
-            println!("  ✓ Database URL: {} bytes", url_str.len());
+    if let Some(url) = db.get("url")
+        && let Some(url_str) = url.as_str()
+    {
+        if url_str.is_empty() {
+            return Err(anyhow::anyhow!("db_config.url cannot be empty"));
         }
+        validate_database_url(url_str)?;
+        println!("  ✓ Database URL: {} bytes", url_str.len());
     }
 
-    if let Some(pool_size) = db.get("pool_size") {
-        if let Some(n) = pool_size.as_integer() {
-            if !(1..=100).contains(&n) {
-                return Err(anyhow::anyhow!(
-                    "db_config.pool_size must be between 1 and 100"
-                ));
-            }
-        }
+    if let Some(pool_size) = db.get("pool_size")
+        && let Some(n) = pool_size.as_integer()
+        && !(1..=100).contains(&n)
+    {
+        return Err(anyhow::anyhow!(
+            "db_config.pool_size must be between 1 and 100"
+        ));
     }
 
-    if let Some(batch_size) = db.get("batch_size") {
-        if let Some(n) = batch_size.as_integer() {
-            if n < 1 {
-                return Err(anyhow::anyhow!("db_config.batch_size must be >= 1"));
-            }
-        }
+    if let Some(batch_size) = db.get("batch_size")
+        && let Some(n) = batch_size.as_integer()
+        && n < 1
+    {
+        return Err(anyhow::anyhow!("db_config.batch_size must be >= 1"));
     }
 
-    if let Some(table_name) = db.get("table_name") {
-        if let Some(name) = table_name.as_str() {
-            if name.is_empty() {
-                return Err(anyhow::anyhow!("db_config.table_name cannot be empty"));
-            }
-            if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                return Err(anyhow::anyhow!(
-                    "db_config.table_name must contain only alphanumeric characters and underscores"
-                ));
-            }
+    if let Some(table_name) = db.get("table_name")
+        && let Some(name) = table_name.as_str()
+    {
+        if name.is_empty() {
+            return Err(anyhow::anyhow!("db_config.table_name cannot be empty"));
+        }
+        if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return Err(anyhow::anyhow!(
+                "db_config.table_name must contain only alphanumeric characters and underscores"
+            ));
         }
     }
 
@@ -322,29 +318,28 @@ fn validate_database_url(url: &str) -> Result<()> {
 }
 
 fn validate_http_server(http: &toml::Table) -> Result<()> {
-    if let Some(enabled) = http.get("enabled") {
-        if !enabled.is_bool() {
-            return Err(anyhow::anyhow!("http_server.enabled must be a boolean"));
-        }
+    if let Some(enabled) = http.get("enabled")
+        && !enabled.is_bool()
+    {
+        return Err(anyhow::anyhow!("http_server.enabled must be a boolean"));
     }
 
-    if let Some(port) = http.get("port") {
-        if let Some(n) = port.as_integer() {
-            if !(1..=65535).contains(&n) {
-                return Err(anyhow::anyhow!(
-                    "http_server.port must be between 1 and 65535"
-                ));
-            }
-            println!("  ✓ HTTP port: {}", n);
+    if let Some(port) = http.get("port")
+        && let Some(n) = port.as_integer()
+    {
+        if !(1..=65535).contains(&n) {
+            return Err(anyhow::anyhow!(
+                "http_server.port must be between 1 and 65535"
+            ));
         }
+        println!("  ✓ HTTP port: {}", n);
     }
 
-    if let Some(host) = http.get("host") {
-        if let Some(host_str) = host.as_str() {
-            if host_str.is_empty() {
-                return Err(anyhow::anyhow!("http_server.host cannot be empty"));
-            }
-        }
+    if let Some(host) = http.get("host")
+        && let Some(host_str) = host.as_str()
+        && host_str.is_empty()
+    {
+        return Err(anyhow::anyhow!("http_server.host cannot be empty"));
     }
 
     Ok(())
@@ -380,20 +375,16 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
     let has_file = config.contains_key("file") || config.contains_key("file_sink");
     let has_database = config.contains_key("database") || config.contains_key("db_config");
 
-    if has_file && has_database {
-        if let Some(file) = config
+    if has_file
+        && has_database
+        && let Some(file) = config
             .get("file")
             .or(config.get("file_sink"))
             .and_then(|t| t.as_table())
-        {
-            if let Some(enabled) = file.get("enabled").and_then(|v| v.as_bool()) {
-                if !enabled {
-                    eprintln!(
-                        "  ⚠ Both file and database sinks enabled - logs will be written to both"
-                    );
-                }
-            }
-        }
+        && let Some(enabled) = file.get("enabled").and_then(|v| v.as_bool())
+        && !enabled
+    {
+        eprintln!("  ⚠ Both file and database sinks enabled - logs will be written to both");
     }
 
     Ok(())

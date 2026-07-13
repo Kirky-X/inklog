@@ -99,17 +99,17 @@ impl CircuitBreaker {
             CircuitState::Open => {
                 // 检查是否超时
                 let last_failure = self.last_failure.lock().ok().and_then(|guard| *guard);
-                if let Some(time) = last_failure {
-                    if time.elapsed() >= self.config.timeout {
-                        // 超时，进入半开状态
-                        if let Ok(mut guard) = self.state.lock() {
-                            *guard = CircuitState::HalfOpen;
-                        }
-                        if let Ok(mut guard) = self.success_count.lock() {
-                            *guard = 0;
-                        }
-                        return true;
+                if let Some(time) = last_failure
+                    && time.elapsed() >= self.config.timeout
+                {
+                    // 超时，进入半开状态
+                    if let Ok(mut guard) = self.state.lock() {
+                        *guard = CircuitState::HalfOpen;
                     }
+                    if let Ok(mut guard) = self.success_count.lock() {
+                        *guard = 0;
+                    }
+                    return true;
                 }
                 false
             }
@@ -119,30 +119,30 @@ impl CircuitBreaker {
 
     /// 记录成功
     pub fn record_success(&mut self) {
-        if let Ok(mut state_guard) = self.state.lock() {
-            if let Ok(mut success_count_guard) = self.success_count.lock() {
-                match *state_guard {
-                    CircuitState::HalfOpen => {
-                        *success_count_guard += 1;
-                        if *success_count_guard >= self.config.success_threshold {
-                            *state_guard = CircuitState::Closed;
-                            if let Ok(mut failure_count_guard) = self.failure_count.lock() {
-                                *failure_count_guard = 0;
-                            }
-                        }
-                    }
-                    CircuitState::Open => {
-                        // 意外的成功，重置
+        if let Ok(mut state_guard) = self.state.lock()
+            && let Ok(mut success_count_guard) = self.success_count.lock()
+        {
+            match *state_guard {
+                CircuitState::HalfOpen => {
+                    *success_count_guard += 1;
+                    if *success_count_guard >= self.config.success_threshold {
                         *state_guard = CircuitState::Closed;
                         if let Ok(mut failure_count_guard) = self.failure_count.lock() {
                             *failure_count_guard = 0;
                         }
                     }
-                    CircuitState::Closed => {
-                        // 成功，重置失败计数
-                        if let Ok(mut failure_count_guard) = self.failure_count.lock() {
-                            *failure_count_guard = 0;
-                        }
+                }
+                CircuitState::Open => {
+                    // 意外的成功，重置
+                    *state_guard = CircuitState::Closed;
+                    if let Ok(mut failure_count_guard) = self.failure_count.lock() {
+                        *failure_count_guard = 0;
+                    }
+                }
+                CircuitState::Closed => {
+                    // 成功，重置失败计数
+                    if let Ok(mut failure_count_guard) = self.failure_count.lock() {
+                        *failure_count_guard = 0;
                     }
                 }
             }
@@ -151,25 +151,24 @@ impl CircuitBreaker {
 
     /// 记录失败
     pub fn record_failure(&mut self) {
-        if let Ok(mut state_guard) = self.state.lock() {
-            if let Ok(mut failure_count_guard) = self.failure_count.lock() {
-                if let Ok(mut last_failure_guard) = self.last_failure.lock() {
-                    *last_failure_guard = Some(Instant::now());
-                    *failure_count_guard += 1;
+        if let Ok(mut state_guard) = self.state.lock()
+            && let Ok(mut failure_count_guard) = self.failure_count.lock()
+            && let Ok(mut last_failure_guard) = self.last_failure.lock()
+        {
+            *last_failure_guard = Some(Instant::now());
+            *failure_count_guard += 1;
 
-                    match *state_guard {
-                        CircuitState::HalfOpen => {
-                            *state_guard = CircuitState::Open;
-                        }
-                        CircuitState::Closed => {
-                            if *failure_count_guard >= self.config.failure_threshold {
-                                *state_guard = CircuitState::Open;
-                            }
-                        }
-                        CircuitState::Open => {
-                            // 已经是打开状态，更新失败时间
-                        }
+            match *state_guard {
+                CircuitState::HalfOpen => {
+                    *state_guard = CircuitState::Open;
+                }
+                CircuitState::Closed => {
+                    if *failure_count_guard >= self.config.failure_threshold {
+                        *state_guard = CircuitState::Open;
                     }
+                }
+                CircuitState::Open => {
+                    // 已经是打开状态，更新失败时间
                 }
             }
         }
