@@ -20,7 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -67,7 +67,7 @@ jobs:
             cross: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main  # 使用更新后的版本
 
@@ -84,9 +84,9 @@ jobs:
       - name: Build binaries
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} --bins
+            cross build --release --target ${{ matrix.target }} --features cli --bins
           else
-            cargo build --release --target ${{ matrix.target }} --bins
+            cargo build --release --target ${{ matrix.target }} --features cli --bins
           fi
 
       - name: Package binaries
@@ -116,7 +116,7 @@ jobs:
     needs: [update-version, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
 
@@ -178,7 +178,7 @@ jobs:
     environment:
       name: crates.io
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
 

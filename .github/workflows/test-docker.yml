@@ -24,7 +24,7 @@ jobs:
         db: [sqlite, postgres, mysql]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -49,13 +49,10 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
-      - name: Start PostgreSQL and MySQL (only for pg/mysql jobs)
+      - name: Start database service (only for pg/mysql jobs)
         if: matrix.db != 'sqlite'
         run: |
-          docker compose -f docker-compose.test.yml up -d postgres mysql
-          # 等待服务健康
-          timeout 60 bash -c 'until docker compose -f docker-compose.test.yml ps postgres | grep -q "healthy"; do sleep 2; done'
-          timeout 60 bash -c 'until docker compose -f docker-compose.test.yml ps mysql | grep -q "healthy"; do sleep 2; done'
+          docker compose -f docker-compose.test.yml up -d --wait ${{ matrix.db }}
 
       - name: Set INKLOG_TEST_DB_URL
         run: |
