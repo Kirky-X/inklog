@@ -663,6 +663,7 @@ impl FileSink {
     }
 
     /// 同步压缩文件（可在后台线程调用）
+    #[cfg(feature = "compression")]
     fn compress_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
         let compressed_path = path.with_extension("zst");
 
@@ -710,6 +711,40 @@ impl FileSink {
         } else {
             // 删除原始文件
             let _ = fs::remove_file(path);
+            Ok(compressed_path)
+        }
+    }
+
+    /// 同步压缩文件 fallback（compression feature 未启用时）。
+    ///
+    /// 当 `compression` feature 未启用但用户配置了 `compress = true` 时，
+    /// 使用 gzip（flate2，始终可用的非 optional 依赖）进行压缩，而非返回错误。
+    /// 这样下游项目无需引入 zstd-sys 即可获得日志压缩能力。
+    ///
+    /// 当 `encrypt = true` 时，与 compression feature 启用时的 zstd 路径行为对齐：
+    /// 对压缩产物加密生成 `.gz.enc`，加密失败时保留压缩文件为 `.gz.unencrypted`。
+    #[cfg(not(feature = "compression"))]
+    fn compress_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
+        use super::CompressionStrategy;
+        use super::GzipCompression;
+        let strategy = GzipCompression::default();
+        let compressed_path = strategy.compress_file(path, self.config.compression_level)?;
+
+        // 如果需要加密（与 compression feature 启用时的 zstd 路径行为对齐）
+        if self.config.encrypt {
+            let encrypted_path = compressed_path.with_extension("gz.enc");
+            if let Err(e) = self.encrypt_file(&compressed_path, &encrypted_path) {
+                error!("Encryption failed: {}", e);
+                // 加密失败，保留压缩文件
+                let _ = fs::rename(
+                    &compressed_path,
+                    encrypted_path.with_extension("gz.unencrypted"),
+                );
+                return Err(e);
+            }
+            let _ = fs::remove_file(&compressed_path);
+            Ok(encrypted_path)
+        } else {
             Ok(compressed_path)
         }
     }
@@ -1963,6 +1998,7 @@ mod tests {
     // ==================== compress_file 测试 ====================
 
     #[test]
+    #[cfg(feature = "compression")]
     fn test_compress_file_roundtrip() {
         let temp_dir = tempdir().unwrap();
         let original_path = temp_dir.path().join("test.log");
@@ -1996,6 +2032,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "compression")]
     fn test_compress_file_nonexistent_input_returns_error() {
         let temp_dir = tempdir().unwrap();
         let nonexistent = temp_dir.path().join("nonexistent.log");
@@ -2012,6 +2049,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[cfg(feature = "compression")]
     fn test_compress_file_with_encryption_roundtrip() {
         let temp_dir = tempdir().unwrap();
         let original_path = temp_dir.path().join("test.log");
@@ -2058,6 +2096,72 @@ mod tests {
 
         unsafe {
             std::env::remove_var("TEST_COMPRESS_ENC_KEY");
+        }
+    }
+
+    #[test]
+    #[serial]
+    #[cfg(not(feature = "compression"))]
+    fn test_compress_file_gzip_fallback_with_encryption_roundtrip() {
+        // 覆盖 gzip fallback 路径的 compress + encrypt 行为：
+        // compression feature 未启用时，compress_file 应用 gzip 压缩 + AES-GCM 加密，
+        // 生成 .gz.enc 文件，且可通过解密 + gzip 解压还原原文。
+        let temp_dir = tempdir().unwrap();
+        let original_path = temp_dir.path().join("test_gzip_enc.log");
+        let original_content = b"Sensitive log content for gzip fallback encryption test";
+        std::fs::write(&original_path, original_content).unwrap();
+
+        let (key_bytes, key_b64) = make_test_key();
+        unsafe {
+            std::env::set_var("TEST_GZIP_ENC_KEY", &key_b64);
+        }
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            compress: true,
+            compression_level: 6,
+            encrypt: true,
+            encryption_key_env: Some("TEST_GZIP_ENC_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.compress_file(&original_path);
+        assert!(
+            result.is_ok(),
+            "gzip fallback compress_file failed: {:?}",
+            result.err()
+        );
+        let encrypted_path = result.unwrap();
+        assert_eq!(encrypted_path.extension().unwrap(), "enc");
+        assert!(encrypted_path.exists());
+
+        // 解密：前 12 字节是 nonce，其余是 ciphertext
+        let encrypted_data = std::fs::read(&encrypted_path).unwrap();
+        assert!(encrypted_data.len() > 12);
+        use aes_gcm::{Aes256Gcm, Nonce};
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
+        let nonce_arr: [u8; 12] = encrypted_data[..12].try_into().unwrap();
+        let nonce = Nonce::from(nonce_arr);
+        let ciphertext = &encrypted_data[12..];
+        let decrypted_compressed = cipher.decrypt(&nonce, ciphertext).unwrap();
+
+        // gzip 解压
+        use std::io::Read;
+        let mut decoder = flate2::read::GzDecoder::new(&decrypted_compressed[..]);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(decompressed, original_content);
+
+        // 原始文件应已被删除（GzipCompression::compress_file 内部删除）
+        assert!(
+            !original_path.exists(),
+            "original file should be removed after gzip compress"
+        );
+
+        unsafe {
+            std::env::remove_var("TEST_GZIP_ENC_KEY");
         }
     }
 
@@ -2712,6 +2816,7 @@ mod tests {
     // ==================== compress_file 测试 ====================
 
     #[test]
+    #[cfg(feature = "compression")]
     fn test_compress_file_basic() {
         // 覆盖 compress_file 基本压缩路径（不加密）
         let temp_dir = tempdir().unwrap();
@@ -2740,6 +2845,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "compression")]
     fn test_compress_file_nonexistent_input() {
         // 覆盖 compress_file 错误路径（输入文件不存在）
         let temp_dir = tempdir().unwrap();
@@ -2867,6 +2973,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[cfg(feature = "compression")]
     fn test_compress_file_with_encryption() {
         // 覆盖 compress_file 的加密分支（行 640-652）
         let temp_dir = tempdir().unwrap();
@@ -2944,6 +3051,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
+    #[cfg(feature = "compression")]
     async fn test_rotate_inner_with_compression() {
         // 覆盖 rotate_inner 的压缩分支（行 748-755）
         let temp_dir = tempdir().unwrap();
@@ -3035,6 +3143,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[cfg(feature = "compression")]
     fn test_compress_file_with_encryption_failure_keeps_compressed() {
         // 覆盖行 666-676：当 encrypt=true 但密钥无效时，
         // compress_file 应将压缩文件重命名为 .unencrypted 后缀并返回错误
@@ -3562,6 +3671,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[cfg(feature = "compression")]
     fn test_compress_file_fails_when_output_dir_readonly() {
         // 覆盖行 643-644：File::create(compressed_path) 失败时返回 IoError
         // 通过将父目录设为只读来触发 File::create 失败

@@ -228,6 +228,7 @@ impl DatabaseSink {
 }
 
 /// Convert LogRecord to Parquet format
+#[cfg(feature = "parquet")]
 pub fn convert_logs_to_parquet(
     logs: &[crate::LogRecord],
     _config: &crate::ParquetConfig,
@@ -290,4 +291,16 @@ pub fn convert_logs_to_parquet(
     writer.close().map_err(|e| e.to_string())?;
 
     Ok(bytes)
+}
+
+/// Convert LogRecord to Parquet format fallback (parquet feature not enabled).
+///
+/// Returns an explicit error when the `parquet` feature is disabled, rather than
+/// silently producing no output.
+#[cfg(not(feature = "parquet"))]
+pub fn convert_logs_to_parquet(
+    _logs: &[crate::LogRecord],
+    _config: &crate::ParquetConfig,
+) -> Result<Vec<u8>, String> {
+    Err("parquet feature not enabled: rebuild inklog with `parquet` feature to export logs as Parquet".to_string())
 }

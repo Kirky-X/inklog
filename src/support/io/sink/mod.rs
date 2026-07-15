@@ -14,7 +14,9 @@ pub mod ring_buffered_file;
 pub mod rotation;
 
 pub use circuit_breaker::CircuitBreaker;
-pub use compression::{CompressionStrategy, GzipCompression, NoCompression, ZstdCompression};
+#[cfg(feature = "compression")]
+pub use compression::ZstdCompression;
+pub use compression::{CompressionStrategy, GzipCompression, NoCompression};
 pub use console::ConsoleSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub use database::DatabaseSink;
