@@ -358,8 +358,11 @@ impl LoggerManager {
 
         // 1. 安装 tracing subscriber
         let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+        // `SetGlobalDefaultError` 的唯一含义是"全局 subscriber 已被设置"——通常是宿主
+        // 应用已先行安装。属良性条件：tracing 事件会流向已安装的 subscriber，降级为
+        // debug 与下方 log logger 处理保持一致，避免噪音。
         if let Err(ref e) = registry.try_init() {
-            tracing::warn!("Failed to set global subscriber: {}", e);
+            tracing::debug!(error = %e, "global subscriber already set; skipping inklog registry");
         }
 
         // 2. 安装 log crate logger（原生支持，无需 tracing_log）
@@ -381,8 +384,11 @@ impl LoggerManager {
             tracing::Level::ERROR => log::LevelFilter::Error,
         };
         let log_logger = LogLogger::new(log_adapter, log_level);
+        // `log::SetLoggerError` 的唯一含义是"全局 logger 已被设置"——通常是宿主
+        // 应用（如 tracing-opentelemetry → tracing-log 桥接）已先行安装。属良性条件：
+        // log 记录仍会流入已安装的 logger，不应视为故障，降级为 debug 避免噪音。
         if let Err(e) = log_logger.install() {
-            tracing::warn!("Failed to set log crate logger: {}", e);
+            tracing::debug!(error = %e, "log crate logger already set; skipping inklog LogLogger");
         }
 
         // 3. 启动HTTP监控服务器（如果配置启用）
