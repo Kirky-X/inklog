@@ -10,6 +10,8 @@ sqlite = ["inklog/sqlite", "dep:dbnexus", "dbnexus/sqlite"]
 postgres = ["inklog/postgres", "dep:dbnexus", "dbnexus/postgres"]
 mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
 duckdb = ["inklog/duckdb", "dep:dbnexus", "dbnexus/duckdb"]
+compression = ["inklog/compression"]
+parquet = ["inklog/parquet"]
 
 [dependencies]
 inklog = { path = ".." }
@@ -110,6 +112,7 @@ path = "src/bin/log_adapter.rs"
 [[bin]]
 name = "compression"
 path = "src/bin/compression.rs"
+required-features = ["compression"]
 
 [[bin]]
 name = "rotation"

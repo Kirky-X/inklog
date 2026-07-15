@@ -652,23 +652,44 @@ async fn test_http_server_disabled_by_default() {
 // Parquet功能验证测试
 // 测试Parquet导出功能的正确性、性能和兼容性
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 use arrow_array::RecordBatchReader;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 use arrow_schema::DataType;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 use bytes::Bytes;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 use inklog::sink::database::convert_logs_to_parquet;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 use std::time::Instant;
 
 // ============ Test Data Helper Functions ============
 
 /// Creates test log data with specified count
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn create_test_logs(count: usize) -> Vec<inklog::log_record::LogRecord> {
     (0..count)
         .map(|i| inklog::log_record::LogRecord {
@@ -693,7 +714,10 @@ fn create_test_logs(count: usize) -> Vec<inklog::log_record::LogRecord> {
 // ============ Parquet Verification Helper Functions ============
 
 /// Expected schema field names
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 const EXPECTED_FIELD_NAMES: &[&str] = &[
     "id",
     "timestamp",
@@ -707,7 +731,10 @@ const EXPECTED_FIELD_NAMES: &[&str] = &[
 ];
 
 /// Expected schema field types
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 const EXPECTED_FIELD_TYPES: &[DataType] = &[
     DataType::Int64,  // id
     DataType::Date64, // timestamp
@@ -721,7 +748,10 @@ const EXPECTED_FIELD_TYPES: &[DataType] = &[
 ];
 
 /// Verifies Parquet file schema (names and types)
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
@@ -746,7 +776,10 @@ fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 /// Verifies Parquet file data content
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = Bytes::copy_from_slice(data);
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
@@ -764,7 +797,10 @@ fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Complete Parquet file verification (schema + data)
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     verify_parquet_schema(data)?;
     verify_parquet_data(data)?;
@@ -774,7 +810,10 @@ fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 // ============ Parquet Tests ============
 
 #[test]
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn test_parquet_basic_conversion() {
     let logs = create_test_logs(100);
     let result = convert_logs_to_parquet(&logs, &Default::default());
@@ -792,7 +831,10 @@ fn test_parquet_basic_conversion() {
 }
 
 #[test]
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn test_parquet_small_dataset() {
     let logs = create_test_logs(1_000);
     let start = Instant::now();
@@ -819,7 +861,10 @@ fn test_parquet_small_dataset() {
 }
 
 #[test]
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn test_parquet_medium_dataset() {
     let logs = create_test_logs(10_000);
     let start = Instant::now();
@@ -842,7 +887,10 @@ fn test_parquet_medium_dataset() {
 }
 
 #[test]
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn test_parquet_large_dataset() {
     let logs = create_test_logs(100_000);
     let start = Instant::now();
@@ -865,7 +913,10 @@ fn test_parquet_large_dataset() {
 }
 
 #[test]
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn test_parquet_compression_ratio() {
     let logs = create_test_logs(10_000);
     let result = convert_logs_to_parquet(&logs, &Default::default())
@@ -891,7 +942,10 @@ fn test_parquet_compression_ratio() {
 }
 
 #[test]
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn test_parquet_empty_dataset() {
     let logs: Vec<inklog::log_record::LogRecord> = vec![];
     let result = convert_logs_to_parquet(&logs, &Default::default());
@@ -906,7 +960,10 @@ fn test_parquet_empty_dataset() {
 }
 
 #[test]
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
 fn test_parquet_schema_compatibility() {
     let logs = create_test_logs(100);
     let result = convert_logs_to_parquet(&logs, &Default::default())
@@ -981,7 +1038,9 @@ use inklog::{
 };
 #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 use inklog::{FileSinkConfig as VerifyFileSinkConfig, log_record::LogRecord as VerifyLogRecord};
+#[cfg(feature = "compression")]
 use std::fs::File as VerifyFile;
+#[cfg(feature = "compression")]
 use std::io::Read as VerifyRead;
 use std::path::PathBuf;
 use std::time::Duration as VerifyDuration;
@@ -1003,6 +1062,7 @@ fn find_file_with_extension(dir: &VerifyTempDir, extension: &str) -> Option<Path
 }
 
 /// Verifies that a file is compressed with Zstandard
+#[cfg(feature = "compression")]
 fn verify_zstd_compression(file_path: &PathBuf) {
     let mut file = VerifyFile::open(file_path).expect("Failed to open compressed file");
     let mut magic = [0u8; 4];
@@ -1023,6 +1083,7 @@ fn verify_encrypted_file(file_path: &PathBuf) {
 
 // ============ Verification Tests ============
 
+#[cfg(feature = "compression")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_file_sink_compression() {
     let temp_dir = VerifyTempDir::new().expect("Failed to create temp directory");

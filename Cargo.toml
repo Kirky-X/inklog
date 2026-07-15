@@ -1,6 +1,6 @@
 [package]
 name = "inklog"
-version = "0.1.8"
+version = "0.1.10"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Kirky.X"]
@@ -13,12 +13,12 @@ resolver = "2"
 members = [".", "examples"]
 
 [package.metadata.docs.rs]
-features = ["default", "http", "cli"]
+features = ["default", "http", "cli", "compression", "parquet"]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"i18n\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"i18n\", \"compression\", \"parquet\"))"] }
 
 [features]
 default = []
@@ -36,6 +36,11 @@ debug = []
 metrics = []
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
 i18n = ["dep:icu", "dep:writeable"]
+# Zstd compression support for rotated log files (optional to avoid zstd-sys
+# symbol conflicts with downstream projects that bundle their own zstd).
+compression = ["dep:zstd"]
+# Parquet/Arrow export support for database sink archival.
+parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 
 [dependencies]
 log = "0.4"
@@ -62,13 +67,13 @@ bytes = "1.12"
 dirs = "6.0"
 parking_lot = "0.12"
 oxcache = { version = "0.3", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
-zstd = "0.13"
+zstd = { version = "0.13", optional = true }
 aes-gcm = "0.11"
 rand = "0.10"
 base64 = "0.22"
-parquet = { version = "59.0", features = ["async"] }
-arrow-array = "59.0"
-arrow-schema = "59.0"
+parquet = { version = "59.0", features = ["async"], optional = true }
+arrow-array = { version = "59.0", optional = true }
+arrow-schema = { version = "59.0", optional = true }
 dbnexus = { version = "0.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
 sea-orm = { version = "2.0.0-rc.42", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"

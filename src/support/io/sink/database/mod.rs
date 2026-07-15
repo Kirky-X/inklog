@@ -73,6 +73,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    #[cfg(feature = "parquet")]
     fn test_convert_logs_to_parquet_empty() {
         let logs: Vec<LogRecord> = vec![];
         let config = DatabaseSinkConfig::default().parquet_config;
@@ -84,6 +85,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "parquet")]
     fn test_convert_logs_to_parquet_non_empty() {
         let log1 = LogRecord::default();
         let log2 = LogRecord {
