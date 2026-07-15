@@ -664,7 +664,7 @@ impl FileSink {
 
     /// 同步压缩文件（可在后台线程调用）
     #[cfg(feature = "compression")]
-    fn compress_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
+    fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
         let compressed_path = path.with_extension("zst");
 
         let input_file = fs::File::open(path).map_err(|e| {
@@ -724,7 +724,7 @@ impl FileSink {
     /// 当 `encrypt = true` 时，与 compression feature 启用时的 zstd 路径行为对齐：
     /// 对压缩产物加密生成 `.gz.enc`，加密失败时保留压缩文件为 `.gz.unencrypted`。
     #[cfg(not(feature = "compression"))]
-    fn compress_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
+    fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
         use super::CompressionStrategy;
         use super::GzipCompression;
         let strategy = GzipCompression::default();
@@ -750,7 +750,7 @@ impl FileSink {
     }
 
     /// 同步加密文件（可在后台线程调用）
-    fn encrypt_file(&self, input_path: &PathBuf, output_path: &PathBuf) -> Result<(), InklogError> {
+    fn encrypt_file(&self, input_path: &Path, output_path: &Path) -> Result<(), InklogError> {
         use aes_gcm::{Aes256Gcm, Nonce};
         use rand::Rng;
 
