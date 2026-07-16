@@ -578,16 +578,50 @@ impl LoggerManager {
             }
         };
 
+        /// vuln-0003 修复：HttpAuthState 在启动时一次性读取 token 值并缓存，
+        /// auth_middleware 不再调用 `std::env::var`。这杜绝了运行时环境变量
+        /// 被篡改对后续请求鉴权的影响（fail-closed at startup）。
         #[derive(Clone)]
         struct HttpAuthState {
             auth_enabled: bool,
-            token_env: Option<String>,
+            /// 启动时一次性读取的 token 值。`None` 表示未配置或读取失败。
+            /// 当 `auth_enabled=true` 且 `token_value=None` 时，启动直接失败。
+            token_value: Option<String>,
             ip_whitelist: Option<Vec<String>>,
         }
 
+        // vuln-0003: 在启动时（而非请求时）读取 token 值。若 auth 启用但
+        // token 未配置或读取失败，直接 fail-closed 拒绝启动。
+        let (auth_enabled, token_value) = match config.auth.as_ref() {
+            Some(a) if a.enabled => {
+                let token_env = if a.token_env.is_empty() {
+                    "INKLOG_HTTP_AUTH_TOKEN"
+                } else {
+                    a.token_env.as_str()
+                };
+                match std::env::var(token_env) {
+                    Ok(t) if !t.is_empty() => (true, Some(t)),
+                    Ok(_) => {
+                        return Err(InklogError::ConfigError(format!(
+                            "HTTP auth enabled but token env var '{}' is empty",
+                            token_env
+                        )));
+                    }
+                    Err(_) => {
+                        return Err(InklogError::ConfigError(format!(
+                            "HTTP auth enabled but token env var '{}' is not set",
+                            token_env
+                        )));
+                    }
+                }
+            }
+            Some(_) => (false, None),
+            None => (false, None),
+        };
+
         let auth_state = HttpAuthState {
-            auth_enabled: config.auth.as_ref().map(|a| a.enabled).unwrap_or(false),
-            token_env: config.auth.as_ref().map(|a| a.token_env.clone()),
+            auth_enabled,
+            token_value,
             ip_whitelist: config.ip_whitelist.clone(),
         };
 
@@ -597,20 +631,11 @@ impl LoggerManager {
             request: Request<axum::body::Body>,
             next: Next,
         ) -> Response {
+            // vuln-0003: 使用启动时缓存的 token_value，不再读取环境变量。
+            // 若 auth_enabled=true 则 token_value 一定为 Some（启动时已校验）。
             if state.auth_enabled
-                && let Some(ref token_env) = state.token_env
+                && let Some(ref expected_token) = state.token_value
             {
-                let expected_token = match std::env::var(token_env) {
-                    Ok(t) => t,
-                    Err(_) => {
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Auth token not configured",
-                        )
-                            .into_response();
-                    }
-                };
-
                 let auth_header = request
                     .headers()
                     .get(header::AUTHORIZATION)
@@ -3158,39 +3183,137 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    /// auth 启用但 token 环境变量未设置时返回 500
+    /// vuln-0003: auth 启用但 token 环境变量未设置时，启动直接 fail-closed
+    /// （之前是启动成功后请求时返回 500，存在运行时环境变量被篡改的风险）
     #[cfg(feature = "http")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[serial_test::serial]
-    async fn test_http_server_auth_missing_token_env_returns_500() {
+    async fn test_http_server_auth_missing_token_env_fails_to_start() {
         let port = find_available_http_port();
         // 使用唯一的环境变量名，确保它未设置
         let token_env = "INKLOG_TEST_TOKEN_MISSING_ENV_VAR";
         unsafe {
             std::env::remove_var(token_env);
         }
+        // Strict 模式：HTTP server 启动失败应导致 with_config 返回 Err
+        let mut config = http_test_config_with_auth(port, token_env);
+        config.http_server.as_mut().unwrap().error_mode = crate::HttpErrorMode::Strict;
+        let result = LoggerManager::with_config(config).await;
+        let err_msg = match result {
+            Err(e) => format!("{}", e),
+            Ok(_) => panic!("vuln-0003: missing token env should fail to start (fail-closed)"),
+        };
+        assert!(
+            err_msg.contains("token env var") && err_msg.contains("is not set"),
+            "error should explain token env misconfiguration, got: {}",
+            err_msg
+        );
+    }
+
+    /// vuln-0003: auth 启用但 token 环境变量为空字符串时，启动 fail-closed
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_auth_empty_token_env_fails_to_start() {
+        let port = find_available_http_port();
+        let token_env = "INKLOG_TEST_TOKEN_EMPTY_ENV_VAR";
+        unsafe {
+            std::env::set_var(token_env, "");
+        }
+        let mut config = http_test_config_with_auth(port, token_env);
+        config.http_server.as_mut().unwrap().error_mode = crate::HttpErrorMode::Strict;
+        let result = LoggerManager::with_config(config).await;
+        let err_msg = match result {
+            Err(e) => format!("{}", e),
+            Ok(_) => panic!("vuln-0003: empty token env should fail to start (fail-closed)"),
+        };
+        assert!(
+            err_msg.contains("is empty"),
+            "error should explain token env is empty, got: {}",
+            err_msg
+        );
+        unsafe {
+            std::env::remove_var(token_env);
+        }
+    }
+
+    /// vuln-0003 核心验证：启动后修改环境变量不影响后续请求鉴权
+    ///
+    /// 之前的行为：auth_middleware 每次请求时调用 `std::env::var(token_env)`，
+    /// 攻击者若有权限修改环境变量（如通过其他漏洞），可立即影响后续请求的鉴权。
+    ///
+    /// 修复后的行为：启动时一次性读取 token 并缓存到 HttpAuthState.token_value，
+    /// 后续请求只使用缓存值，环境变量修改不影响鉴权。
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_vuln_0003_env_var_change_after_start_does_not_affect_auth() {
+        let port = find_available_http_port();
+        let token_env = "INKLOG_TEST_TOKEN_VULN_0003";
+        let original_token = "original-secret-vuln-0003";
+        unsafe {
+            std::env::set_var(token_env, original_token);
+        }
         let manager = LoggerManager::with_config(http_test_config_with_auth(port, token_env))
             .await
-            .expect("Manager should start with HTTP server");
+            .expect("Manager should start with valid token");
         assert!(
             wait_for_http_server("127.0.0.1", port).await,
             "HTTP server should become reachable"
         );
-        let resp = reqwest::get(format!("http://127.0.0.1:{}/health", port))
+
+        // 1. 原始 token 应该能通过鉴权
+        let client = reqwest::Client::builder()
+            .build()
+            .expect("Failed to build reqwest client");
+        let resp = client
+            .get(format!("http://127.0.0.1:{}/health", port))
+            .bearer_auth(original_token)
+            .send()
             .await
-            .expect("GET /health should succeed");
+            .expect("Request with original token should succeed");
         assert_eq!(
             resp.status(),
-            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            "missing token env should return 500"
+            reqwest::StatusCode::OK,
+            "original token should work"
         );
-        let body = resp.text().await.expect("body should be text");
-        assert!(
-            body.contains("Auth token not configured"),
-            "response should explain token misconfiguration, got: {}",
-            body
+
+        // 2. 篡改环境变量为另一个值（模拟攻击者修改环境变量）
+        let tampered_token = "tampered-by-attacker";
+        unsafe {
+            std::env::set_var(token_env, tampered_token);
+        }
+
+        // 3. 用篡改后的 token 请求 — 应该返回 401（因为服务端使用的是启动时缓存的原始 token）
+        let resp = client
+            .get(format!("http://127.0.0.1:{}/health", port))
+            .bearer_auth(tampered_token)
+            .send()
+            .await
+            .expect("Request with tampered token should still get a response");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "vuln-0003: tampered env var token should NOT work (cached token at startup wins)"
         );
+
+        // 4. 原始 token 仍然有效（缓存未变）
+        let resp = client
+            .get(format!("http://127.0.0.1:{}/health", port))
+            .bearer_auth(original_token)
+            .send()
+            .await
+            .expect("Request with original token should still succeed");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::OK,
+            "vuln-0003: original token should still work after env var tampering"
+        );
+
         let _ = manager.shutdown();
+        unsafe {
+            std::env::remove_var(token_env);
+        }
     }
 
     /// auth 启用且 Bearer token 正确时返回 200

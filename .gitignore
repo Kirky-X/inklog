@@ -115,6 +115,9 @@ specmark/
 *.seed
 *.pid.lock
 
+# strix runs output
+strix_runs/
+
 #iflow and qoder
 .iflow/
 .qoder/
