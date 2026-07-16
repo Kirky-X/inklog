@@ -303,6 +303,24 @@ impl FileSink {
     }
 
     fn open_file_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
+        // vuln-0002: 验证路径安全性，防止路径遍历和敏感文件访问。
+        // 必须在 `create_dir_all` 之前执行，避免恶意路径创建目录。
+        let validator = crate::validation::PathValidator::new();
+        let validation_result = validator.validate(&self.config.path);
+        if !validation_result.valid {
+            let reason = validation_result
+                .error
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "Rejecting unsafe log path {}: {}",
+                self.config.path.display(),
+                reason
+            );
+            return Err(InklogError::ConfigError(format!(
+                "Unsafe log path rejected: {reason}"
+            )));
+        }
+
         if let Some(parent) = self.config.path.parent()
             && let Err(e) = fs::create_dir_all(parent)
         {
@@ -3832,5 +3850,238 @@ mod tests {
             *shutdown_called.lock(),
             "fallback sink shutdown should be called"
         );
+    }
+
+    // ========================================================================
+    // vuln-0002: FileSink 路径遍历防护测试
+    // ========================================================================
+    //
+    // PathValidator 默认配置拒绝：
+    // - 含 ".." 的路径（路径遍历）
+    // - 含敏感组件的路径（etc / passwd / shadow / .git / .ssh / .env）
+    // - 符号链接（allow_symlinks = false）
+    // FileSink::open_file_inner 在 create_dir_all 之前验证路径，
+    // 避免恶意路径创建目录或写入敏感文件。
+
+    /// vuln-0002 #1: FileSink 拒绝 "../../../etc/passwd" 路径遍历。
+    #[test]
+    fn file_sink_rejects_path_traversal_to_etc_passwd() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("../../../etc/passwd"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        let err = result.expect_err("should reject path traversal to /etc/passwd");
+        assert!(
+            matches!(err, InklogError::ConfigError(_)),
+            "expected ConfigError, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("Unsafe log path rejected"),
+            "error should mention unsafe path: {err}"
+        );
+    }
+
+    /// vuln-0002 #2: FileSink 拒绝 "/etc/cron.d/malicious" 系统敏感路径。
+    #[test]
+    fn file_sink_rejects_system_cron_path() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("/etc/cron.d/malicious"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        let err = result.expect_err("should reject /etc/cron.d system path");
+        assert!(
+            matches!(err, InklogError::ConfigError(_)),
+            "expected ConfigError, got: {err:?}"
+        );
+    }
+
+    /// vuln-0002 #3: FileSink 拒绝 "../../system/file" 路径遍历。
+    #[test]
+    fn file_sink_rejects_parent_dir_traversal() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("../../system/file"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        let err = result.expect_err("should reject parent-dir traversal");
+        assert!(
+            matches!(err, InklogError::ConfigError(_)),
+            "expected ConfigError, got: {err:?}"
+        );
+    }
+
+    /// vuln-0002 #4: FileSink 拒绝 "/etc/passwd" 直接访问。
+    #[test]
+    fn file_sink_rejects_etc_passwd_direct() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("/etc/passwd"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_err(),
+            "should reject direct access to /etc/passwd"
+        );
+        assert!(matches!(result.unwrap_err(), InklogError::ConfigError(_)));
+    }
+
+    /// vuln-0002 #5: FileSink 拒绝 "/etc/shadow" 直接访问。
+    #[test]
+    fn file_sink_rejects_etc_shadow_direct() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("/etc/shadow"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_err(),
+            "should reject direct access to /etc/shadow"
+        );
+    }
+
+    /// vuln-0002 #6: FileSink 拒绝含 ".git" 组件的路径。
+    #[test]
+    fn file_sink_rejects_git_directory_path() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("project/.git/config"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_err(),
+            "should reject path containing .git component"
+        );
+    }
+
+    /// vuln-0002 #7: FileSink 拒绝含 ".ssh" 组件的路径。
+    #[test]
+    fn file_sink_rejects_ssh_directory_path() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("~/.ssh/id_rsa"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_err(),
+            "should reject path containing .ssh component"
+        );
+    }
+
+    /// vuln-0002 #8: FileSink 拒绝含 ".env" 组件的路径。
+    #[test]
+    fn file_sink_rejects_env_file_path() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("./.env"),
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_err(),
+            "should reject path containing .env component"
+        );
+    }
+
+    /// vuln-0002 #9: FileSink 接受合法相对路径 "logs/app.log"（通过 tempdir 隔离）。
+    ///
+    /// 用 tempdir 路径拼接 "logs/app.log" 子路径，等价于测试相对路径
+    /// "logs/app.log" 的安全性（PathValidator 检查路径组件，不含 ".."
+    /// 且组件不在 deny 列表中）。
+    #[test]
+    fn file_sink_accepts_valid_logs_app_log_path() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("logs").join("app.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_ok(),
+            "should accept valid logs/app.log path, got: {:?}",
+            result.err()
+        );
+    }
+
+    /// vuln-0002 #10: FileSink 接受合法相对路径 "var/log/app.log"（通过 tempdir 隔离）。
+    #[test]
+    fn file_sink_accepts_valid_var_log_app_log_path() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("var").join("log").join("app.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_ok(),
+            "should accept valid var/log/app.log path, got: {:?}",
+            result.err()
+        );
+    }
+
+    /// vuln-0002 #11: FileSink 接受 tempdir 下的绝对路径（默认 allow_absolute=true）。
+    #[test]
+    fn file_sink_accepts_absolute_tempdir_path() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("app.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            ..Default::default()
+        };
+        let result = FileSink::new(config);
+        assert!(
+            result.is_ok(),
+            "should accept absolute path under tempdir, got: {:?}",
+            result.err()
+        );
+    }
+
+    /// vuln-0002 #12: open_file_inner 直接调用也验证路径（深度防御）。
+    #[test]
+    fn open_file_inner_rejects_path_traversal_directly() {
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("../../../etc/passwd"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.open_file_inner(&mut inner);
+        assert!(
+            result.is_err(),
+            "open_file_inner should reject path traversal"
+        );
+        assert!(matches!(result.unwrap_err(), InklogError::ConfigError(_)));
+    }
+
+    /// vuln-0002 #13: open_file_inner 接受合法路径并成功打开文件。
+    #[test]
+    fn open_file_inner_accepts_valid_path_and_opens_file() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("valid.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.open_file_inner(&mut inner);
+        assert!(result.is_ok(), "open_file_inner should accept valid path");
+        assert!(inner.current_file.is_some(), "file should be opened");
+        assert!(log_path.exists(), "log file should exist on disk");
     }
 }
