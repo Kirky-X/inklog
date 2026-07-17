@@ -14,7 +14,7 @@
 //! cargo run --bin rotation
 //! ```
 
-use chrono::Utc;
+use inklog::chrono::Utc;
 use inklog::config::FileSinkConfig;
 use inklog::sink::rotation::{
     CompositeRotation, RotationContext, RotationStrategy, SizeBasedRotation, TimeBasedRotation,

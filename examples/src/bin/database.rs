@@ -38,7 +38,7 @@
 //! | metadata | TEXT | 元数据 |
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use chrono::Utc;
+use inklog::chrono::Utc;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::{DatabaseDriver, DatabaseSinkConfig};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]

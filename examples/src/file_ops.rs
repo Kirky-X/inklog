@@ -10,7 +10,7 @@
 //! - [`cleanup_files`]：按前缀删除指定目录下的临时文件，返回删除数量。
 
 use anyhow::Result;
-use chrono::Utc;
+use inklog::chrono::Utc;
 use inklog::domain::config::FileSinkConfig;
 use inklog::support::io::sink::LogSink;
 use inklog::LogRecord;

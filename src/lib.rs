@@ -189,3 +189,17 @@ pub use support::processing::{
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,
 };
+
+// Re-export underlying dependencies used in public API type signatures.
+//
+// Scope: only type references (L1) — e.g. `use inklog::tracing::Level`,
+// `use inklog::chrono::DateTime`. Macro attributes (L2, `#[tokio::main]`)
+// and macro invocations (L3, `tracing::info!`) reference absolute crate
+// paths at expansion time and cannot be routed through a re-export alias;
+// downstream crates must still declare direct dependencies for those uses.
+// This re-export therefore narrows the direct-dependency surface to the
+// macro path only; it does not eliminate it.
+pub use chrono;
+pub use serde;
+pub use tokio;
+pub use tracing;

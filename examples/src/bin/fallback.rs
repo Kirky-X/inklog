@@ -25,7 +25,7 @@
 //! 3. **fallback_demo()**: 演示降级到 File Sink
 
 use async_trait::async_trait;
-use chrono::Utc;
+use inklog::chrono::Utc;
 use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 use inklog::log_record::LogRecord;
 use inklog::sink::console::ConsoleSink;
@@ -33,11 +33,11 @@ use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
 use inklog::support::observability::{SinkHealth, SinkStatus};
 use inklog::support::processing::LogTemplate;
+use inklog::tokio::sync::Mutex;
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// 降级状态追踪器
 ///

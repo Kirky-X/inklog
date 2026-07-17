@@ -8,10 +8,10 @@
 //! - [`create_record_with_fields`]：构造带结构化字段的 LogRecord。
 //! - [`render_formats`]：用多种模板格式渲染同一条记录，返回 `(格式名, 渲染结果)` 列表。
 
+use inklog::tracing::Level;
 use inklog::{LogRecord, LogTemplate};
 use serde_json::Value;
 use std::collections::HashMap;
-use tracing::Level;
 
 /// 创建示例日志记录，与 `template.rs` bin 中的 `create_sample_record` 行为一致。
 ///

@@ -14,10 +14,10 @@
 //! - 占位符展示：输出不同占位符的效果（timestamp、level、message 等）
 //! - 格式对比：展示多种模板格式的渲染效果
 
+use inklog::tracing::Level;
 use inklog::{LogRecord, LogTemplate};
 use serde_json::Value;
 use std::collections::HashMap;
-use tracing::Level;
 
 fn main() {
     println!("=== inklog 日志模板示例 ===\n");

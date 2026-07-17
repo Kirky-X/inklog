@@ -28,11 +28,11 @@
 //!   - P99：99% 的日志延迟低于此值
 //! - **背压（Backpressure）**：Channel 满时的阻塞行为
 
+use inklog::tokio::fs;
 use inklog::{InklogConfig, LoggerManager};
 use inklog_examples::common::{format_duration, print_section, print_separator, temp_file_path};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::fs;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

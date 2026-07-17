@@ -27,7 +27,7 @@
 //! - 轮转日志: `app.log.1`, `app.log.2`, ...
 //! - 压缩日志: `app.log.1.zst`, `app.log.2.zst`, ...
 
-use chrono::Utc;
+use inklog::chrono::Utc;
 use inklog::config::FileSinkConfig;
 use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
