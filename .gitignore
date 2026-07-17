@@ -39,7 +39,6 @@ coverage/
 .env.*.local
 *.env
 secrets/
-.secrets.baseline
 
 # Backup
 *.bak

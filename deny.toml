@@ -3,8 +3,9 @@
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # 忽略非关键的安全警告（这些是 transitive 依赖的问题）
 ignore = [
-    "RUSTSEC-2024-0436", # paste unmaintained (dev dependency)
-    "RUSTSEC-2026-0173", # proc-macro-error2 unmaintained (transitive via dbnexus → sea-orm)
+    # 历史死代码 ignore 已清理（2026-07）— cargo-deny advisory-not-detected：
+    #   RUSTSEC-2024-0436 (paste) — dev dependency 已移除
+    #   RUSTSEC-2026-0173 (proc-macro-error2) — 当前 cargo-deny db 未匹配（advisory 范围不覆盖）
 ]
 
 [licenses]
