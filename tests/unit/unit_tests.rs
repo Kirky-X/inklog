@@ -4,9 +4,9 @@ use inklog::log_record::LogRecord;
 use inklog::sink::LogSink;
 use inklog::sink::console::ConsoleSink;
 use inklog::template::LogTemplate;
+use inklog::tracing::Level;
 use inklog::{ConsoleSinkConfig, FileSinkConfig, InklogConfig, LoggerManager};
 use tempfile::TempDir;
-use tracing::Level;
 
 #[test]
 fn test_config_validation() {

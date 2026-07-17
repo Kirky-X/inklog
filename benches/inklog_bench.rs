@@ -4,6 +4,8 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use inklog::masking::{self, DataMasker};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::convert_logs_to_parquet;
+use inklog::tokio::runtime::Runtime;
+use inklog::tracing::Level;
 use inklog::{
     InklogConfig, LoggerManager,
     config::{FileSinkConfig, PerformanceConfig},
@@ -18,8 +20,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
-use tokio::runtime::Runtime;
-use tracing::Level;
 use tracing_subscriber::prelude::*;
 
 // ============ Benchmark Helper Functions ============

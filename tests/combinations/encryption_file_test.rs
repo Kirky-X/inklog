@@ -381,7 +381,7 @@ mod encryption_file_test {
 
     #[tokio::test]
     async fn test_concurrent_encryption() {
-        use tokio::sync::Arc;
+        use inklog::tokio::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
         
         let key_base64 = generate_test_key();

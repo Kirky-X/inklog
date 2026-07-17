@@ -84,7 +84,7 @@ pub const COUNT_TABLE_SQL: &str = "SELECT COUNT(*) FROM logs";
 
 /// 辅助函数：构造测试用 LogRecord。
 pub fn make_log_record(level: &str, target: &str, message: &str) -> inklog::LogRecord {
-    use tracing::Level;
+    use inklog::tracing::Level;
     let lvl = match level.to_uppercase().as_str() {
         "ERROR" => Level::ERROR,
         "WARN" => Level::WARN,

@@ -3,7 +3,7 @@
 use inklog::LoggerManager;
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::{error, info};
+use inklog::tracing::{error, info};
 
 #[tokio::test]
 #[ignore = "Requires Docker database environment"]

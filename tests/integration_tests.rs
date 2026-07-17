@@ -17,9 +17,9 @@
 
 use inklog::LoggerManager;
 use inklog::sink::LogSink;
+use inklog::tracing::{error, info};
 use serial_test::serial;
 use std::time::Duration;
-use tracing::{error, info};
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[allow(unused_imports)]
@@ -218,11 +218,11 @@ use inklog::sink::LogSink as BatchLogSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::DatabaseSink as BatchDatabaseSink;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use inklog::tracing::Level as BatchLevel;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::time::Duration as BatchDuration;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use tempfile::TempDir as BatchTempDir;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use tracing::Level as BatchLevel;
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[tokio::test(flavor = "multi_thread")]
@@ -976,9 +976,9 @@ fn test_parquet_schema_compatibility() {
 // ============ 稳定性集成测试 (integration::stability) ============
 
 use inklog::LoggerManager as StabilityLoggerManager;
+use inklog::tracing::{error as stability_error, info as stability_info};
 use std::thread as stability_thread;
 use std::time::{Duration as StabilityDuration, Instant as StabilityInstant};
-use tracing::{error as stability_error, info as stability_info};
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "manual"] // Long-running test, run with: cargo test --test integration_tests -- --ignored
@@ -1031,6 +1031,7 @@ use inklog::config::DatabaseDriver as VerifyDatabaseDriver;
 use inklog::sink::database::DatabaseSink as VerifyDatabaseSink;
 use inklog::sink::file::FileSink as VerifyFileSink;
 // LogSink already imported at line 29
+use inklog::tracing::Level as VerifyLevel;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::{
     DatabaseSinkConfig as VerifyDatabaseSinkConfig, FileSinkConfig as VerifyFileSinkConfig,
@@ -1045,7 +1046,6 @@ use std::io::Read as VerifyRead;
 use std::path::PathBuf;
 use std::time::Duration as VerifyDuration;
 use tempfile::TempDir as VerifyTempDir;
-use tracing::Level as VerifyLevel;
 
 // ============ File Helper Functions ============
 
