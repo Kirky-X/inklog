@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-07-17
+
+### 安全修复
+
+- **[vuln-0001]** 对 `table_name` 做 SQL 注入防护清洗
+- **[vuln-0002]** `FileSink` 集成 `PathValidator` 防路径穿越；收紧敏感组件黑名单（新增 `.bashrc`/`.profile`/`.zshrc`/`.netrc`/`id_rsa`/`id_ed25519` 等），禁止落到用户主目录与密钥文件
+- **[vuln-0003]** HTTP auth token 改为启动期缓存，获取失败 fail-closed（不再降级为无认证）
+
+### 修复
+
+- `compress_file`/`encrypt_file` 参数改 `&Path` 修 clippy `ptr_arg`
+- 已安装的全局 logger/subscriber 不再重复 warn
+
+### 重构
+
+- examples/tests/benches：扩展 L1 重导出隔离 + 补 `tracing`/`chrono`/`tokio`/`serde` re-export
+
 ## [0.1.7] - 2026-07-13
 
 ### ⚠️ BREAKING CHANGES（仅影响启用 db 后端 feature 的用户）
