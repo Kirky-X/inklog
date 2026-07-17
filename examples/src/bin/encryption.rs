@@ -55,12 +55,12 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes256Gcm;
 use inklog::sink::encryption::get_encryption_key;
 use inklog::sink::LogSink;
+use inklog::tracing::Level;
 use inklog::{FileSinkConfig, LogRecord};
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
 use rand::Rng;
 use std::io::Write;
 use std::path::PathBuf;
-use tracing::Level;
 
 /// 加密文件魔数和版本常量
 const MAGIC_HEADER: &[u8] = b"ENCLOG1\0";

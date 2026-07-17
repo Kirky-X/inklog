@@ -8,7 +8,7 @@
 //! - [`write_test_cases`]：把 `(level, message)` 列表写入 sink 并 flush。
 
 use anyhow::Result;
-use chrono::Utc;
+use inklog::chrono::Utc;
 use inklog::domain::config::ConsoleSinkConfig;
 use inklog::support::io::sink::LogSink;
 use inklog::LogRecord;

@@ -20,7 +20,7 @@
 //! - **stderr 分流**：将 ERROR/WARN 级别的日志输出到 stderr
 //! - **数据脱敏**：可选的敏感信息脱敏功能
 
-use chrono::Utc;
+use inklog::chrono::Utc;
 use inklog::config::ConsoleSinkConfig;
 use inklog::sink::console::ConsoleSink;
 use inklog::sink::LogSink;
