@@ -11,7 +11,7 @@ mod async_file_test {
     use std::io::{Read, Write};
     use std::path::PathBuf;
     use tempfile::TempDir;
-    use tokio::time::{timeout, Duration};
+    use inklog::tokio::time::{timeout, Duration};
 
     // === 异步文件配置测试 ===
 

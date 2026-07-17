@@ -23,11 +23,11 @@ use inklog::sink::console::ConsoleSink;
 #[allow(unused_imports)]
 use inklog::template::LogTemplate;
 #[allow(unused_imports)]
+use inklog::tracing::Level;
+#[allow(unused_imports)]
 use inklog::{ConsoleSinkConfig, FileSinkConfig, InklogConfig, LoggerManager};
 #[allow(unused_imports)]
 use tempfile::TempDir;
-#[allow(unused_imports)]
-use tracing::Level;
 
 // ============ 配置单元测试 (unit::config) ============
 

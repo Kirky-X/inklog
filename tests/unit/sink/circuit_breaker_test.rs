@@ -9,8 +9,8 @@ mod circuit_breaker_test {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::sync::Mutex;
-    use tokio::time::timeout;
+    use inklog::tokio::sync::Mutex;
+    use inklog::tokio::time::timeout;
 
     // === 熔断器状态测试 ===
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 use inklog::LoggerManager;
 use std::time::Duration;
-use tracing::{error, info};
+use inklog::tracing::{error, info};
 
 #[tokio::test]
 async fn test_e2e_logging() {

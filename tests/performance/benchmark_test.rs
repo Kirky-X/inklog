@@ -10,7 +10,7 @@ mod performance_test {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
-    use tokio::sync::Barrier;
+    use inklog::tokio::sync::Barrier;
 
     // === 吞吐量测试 ===
 

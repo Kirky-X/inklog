@@ -7,7 +7,7 @@
 use inklog::LoggerManager;
 use log::{debug, error, info, warn};
 use std::time::Duration;
-use tracing::{error as tracing_error, info as tracing_info};
+use inklog::tracing::{error as tracing_error, info as tracing_info};
 
 /// 测试 log crate 原生支持
 /// 验证用户可以直接使用 log::info! 等宏，无需 tracing_log 适配器

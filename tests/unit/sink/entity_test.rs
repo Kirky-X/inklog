@@ -4,7 +4,7 @@
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 mod entity_tests {
-    use chrono::{DateTime, Utc};
+    use inklog::chrono::{DateTime, Utc};
     use inklog::sink::entity::{ActiveModel, Column, Entity, Model, TABLE_NAME};
     use sea_orm::entity::prelude::*;
 

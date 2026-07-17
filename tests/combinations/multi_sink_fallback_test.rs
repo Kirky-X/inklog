@@ -14,8 +14,8 @@ mod multi_sink_fallback_test {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use tempfile::TempDir;
-    use tokio::sync::Mutex;
-    use tokio::time::Duration;
+    use inklog::tokio::sync::Mutex;
+    use inklog::tokio::time::Duration;
 
     // === 降级状态测试 ===
 
@@ -280,7 +280,7 @@ mod multi_sink_fallback_test {
     #[tokio::test]
     async fn test_concurrent_fallback_scenarios() {
         use std::sync::Arc;
-        use tokio::sync::Barrier;
+        use inklog::tokio::sync::Barrier;
         use std::sync::atomic::{AtomicUsize, Ordering};
         
         let temp_dir = TempDir::new().unwrap();

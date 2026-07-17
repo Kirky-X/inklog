@@ -7,7 +7,7 @@ mod large_volume_test {
     use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
     use serial_test::serial;
     use tempfile::TempDir;
-    use tokio::time::sleep;
+    use inklog::tokio::time::sleep;
     use std::time::Duration;
 
     #[tokio::test]

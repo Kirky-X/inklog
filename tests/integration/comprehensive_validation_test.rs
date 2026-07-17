@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
-use tokio::time::sleep;
+use inklog::tokio::time::sleep;
 
 #[tokio::test]
 #[serial]
