@@ -12,6 +12,7 @@ use crate::DataMasker;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
+use crate::validation::PathValidatorConfig;
 use aes_gcm::KeyInit;
 use aes_gcm::aead::Aead;
 use async_trait::async_trait;
@@ -305,7 +306,29 @@ impl FileSink {
     fn open_file_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
         // vuln-0002: 验证路径安全性，防止路径遍历和敏感文件访问。
         // 必须在 `create_dir_all` 之前执行，避免恶意路径创建目录。
-        let validator = crate::validation::PathValidator::new();
+        // FileSink 需支持绝对路径（如 /var/log），但收紧 deny 黑名单，
+        // 禁止落到用户主目录/密钥等敏感文件，避免默认宽松配置写到宿主任意文件。
+        let validator = crate::validation::PathValidator::with_config(PathValidatorConfig {
+            allow_absolute: true,
+            allow_symlinks: false,
+            deny_components: vec![
+                "..".to_string(),
+                ".git".to_string(),
+                ".ssh".to_string(),
+                ".env".to_string(),
+                "etc".to_string(),
+                "passwd".to_string(),
+                "shadow".to_string(),
+                ".bashrc".to_string(),
+                ".bash_profile".to_string(),
+                ".profile".to_string(),
+                ".zshrc".to_string(),
+                ".netrc".to_string(),
+                "id_rsa".to_string(),
+                "id_ed25519".to_string(),
+            ],
+            ..Default::default()
+        });
         let validation_result = validator.validate(&self.config.path);
         if !validation_result.valid {
             let reason = validation_result
