@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 测试
+
+- 新增 `tests/e2e_advanced.rs`（226 个测试）：覆盖 CORE/ROT/PIPE/SEC/REL/PERF/OBS/CFG/compression/i18n/Integration 共 19 个模块的边界与异常场景
+
 ## [0.1.11] - 2026-07-17
 
 ### 安全修复
