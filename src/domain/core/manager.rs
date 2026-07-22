@@ -421,7 +421,7 @@ impl LoggerManager {
         (
             Self,
             LoggerSubscriber,
-            tracing_subscriber::filter::LevelFilter,
+            tracing_subscriber::filter::EnvFilter,
         ),
         InklogError,
     > {
@@ -440,13 +440,27 @@ impl LoggerManager {
         let subscriber =
             LoggerSubscriber::new(console_sender.clone(), sender.clone(), metrics.clone());
 
-        // Filter
+        // Filter — use EnvFilter to support RUST_LOG per-module filtering
+        // Configured level serves as the global default; RUST_LOG overrides
+        // specific modules (e.g. RUST_LOG=nebulaid=debug,hyper=warn).
         let level = config
             .global
             .level
             .parse::<tracing::Level>()
             .unwrap_or(tracing::Level::INFO);
-        let filter = tracing_subscriber::filter::LevelFilter::from_level(level);
+        let level_str = match level {
+            tracing::Level::TRACE => "trace",
+            tracing::Level::DEBUG => "debug",
+            tracing::Level::INFO => "info",
+            tracing::Level::WARN => "warn",
+            tracing::Level::ERROR => "error",
+        };
+        let filter = match std::env::var("RUST_LOG") {
+            Ok(val) if !val.is_empty() => {
+                tracing_subscriber::filter::EnvFilter::new(format!("{},{}", level_str, val))
+            }
+            _ => tracing_subscriber::filter::EnvFilter::new(level_str),
+        };
 
         // Create error sink for logging system errors
         let error_sink_config = FileSinkConfig {
@@ -3788,11 +3802,12 @@ worker_threads = 1
             "channel_len should be 0 for fresh manager"
         );
 
-        // 验证 filter 反映配置的 level（warn → WARN）
-        assert_eq!(
-            filter,
-            tracing_subscriber::filter::LevelFilter::WARN,
-            "filter should reflect config.global.level 'warn'"
+        // filter 现在是 EnvFilter，验证其字符串表示包含配置的 level "warn"
+        let filter_str = filter.to_string();
+        assert!(
+            filter_str.contains("warn"),
+            "EnvFilter should contain config level 'warn', got: {}",
+            filter_str
         );
 
         let _ = manager.shutdown();
@@ -3823,10 +3838,11 @@ worker_threads = 1
         .expect("build_detached should succeed even with invalid level");
 
         // 无效 level 应回退到 INFO
-        assert_eq!(
-            filter,
-            tracing_subscriber::filter::LevelFilter::INFO,
-            "invalid level should fall back to INFO"
+        let filter_str = filter.to_string();
+        assert!(
+            filter_str.contains("info"),
+            "EnvFilter should fall back to 'info' for invalid level, got: {}",
+            filter_str
         );
 
         let _ = manager.shutdown();
