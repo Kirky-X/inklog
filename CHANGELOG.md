@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-07-22
+
 ### 测试
 
 - 新增 `tests/e2e_advanced.rs`（226 个测试）：覆盖 CORE/ROT/PIPE/SEC/REL/PERF/OBS/CFG/compression/i18n/Integration 共 19 个模块的边界与异常场景
+
+### 维护
+
+- 移除未使用依赖：parking_lot（examples）
+- 更新 sea-orm 到 2.0 稳定版
 
 ## [0.1.11] - 2026-07-17
 
@@ -241,7 +248,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/Kirky-X/inklog/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/Kirky-X/inklog/compare/v0.1.7...v0.1.11
 [0.1.7]: https://github.com/Kirky-X/inklog/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Kirky-X/inklog/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Kirky-X/inklog/compare/v0.1.2...v0.1.5
