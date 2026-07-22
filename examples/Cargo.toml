@@ -17,18 +17,17 @@ parquet = ["inklog/parquet"]
 inklog = { path = ".." }
 async-trait = "0.1"
 dbnexus = { version = "0.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
-parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.20", features = ["v4"] }
-chrono = "0.4.44"
-aes-gcm = "0.10.3"
-base64 = "0.22.1"
-rand = "0.10.0"
-tempfile = "3.27.0"
+chrono = "0.4"
+aes-gcm = "0.10"
+base64 = "0.22"
+rand = "0.10"
+tempfile = "3.27"
 # Layer 0 示例所需：log crate 适配器、channel、自定义正则模式
 log = "0.4"
 crossbeam-channel = "0.5"

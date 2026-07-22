@@ -75,7 +75,7 @@ parquet = { version = "59.0", features = ["async"], optional = true }
 arrow-array = { version = "59.0", optional = true }
 arrow-schema = { version = "59.0", optional = true }
 dbnexus = { version = "0.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
-sea-orm = { version = "2.0.0-rc.42", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
+sea-orm = { version = "2.0", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = "1.1"
 zeroize = "1.9"
 sha2 = "0.11"
