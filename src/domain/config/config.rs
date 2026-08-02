@@ -152,10 +152,12 @@ impl InklogConfig {
     /// Search paths (first existing file wins):
     /// 1. `$INKLOG_CONFIG_PATH`
     /// 2. `inklog_config.toml` (current directory)
-    /// 3. `~/.config/inklog/config.toml`
-    /// 4. `/etc/inklog/config.toml`
+    /// 3. `~/.config/inklog/config.toml` (user config dir)
+    /// 4. Platform-specific system config:
+    ///    - Unix/Linux: `/etc/inklog/config.toml`
+    ///    - Windows: `%ProgramData%\inklog\config.toml`
     pub fn from_search_paths() -> Result<Self, InklogError> {
-        let search_paths = vec![
+        let mut search_paths: Vec<Option<String>> = vec![
             std::env::var("INKLOG_CONFIG_PATH").ok(),
             Some("inklog_config.toml".to_string()),
             dirs::config_dir().map(|p| {
@@ -164,8 +166,8 @@ impl InklogConfig {
                     .to_string_lossy()
                     .to_string()
             }),
-            Some("/etc/inklog/config.toml".to_string()),
         ];
+        search_paths.push(Self::system_config_path());
 
         for path_opt in search_paths.into_iter().flatten() {
             if std::path::Path::new(&path_opt).exists() {
@@ -186,6 +188,27 @@ impl InklogConfig {
         }
 
         Ok(Self::default())
+    }
+
+    /// Returns the platform-specific system configuration path.
+    ///
+    /// - Unix/Linux: `/etc/inklog/config.toml`
+    /// - Windows: `%ProgramData%\inklog\config.toml`
+    fn system_config_path() -> Option<String> {
+        #[cfg(unix)]
+        {
+            Some("/etc/inklog/config.toml".to_string())
+        }
+        #[cfg(windows)]
+        {
+            std::env::var("ProgramData")
+                .ok()
+                .map(|base| format!("{}\\inklog\\config.toml", base))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            None
+        }
     }
 
     /// Returns a list of enabled sink names.
@@ -382,5 +405,26 @@ mod tests {
             ..Default::default()
         });
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_system_config_path_returns_platform_path() {
+        let path = InklogConfig::system_config_path();
+        assert!(
+            path.is_some(),
+            "system_config_path should return Some on unix"
+        );
+        let path = path.unwrap();
+        #[cfg(unix)]
+        assert_eq!(path, "/etc/inklog/config.toml");
+        #[cfg(windows)]
+        assert!(path.contains("inklog") && path.contains("config.toml"));
+    }
+
+    #[test]
+    fn test_from_search_paths_falls_back_to_default() {
+        // When no config files exist, should return default config
+        let config = InklogConfig::from_search_paths().unwrap();
+        assert_eq!(config.global.level, "info");
     }
 }
