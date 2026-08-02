@@ -6,6 +6,7 @@
 
 mod cli;
 mod config;
+mod masking_test;
 mod sink;
 
 mod unit_tests;
