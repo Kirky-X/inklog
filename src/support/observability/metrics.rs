@@ -48,9 +48,9 @@
 //! | `inklog_sink_healthy` | Gauge | Sink 健康状态 |
 //! | `inklog_uptime_seconds` | Gauge | 运行时间（秒）|
 
+use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -166,24 +166,10 @@ impl GaugeF64 {
         }
     }
     pub fn set(&self, v: f64) {
-        let mut guard = match self.value.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                tracing::warn!("GaugeF64 mutex poisoned, recovering");
-                poisoned.into_inner()
-            }
-        };
-        *guard = v;
+        *self.value.lock() = v;
     }
     pub fn get(&self) -> f64 {
-        let guard = match self.value.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                tracing::warn!("GaugeF64 mutex poisoned, recovering");
-                poisoned.into_inner()
-            }
-        };
-        *guard
+        *self.value.lock()
     }
 }
 
@@ -416,12 +402,9 @@ impl Metrics {
     }
 
     /// Returns the sink health status map (with audit logging).
-    pub fn sink_health(&self) -> std::collections::HashMap<String, SinkHealth> {
+    pub fn sink_health(&self) -> HashMap<String, SinkHealth> {
         self.audit_access("sink_health");
-        match self.sink_health.lock() {
-            Ok(guard) => guard.clone(),
-            Err(_) => std::collections::HashMap::new(),
-        }
+        self.sink_health.lock().clone()
     }
 
     /// Returns the uptime duration.
@@ -493,16 +476,16 @@ impl Metrics {
             (0, None)
         } else {
             // 需要获取当前失败次数，所以需要先读取
-            let current_failures = if let Ok(map) = self.sink_health.lock() {
+            let current_failures = {
+                let map = self.sink_health.lock();
                 map.get(name).map(|h| h.consecutive_failures).unwrap_or(0)
-            } else {
-                0
             };
             (current_failures + 1, error)
         };
 
         // 现在快速更新
-        if let Ok(mut map) = self.sink_health.lock() {
+        {
+            let mut map = self.sink_health.lock();
             let entry = map
                 .entry(name.to_string())
                 .or_insert_with(SinkHealth::healthy);
@@ -514,33 +497,25 @@ impl Metrics {
 
     /// Reports that a sink has started (transitions from NotStarted to Healthy)
     pub fn sink_started(&self, name: &str) {
-        if let Ok(mut map) = self.sink_health.lock() {
-            let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
-            entry.status = SinkStatus::Healthy;
-            entry.consecutive_failures = 0;
-            entry.last_error = None;
-        }
+        let mut map = self.sink_health.lock();
+        let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
+        entry.status = SinkStatus::Healthy;
+        entry.consecutive_failures = 0;
+        entry.last_error = None;
     }
 
     /// Reports that a sink has degraded but is still operational
     pub fn sink_degraded(&self, name: &str, reason: String) {
-        if let Ok(mut map) = self.sink_health.lock() {
-            let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
-            entry.status = SinkStatus::Degraded {
-                reason: reason.clone(),
-            };
-            entry.last_error = Some(reason);
-        }
+        let mut map = self.sink_health.lock();
+        let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
+        entry.status = SinkStatus::Degraded {
+            reason: reason.clone(),
+        };
+        entry.last_error = Some(reason);
     }
 
     pub fn get_status(&self, channel_len: usize, channel_cap: usize) -> HealthStatus {
-        let sinks: std::collections::HashMap<String, SinkHealth> = match self.sink_health.lock() {
-            Ok(guard) => guard.clone(),
-            Err(_e) => {
-                eprintln!("Metrics mutex poisoned, using empty data");
-                std::collections::HashMap::new()
-            }
-        };
+        let sinks: HashMap<String, SinkHealth> = self.sink_health.lock().clone();
 
         // Determine overall status based on sink statuses
         let overall_status = if sinks.is_empty() {
@@ -722,14 +697,13 @@ impl Metrics {
         //
         s.push_str("# HELP inklog_sink_healthy Sink health status (1=healthy, 0=unhealthy)\n");
         s.push_str("# TYPE inklog_sink_healthy gauge\n");
-        if let Ok(health_map) = self.sink_health.lock() {
-            for (name, health) in health_map.iter() {
-                let value = if health.status.is_operational() { 1 } else { 0 };
-                s.push_str(&format!(
-                    "inklog_sink_healthy{{sink=\"{}\"}} {}\n",
-                    name, value
-                ));
-            }
+        let health_map = self.sink_health.lock();
+        for (name, health) in health_map.iter() {
+            let value = if health.status.is_operational() { 1 } else { 0 };
+            s.push_str(&format!(
+                "inklog_sink_healthy{{sink=\"{}\"}} {}\n",
+                name, value
+            ));
         }
 
         //
@@ -884,14 +858,8 @@ impl SinkHealthMonitor {
         is_healthy: bool,
         error: Option<&str>,
     ) -> FallbackAction {
-        let mut states = self
-            .fallback_states
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut retries = self
-            .retry_counters
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut states = self.fallback_states.lock();
+        let mut retries = self.retry_counters.lock();
 
         let current_state = states
             .get(sink_name)
@@ -1127,10 +1095,7 @@ impl SinkHealthMonitor {
             "加密密钥错误，降级为明文写入"
         );
 
-        let mut states = self
-            .fallback_states
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut states = self.fallback_states.lock();
         let current_state = states
             .get(sink_name)
             .cloned()
@@ -1153,14 +1118,8 @@ impl SinkHealthMonitor {
 
     /// 确认恢复成功
     pub fn confirm_recovery(&self, sink_name: &str) {
-        let mut states = self
-            .fallback_states
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut retries = self
-            .retry_counters
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut states = self.fallback_states.lock();
+        let mut retries = self.retry_counters.lock();
 
         let current_state = states
             .get(sink_name)
@@ -1190,7 +1149,6 @@ impl SinkHealthMonitor {
     pub fn get_fallback_state(&self, sink_name: &str) -> FallbackState {
         self.fallback_states
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .get(sink_name)
             .cloned()
             .unwrap_or(FallbackState::Active)
@@ -1200,30 +1158,20 @@ impl SinkHealthMonitor {
     pub fn is_any_in_fallback(&self) -> bool {
         self.fallback_states
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .values()
             .any(|state| matches!(state, FallbackState::Fallback { .. }))
     }
 
     /// 获取所有降级事件
     pub fn get_fallback_events(&self, limit: usize) -> Vec<FallbackEvent> {
-        let events = self
-            .fallback_events
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let events = self.fallback_events.lock();
         events.iter().rev().take(limit).cloned().collect()
     }
 
     /// 获取降级统计
     pub fn get_fallback_stats(&self) -> FallbackStats {
-        let states = self
-            .fallback_states
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let events = self
-            .fallback_events
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let states = self.fallback_states.lock();
+        let events = self.fallback_events.lock();
 
         let active_fallbacks = states
             .values()
@@ -1252,10 +1200,7 @@ impl SinkHealthMonitor {
             reason,
         };
 
-        let mut events = self
-            .fallback_events
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut events = self.fallback_events.lock();
         events.push(event);
 
         // 保留最近 100 个事件
@@ -1266,18 +1211,9 @@ impl SinkHealthMonitor {
 
     /// 重置监控器状态
     pub fn reset(&self) {
-        let mut states = self
-            .fallback_states
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut retries = self
-            .retry_counters
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut events = self
-            .fallback_events
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut states = self.fallback_states.lock();
+        let mut retries = self.retry_counters.lock();
+        let mut events = self.fallback_events.lock();
 
         states.clear();
         retries.clear();
@@ -1665,44 +1601,33 @@ mod metrics_tests {
     }
 
     #[test]
-    fn test_gauge_f64_mutex_poisoning_recovery_set() {
-        // 覆盖行 174-176: GaugeF64::set 的 mutex poisoning 恢复路径
+    fn test_gauge_f64_concurrent_access() {
+        // parking_lot::Mutex does not poison; verify concurrent set/get works
         let gauge = std::sync::Arc::new(GaugeF64::new(0.0));
         let gauge_clone = gauge.clone();
 
-        // 在子线程中获取 lock 并 panic，毒化 mutex
         let handle = std::thread::spawn(move || {
-            let _guard = gauge_clone.value.lock().unwrap();
-            panic!("Intentional panic to poison mutex");
+            gauge_clone.set(99.0);
         });
-
-        // 等待子线程结束（它会 panic）
         let _ = handle.join();
 
-        // 现在 mutex 被毒化，set 应该走恢复路径
         gauge.set(42.0);
-        // 验证值被正确设置（恢复后）
         assert_eq!(gauge.get(), 42.0);
     }
 
     #[test]
-    fn test_gauge_f64_mutex_poisoning_recovery_get() {
-        // 覆盖行 184-186: GaugeF64::get 的 mutex poisoning 恢复路径
+    fn test_gauge_f64_get_after_thread_write() {
+        // parking_lot::Mutex does not poison; verify get returns latest value
         let gauge = std::sync::Arc::new(GaugeF64::new(10.0));
         let gauge_clone = gauge.clone();
 
-        // 在子线程中获取 lock 并 panic，毒化 mutex
         let handle = std::thread::spawn(move || {
-            let _guard = gauge_clone.value.lock().unwrap();
-            panic!("Intentional panic to poison mutex");
+            gauge_clone.set(55.0);
         });
-
-        // 等待子线程结束
         let _ = handle.join();
 
-        // get 应该走恢复路径，返回毒化的值（10.0）
         let val = gauge.get();
-        assert_eq!(val, 10.0);
+        assert_eq!(val, 55.0);
     }
 
     #[test]
@@ -2090,7 +2015,8 @@ mod metrics_tests {
         // 覆盖 L591：当 sinks 非空且仅含 NotStarted 状态（非 Healthy/Unhealthy/Degraded）时，
         // get_status 的 else 分支返回 SinkStatus::Healthy
         let metrics = Metrics::new();
-        if let Ok(mut map) = metrics.sink_health.lock() {
+        {
+            let mut map = metrics.sink_health.lock();
             map.insert("not_started_sink".to_string(), SinkHealth::default());
         }
         let status = metrics.get_status(0, 100);
