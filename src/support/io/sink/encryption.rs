@@ -90,6 +90,22 @@ pub fn derive_key_from_password(
     password: &str,
     salt: Option<&[u8]>,
 ) -> Result<([u8; 32], Vec<u8>), InklogError> {
+    // Security: enforce minimum password length
+    if password.len() < 8 {
+        return Err(InklogError::ConfigError(format!(
+            "Encryption password must be at least 8 characters, got {}",
+            password.len()
+        )));
+    }
+
+    // Warn about weak passwords
+    if password.len() < 16 {
+        tracing::warn!(
+            password_length = password.len(),
+            "Weak encryption password (< 16 chars). Consider using a longer passphrase or a random 32-byte key."
+        );
+    }
+
     let mut key = [0u8; 32];
 
     let salt: Vec<u8> = match salt {
@@ -269,11 +285,27 @@ mod tests {
 
     #[test]
     fn test_derive_key_with_empty_password() {
-        // Empty password should still work (PBKDF2 allows it)
+        // Empty password should fail minimum length check
         let result = derive_key_from_password("", Some(b"salt"));
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("at least 8 characters"));
+    }
+
+    #[test]
+    fn test_derive_key_with_short_password() {
+        // Password shorter than 8 chars should fail
+        let result = derive_key_from_password("short", Some(b"salt"));
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("at least 8 characters"));
+    }
+
+    #[test]
+    fn test_derive_key_minimum_length() {
+        // Exactly 8 chars should pass
+        let result = derive_key_from_password("12345678", Some(b"salt"));
         assert!(result.is_ok());
-        let (key, _) = result.unwrap();
-        assert_eq!(key.len(), 32);
     }
 
     #[test]
