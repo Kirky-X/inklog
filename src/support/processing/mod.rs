@@ -3,10 +3,12 @@
 //! Processing module - log processing utilities.
 
 pub mod masking;
+pub mod masking_registry;
 pub mod object_pool;
 pub mod template;
 
-pub use masking::DataMasker;
+pub use masking::{DataMasker, DataMaskerBuilder, MaskRule, MaskRuleBuilder};
+pub use masking_registry::MaskRuleRegistry;
 pub use object_pool::{
     ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record,
     put_string_buffer,

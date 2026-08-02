@@ -41,6 +41,7 @@
 //! }
 //! ```
 
+use std::sync::LazyLock;
 use thiserror::Error;
 
 /// Sensitive pattern redaction rules for error messages.
@@ -92,18 +93,24 @@ const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Pre-compiled regex patterns for efficient repeated sanitization.
+/// Compiled once on first access via `LazyLock` instead of on every call.
+static COMPILED_PATTERNS: LazyLock<Vec<(regex::Regex, &'static str)>> = LazyLock::new(|| {
+    SENSITIVE_PATTERNS
+        .iter()
+        .filter_map(|(pattern, replacement)| {
+            regex::Regex::new(pattern).ok().map(|re| (re, *replacement))
+        })
+        .collect()
+});
+
 /// Sanitizes a message by removing sensitive information.
-/// Uses regex pattern matching to detect and redact common sensitive patterns.
+/// Uses pre-compiled regex patterns for optimal performance under high-frequency logging.
 fn sanitize_message(msg: &str) -> String {
     let mut result = msg.to_string();
-
-    // 使用正则表达式进行更精确的匹配
-    for (pattern, replacement) in SENSITIVE_PATTERNS {
-        if let Ok(re) = regex::Regex::new(pattern) {
-            result = re.replace_all(&result, *replacement).to_string();
-        }
+    for (re, replacement) in COMPILED_PATTERNS.iter() {
+        result = re.replace_all(&result, *replacement).to_string();
     }
-
     result
 }
 
