@@ -457,7 +457,7 @@ impl LoggerManager {
     /// 1. 环境变量 `INKLOG_CONFIG_PATH` 指定的路径
     /// 2. 当前目录下的 `inklog_config.toml`
     /// 3. 用户配置目录 `~/.config/inklog/config.toml`
-    /// 4. 系统配置目录 `/etc/inklog/config.toml`
+    /// 4. 系统配置目录（Unix: `/etc/inklog/config.toml`，Windows: `%ProgramData%\inklog\config.toml`）
     ///
     /// # Returns
     /// 成功返回LoggerManager实例，失败返回错误
