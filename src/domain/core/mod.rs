@@ -6,6 +6,13 @@ pub mod container;
 pub mod manager;
 pub mod subscriber;
 
+// Submodules extracted from manager.rs for maintainability
+mod builder;
+mod http_server;
+mod recovery;
+mod workers;
+
+pub use builder::{LoggerBuilder, LoggerDependencies};
 pub use container::{InklogContainer, InklogContainerBuilder};
-pub use manager::{LoggerBuilder, LoggerDependencies, LoggerManager};
+pub use manager::LoggerManager;
 pub use subscriber::LoggerSubscriber;
