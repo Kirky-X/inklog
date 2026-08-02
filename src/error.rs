@@ -73,8 +73,13 @@ const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
         "(?i)(bearer|authorization)\\s*:\\s*[a-zA-Z0-9_\\-\\.]+",
         "$1: ***REDACTED***",
     ),
-    // Sensitive paths
+    // Sensitive paths (cross-platform)
     ("/home/[a-zA-Z0-9_-]+/", "[USER_HOME_PATH]"),
+    ("/Users/[a-zA-Z0-9_-]+/", "[USER_HOME_PATH]"),
+    (
+        "(?i)[A-Z]:[/\\\\]Users[/\\\\][a-zA-Z0-9_-]+[/\\\\]",
+        "[USER_HOME_PATH]",
+    ),
     ("/etc/inklog/", "[CONFIG_PATH]"),
     ("/run/secrets/", "[SECRETS_PATH]"),
     // Passwords in URLs
@@ -323,6 +328,48 @@ mod tests {
             msg
         );
         assert!(!msg.contains("/home/user/"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_macos_user_paths() {
+        let error = InklogError::ConfigError(
+            "Config not found at /Users/john/.config/inklog.yaml".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("[USER_HOME_PATH]"),
+            "macOS path should be redacted. Message: {}",
+            msg
+        );
+        assert!(!msg.contains("/Users/john/"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_windows_user_paths() {
+        let error = InklogError::ConfigError(
+            "Config not found at C:\\Users\\Admin\\.config\\inklog.yaml".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("[USER_HOME_PATH]"),
+            "Windows path should be redacted. Message: {}",
+            msg
+        );
+        assert!(!msg.contains("C:\\Users\\Admin\\"));
+    }
+
+    #[test]
+    fn test_safe_message_redacts_windows_forward_slash_paths() {
+        let error = InklogError::ConfigError(
+            "Config not found at C:/Users/Admin/.config/inklog.yaml".to_string(),
+        );
+        let msg = error.safe_message();
+        assert!(
+            msg.contains("[USER_HOME_PATH]"),
+            "Windows forward-slash path should be redacted. Message: {}",
+            msg
+        );
+        assert!(!msg.contains("C:/Users/Admin/"));
     }
 
     #[test]
