@@ -171,9 +171,12 @@ impl DbNexusAdapter {
         };
 
         // 使用 DbPool::with_config 创建连接池
-        let pool = DbPool::with_config(config).await.map_err(|e| {
-            InklogError::DatabaseError(format!("Failed to create connection pool: {}", e))
-        })?;
+        let pool = DbPool::with_config(config)
+            .await
+            .map_err(|e| InklogError::DatabaseError {
+                message: format!("Failed to create connection pool: {}", e),
+                source: Some(Box::new(e)),
+            })?;
 
         Ok(Self {
             pool,
@@ -216,11 +219,14 @@ impl Database for DbNexusAdapter {
         }
 
         // 获取写会话 (使用 admin 角色，因为默认权限配置只允许 admin/system)
-        let session = self
-            .pool
-            .get_session("admin")
-            .await
-            .map_err(|e| InklogError::DatabaseError(format!("Failed to get session: {}", e)))?;
+        let session =
+            self.pool
+                .get_session("admin")
+                .await
+                .map_err(|e| InklogError::DatabaseError {
+                    message: format!("Failed to get session: {}", e),
+                    source: Some(Box::new(e)),
+                })?;
 
         // 构建所有记录的 INSERT SQL 语句
         let sqls: Vec<String> = records
@@ -267,7 +273,10 @@ impl Database for DbNexusAdapter {
             .await
             .map_err(|e| {
                 tracing::error!("Batch insert failed, transaction rolled back: {}", e);
-                InklogError::DatabaseError(format!("Batch insert failed: {}", e))
+                InklogError::DatabaseError {
+                    message: format!("Batch insert failed: {}", e),
+                    source: Some(Box::new(e)),
+                }
             })?;
 
         Ok(records.len())
@@ -316,9 +325,10 @@ impl DbNexusAdapter {
     /// 此方法仅在启用 `dbnexus` feature 时可用
     #[deprecated(note = "Enable 'dbnexus' feature to use DbNexusAdapter")]
     pub async fn new(_url: &str, _pool_size: u32) -> Result<Self, InklogError> {
-        Err(InklogError::DatabaseError(
-            "DbNexusAdapter requires 'dbnexus' feature to be enabled".to_string(),
-        ))
+        Err(InklogError::DatabaseError {
+            message: "DbNexusAdapter requires 'dbnexus' feature to be enabled".to_string(),
+            source: None,
+        })
     }
 }
 
@@ -633,7 +643,7 @@ mod tests {
     async fn test_dbnexus_adapter_not_available_without_feature() {
         let result = DbNexusAdapter::new("test", 1).await;
         assert!(result.is_err());
-        if let Err(InklogError::DatabaseError(_)) = result {
+        if let Err(InklogError::DatabaseError { .. }) = result {
             // Expected
         } else {
             panic!("Expected DatabaseError");
