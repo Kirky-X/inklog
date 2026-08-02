@@ -184,26 +184,55 @@ impl LoggerManager {
         let auth_enabled = config.auth.as_ref().map(|a| a.enabled).unwrap_or(false);
         let ip_whitelist = config.ip_whitelist.clone();
 
+        let tls_config = config.tls.clone();
+
         let handle = tokio::spawn(async move {
-            let listener = match tokio::net::TcpListener::bind(addr).await {
-                Ok(l) => l,
-                Err(e) => {
-                    tracing::error!("Failed to bind HTTP server to {}: {}", addr, e);
-                    return;
+            let make_svc = app.into_make_service_with_connect_info::<SocketAddr>();
+
+            if let Some(ref tls) = tls_config {
+                // TLS mode via axum-server + rustls
+                use axum_server::tls_rustls::RustlsConfig;
+
+                let rustls_config =
+                    match RustlsConfig::from_pem_file(&tls.cert_path, &tls.key_path).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to load TLS cert/key ({}, {}): {}",
+                                tls.cert_path,
+                                tls.key_path,
+                                e
+                            );
+                            return;
+                        }
+                    };
+                info!(
+                    "HTTPS server started on {} (auth: {}, ip_whitelist: {:?})",
+                    addr, auth_enabled, ip_whitelist
+                );
+                if let Err(e) = axum_server::tls_rustls::bind_rustls(addr, rustls_config)
+                    .serve(make_svc)
+                    .await
+                {
+                    tracing::error!("HTTPS server error: {}", e);
                 }
-            };
-            info!(
-                "HTTP server started on {} (auth: {}, ip_whitelist: {:?})",
-                addr, auth_enabled, ip_whitelist
-            );
-            match axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .await
-            {
-                Ok(_) => info!("HTTP server stopped"),
-                Err(e) => tracing::error!("HTTP server error: {}", e),
+            } else {
+                // Plain TCP mode
+                let listener = match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("Failed to bind HTTP server to {}: {}", addr, e);
+                        return;
+                    }
+                };
+                info!(
+                    "HTTP server started on {} (auth: {}, ip_whitelist: {:?})",
+                    addr, auth_enabled, ip_whitelist
+                );
+                match axum::serve(listener, make_svc).await {
+                    Ok(_) => info!("HTTP server stopped"),
+                    Err(e) => tracing::error!("HTTP server error: {}", e),
+                }
             }
         });
 

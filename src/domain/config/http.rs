@@ -27,6 +27,9 @@ pub struct HttpServerConfig {
     pub auth: Option<HttpAuthConfig>,
     #[serde(default)]
     pub ip_whitelist: Option<Vec<String>>,
+    /// Optional TLS configuration. When set, the HTTP server starts with TLS.
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 fn default_http_host() -> String {
@@ -53,6 +56,7 @@ impl Default for HttpServerConfig {
             error_mode: HttpErrorMode::default(),
             auth: None,
             ip_whitelist: None,
+            tls: None,
         }
     }
 }
@@ -86,6 +90,15 @@ impl Default for HttpAuthConfig {
 // ============================================================================
 // HttpErrorMode - HTTP server error handling mode
 // ============================================================================
+
+/// TLS configuration for the HTTP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TlsConfig {
+    /// Path to the PEM-encoded certificate file.
+    pub cert_path: String,
+    /// Path to the PEM-encoded private key file.
+    pub key_path: String,
+}
 
 /// HTTP server error handling mode.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

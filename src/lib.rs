@@ -156,7 +156,7 @@ pub mod integrations;
 pub use domain::config::{
     ChannelStrategy, ConsoleSinkConfig, DatabaseDriver, DatabaseSinkConfig, FileSinkConfig,
     GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig, ParquetConfig,
-    PartitionStrategy, PerformanceConfig,
+    PartitionStrategy, PerformanceConfig, TlsConfig,
 };
 pub use domain::db_provider::LogDbProvider;
 pub use domain::types::log_record::LogRecord;

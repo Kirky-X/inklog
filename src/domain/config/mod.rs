@@ -16,5 +16,5 @@ pub use console::ConsoleSinkConfig;
 pub use database::{DatabaseDriver, DatabaseSinkConfig, ParquetConfig, PartitionStrategy};
 pub use file_sink::FileSinkConfig;
 pub use global::GlobalConfig;
-pub use http::{HttpAuthConfig, HttpErrorMode, HttpServerConfig};
+pub use http::{HttpAuthConfig, HttpErrorMode, HttpServerConfig, TlsConfig};
 pub use performance::{ChannelStrategy, PerformanceConfig};
