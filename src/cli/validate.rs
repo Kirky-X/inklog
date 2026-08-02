@@ -450,6 +450,17 @@ pub fn check_prerequisites() {
 
     println!("\n  Configuration check:");
 
+    #[cfg(unix)]
+    let home_config = std::path::PathBuf::from("/etc/inklog/config.toml");
+    #[cfg(windows)]
+    let home_config = std::env::var("ProgramData")
+        .map(|base| {
+            std::path::PathBuf::from(base)
+                .join("inklog")
+                .join("config.toml")
+        })
+        .unwrap_or_else(|_| std::path::PathBuf::from("C:\\ProgramData\\inklog\\config.toml"));
+    #[cfg(not(any(unix, windows)))]
     let home_config = std::path::PathBuf::from("/etc/inklog/config.toml");
     let local_config = std::path::PathBuf::from("./inklog_config.toml");
     let config_example = std::path::PathBuf::from("./config.example.toml");

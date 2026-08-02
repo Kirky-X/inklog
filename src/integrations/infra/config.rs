@@ -136,7 +136,7 @@ impl InklogConfigAdapter {
     /// 1. `$INKLOG_CONFIG_PATH` 环境变量指定的路径
     /// 2. `inklog_config.toml`（当前目录）
     /// 3. `~/.config/inklog/config.toml`
-    /// 4. `/etc/inklog/config.toml`
+    /// 4. 系统配置目录（Unix: `/etc/inklog/config.toml`，Windows: `%ProgramData%\inklog\config.toml`）
     /// 5. 默认配置
     ///
     /// # 返回
