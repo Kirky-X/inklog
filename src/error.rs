@@ -125,14 +125,22 @@ pub enum InklogError {
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 
-    #[error("Database error: {0}")]
-    DatabaseError(String),
+    #[error("Database error: {message}")]
+    DatabaseError {
+        message: String,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send>>,
+    },
 
     #[error("Cache error: {0}")]
     CacheError(String),
 
-    #[error("Encryption error: {0}")]
-    EncryptionError(String),
+    #[error("Encryption error: {message}")]
+    EncryptionError {
+        message: String,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send>>,
+    },
 
     #[error("Shutdown error: {0}")]
     Shutdown(String),
@@ -160,6 +168,44 @@ impl From<toml::de::Error> for InklogError {
 }
 
 impl InklogError {
+    /// Create a `DatabaseError` with a message only (no source chain).
+    pub fn database_error(message: impl Into<String>) -> Self {
+        InklogError::DatabaseError {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Create a `DatabaseError` with a message and source error chain.
+    pub fn database_error_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + 'static,
+    ) -> Self {
+        InklogError::DatabaseError {
+            message: message.into(),
+            source: Some(Box::new(source)),
+        }
+    }
+
+    /// Create an `EncryptionError` with a message only (no source chain).
+    pub fn encryption_error(message: impl Into<String>) -> Self {
+        InklogError::EncryptionError {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Create an `EncryptionError` with a message and source error chain.
+    pub fn encryption_error_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + 'static,
+    ) -> Self {
+        InklogError::EncryptionError {
+            message: message.into(),
+            source: Some(Box::new(source)),
+        }
+    }
+
     /// Returns a sanitized error message that does not contain sensitive information.
     ///
     /// This method is useful for logging and displaying errors to users
@@ -187,14 +233,14 @@ impl InklogError {
             InklogError::SerializationError(e) => {
                 format!("Serialization error: {}", sanitize_message(&e.to_string()))
             }
-            InklogError::DatabaseError(msg) => {
-                format!("Database error: {}", sanitize_message(msg))
+            InklogError::DatabaseError { message, .. } => {
+                format!("Database error: {}", sanitize_message(message))
             }
             InklogError::CacheError(msg) => {
                 format!("Cache error: {}", sanitize_message(msg))
             }
-            InklogError::EncryptionError(msg) => {
-                format!("Encryption error: {}", sanitize_message(msg))
+            InklogError::EncryptionError { message, .. } => {
+                format!("Encryption error: {}", sanitize_message(message))
             }
             InklogError::Shutdown(msg) => {
                 format!("Shutdown error: {}", sanitize_message(msg))
@@ -320,9 +366,12 @@ mod tests {
                 .contains("Configuration error:")
         );
         assert!(
-            InklogError::DatabaseError("x".into())
-                .safe_message()
-                .contains("Database error:")
+            InklogError::DatabaseError {
+                message: "x".into(),
+                source: None
+            }
+            .safe_message()
+            .contains("Database error:")
         );
         assert!(
             InklogError::CacheError("x".into())
@@ -330,9 +379,12 @@ mod tests {
                 .contains("Cache error:")
         );
         assert!(
-            InklogError::EncryptionError("x".into())
-                .safe_message()
-                .contains("Encryption error:")
+            InklogError::EncryptionError {
+                message: "x".into(),
+                source: None
+            }
+            .safe_message()
+            .contains("Encryption error:")
         );
         assert!(
             InklogError::Shutdown("x".into())
