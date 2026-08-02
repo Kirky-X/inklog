@@ -26,6 +26,19 @@ pub(super) const MIN_BATCH_SIZE: usize = 10;
 pub(super) const MAX_BATCH_SIZE: usize = 1000;
 pub(super) const ADAPTIVE_WINDOW_SIZE: usize = 10;
 
+/// Maximum number of database worker connections, capped at `min(num_cpus, 4)`.
+/// Prevents resource exhaustion when pool_size is set too high.
+pub(super) const MAX_DB_WORKER_LIMIT: usize = 4;
+
+/// Compute the effective upper bound for database worker threads/connections.
+/// Returns `min(num_cpus::get().max(1), MAX_DB_WORKER_LIMIT)`.
+pub(crate) fn effective_db_worker_limit() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, MAX_DB_WORKER_LIMIT)
+}
+
 impl DatabaseSink {
     /// 创建 DatabaseSink（使用默认配置）
     ///

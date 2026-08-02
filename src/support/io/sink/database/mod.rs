@@ -30,6 +30,8 @@ use crate::Metrics;
 mod database_impl;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub use database_impl::convert_logs_to_parquet;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+pub(crate) use database_impl::effective_db_worker_limit;
 // Import constants for test access (tests use `use super::*;`)
 #[cfg(all(any(feature = "sqlite", feature = "postgres", feature = "mysql"), test))]
 use database_impl::{ADAPTIVE_WINDOW_SIZE, MAX_BATCH_SIZE, MIN_BATCH_SIZE};
@@ -665,6 +667,19 @@ mod tests {
         assert_eq!(
             inner.current_batch_size, 200,
             "should grow when total_ops=0 (success_rate defaults to 1.0)"
+        );
+    }
+
+    #[test]
+    fn test_effective_db_worker_limit() {
+        let limit = effective_db_worker_limit();
+        // Should be between 1 and MAX_DB_WORKER_LIMIT (4)
+        assert!(limit >= 1, "limit should be at least 1, got {}", limit);
+        assert!(
+            limit <= database_impl::MAX_DB_WORKER_LIMIT,
+            "limit should be at most {}, got {}",
+            database_impl::MAX_DB_WORKER_LIMIT,
+            limit
         );
     }
 }

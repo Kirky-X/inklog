@@ -402,91 +402,45 @@ Inklog 内置全面的 **PII (个人身份信息)** 检测和脱敏功能,保护
 
 ### 内置 PII 检测模式
 
-#### 1. 邮箱地址检测
+Inklog 内置 **21 条**脱敏规则，按优先级排序执行。规则分为三个优先级组：高（10-25）、中（30-40）、低（50-100）。
 
-**正则表达式**:
-```rust
-r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-```
+#### 高优先级规则（优先级 10-25）
 
-**脱敏规则**: `user@example.com` → `***@***.***`
+| # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
+|---|---------|--------|---------|----------|
+| 1 | 国际电话号码 | 10 | E.164 格式 `+{cc}-{mid}-{last}` | `+1-202-555-0123` → `+1-***-***-23` |
+| 2 | 信用卡号 (Luhn) | 15 | Visa/MC/Amex/Discover + Luhn 校验 | `4111111111111111` → `****-****-****-1111` |
+| 3 | IPv4 地址 | 20 | `xxx.xxx.xxx.xxx` | `192.168.1.100` → `***.***.***.100` |
+| 4 | MAC 地址 | 20 | `XX:XX:XX:XX:XX:XX` 或 `XX-XX-XX-XX-XX-XX` | `00:1A:2B:3C:4D:5E` → `XX:**:**:**:**:5E` |
+| 5 | IPv6 地址 | 21 | `{hex}:{hex}:...:{hex}` | `2001:db8::1` → `****:****:****:XXXX` |
 
-**代码示例**:
-```rust
-impl MaskRule {
-    fn new_email_rule() -> Self {
-        Self {
-            pattern: LazyLock::new(|| {
-                Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap()
-            }),
-            replacement: "***@***.***".to_string(),
-        }
-    }
-}
-```
+#### 中优先级规则（优先级 30-40）
 
-#### 2. 电话号码检测 (中国手机号)
+| # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
+|---|---------|--------|---------|----------|
+| 6 | 护照号 | 30 | `[A-Z]\d{6,9}` (G/E 开头) | `G12345678` → `******XX` |
+| 7 | SSN (美国社保号) | 35 | `XXX-XX-XXXX` | `123-45-6789` → `***-**-6789` |
+| 8 | DB 连接串 | 40 | `protocol://user:pass@host/db` | `postgres://admin:secret@...` → `postgres://***:***@***` |
 
-**正则表达式**:
-```rust
-r"\b1[3-9]\d{9}\b"
-```
+#### 低优先级规则（优先级 50-100）
 
-**脱敏规则**: `13812345678` → `138****5678`
+| # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
+|---|---------|--------|---------|----------|
+| 9 | GitHub Token | 50 | `ghp_/gho_/ghu_/ghs_/ghr_` 前缀 | `ghp_xxxx` → `***REDACTED_GITHUB***` |
+| 10 | Slack Token | 51 | `xoxb-/xoxp-/xapp-` 前缀 | `xoxb-xxxx` → `***REDACTED_SLACK***` |
+| 11 | Stripe Key | 52 | `sk_live_/rk_live_/pk_live_` 前缀 | `sk_live_xxxx` → `***REDACTED_STRIPE***` |
+| 12 | Google API Key | 53 | `AIza` 前缀 35 字符 | `AIzaSy...` → `***REDACTED_GOOGLE***` |
+| 13 | 私钥 PEM | 54 | `-----BEGIN ... PRIVATE KEY-----` | PEM 块 → `***REDACTED_PRIVATE_KEY***` |
+| 14 | 邮箱地址 | 100 | 标准邮箱格式 | `user@example.com` → `**@**.***` |
+| 15 | 电话号码 (中国) | 100 | `1[3-9]\d{9}` | `13812345678` → `***-****-****` |
+| 16 | 身份证号 (中国) | 100 | 18 位独立字符串 | `110101199001011234` → `******1234` |
+| 17 | 银行卡号 | 100 | 8+ 位连续数字 | `6222021234567890123` → `****-****-****-0123` |
+| 18 | API 密钥 | 100 | `api_key=...` 格式 | `api_key=xxx` → `api_key=***REDACTED***` |
+| 19 | AWS 凭据 | 100 | `AKIA/ABIA/ACCA/ASIA` 前缀 | `AKIAIOSFODNN7EXAMPLE` → `***REDACTED***` |
+| 20 | JWT Token | 100 | `eyJ.eyJ.sig` 格式 | JWT → `***REDACTED_JWT***` |
+| 21 | 通用密钥 | 100 | token/secret/key/password 等 | `secret=xxx` → `***REDACTED***` |
 
-#### 3. 身份证号检测 (中国 SSN)
-
-**正则表达式**:
-```rust
-r"^(\d{6})(\d{8})(\d{3}[\dX])$"
-```
-
-**脱敏规则**: `110101199001011234` → `******1234` (保留后4位)
-
-#### 4. 银行卡号检测
-
-**正则表达式**:
-```rust
-r"(\d{4})(\d+)(\d{4})"
-```
-
-**脱敏规则**: `6222021234567890123` → `****-****-****-0123`
-
-#### 5. API 密钥检测
-
-**正则表达式**:
-```rust
-r"(?i)(api[_-]?key[^\s:=]*\s*[=:]\s*[a-zA-Z0-9_-]{20,})"
-```
-
-**脱敏规则**: `api_key=abcdefghij1234567890` → `api_key=***REDACTED***`
-
-#### 6. AWS 凭据检测
-
-**正则表达式**:
-```rust
-r"(?i)(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}"
-```
-
-**脱敏规则**: `AKIAIOSFODNN7EXAMPLE` → `***REDACTED***`
-
-#### 7. JWT Token 检测
-
-**正则表达式**:
-```rust
-r"(?i)eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*"
-```
-
-**脱敏规则**: 完整替换为 `***REDACTED_JWT***`
-
-#### 8. 通用密钥检测
-
-**正则表达式**:
-```rust
-r"(?i)([^\s:=]*(?:token|secret|key|password|passwd|pwd|credential)s?[^\s:=]*\s*[=:]\s*)([a-zA-Z0-9_\-\+]{16,})"
-```
-
-**脱敏规则**: 敏感字段值替换为 `***REDACTED***`
+> **注意**: 信用卡规则使用 **Luhn 算法**验证校验和，仅脱敏通过校验的合法卡号，避免误判普通数字序列。
 
 ### 字段级别敏感检测
 
@@ -536,31 +490,87 @@ impl DataMasker {
 
 ### 自定义模式支持
 
-**当前状态**: 当前版本使用硬编码的内置规则,暂不支持运行时自定义正则模式。
+Inklog 支持通过 `MaskRuleBuilder` 和 `DataMaskerBuilder` 灵活自定义脱敏规则。
 
-**自定义扩展建议**:
-
-如需添加自定义 PII 模式,可以修改 `src/support/processing/masking.rs` 中的 `DataMasker::new()` 方法:
+#### 使用 MaskRuleBuilder 创建自定义规则
 
 ```rust
-impl DataMasker {
-    pub fn new() -> Self {
-        let rules = vec![
-            // 内置规则
-            MaskRule::new_email_rule(),
-            MaskRule::new_phone_rule(),
+use inklog::{MaskRule, MaskRuleBuilder};
 
-            // 添加自定义规则
-            MaskRule {
-                pattern: LazyLock::new(|| {
-                    Regex::new(r"CUSTOM_PATTERN").unwrap()
-                }),
-                replacement: "***CUSTOM***".to_string(),
-            },
-        ];
-        Self { rules }
-    }
-}
+// 使用 Builder 创建自定义规则
+let custom_rule = MaskRule::builder("employee_id")
+    .pattern(r"\bEMP-\d{6}\b")
+    .replacement("EMP-***")
+    .priority(30)
+    .build()
+    .expect("Invalid pattern");
+```
+
+#### 使用 DataMaskerBuilder 组装脱敏器
+
+```rust
+use inklog::{DataMasker, DataMaskerBuilder, MaskRule};
+
+// 在内置规则基础上添加自定义规则
+let masker = DataMasker::builder()
+    .add_rule(
+        MaskRule::builder("employee_id")
+            .pattern(r"\bEMP-\d{6}\b")
+            .replacement("EMP-***")
+            .priority(30)
+            .build()
+            .unwrap()
+    )
+    .disable_builtin("bank_card")  // 禁用特定内置规则
+    .build();
+
+let result = masker.mask("Employee: EMP-123456");
+// 结果: "Employee: EMP-***"
+```
+
+#### 使用 MaskRuleRegistry 管理规则
+
+```rust
+use inklog::{MaskRuleRegistry, MaskRule};
+
+// 创建包含所有内置规则的注册中心
+let mut registry = MaskRuleRegistry::with_builtins();
+
+// 注册自定义规则
+let custom = MaskRule::builder("custom_pattern")
+    .pattern(r"CUSTOM-\d+")
+    .replacement("***CUSTOM***")
+    .priority(25)
+    .build()
+    .unwrap();
+registry.register(custom).unwrap();
+
+// 启用/禁用特定规则
+registry.set_enabled("email", false);
+
+// 获取当前活跃规则（按优先级排序）
+let active = registry.active_rules();
+println!("Active rules: {}", active.len());
+```
+
+#### 从 TOML 配置加载规则
+
+```rust
+let toml_config = r#"
+[[masking_rules]]
+name = "employee_id"
+pattern = "\\bEMP-\\d{6}\\b"
+replacement = "EMP-***"
+priority = 30
+
+[[masking_rules]]
+name = "project_code"
+pattern = "PRJ-[A-Z]{3}-\\d{4}"
+replacement = "PRJ-***-XXXX"
+priority = 35
+"#;
+
+let rules = MaskRuleRegistry::load_from_toml(toml_config).unwrap();
 ```
 
 ### 脱敏集成
@@ -1102,9 +1112,13 @@ log::info!("User registration: email=user@example.com, phone=13812345678");
 
 **支持的 GDPR 敏感数据类型**:
 - ✅ 电子邮箱地址 (邮箱脱敏)
-- ✅ 电话号码 (电话脱敏)
-- ✅ 身份标识符 (身份证脱敏)
-- ✅ 网络标识符 (IP 地址脱敏 - 自定义)
+- ✅ 电话号码 (中国手机号 + 国际 E.164 格式)
+- ✅ 身份标识符 (中国身份证、美国 SSN、护照号)
+- ✅ 网络标识符 (IPv4/IPv6 地址、MAC 地址)
+- ✅ 金融凭据 (信用卡号 + Luhn 校验、银行卡号)
+- ✅ 第三方令牌 (GitHub/Slack/Stripe/Google API Key)
+- ✅ 私钥 PEM 证书
+- ✅ 数据库连接串
 
 #### 数据主体权利
 
@@ -1836,8 +1850,8 @@ chown $(whoami):$(whoami) logs/*.enc
 
 ---
 
-**文档版本**: 1.0
-**最后更新**: 2026-01-18  
+**文档版本**: 1.1
+**最后更新**: 2026-08-02  
 **维护者**: Inklog Security Team  
 
 **联系我们**: security@inklog.dev
