@@ -2741,7 +2741,6 @@ dependencies = [
  "is-terminal",
  "log",
  "nix",
- "once_cell",
  "owo-colors",
  "oxcache",
  "parking_lot",

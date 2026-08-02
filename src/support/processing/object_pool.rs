@@ -33,10 +33,10 @@
 
 use crate::InklogError;
 use crate::LogRecord;
-use once_cell::sync::Lazy;
 use oxcache::Cache;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -285,10 +285,10 @@ thread_local! {
 // Global Convenience Functions
 // ============================================================================
 
-static GLOBAL_LOG_RECORD_POOL: Lazy<ThreadLocalLogRecordPool> =
-    Lazy::new(|| ThreadLocalLogRecordPool::new(1024));
-static GLOBAL_STRING_POOL: Lazy<ThreadLocalStringPool> =
-    Lazy::new(|| ThreadLocalStringPool::new(1024));
+static GLOBAL_LOG_RECORD_POOL: LazyLock<ThreadLocalLogRecordPool> =
+    LazyLock::new(|| ThreadLocalLogRecordPool::new(1024));
+static GLOBAL_STRING_POOL: LazyLock<ThreadLocalStringPool> =
+    LazyLock::new(|| ThreadLocalStringPool::new(1024));
 
 /// Get a LogRecord from the global thread-local pool.
 pub fn get_log_record() -> LogRecord {

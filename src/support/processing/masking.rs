@@ -66,6 +66,9 @@
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use crate::error::InklogError;
 
 /// Word-boundary regex patterns for sensitive field detection.
 /// Uses \b (word boundary) to avoid false positives like "cakey" matching "key".
@@ -160,18 +163,47 @@ pub struct DataMasker {
     rules: Vec<MaskRule>,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct MaskRule {
+/// Type alias for the custom apply function used in masking rules.
+type ApplyFn = Arc<dyn Fn(&Regex, &str, &str) -> String + Send + Sync>;
+
+/// A masking rule that defines how to detect and replace sensitive data patterns.
+///
+/// # Fields
+/// - `name`: Unique identifier for the rule
+/// - `pattern`: Compiled regex pattern for detection
+/// - `replacement`: Replacement string (supports capture group references like `${1}`)
+/// - `replace_count`: Maximum number of replacements per application
+/// - `priority`: Execution order (lower values execute first)
+/// - `enabled`: Whether this rule is active
+/// - `apply_fn`: Custom application function for complex masking logic
+#[derive(Clone)]
+pub struct MaskRule {
     name: String,
     pattern: Regex,
     replacement: String,
+    #[allow(dead_code)]
     replace_count: usize,
+    priority: i32,
+    enabled: bool,
+    apply_fn: ApplyFn,
+}
+
+impl std::fmt::Debug for MaskRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MaskRule")
+            .field("name", &self.name)
+            .field("pattern", &self.pattern.as_str())
+            .field("replacement", &self.replacement)
+            .field("priority", &self.priority)
+            .field("enabled", &self.enabled)
+            .field("apply_fn", &"<fn>")
+            .finish()
+    }
 }
 
 impl DataMasker {
     pub fn new() -> Self {
-        let rules = vec![
+        let mut rules = vec![
             MaskRule::new_email_rule(),
             MaskRule::new_phone_rule(),
             MaskRule::new_id_card_rule(),
@@ -180,8 +212,24 @@ impl DataMasker {
             MaskRule::new_aws_key_rule(),
             MaskRule::new_jwt_rule(),
             MaskRule::new_generic_secret_rule(),
+            // High-priority
+            MaskRule::new_international_phone_rule(),
+            MaskRule::new_credit_card_rule(),
+            MaskRule::new_ipv4_rule(),
+            MaskRule::new_ipv6_rule(),
+            MaskRule::new_mac_address_rule(),
+            // Medium-priority
+            MaskRule::new_passport_rule(),
+            MaskRule::new_ssn_rule(),
+            MaskRule::new_db_connection_rule(),
+            // Low-priority
+            MaskRule::new_github_token_rule(),
+            MaskRule::new_slack_token_rule(),
+            MaskRule::new_stripe_key_rule(),
+            MaskRule::new_google_api_key_rule(),
+            MaskRule::new_private_key_rule(),
         ];
-
+        rules.sort_by_key(|r| r.priority());
         Self { rules }
     }
 
@@ -229,11 +277,84 @@ impl DataMasker {
             self.mask_value(v);
         }
     }
+
+    /// Consumes the `DataMasker` and returns the inner rules vector.
+    pub fn into_rules(self) -> Vec<MaskRule> {
+        self.rules
+    }
+
+    /// Creates a new [`DataMaskerBuilder`] for assembling a custom masker.
+    pub fn builder() -> DataMaskerBuilder {
+        DataMaskerBuilder::new()
+    }
 }
 
+/// Builder for assembling a [`DataMasker`] with custom rule configurations.
+///
+/// # Example
+///
+/// ```rust
+/// use inklog::DataMasker;
+///
+/// let masker = DataMasker::builder()
+///     .disable_builtin("email")
+///     .build();
+/// ```
+pub struct DataMaskerBuilder {
+    extra_rules: Vec<MaskRule>,
+    disabled_builtins: Vec<String>,
+    use_builtins: bool,
+}
+
+impl DataMaskerBuilder {
+    fn new() -> Self {
+        Self {
+            extra_rules: Vec::new(),
+            disabled_builtins: Vec::new(),
+            use_builtins: true,
+        }
+    }
+
+    /// Add a custom rule to the masker.
+    pub fn add_rule(mut self, rule: MaskRule) -> Self {
+        self.extra_rules.push(rule);
+        self
+    }
+
+    /// Disable a built-in rule by name.
+    pub fn disable_builtin(mut self, name: &str) -> Self {
+        self.disabled_builtins.push(name.to_string());
+        self
+    }
+
+    /// Build the [`DataMasker`] with all configured rules sorted by priority.
+    pub fn build(self) -> DataMasker {
+        let mut rules = if self.use_builtins {
+            DataMasker::new().into_rules()
+        } else {
+            Vec::new()
+        };
+
+        // Remove disabled builtins
+        for name in &self.disabled_builtins {
+            rules.retain(|r| r.name() != name.as_str());
+        }
+
+        // Add extra rules
+        rules.extend(self.extra_rules);
+
+        // Sort by priority
+        rules.sort_by_key(|r| r.priority());
+
+        DataMasker { rules }
+    }
+}
+
+#[allow(dead_code)]
 use std::sync::LazyLock;
 
 /// Pre-compiled regex patterns for better performance
+#[allow(dead_code)]
 static EMAIL_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+").expect("Invalid email regex"));
 
@@ -269,102 +390,585 @@ static GENERIC_SECRET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .expect("Invalid generic secret regex")
 });
 
+// === High-priority rules (compliance) ===
+
+/// International phone (E.164 format)
+static INTERNATIONAL_PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\+(\d{1,3})[\s.-]?(\(?\d{1,4}\)?[\s.-]?\d{2,4}[\s.-]?)(\d{2,4})")
+        .expect("Invalid international phone regex")
+});
+
+/// Credit card (major card networks)
+static CREDIT_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|35[0-9]{14})\b")
+        .expect("Invalid credit card regex")
+});
+
+/// IPv4 address
+static IPV4_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b")
+        .expect("Invalid IPv4 regex")
+});
+
+/// IPv6 address
+static IPV6_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b").expect("Invalid IPv6 regex")
+});
+
+/// MAC address
+static MAC_ADDRESS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b").expect("Invalid MAC address regex")
+});
+
+// === Medium-priority rules (regional identity) ===
+
+/// Passport number (Chinese international passport format)
+static PASSPORT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b[EeGg][A-Za-z0-9]{8}\b").expect("Invalid passport regex"));
+
+/// US Social Security Number
+static SSN_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("Invalid SSN regex"));
+
+/// Database connection string (password in URI)
+static DB_CONNECTION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)((?:postgres|mysql|mongodb|redis|amqp)://[^:\s]+:)([^@]+)(@\S+)")
+        .expect("Invalid DB connection regex")
+});
+
+// === Low-priority rules (third-party tokens) ===
+
+/// GitHub personal access token
+static GITHUB_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{36,}\b").expect("Invalid GitHub token regex")
+});
+
+/// Slack token
+static SLACK_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"xox[bpas]-[0-9]{10,13}-[0-9a-zA-Z-]+").expect("Invalid Slack token regex")
+});
+
+/// Stripe API key
+static STRIPE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:sk|pk)_(?:live|test)_[0-9a-zA-Z]{24,}").expect("Invalid Stripe key regex")
+});
+
+/// Google API key
+static GOOGLE_API_KEY_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"AIza[0-9A-Za-z_-]{35}").expect("Invalid Google API key regex"));
+
+/// Private key PEM block
+static PRIVATE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----")
+        .expect("Invalid private key regex")
+});
+
 impl MaskRule {
     fn new_email_rule() -> Self {
-        Self {
-            name: "email".to_string(),
-            pattern: EMAIL_REGEX.clone(),
-            replacement: "**@**.***".to_string(),
-            replace_count: 1,
-        }
+        Self::build_from_regex("email", EMAIL_REGEX.clone(), "**@**.***", 100, None)
     }
 
     fn new_phone_rule() -> Self {
-        Self {
-            name: "phone".to_string(),
-            pattern: PHONE_REGEX.clone(),
-            replacement: "***-****-****".to_string(),
-            replace_count: 1,
-        }
+        Self::build_from_regex("phone", PHONE_REGEX.clone(), "***-****-****", 100, None)
     }
 
     fn new_id_card_rule() -> Self {
-        Self {
-            name: "id_card".to_string(),
-            pattern: ID_CARD_REGEX.clone(),
-            replacement: "MASK_ID_CARD".to_string(), // Special marker for custom handling
-            replace_count: 1,
-        }
+        Self::build_from_regex(
+            "id_card",
+            ID_CARD_REGEX.clone(),
+            "MASK_ID_CARD",
+            100,
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex.replace(text, "******$3").to_string()
+            })),
+        )
     }
 
     fn new_bank_card_rule() -> Self {
-        Self {
-            name: "bank_card".to_string(),
-            pattern: BANK_CARD_REGEX.clone(),
-            replacement: "MASK_BANK_CARD".to_string(), // Special marker for custom handling
-            replace_count: 1,
-        }
+        Self::build_from_regex(
+            "bank_card",
+            BANK_CARD_REGEX.clone(),
+            "MASK_BANK_CARD",
+            100,
+            Some(Arc::new(
+                |_regex: &Regex, text: &str, _replacement: &str| {
+                    if text.len() >= 12 && text.chars().all(|c| c.is_ascii_digit()) {
+                        let last_four = &text[text.len() - 4..];
+                        format!("****-****-****-{}", last_four)
+                    } else {
+                        text.to_string()
+                    }
+                },
+            )),
+        )
     }
 
     fn new_api_key_rule() -> Self {
-        Self {
-            name: "api_key".to_string(),
-            pattern: API_KEY_REGEX.clone(),
-            replacement: "${1}***REDACTED***${3}".to_string(),
-            replace_count: 1,
-        }
+        Self::build_from_regex(
+            "api_key",
+            API_KEY_REGEX.clone(),
+            "${1}***REDACTED***${3}",
+            100,
+            None,
+        )
     }
 
     fn new_aws_key_rule() -> Self {
-        Self {
-            name: "aws_key".to_string(),
-            pattern: AWS_KEY_REGEX.clone(),
-            replacement: "***REDACTED***".to_string(),
-            replace_count: 1,
-        }
+        Self::build_from_regex(
+            "aws_key",
+            AWS_KEY_REGEX.clone(),
+            "***REDACTED***",
+            100,
+            None,
+        )
     }
 
     fn new_jwt_rule() -> Self {
-        Self {
-            name: "jwt".to_string(),
-            pattern: JWT_REGEX.clone(),
-            replacement: "***REDACTED_JWT***".to_string(),
-            replace_count: 1,
-        }
+        Self::build_from_regex("jwt", JWT_REGEX.clone(), "***REDACTED_JWT***", 100, None)
     }
 
     fn new_generic_secret_rule() -> Self {
-        Self {
-            name: "generic_secret".to_string(),
-            pattern: GENERIC_SECRET_REGEX.clone(),
-            replacement: "${1}***REDACTED***${3}".to_string(),
+        Self::build_from_regex(
+            "generic_secret",
+            GENERIC_SECRET_REGEX.clone(),
+            "${1}***REDACTED***${3}",
+            100,
+            None,
+        )
+    }
+
+    // === Internal helper for pre-compiled rules ===
+
+    /// Build a rule from a pre-compiled Regex, avoiding re-compilation.
+    fn build_from_regex(
+        name: &str,
+        regex: Regex,
+        replacement: &str,
+        priority: i32,
+        apply_fn: Option<ApplyFn>,
+    ) -> Self {
+        MaskRule {
+            name: name.to_string(),
+            pattern: regex,
+            replacement: replacement.to_string(),
             replace_count: 1,
+            priority,
+            enabled: true,
+            apply_fn: apply_fn.unwrap_or_else(|| {
+                Arc::new(|regex: &Regex, text: &str, replacement: &str| {
+                    regex.replace(text, replacement).to_string()
+                })
+            }),
         }
     }
 
+    // === High-priority rules ===
+
+    fn new_international_phone_rule() -> Self {
+        Self::build_from_regex(
+            "international_phone",
+            INTERNATIONAL_PHONE_REGEX.clone(),
+            "+${1}-***-***-${3}",
+            10,
+            None,
+        )
+    }
+
+    fn new_credit_card_rule() -> Self {
+        Self::build_from_regex(
+            "credit_card",
+            CREDIT_CARD_REGEX.clone(),
+            "***REDACTED_CC***",
+            15,
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex
+                    .replace_all(text, |caps: &regex::Captures| {
+                        let number = caps.get(0).unwrap().as_str();
+                        let digits: Vec<u32> =
+                            number.chars().filter_map(|c| c.to_digit(10)).collect();
+                        let mut sum = 0u32;
+                        let mut alternate = false;
+                        for &d in digits.iter().rev() {
+                            if alternate {
+                                let doubled = d * 2;
+                                sum += if doubled > 9 { doubled - 9 } else { doubled };
+                            } else {
+                                sum += d;
+                            }
+                            alternate = !alternate;
+                        }
+                        if !sum.is_multiple_of(10) {
+                            return number.to_string();
+                        }
+                        let last4 = &number[number.len() - 4..];
+                        if number.starts_with('3') {
+                            format!("****-******-{}", last4)
+                        } else {
+                            format!("****-****-****-{}", last4)
+                        }
+                    })
+                    .to_string()
+            })),
+        )
+    }
+
+    fn new_ipv4_rule() -> Self {
+        Self::build_from_regex(
+            "ipv4",
+            IPV4_REGEX.clone(),
+            "***.***.***.XXX",
+            20,
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex
+                    .replace_all(text, |caps: &regex::Captures| {
+                        let ip = caps.get(0).unwrap().as_str();
+                        if let Some(pos) = ip.rfind('.') {
+                            format!("***.***.***.{}", &ip[pos + 1..])
+                        } else {
+                            "***.***.***.***".to_string()
+                        }
+                    })
+                    .to_string()
+            })),
+        )
+    }
+
+    fn new_ipv6_rule() -> Self {
+        Self::build_from_regex(
+            "ipv6",
+            IPV6_REGEX.clone(),
+            "****:****:****:XXXX",
+            21,
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex
+                    .replace_all(text, |caps: &regex::Captures| {
+                        let ip = caps.get(0).unwrap().as_str();
+                        if let Some(pos) = ip.rfind(':') {
+                            let last_group = &ip[pos + 1..];
+                            let prefix_count = ip.matches(':').count();
+                            let mut result = "****".to_string();
+                            for _ in 1..prefix_count {
+                                result.push_str(":****");
+                            }
+                            result.push(':');
+                            result.push_str(last_group);
+                            result
+                        } else {
+                            ip.to_string()
+                        }
+                    })
+                    .to_string()
+            })),
+        )
+    }
+
+    fn new_mac_address_rule() -> Self {
+        Self::build_from_regex(
+            "mac_address",
+            MAC_ADDRESS_REGEX.clone(),
+            "XX:**:**:**:**:XX",
+            25,
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex
+                    .replace_all(text, |caps: &regex::Captures| {
+                        let mac = caps.get(0).unwrap().as_str();
+                        let sep = if mac.contains(':') { ':' } else { '-' };
+                        let parts: Vec<&str> = mac.split(sep).collect();
+                        if parts.len() == 6 {
+                            format!(
+                                "{}{}{}{}{}{}{}{}{}{}{}",
+                                parts[0], sep, "**", sep, "**", sep, "**", sep, "**", sep, parts[5]
+                            )
+                        } else {
+                            mac.to_string()
+                        }
+                    })
+                    .to_string()
+            })),
+        )
+    }
+
+    // === Medium-priority rules ===
+
+    fn new_passport_rule() -> Self {
+        Self::build_from_regex(
+            "passport",
+            PASSPORT_REGEX.clone(),
+            "******XX",
+            30,
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex
+                    .replace_all(text, |caps: &regex::Captures| {
+                        let passport = caps.get(0).unwrap().as_str();
+                        let first = &passport[..1];
+                        let last2 = &passport[passport.len() - 2..];
+                        format!("{}******{}", first, last2)
+                    })
+                    .to_string()
+            })),
+        )
+    }
+
+    fn new_ssn_rule() -> Self {
+        Self::build_from_regex(
+            "ssn",
+            SSN_REGEX.clone(),
+            "***-**-XXXX",
+            35,
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex
+                    .replace_all(text, |caps: &regex::Captures| {
+                        let ssn = caps.get(0).unwrap().as_str();
+                        let last4 = &ssn[ssn.len() - 4..];
+                        format!("***-**-{}", last4)
+                    })
+                    .to_string()
+            })),
+        )
+    }
+
+    fn new_db_connection_rule() -> Self {
+        Self::build_from_regex(
+            "db_connection",
+            DB_CONNECTION_REGEX.clone(),
+            "${1}***${3}",
+            40,
+            None,
+        )
+    }
+
+    // === Low-priority rules ===
+
+    fn new_github_token_rule() -> Self {
+        Self::build_from_regex(
+            "github_token",
+            GITHUB_TOKEN_REGEX.clone(),
+            "***REDACTED_GITHUB***",
+            50,
+            None,
+        )
+    }
+
+    fn new_slack_token_rule() -> Self {
+        Self::build_from_regex(
+            "slack_token",
+            SLACK_TOKEN_REGEX.clone(),
+            "***REDACTED_SLACK***",
+            51,
+            None,
+        )
+    }
+
+    fn new_stripe_key_rule() -> Self {
+        Self::build_from_regex(
+            "stripe_key",
+            STRIPE_KEY_REGEX.clone(),
+            "***REDACTED_STRIPE***",
+            52,
+            None,
+        )
+    }
+
+    fn new_google_api_key_rule() -> Self {
+        Self::build_from_regex(
+            "google_api_key",
+            GOOGLE_API_KEY_REGEX.clone(),
+            "***REDACTED_GOOGLE***",
+            53,
+            None,
+        )
+    }
+
+    fn new_private_key_rule() -> Self {
+        Self::build_from_regex(
+            "private_key",
+            PRIVATE_KEY_REGEX.clone(),
+            "***REDACTED_PRIVATE_KEY***",
+            54,
+            None,
+        )
+    }
+
     fn apply(&self, text: &str) -> String {
-        if self.name == "id_card" {
-            // ID card: mask all but last 4 digits
-            self.pattern.replace(text, "******$3").to_string()
-        } else if self.name == "bank_card" {
-            // Bank card: check if it looks like a bank card number (all digits, >= 12 chars)
-            if text.len() >= 12 && text.chars().all(|c| c.is_ascii_digit()) {
-                let last_four = &text[text.len() - 4..];
-                format!("****-****-****-{}", last_four)
-            } else {
-                text.to_string()
-            }
-        } else if self.name == "api_key" || self.name == "generic_secret" {
-            // For patterns with capture groups, use the replacement with group references
-            self.pattern
-                .replace(text, self.replacement.as_str())
-                .to_string()
-        } else {
-            // For email and phone, use the standard replacement
-            self.pattern
-                .replace(text, self.replacement.as_str())
-                .to_string()
+        (self.apply_fn)(&self.pattern, text, &self.replacement)
+    }
+
+    /// Returns the name of this rule.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns whether this rule is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Returns the priority of this rule (lower = earlier).
+    pub fn priority(&self) -> i32 {
+        self.priority
+    }
+
+    /// Sets whether this rule is enabled.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    /// Creates a new builder for constructing a `MaskRule`.
+    pub fn builder(name: &str) -> MaskRuleBuilder {
+        MaskRuleBuilder::new(name)
+    }
+}
+
+/// Builder for constructing [`MaskRule`] instances with a fluent API.
+///
+/// # Defaults
+/// - `priority`: 100
+/// - `enabled`: true
+/// - `apply_fn`: standard `regex.replace(text, replacement)`
+///
+/// # Example
+///
+/// ```rust
+/// use inklog::MaskRule;
+///
+/// let rule = MaskRule::builder("custom_phone")
+///     .pattern(r"\b\d{3}-\d{4}\b")
+///     .replacement("***-****")
+///     .priority(50)
+///     .build()
+///     .unwrap();
+/// ```
+pub struct MaskRuleBuilder {
+    name: String,
+    pattern: Option<String>,
+    replacement: String,
+    priority: i32,
+    enabled: bool,
+    apply_fn: Option<ApplyFn>,
+}
+
+impl MaskRuleBuilder {
+    fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            pattern: None,
+            replacement: String::new(),
+            priority: 100,
+            enabled: true,
+            apply_fn: None,
         }
+    }
+
+    /// Sets the regex pattern for this rule.
+    pub fn pattern(mut self, regex: &str) -> Self {
+        self.pattern = Some(regex.to_string());
+        self
+    }
+
+    /// Sets the replacement string (supports capture group refs like `${1}`).
+    pub fn replacement(mut self, replacement: &str) -> Self {
+        self.replacement = replacement.to_string();
+        self
+    }
+
+    /// Sets the execution priority (lower values execute first).
+    pub fn priority(mut self, priority: i32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    /// Sets whether this rule is enabled.
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Sets a custom apply function for complex masking logic.
+    pub fn apply_fn(mut self, f: ApplyFn) -> Self {
+        self.apply_fn = Some(f);
+        self
+    }
+
+    /// Builds the [`MaskRule`], compiling the regex pattern.
+    ///
+    /// # Errors
+    /// Returns `Err(InklogError)` if the pattern is missing or an invalid regex.
+    pub fn build(self) -> Result<MaskRule, InklogError> {
+        let pattern_str = self.pattern.ok_or_else(|| {
+            InklogError::ConfigError(format!("MaskRule '{}' requires a pattern", self.name))
+        })?;
+        let regex = Regex::new(&pattern_str).map_err(|e| {
+            InklogError::ConfigError(format!("Invalid regex in rule '{}': {}", self.name, e))
+        })?;
+        Ok(MaskRule {
+            name: self.name,
+            pattern: regex,
+            replacement: self.replacement,
+            replace_count: 1,
+            priority: self.priority,
+            enabled: self.enabled,
+            apply_fn: self.apply_fn.unwrap_or_else(|| {
+                Arc::new(|regex: &Regex, text: &str, replacement: &str| {
+                    regex.replace(text, replacement).to_string()
+                })
+            }),
+        })
+    }
+}
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+
+    #[test]
+    fn test_builder_defaults() {
+        let rule = MaskRule::builder("test")
+            .pattern(r"\d+")
+            .replacement("***")
+            .build()
+            .unwrap();
+        assert_eq!(rule.name(), "test");
+        assert_eq!(rule.priority(), 100);
+        assert!(rule.is_enabled());
+        assert_eq!(rule.apply("abc123def"), "abc***def");
+    }
+
+    #[test]
+    fn test_builder_custom_values() {
+        let rule = MaskRule::builder("custom")
+            .pattern(r"\d+")
+            .replacement("###")
+            .priority(50)
+            .enabled(false)
+            .build()
+            .unwrap();
+        assert_eq!(rule.priority(), 50);
+        assert!(!rule.is_enabled());
+    }
+
+    #[test]
+    fn test_builder_custom_apply_fn() {
+        let rule = MaskRule::builder("reverse")
+            .pattern(r"\w+")
+            .replacement("")
+            .apply_fn(Arc::new(|_re: &Regex, text: &str, _rep: &str| {
+                text.chars().rev().collect()
+            }))
+            .build()
+            .unwrap();
+        assert_eq!(rule.apply("hello"), "olleh");
+    }
+
+    #[test]
+    fn test_builder_missing_pattern() {
+        let result = MaskRule::builder("no_pattern").replacement("***").build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_builder_invalid_regex() {
+        let result = MaskRule::builder("bad_regex").pattern(r"[invalid").build();
+        assert!(result.is_err());
     }
 }
 
