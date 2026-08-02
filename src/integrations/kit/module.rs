@@ -87,7 +87,10 @@ impl AsyncAutoBuilder for InklogModule {
             // 1. Require DbNexusModule capability (Arc<dyn ConnectionPool + Send + Sync>).
             let pool = kit
                 .require::<DbNexusModule>()
-                .map_err(|e| InklogError::DatabaseError(format!("require DbNexusModule: {e}")))?;
+                .map_err(|e| InklogError::DatabaseError {
+                    message: format!("require DbNexusModule: {e}"),
+                    source: Some(Box::new(e)),
+                })?;
 
             // 2. Wrap in DbNexusLogDbAdapter — adapts ConnectionPool to LogDbProvider.
             let adapter = DbNexusLogDbAdapter::new(pool, "logs")?;

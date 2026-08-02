@@ -122,9 +122,13 @@ impl LogDbProvider for DbNexusLogDbAdapter {
     ) -> Pin<Box<dyn Future<Output = Result<(), InklogError>> + Send + 'a>> {
         Box::pin(async move {
             let session =
-                self.pool.get_session("admin").await.map_err(|e| {
-                    InklogError::DatabaseError(format!("Failed to get session: {e}"))
-                })?;
+                self.pool
+                    .get_session("admin")
+                    .await
+                    .map_err(|e| InklogError::DatabaseError {
+                        message: format!("Failed to get session: {e}"),
+                        source: Some(Box::new(e)),
+                    })?;
             // dbnexus gates DDL (CREATE/DROP/ALTER TABLE etc.) behind
             // `execute_raw_ddl` (admin-only, AST-validated). `execute_raw`
             // rejects DDL with `Permission("DDL operations are not allowed
@@ -134,12 +138,18 @@ impl LogDbProvider for DbNexusLogDbAdapter {
                 session
                     .execute_raw_ddl(sql)
                     .await
-                    .map_err(|e| InklogError::DatabaseError(format!("Execute DDL failed: {e}")))?;
+                    .map_err(|e| InklogError::DatabaseError {
+                        message: format!("Execute DDL failed: {e}"),
+                        source: Some(Box::new(e)),
+                    })?;
             } else {
                 session
                     .execute_raw(sql)
                     .await
-                    .map_err(|e| InklogError::DatabaseError(format!("Execute failed: {e}")))?;
+                    .map_err(|e| InklogError::DatabaseError {
+                        message: format!("Execute failed: {e}"),
+                        source: Some(Box::new(e)),
+                    })?;
             }
             Ok(())
         })
@@ -155,9 +165,13 @@ impl LogDbProvider for DbNexusLogDbAdapter {
             }
 
             let session =
-                self.pool.get_session("admin").await.map_err(|e| {
-                    InklogError::DatabaseError(format!("Failed to get session: {e}"))
-                })?;
+                self.pool
+                    .get_session("admin")
+                    .await
+                    .map_err(|e| InklogError::DatabaseError {
+                        message: format!("Failed to get session: {e}"),
+                        source: Some(Box::new(e)),
+                    })?;
 
             let sqls: Vec<String> = entries
                 .iter()
@@ -168,7 +182,10 @@ impl LogDbProvider for DbNexusLogDbAdapter {
             session
                 .batch_execute_in_transaction(sql_refs)
                 .await
-                .map_err(|e| InklogError::DatabaseError(format!("Batch insert failed: {e}")))?;
+                .map_err(|e| InklogError::DatabaseError {
+                    message: format!("Batch insert failed: {e}"),
+                    source: Some(Box::new(e)),
+                })?;
 
             Ok(())
         })
@@ -235,30 +252,36 @@ const MAX_SQL_IDENTIFIER_LEN: usize = 64;
 /// ```
 pub fn sanitize_identifier(name: &str) -> Result<&str, InklogError> {
     if name.is_empty() {
-        return Err(InklogError::DatabaseError(
-            "Invalid SQL identifier: empty".to_string(),
-        ));
+        return Err(InklogError::DatabaseError {
+            message: "Invalid SQL identifier: empty".to_string(),
+            source: None,
+        });
     }
     if name.len() > MAX_SQL_IDENTIFIER_LEN {
-        return Err(InklogError::DatabaseError(format!(
-            "Invalid SQL identifier: length {} exceeds maximum {}",
-            name.len(),
-            MAX_SQL_IDENTIFIER_LEN
-        )));
+        return Err(InklogError::DatabaseError {
+            message: format!(
+                "Invalid SQL identifier: length {} exceeds maximum {}",
+                name.len(),
+                MAX_SQL_IDENTIFIER_LEN
+            ),
+            source: None,
+        });
     }
 
     let mut chars = name.chars();
     let first = chars.next().expect("non-empty checked above");
     if !first.is_ascii_alphabetic() && first != '_' {
-        return Err(InklogError::DatabaseError(
-            "Invalid SQL identifier: must start with a letter or underscore".to_string(),
-        ));
+        return Err(InklogError::DatabaseError {
+            message: "Invalid SQL identifier: must start with a letter or underscore".to_string(),
+            source: None,
+        });
     }
     for c in chars {
         if !c.is_ascii_alphanumeric() && c != '_' {
-            return Err(InklogError::DatabaseError(
-                "Invalid SQL identifier: contains disallowed character".to_string(),
-            ));
+            return Err(InklogError::DatabaseError {
+                message: "Invalid SQL identifier: contains disallowed character".to_string(),
+                source: None,
+            });
         }
     }
     Ok(name)
@@ -499,7 +522,7 @@ mod tests {
     #[test]
     fn sanitize_identifier_rejects_empty() {
         let err = sanitize_identifier("").unwrap_err();
-        assert!(matches!(err, InklogError::DatabaseError(_)));
+        assert!(matches!(err, InklogError::DatabaseError { .. }));
         assert!(err.to_string().to_lowercase().contains("empty"));
     }
 
@@ -507,7 +530,7 @@ mod tests {
     #[test]
     fn sanitize_identifier_rejects_leading_digit() {
         let err = sanitize_identifier("1logs").unwrap_err();
-        assert!(matches!(err, InklogError::DatabaseError(_)));
+        assert!(matches!(err, InklogError::DatabaseError { .. }));
         assert!(err.to_string().contains("start with a letter"));
     }
 
@@ -516,7 +539,7 @@ mod tests {
     fn sanitize_identifier_rejects_too_long() {
         let too_long = "a".repeat(65);
         let err = sanitize_identifier(&too_long).unwrap_err();
-        assert!(matches!(err, InklogError::DatabaseError(_)));
+        assert!(matches!(err, InklogError::DatabaseError { .. }));
         assert!(err.to_string().contains("exceeds maximum"));
     }
 
@@ -525,7 +548,7 @@ mod tests {
     fn sanitize_identifier_rejects_drop_table_injection() {
         let payload = "logs'; DROP TABLE logs; --";
         let err = sanitize_identifier(payload).unwrap_err();
-        assert!(matches!(err, InklogError::DatabaseError(_)));
+        assert!(matches!(err, InklogError::DatabaseError { .. }));
         // 错误信息不得包含原始 payload（防 log-injection）
         assert!(!err.to_string().contains(payload));
     }
@@ -535,7 +558,7 @@ mod tests {
     fn sanitize_identifier_rejects_or_injection() {
         let payload = "logs' OR '1'='1";
         let err = sanitize_identifier(payload).unwrap_err();
-        assert!(matches!(err, InklogError::DatabaseError(_)));
+        assert!(matches!(err, InklogError::DatabaseError { .. }));
         assert!(!err.to_string().contains(payload));
     }
 
@@ -544,7 +567,7 @@ mod tests {
     fn sanitize_identifier_rejects_path_traversal_input() {
         let payload = "../etc/passwd";
         let err = sanitize_identifier(payload).unwrap_err();
-        assert!(matches!(err, InklogError::DatabaseError(_)));
+        assert!(matches!(err, InklogError::DatabaseError { .. }));
         assert!(!err.to_string().contains(payload));
     }
 
@@ -592,7 +615,7 @@ mod tests {
         ] {
             let result = DbNexusLogDbAdapter::new(pool.clone(), malicious);
             assert!(
-                matches!(result, Err(InklogError::DatabaseError(_))),
+                matches!(result, Err(InklogError::DatabaseError { .. })),
                 "should reject malicious table_name: {malicious:?}"
             );
         }
@@ -614,7 +637,7 @@ mod tests {
         ] {
             let err = build_insert_sql(&record, malicious).unwrap_err();
             assert!(
-                matches!(err, InklogError::DatabaseError(_)),
+                matches!(err, InklogError::DatabaseError { .. }),
                 "should reject malicious table_name: {malicious:?}"
             );
         }

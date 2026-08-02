@@ -270,9 +270,10 @@ mod tests {
     #[async_trait::async_trait]
     impl crate::integrations::infra::Database for FailingDatabase {
         async fn insert_batch(&self, _records: &[LogRecord]) -> Result<usize, InklogError> {
-            Err(InklogError::DatabaseError(
-                "Simulated database failure".to_string(),
-            ))
+            Err(InklogError::DatabaseError {
+                message: "Simulated database failure".to_string(),
+                source: None,
+            })
         }
 
         async fn is_healthy(&self) -> bool {

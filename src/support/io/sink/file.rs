@@ -234,31 +234,33 @@ impl FileSink {
             .as_ref()
             .unwrap_or(&default_key);
 
-        let key = std::env::var(key_str).map_err(|_| {
-            InklogError::EncryptionError(format!(
+        let key = std::env::var(key_str).map_err(|_| InklogError::EncryptionError {
+            message: format!(
                 "Encryption key not found in environment variable: {}",
                 key_str
-            ))
+            ),
+            source: None,
         })?;
 
         // 验证密钥长度（Base64 编码前至少 16 字符）
         if key.len() < 16 {
-            return Err(InklogError::EncryptionError(
-                "Encryption key must be at least 16 characters".to_string(),
-            ));
+            return Err(InklogError::EncryptionError {
+                message: "Encryption key must be at least 16 characters".to_string(),
+                source: None,
+            });
         }
 
         let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key)
-            .map_err(|_| {
-                InklogError::EncryptionError(
-                    "Invalid base64 encoding in encryption key".to_string(),
-                )
+            .map_err(|_| InklogError::EncryptionError {
+                message: "Invalid base64 encoding in encryption key".to_string(),
+                source: None,
             })?;
 
         if decoded.len() != 32 {
-            return Err(InklogError::EncryptionError(
-                "Encryption key must be 32 bytes (256 bits)".to_string(),
-            ));
+            return Err(InklogError::EncryptionError {
+                message: "Encryption key must be 32 bytes (256 bits)".to_string(),
+                source: None,
+            });
         }
 
         // 验证密钥熵（确保不是弱密钥）
@@ -273,9 +275,10 @@ impl FileSink {
     /// 返回 Ok(()) 如果密钥有足够的熵（>= 4.0）
     fn validate_key_entropy(key: &[u8]) -> Result<(), InklogError> {
         if key.is_empty() {
-            return Err(InklogError::EncryptionError(
-                "Encryption key cannot be empty".to_string(),
-            ));
+            return Err(InklogError::EncryptionError {
+                message: "Encryption key cannot be empty".to_string(),
+                source: None,
+            });
         }
 
         let mut freq = [0u32; 256];
@@ -295,11 +298,14 @@ impl FileSink {
 
         const MIN_ENTROPY_THRESHOLD: f64 = 4.0;
         if entropy < MIN_ENTROPY_THRESHOLD {
-            return Err(InklogError::EncryptionError(format!(
-                "Encryption key has insufficient entropy ({} < {}). \
-                 Please use a cryptographically random key.",
-                entropy, MIN_ENTROPY_THRESHOLD
-            )));
+            return Err(InklogError::EncryptionError {
+                message: format!(
+                    "Encryption key has insufficient entropy ({} < {}). \
+                     Please use a cryptographically random key.",
+                    entropy, MIN_ENTROPY_THRESHOLD
+                ),
+                source: None,
+            });
         }
 
         Ok(())
@@ -799,8 +805,11 @@ impl FileSink {
 
         // 获取密钥
         let key_bytes = self.get_encryption_key()?;
-        let cipher = Aes256Gcm::new_from_slice(&key_bytes)
-            .map_err(|e| InklogError::EncryptionError(format!("Invalid key: {}", e)))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| InklogError::EncryptionError {
+                message: format!("Invalid key: {}", e),
+                source: Some(Box::new(e)),
+            })?;
 
         // 生成加密安全的随机 nonce
         // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 SysRng 定期种子化
@@ -818,7 +827,10 @@ impl FileSink {
         // 加密
         let ciphertext = cipher.encrypt(&nonce, input_data.as_slice()).map_err(|e| {
             error!("Encryption failed: {}", e);
-            InklogError::EncryptionError(e.to_string())
+            InklogError::EncryptionError {
+                message: e.to_string(),
+                source: Some(Box::new(e)),
+            }
         })?;
 
         // 写入加密文件
