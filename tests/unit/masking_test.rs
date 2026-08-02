@@ -440,7 +440,7 @@ mod masking_test {
 
     #[test]
     fn test_credit_card_invalid_luhn() {
-        let masker = DataMasker::new();
+        let masker = DataMasker::builder().disable_builtin("bank_card").build();
         // Invalid Luhn checksum (sum=32, not divisible by 10)
         let result = masker.mask("4111111111111114");
         assert!(

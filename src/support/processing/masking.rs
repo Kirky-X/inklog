@@ -490,16 +490,19 @@ impl MaskRule {
             BANK_CARD_REGEX.clone(),
             "MASK_BANK_CARD",
             100,
-            Some(Arc::new(
-                |_regex: &Regex, text: &str, _replacement: &str| {
-                    if text.len() >= 12 && text.chars().all(|c| c.is_ascii_digit()) {
-                        let last_four = &text[text.len() - 4..];
-                        format!("****-****-****-{}", last_four)
-                    } else {
-                        text.to_string()
-                    }
-                },
-            )),
+            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+                regex
+                    .replace_all(text, |caps: &regex::Captures| {
+                        let matched = caps.get(0).unwrap().as_str();
+                        if matched.len() >= 12 {
+                            let last_four = &matched[matched.len() - 4..];
+                            format!("****-****-****-{}", last_four)
+                        } else {
+                            matched.to_string()
+                        }
+                    })
+                    .to_string()
+            })),
         )
     }
 

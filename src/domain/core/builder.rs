@@ -75,6 +75,66 @@ impl std::fmt::Debug for LoggerDependencies {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builder_valid_level() {
+        let builder = LoggerBuilder::new().level("debug");
+        assert!(builder.validation_errors.is_empty());
+        assert_eq!(builder.config.global.level, "debug");
+    }
+
+    #[test]
+    fn test_builder_invalid_level() {
+        let builder = LoggerBuilder::new().level("invalid_level");
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert!(builder.validation_errors[0].contains("Invalid log level"));
+    }
+
+    #[test]
+    fn test_builder_case_insensitive_level() {
+        let builder = LoggerBuilder::new().level("DEBUG");
+        assert!(builder.validation_errors.is_empty());
+    }
+
+    #[test]
+    fn test_builder_multiple_errors() {
+        let builder = LoggerBuilder::new().level("bad1").level("bad2");
+        assert_eq!(builder.validation_errors.len(), 2);
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_builder_http_port_zero() {
+        let builder = LoggerBuilder::new().http_port(0);
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert!(builder.validation_errors[0].contains("HTTP port"));
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_builder_http_port_valid() {
+        let builder = LoggerBuilder::new().http_port(8080);
+        assert!(builder.validation_errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_builder_build_fails_with_validation_errors() {
+        let result = LoggerBuilder::new().level("invalid").build().await;
+        assert!(result.is_err());
+        match result {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(msg.contains("Builder validation failed"));
+                assert!(msg.contains("Invalid log level"));
+            }
+            Ok(_) => panic!("Expected build to fail with validation errors"),
+        }
+    }
+}
+
 // ============================================================================
 // LoggerBuilder - Fluent builder API
 // ============================================================================
@@ -115,6 +175,8 @@ impl std::fmt::Debug for LoggerDependencies {
 pub struct LoggerBuilder {
     pub(crate) config: InklogConfig,
     pub(crate) deps: LoggerDependencies,
+    /// Accumulated validation errors for deferred reporting at `build()` time.
+    pub(crate) validation_errors: Vec<String>,
 }
 
 impl LoggerBuilder {
@@ -123,7 +185,16 @@ impl LoggerBuilder {
     }
 
     pub fn level(mut self, level: impl Into<String>) -> Self {
-        self.config.global.level = level.into();
+        let level_str = level.into();
+        let valid_levels = ["trace", "debug", "info", "warn", "error", "fatal"];
+        if !valid_levels.contains(&level_str.to_lowercase().as_str()) {
+            self.validation_errors.push(format!(
+                "Invalid log level '{}'. Valid levels: {}",
+                level_str,
+                valid_levels.join(", ")
+            ));
+        }
+        self.config.global.level = level_str;
         self
     }
 
@@ -309,9 +380,13 @@ impl LoggerBuilder {
     /// 设置HTTP服务器监听端口
     ///
     /// # Arguments
-    /// * `port` - 监听端口号
+    /// * `port` - 监听端口号 (1-65535)
     #[cfg(feature = "http")]
     pub fn http_port(mut self, port: u16) -> Self {
+        if port == 0 {
+            self.validation_errors
+                .push("HTTP port must be between 1 and 65535".to_string());
+        }
         if let Some(ref mut http) = self.config.http_server {
             http.port = port;
         } else {
@@ -456,6 +531,15 @@ impl LoggerBuilder {
     /// # Returns
     /// 成功返回 `Ok(LoggerManager)`，失败返回 `Err(InklogError)`
     pub async fn build(self) -> Result<LoggerManager, InklogError> {
+        // Report all accumulated validation errors at once
+        if !self.validation_errors.is_empty() {
+            return Err(InklogError::ConfigError(format!(
+                "Builder validation failed with {} error(s):\n  - {}",
+                self.validation_errors.len(),
+                self.validation_errors.join("\n  - ")
+            )));
+        }
+
         // 如果有任何注入的依赖，使用 with_dependencies
         let has_deps = self.deps.cache.is_some() || self.deps.config.is_some() || {
             #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
