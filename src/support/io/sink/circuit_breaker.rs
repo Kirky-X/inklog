@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //! 断路器实现，用于 Sink 的故障隔离与自动恢复
 
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
 use std::time::{Duration as StdDuration, Instant};
 
 /// 断路器状态
@@ -37,13 +37,22 @@ impl Default for CircuitBreakerConfig {
     }
 }
 
+/// Internal state protected by a single lock.
+#[derive(Debug)]
+struct CircuitBreakerInner {
+    state: CircuitState,
+    failure_count: u32,
+    success_count: u32,
+    last_failure: Option<Instant>,
+}
+
 /// 断路器实现
+///
+/// Uses a single `parking_lot::Mutex` to protect all mutable state,
+/// reducing lock acquisitions from 4 to 1 per operation.
 #[derive(Debug)]
 pub struct CircuitBreaker {
-    state: Arc<Mutex<CircuitState>>,
-    failure_count: Arc<Mutex<u32>>,
-    success_count: Arc<Mutex<u32>>,
-    last_failure: Arc<Mutex<Option<Instant>>>,
+    inner: Mutex<CircuitBreakerInner>,
     config: CircuitBreakerConfig,
 }
 
@@ -56,10 +65,12 @@ impl CircuitBreaker {
     /// * `success_threshold` - 半开状态下成功次数阈值
     pub fn new(failure_threshold: u32, timeout: StdDuration, success_threshold: u32) -> Self {
         Self {
-            state: Arc::new(Mutex::new(CircuitState::Closed)),
-            failure_count: Arc::new(Mutex::new(0)),
-            success_count: Arc::new(Mutex::new(0)),
-            last_failure: Arc::new(Mutex::new(None)),
+            inner: Mutex::new(CircuitBreakerInner {
+                state: CircuitState::Closed,
+                failure_count: 0,
+                success_count: 0,
+                last_failure: None,
+            }),
             config: CircuitBreakerConfig {
                 failure_threshold,
                 success_threshold,
@@ -71,44 +82,34 @@ impl CircuitBreaker {
     /// 使用配置创建新的断路器
     pub fn with_config(config: CircuitBreakerConfig) -> Self {
         Self {
-            state: Arc::new(Mutex::new(CircuitState::Closed)),
-            failure_count: Arc::new(Mutex::new(0)),
-            success_count: Arc::new(Mutex::new(0)),
-            last_failure: Arc::new(Mutex::new(None)),
+            inner: Mutex::new(CircuitBreakerInner {
+                state: CircuitState::Closed,
+                failure_count: 0,
+                success_count: 0,
+                last_failure: None,
+            }),
             config,
         }
     }
 
     /// 获取当前状态
     pub fn state(&self) -> CircuitState {
-        self.state
-            .lock()
-            .map(|guard| *guard)
-            .unwrap_or(CircuitState::Closed)
+        self.inner.lock().state
     }
 
     /// 检查是否可以执行操作
     pub fn can_execute(&self) -> bool {
-        let state = self
-            .state
-            .lock()
-            .map(|guard| *guard)
-            .unwrap_or(CircuitState::Closed);
-        match state {
+        let mut inner = self.inner.lock();
+        match inner.state {
             CircuitState::Closed => true,
             CircuitState::Open => {
                 // 检查是否超时
-                let last_failure = self.last_failure.lock().ok().and_then(|guard| *guard);
-                if let Some(time) = last_failure
+                if let Some(time) = inner.last_failure
                     && time.elapsed() >= self.config.timeout
                 {
                     // 超时，进入半开状态
-                    if let Ok(mut guard) = self.state.lock() {
-                        *guard = CircuitState::HalfOpen;
-                    }
-                    if let Ok(mut guard) = self.success_count.lock() {
-                        *guard = 0;
-                    }
+                    inner.state = CircuitState::HalfOpen;
+                    inner.success_count = 0;
                     return true;
                 }
                 false
@@ -119,80 +120,60 @@ impl CircuitBreaker {
 
     /// 记录成功
     pub fn record_success(&mut self) {
-        if let Ok(mut state_guard) = self.state.lock()
-            && let Ok(mut success_count_guard) = self.success_count.lock()
-        {
-            match *state_guard {
-                CircuitState::HalfOpen => {
-                    *success_count_guard += 1;
-                    if *success_count_guard >= self.config.success_threshold {
-                        *state_guard = CircuitState::Closed;
-                        if let Ok(mut failure_count_guard) = self.failure_count.lock() {
-                            *failure_count_guard = 0;
-                        }
-                    }
+        let mut inner = self.inner.lock();
+        match inner.state {
+            CircuitState::HalfOpen => {
+                inner.success_count += 1;
+                if inner.success_count >= self.config.success_threshold {
+                    inner.state = CircuitState::Closed;
+                    inner.failure_count = 0;
                 }
-                CircuitState::Open => {
-                    // 意外的成功，重置
-                    *state_guard = CircuitState::Closed;
-                    if let Ok(mut failure_count_guard) = self.failure_count.lock() {
-                        *failure_count_guard = 0;
-                    }
-                }
-                CircuitState::Closed => {
-                    // 成功，重置失败计数
-                    if let Ok(mut failure_count_guard) = self.failure_count.lock() {
-                        *failure_count_guard = 0;
-                    }
-                }
+            }
+            CircuitState::Open => {
+                // 意外的成功，重置
+                inner.state = CircuitState::Closed;
+                inner.failure_count = 0;
+            }
+            CircuitState::Closed => {
+                // 成功，重置失败计数
+                inner.failure_count = 0;
             }
         }
     }
 
     /// 记录失败
     pub fn record_failure(&mut self) {
-        if let Ok(mut state_guard) = self.state.lock()
-            && let Ok(mut failure_count_guard) = self.failure_count.lock()
-            && let Ok(mut last_failure_guard) = self.last_failure.lock()
-        {
-            *last_failure_guard = Some(Instant::now());
-            *failure_count_guard += 1;
+        let mut inner = self.inner.lock();
+        inner.last_failure = Some(Instant::now());
+        inner.failure_count += 1;
 
-            match *state_guard {
-                CircuitState::HalfOpen => {
-                    *state_guard = CircuitState::Open;
+        match inner.state {
+            CircuitState::HalfOpen => {
+                inner.state = CircuitState::Open;
+            }
+            CircuitState::Closed => {
+                if inner.failure_count >= self.config.failure_threshold {
+                    inner.state = CircuitState::Open;
                 }
-                CircuitState::Closed => {
-                    if *failure_count_guard >= self.config.failure_threshold {
-                        *state_guard = CircuitState::Open;
-                    }
-                }
-                CircuitState::Open => {
-                    // 已经是打开状态，更新失败时间
-                }
+            }
+            CircuitState::Open => {
+                // 已经是打开状态，更新失败时间
             }
         }
     }
 
     /// 重置断路器到初始状态
     pub fn reset(&mut self) {
-        if let Ok(mut guard) = self.state.lock() {
-            *guard = CircuitState::Closed;
-        }
-        if let Ok(mut guard) = self.failure_count.lock() {
-            *guard = 0;
-        }
-        if let Ok(mut guard) = self.success_count.lock() {
-            *guard = 0;
-        }
-        if let Ok(mut guard) = self.last_failure.lock() {
-            *guard = None;
-        }
+        let mut inner = self.inner.lock();
+        inner.state = CircuitState::Closed;
+        inner.failure_count = 0;
+        inner.success_count = 0;
+        inner.last_failure = None;
     }
 
     /// 获取失败次数
     pub fn failure_count(&self) -> u32 {
-        self.failure_count.lock().map(|guard| *guard).unwrap_or(0)
+        self.inner.lock().failure_count
     }
 
     /// 获取配置
