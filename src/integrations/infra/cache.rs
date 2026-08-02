@@ -88,8 +88,8 @@ pub trait Cache: Send + Sync {
 // ============================================================================
 
 use oxcache::Cache as OxCache;
+use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::RwLock;
 
 /// oxcache 适配器
 ///
@@ -324,7 +324,7 @@ impl Cache for MockCache {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-        let storage = self.storage.read().unwrap();
+        let storage = self.storage.read();
         Ok(storage.get(key).cloned())
     }
 
@@ -332,7 +332,7 @@ impl Cache for MockCache {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-        let mut storage = self.storage.write().unwrap();
+        let mut storage = self.storage.write();
         storage.insert(key.to_string(), value);
         Ok(())
     }
@@ -341,7 +341,7 @@ impl Cache for MockCache {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-        let mut storage = self.storage.write().unwrap();
+        let mut storage = self.storage.write();
         Ok(storage.remove(key).is_some())
     }
 
@@ -349,7 +349,7 @@ impl Cache for MockCache {
         if self.delay_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(self.delay_ms)).await;
         }
-        let storage = self.storage.read().unwrap();
+        let storage = self.storage.read();
         Ok(storage.contains_key(key))
     }
 }
