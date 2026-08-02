@@ -3,9 +3,9 @@
 use crate::LogRecord;
 use crate::Metrics;
 use crossbeam_channel::Sender;
+use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::Layer;
@@ -58,15 +58,7 @@ impl LoggerSubscriber {
     }
 
     pub fn try_flush_fallback(&self) {
-        let mut buffer = match self.fallback_buffer.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                // Mutex poison 只在持有锁的线程 panic 时发生
-                // 这时我们恢复互斥锁并继续使用（因为数据可能仍然有效）
-                tracing::warn!("Fallback buffer mutex poisoned, recovering");
-                poisoned.into_inner()
-            }
-        };
+        let mut buffer = self.fallback_buffer.lock();
         while let Some(record) = buffer.front() {
             let timeout = Duration::from_millis(self.send_timeout_ms);
             match self.async_sender.send_timeout(Arc::clone(record), timeout) {
@@ -108,15 +100,7 @@ where
             Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
                 // For critical logs, add to fallback buffer
                 if Self::is_critical_level(&record.level) {
-                    let mut buffer = match self.fallback_buffer.lock() {
-                        Ok(guard) => guard,
-                        Err(poisoned) => {
-                            // Mutex poison 只在持有锁的线程 panic 时发生
-                            // 这时我们恢复互斥锁并继续使用（因为数据可能仍然有效）
-                            tracing::warn!("Fallback buffer mutex poisoned, recovering");
-                            poisoned.into_inner()
-                        }
-                    };
+                    let mut buffer = self.fallback_buffer.lock();
                     if buffer.len() >= FALLBACK_BUFFER_SIZE {
                         buffer.pop_front();
                     }
@@ -303,7 +287,6 @@ mod tests {
         subscriber
             .fallback_buffer
             .lock()
-            .unwrap()
             .push_back(Arc::clone(&record));
 
         // 调用 try_flush_fallback，async channel 有容量 → send 成功 → pop_front
@@ -311,7 +294,7 @@ mod tests {
 
         // 验证 buffer 已清空
         assert!(
-            subscriber.fallback_buffer.lock().unwrap().is_empty(),
+            subscriber.fallback_buffer.lock().is_empty(),
             "buffer should be empty after successful flush"
         );
 
@@ -338,7 +321,6 @@ mod tests {
         subscriber
             .fallback_buffer
             .lock()
-            .unwrap()
             .push_back(Arc::clone(&record));
 
         // 断开 async channel 的接收端 → send 返回 Disconnected → break
@@ -347,38 +329,15 @@ mod tests {
 
         // 断开后 buffer 应仍包含记录（break 未弹出）
         assert_eq!(
-            subscriber.fallback_buffer.lock().unwrap().len(),
+            subscriber.fallback_buffer.lock().len(),
             1,
             "buffer should still contain the record after disconnect"
         );
     }
 
-    #[test]
-    fn test_try_flush_fallback_recovers_from_poisoned_mutex() {
-        let (console_tx, _console_rx) = bounded(10);
-        let (async_tx, _async_rx) = bounded(10);
-        let metrics = Arc::new(Metrics::new());
-
-        let subscriber = LoggerSubscriber::new(console_tx, async_tx, metrics);
-
-        // 通过在另一个线程中持有锁时 panic 来毒化 mutex
-        let buffer_clone = Arc::clone(&subscriber.fallback_buffer);
-        let handle = std::thread::spawn(move || {
-            let _guard = buffer_clone.lock().unwrap();
-            panic!("intentional panic to poison mutex");
-        });
-
-        // 等待线程结束（它已经 panic）
-        let join_result = handle.join();
-        assert!(join_result.is_err(), "thread should have panicked");
-
-        // 调用 try_flush_fallback，应从毒化状态恢复而非 panic。
-        // 注意：into_inner() 恢复数据但不解除毒化状态，mutex 仍为 poisoned。
-        // 此测试仅验证 try_flush_fallback 不会 panic（即正确走了 poison 恢复分支）。
-        subscriber.try_flush_fallback();
-
-        // 到达此处说明毒化恢复成功（未 panic）
-    }
+    // NOTE: parking_lot::Mutex 不支持 poison，无需测试毒化恢复
+    // try_flush_fallback 的断开 channel 场景由
+    // test_try_flush_fallback_with_disconnected_channel 覆盖
 
     // =========================================================================
     // on_event console channel 断开测试
@@ -440,54 +399,9 @@ mod tests {
     // on_event fallback_buffer 锁毒化恢复（行 116, 119-120）
     // =========================================================================
 
-    #[test]
-    fn test_on_event_critical_level_recovers_from_poisoned_fallback_mutex() {
-        // 覆盖行 116, 119-120：on_event 中 fallback_buffer.lock() 返回 Err(poisoned)
-        // 时的恢复分支（tracing::warn + into_inner）
-        //
-        // 策略：
-        // 1. async_sender 用 bounded(0) → send_timeout 总是超时
-        // 2. 在另一线程持有 fallback_buffer 锁时 panic → 毒化 mutex
-        // 3. 触发 ERROR 级别 tracing 事件 → on_event → send_timeout 超时
-        //    → is_critical_level("ERROR")=true → fallback_buffer.lock() 返回 Err
-        //    → 走 poisoned 恢复分支
-        let (console_tx, _console_rx) = bounded(10);
-        // bounded(0) 是 rendezvous channel，无 receiver 时 send_timeout 必然超时
-        let (async_tx, _async_rx) = bounded(0);
-
-        let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()));
-        // 在 layer 被 registry 消费前，先拿到 fallback_buffer 的 Arc clone
-        let buffer_clone = Arc::clone(&layer.fallback_buffer);
-
-        // 在另一线程持有 fallback_buffer 锁时 panic，毒化 mutex
-        let handle = std::thread::spawn(move || {
-            let _guard = buffer_clone.lock().unwrap();
-            panic!("intentional panic to poison fallback buffer mutex");
-        });
-        let join_result = handle.join();
-        assert!(
-            join_result.is_err(),
-            "poisoning thread should have panicked"
-        );
-
-        // 现在 fallback_buffer 已被毒化
-        // 安装 layer 并触发 ERROR 事件
-        let registry = tracing_subscriber::registry().with(layer);
-        with_default(registry, || {
-            // ERROR 级别 → is_critical_level=true → 进入 fallback buffer 分支
-            // fallback_buffer.lock() 返回 Err(poisoned) → 走恢复分支
-            tracing::error!(target: "test::subscriber", message = "poisoned fallback test");
-        });
-
-        // 到达此处说明毒化恢复成功（on_event 未 panic）
-        // 验证 console channel 仍然收到了记录（console 路径不受 fallback 毒化影响）
-        let console_received = _console_rx.try_recv();
-        assert!(
-            console_received.is_ok(),
-            "console channel should still receive the record"
-        );
-        assert_eq!(console_received.unwrap().level, "ERROR");
-    }
+    // NOTE: parking_lot::Mutex 不支持 poison，无需测试毒化恢复
+    // on_event 的 fallback buffer 路径由
+    // test_critical_level_adds_to_fallback_buffer 覆盖
 
     #[test]
     fn test_on_event_console_ok_and_async_ok_paths() {
@@ -584,7 +498,7 @@ mod tests {
         });
 
         // 关键级别 + async 超时：记录存入 fallback_buffer
-        let buffer_guard = fallback_buffer.lock().unwrap();
+        let buffer_guard = fallback_buffer.lock();
         assert_eq!(
             buffer_guard.len(),
             1,
