@@ -36,6 +36,12 @@ use async_trait::async_trait;
 /// All methods use `&self` instead of `&mut self` to support interior mutability
 /// and dependency injection patterns. Implementations should use `Mutex` or `RwLock`
 /// for mutable state.
+///
+/// # Trait Isolation
+///
+/// Optional capabilities are split into separate traits:
+/// - [`Rotatable`]: File rotation support (FileSink only)
+/// - [`DiskCheckable`]: Disk space checking (FileSink only)
 #[async_trait]
 pub trait LogSink: Send + Sync {
     /// Write a log record to the sink.
@@ -51,21 +57,27 @@ pub trait LogSink: Send + Sync {
 
     /// Gracefully shutdown the sink, flushing any remaining data.
     async fn shutdown(&self) -> Result<(), InklogError>;
+}
 
+/// Trait for sinks that support log file rotation.
+///
+/// Only implemented by [`FileSink`]. Separated from [`LogSink`] to keep
+/// the core trait minimal for sinks that don't need rotation.
+pub trait Rotatable {
     /// Start rotation timer (for file-based sinks with time-based rotation).
-    fn start_rotation_timer(&self) {
-        // 默认空实现
-    }
+    fn start_rotation_timer(&self);
 
     /// Stop rotation timer.
-    fn stop_rotation_timer(&self) {
-        // 默认空实现
-    }
+    fn stop_rotation_timer(&self);
+}
 
+/// Trait for sinks that can check disk space before writing.
+///
+/// Only implemented by [`FileSink`]. Separated from [`LogSink`] to keep
+/// the core trait minimal for sinks that don't write to disk.
+pub trait DiskCheckable {
     /// Check if there is sufficient disk space for writing.
-    fn check_disk_space(&self) -> Result<bool, InklogError> {
-        Ok(true) // 默认返回有足够空间
-    }
+    fn check_disk_space(&self) -> Result<bool, InklogError>;
 }
 
 #[cfg(test)]
@@ -94,25 +106,56 @@ mod tests {
         assert!(sink.is_healthy());
     }
 
-    #[test]
-    fn test_default_start_rotation_timer() {
-        let sink = DummySink;
-        // Just verify it doesn't panic
-        sink.start_rotation_timer();
+    /// Test that Rotatable and DiskCheckable are separate traits
+    struct RotatableDiskSink;
+
+    #[async_trait]
+    impl LogSink for RotatableDiskSink {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            Ok(())
+        }
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    impl Rotatable for RotatableDiskSink {
+        fn start_rotation_timer(&self) {}
+        fn stop_rotation_timer(&self) {}
+    }
+
+    impl DiskCheckable for RotatableDiskSink {
+        fn check_disk_space(&self) -> Result<bool, InklogError> {
+            Ok(true)
+        }
     }
 
     #[test]
-    fn test_default_stop_rotation_timer() {
-        let sink = DummySink;
-        // Just verify it doesn't panic
+    fn test_rotatable_trait() {
+        let sink = RotatableDiskSink;
+        // Verify Rotatable trait works
+        sink.start_rotation_timer();
         sink.stop_rotation_timer();
     }
 
     #[test]
-    fn test_default_check_disk_space() {
-        let sink = DummySink;
+    fn test_disk_checkable_trait() {
+        let sink = RotatableDiskSink;
         let result = sink.check_disk_space();
         assert!(result.is_ok());
         assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_log_sink_does_not_have_rotation_or_disk() {
+        // Verify LogSink trait no longer has rotation/disk methods
+        // DummySink only implements LogSink, not Rotatable or DiskCheckable
+        let sink = DummySink;
+        assert!(sink.is_healthy());
+        // sink.start_rotation_timer(); // This would not compile - correct!
+        // sink.check_disk_space(); // This would not compile - correct!
     }
 }
