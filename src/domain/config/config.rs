@@ -204,7 +204,11 @@ impl InklogConfig {
     }
 
     /// Validate the configuration.
+    ///
+    /// Checks for common misconfigurations and returns a descriptive error
+    /// for the first problem found.
     pub fn validate(&self) -> Result<(), InklogError> {
+        // --- Performance ---
         if self.performance.channel_capacity == 0 {
             return Err(InklogError::ConfigError(
                 "channel_capacity cannot be 0".to_string(),
@@ -215,6 +219,49 @@ impl InklogConfig {
                 "worker_threads cannot be 0".to_string(),
             ));
         }
+        if self.performance.max_capacity < self.performance.min_capacity {
+            return Err(InklogError::ConfigError(format!(
+                "performance.max_capacity ({}) must be >= min_capacity ({})",
+                self.performance.max_capacity, self.performance.min_capacity
+            )));
+        }
+
+        // --- Global log level ---
+        let valid_levels = ["trace", "debug", "info", "warn", "error", "fatal"];
+        if !valid_levels.contains(&self.global.level.to_lowercase().as_str()) {
+            return Err(InklogError::ConfigError(format!(
+                "Invalid log level '{}'. Valid levels: {}",
+                self.global.level,
+                valid_levels.join(", ")
+            )));
+        }
+
+        // --- File sink ---
+        if let Some(ref file) = self.file_sink
+            && file.enabled
+        {
+            if file.path.as_os_str().is_empty() {
+                return Err(InklogError::ConfigError(
+                    "file_sink.path must not be empty when file sink is enabled".to_string(),
+                ));
+            }
+            if file.batch_size == 0 {
+                return Err(InklogError::ConfigError(
+                    "file_sink.batch_size must be > 0".to_string(),
+                ));
+            }
+        }
+
+        // --- HTTP server ---
+        if let Some(ref http) = self.http_server
+            && http.enabled
+            && http.port == 0
+        {
+            return Err(InklogError::ConfigError(
+                "http_server.port must be in range 1-65535".to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -224,5 +271,116 @@ impl std::str::FromStr for InklogConfig {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         toml::from_str(s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_default_config() {
+        let config = InklogConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_invalid_log_level() {
+        let mut config = InklogConfig::default();
+        config.global.level = "verbose".to_string();
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("Invalid log level"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_validate_valid_log_levels() {
+        for level in &[
+            "trace", "debug", "info", "warn", "error", "fatal", "INFO", "Debug",
+        ] {
+            let mut config = InklogConfig::default();
+            config.global.level = level.to_string();
+            assert!(
+                config.validate().is_ok(),
+                "level '{}' should be valid",
+                level
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_zero_channel_capacity() {
+        let mut config = InklogConfig::default();
+        config.performance.channel_capacity = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("channel_capacity"));
+    }
+
+    #[test]
+    fn test_validate_zero_worker_threads() {
+        let mut config = InklogConfig::default();
+        config.performance.worker_threads = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("worker_threads"));
+    }
+
+    #[test]
+    fn test_validate_max_capacity_less_than_min() {
+        let mut config = InklogConfig::default();
+        config.performance.max_capacity = 100;
+        config.performance.min_capacity = 500;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("max_capacity"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_empty_path() {
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            path: std::path::PathBuf::new(),
+            ..Default::default()
+        });
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("file_sink.path"));
+    }
+
+    #[test]
+    fn test_validate_file_sink_zero_batch_size() {
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            path: std::path::PathBuf::from("logs/test.log"),
+            batch_size: 0,
+            ..Default::default()
+        });
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("batch_size"));
+    }
+
+    #[test]
+    fn test_validate_http_port_zero() {
+        let mut config = InklogConfig::default();
+        config.http_server = Some(HttpServerConfig {
+            enabled: true,
+            port: 0,
+            ..Default::default()
+        });
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("port"));
+    }
+
+    #[test]
+    fn test_validate_http_disabled_port_zero_ok() {
+        let mut config = InklogConfig::default();
+        config.http_server = Some(HttpServerConfig {
+            enabled: false,
+            port: 0,
+            ..Default::default()
+        });
+        assert!(config.validate().is_ok());
     }
 }
