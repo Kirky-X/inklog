@@ -667,7 +667,7 @@ impl MaskRule {
             "mac_address",
             MAC_ADDRESS_REGEX.clone(),
             "XX:**:**:**:**:XX",
-            25,
+            20,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
                     .replace_all(text, |caps: &regex::Captures| {

@@ -29,7 +29,7 @@ mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
 # 当 sqlite+duckdb+postgres+mysql 全部 4 个后端都启用时允许共存（用于 --all-features 测试）。
 # DatabaseSink 仅支持 sea-orm 后端（sqlite/postgres/mysql），不直接支持 duckdb 驱动。
 duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb"]
-http = ["dep:axum"]
+http = ["dep:axum", "dep:axum-server"]
 test-local = []
 cli = ["dep:clap", "dep:glob"]
 debug = []
@@ -61,6 +61,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 axum = { version = "0.8", optional = true }
+axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 is-terminal = "0.4"
 bytes = "1.12"
 dirs = "6.0"
