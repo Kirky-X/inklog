@@ -67,11 +67,22 @@ impl LoggerManager {
                             // 获取当前 tokio runtime 并创建默认的 DbNexusAdapter
                             let handle = tokio::runtime::Handle::current();
                             let cfg_url = cfg.url.clone();
-                            let cfg_pool_size = cfg.pool_size;
+                            // Cap pool_size to min(configured, num_cpus, 4) to prevent resource exhaustion
+                            let db_worker_limit =
+                                crate::support::io::sink::database::effective_db_worker_limit();
+                            let effective_pool_size = cfg.pool_size.min(db_worker_limit as u32);
+                            if effective_pool_size < cfg.pool_size {
+                                tracing::warn!(
+                                    configured_pool_size = cfg.pool_size,
+                                    effective_pool_size = effective_pool_size,
+                                    limit = db_worker_limit,
+                                    "Database pool_size capped to min(configured, num_cpus, 4)"
+                                );
+                            }
                             let adapter = handle.block_on(async {
                                 crate::integrations::infra::DbNexusAdapter::new(
                                     &cfg_url,
-                                    cfg_pool_size,
+                                    effective_pool_size,
                                 )
                                 .await
                             })?;

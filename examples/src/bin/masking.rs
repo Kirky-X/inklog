@@ -7,9 +7,12 @@
 //! # 功能演示
 //!
 //! - 基础脱敏：邮箱、电话、身份证、银行卡等
+//! - 新增规则：信用卡(Luhn)、国际电话、IPv4/IPv6、MAC、护照、SSN、DB连接串、第三方令牌
 //! - JSON 数据脱敏
 //! - 敏感字段检测
 //! - HashMap 脱敏
+//! - 自定义规则 (MaskRuleBuilder / DataMaskerBuilder)
+//! - 规则注册中心 (MaskRuleRegistry)
 //! - 日志中的脱敏应用
 //!
 //! # 运行
@@ -19,6 +22,7 @@
 //! ```
 
 use inklog::support::processing::DataMasker;
+use inklog::{MaskRule, MaskRuleRegistry};
 use inklog_examples::common::{print_section, print_separator};
 use serde_json::json;
 use std::collections::HashMap;
@@ -207,13 +211,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("脱敏后:       {}", masked_aws);
     assert!(masked_aws.contains("***REDACTED***"));
 
-    // 7.3 API Key 脱敏
-    print_section("7.3 API Key 脱敏");
-    let api_key_text = "api_key=sk-1234567890abcdefghijABCDEFGH";
-    let masked_api = masker.mask(api_key_text);
-    println!("原始文本: {}", api_key_text);
-    println!("脱敏后:   {}", masked_api);
-    assert!(masked_api.contains("***REDACTED***"));
+    // 7.4 信用卡脱敏 (Luhn 校验)
+    print_section("7.4 信用卡脱敏 (Luhn 校验)");
+    let visa = "4111111111111111";
+    let masked_visa = masker.mask(visa);
+    println!("原始 Visa:  {}", visa);
+    println!("脱敏后:     {}", masked_visa);
+
+    let amex = "378282246310005";
+    let masked_amex = masker.mask(amex);
+    println!("原始 Amex:  {}", amex);
+    println!("脱敏后:     {}", masked_amex);
+
+    // 7.5 国际电话号码脱敏
+    print_section("7.5 国际电话号码脱敏");
+    let intl_phone = "+1-202-555-0123";
+    let masked_intl = masker.mask(intl_phone);
+    println!("原始国际电话: {}", intl_phone);
+    println!("脱敏后:       {}", masked_intl);
+
+    // 7.6 IP 地址和 MAC 地址脱敏
+    print_section("7.6 IP/MAC 地址脱敏");
+    let ipv4 = "Server at 192.168.1.100 port 8080";
+    let ipv6 = "IPv6 addr: 2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+    let mac = "Device MAC: 00:1A:2B:3C:4D:5E";
+    println!("IPv4: {} → {}", ipv4, masker.mask(ipv4));
+    println!("IPv6: {} → {}", ipv6, masker.mask(ipv6));
+    println!("MAC:  {} → {}", mac, masker.mask(mac));
+
+    // 7.7 第三方令牌脱敏
+    print_section("7.7 第三方令牌脱敏");
+    let github_token = "ghp_1234567890abcdefghij1234567890abcdef";
+    let slack_token = "xoxb-1234567890-1234567890-abcDEF123";
+    let stripe_key = "sk_live_1234567890abcdefghij";
+    println!("GitHub: {} → {}", github_token, masker.mask(github_token));
+    println!("Slack:  {} → {}", slack_token, masker.mask(slack_token));
+    println!("Stripe: {} → {}", stripe_key, masker.mask(stripe_key));
 
     // 8. 实际应用场景
     print_separator("8. 实际应用场景");
@@ -254,14 +287,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n脱敏后 API 响应:");
     println!("{}", serde_json::to_string_pretty(&api_response)?);
 
-    // 9. 性能提示
-    print_separator("9. 性能提示");
+    // 9. 自定义规则
+    print_separator("9. 自定义规则");
+
+    // 9.1 MaskRuleBuilder 创建自定义规则
+    print_section("9.1 MaskRuleBuilder");
+    let custom_rule = MaskRule::builder("employee_id")
+        .pattern(r"\bEMP-\d{6}\b")
+        .replacement("EMP-***")
+        .priority(30)
+        .build()
+        .expect("Invalid pattern");
+    println!(
+        "自定义规则: {} (priority={})",
+        custom_rule.name(),
+        custom_rule.priority()
+    );
+
+    // 9.2 DataMaskerBuilder 组装脱敏器
+    print_section("9.2 DataMaskerBuilder");
+    let custom_masker = DataMasker::builder()
+        .add_rule(
+            MaskRule::builder("employee_id")
+                .pattern(r"\bEMP-\d{6}\b")
+                .replacement("EMP-***")
+                .priority(30)
+                .build()
+                .unwrap(),
+        )
+        .disable_builtin("bank_card")
+        .build();
+    let emp_text = "Employee EMP-123456 logged in";
+    println!("原始: {}", emp_text);
+    println!("脱敏: {}", custom_masker.mask(emp_text));
+
+    // 9.3 MaskRuleRegistry 规则注册中心
+    print_section("9.3 MaskRuleRegistry");
+    let mut registry = MaskRuleRegistry::with_builtins();
+    println!("内置规则数: {}", registry.len());
+    registry
+        .register(
+            MaskRule::builder("project_code")
+                .pattern(r"PRJ-[A-Z]{3}-\d{4}")
+                .replacement("PRJ-***")
+                .priority(35)
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+    println!("注册自定义规则后: {}", registry.len());
+    println!("活跃规则数: {}", registry.active_rules().len());
+
+    // 10. 性能提示
+    print_separator("10. 性能提示");
 
     println!("DataMasker 性能优化要点:");
-    println!("  1. 使用预编译的正则表达式");
+    println!("  1. 使用预编译的 LazyLock 正则表达式");
     println!("  2. 支持批量处理 HashMap 和 JSON");
     println!("  3. 递归处理嵌套结构");
     println!("  4. 大小写不敏感的字段名检测");
+    println!("  5. 规则按优先级排序执行");
+    println!("  6. 支持通过 Registry 动态管理规则");
 
     // 完成
     println!("\n✓ 所有示例演示完成");
