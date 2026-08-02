@@ -6,7 +6,9 @@
 //! with support for automatic rotation, compression, and encryption.
 
 use super::CircuitBreaker;
+use super::DiskCheckable;
 use super::LogSink;
+use super::Rotatable;
 use super::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
 use crate::DataMasker;
 use crate::FileSinkConfig;
@@ -1122,6 +1124,26 @@ impl LogSink for FileSink {
         }
 
         Ok(())
+    }
+}
+
+impl Rotatable for FileSink {
+    fn start_rotation_timer(&self) {
+        // Delegate to inherent method
+        FileSink::start_rotation_timer(self)
+    }
+
+    fn stop_rotation_timer(&self) {
+        // Stop the rotation timer by setting the rotation timer to None
+        let mut inner = self.inner.write();
+        inner.rotation_timer = None;
+    }
+}
+
+impl DiskCheckable for FileSink {
+    fn check_disk_space(&self) -> Result<bool, InklogError> {
+        // Delegate to inherent method
+        FileSink::check_disk_space(self)
     }
 }
 
