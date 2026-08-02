@@ -404,8 +404,8 @@ impl Config for InklogConfigAdapter {
 // MockConfig - 单元测试用的 Mock 实现
 // ============================================================================
 
+use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::RwLock;
 
 /// Mock 配置实现（用于单元测试）
 ///
@@ -455,7 +455,7 @@ impl MockConfig {
     /// 返回 `Self`，支持链式调用
     pub fn with_value(self, key: &str, value: &str) -> Self {
         {
-            let mut values = self.values.write().unwrap();
+            let mut values = self.values.write();
             values.insert(key.to_string(), value.to_string());
         }
         self
@@ -468,7 +468,7 @@ impl MockConfig {
     /// * `key` - 配置键
     /// * `value` - 配置值（字符串形式）
     pub fn set(&self, key: &str, value: &str) {
-        let mut values = self.values.write().unwrap();
+        let mut values = self.values.write();
         values.insert(key.to_string(), value.to_string());
     }
 }
@@ -481,7 +481,7 @@ impl Default for MockConfig {
 
 impl Config for MockConfig {
     fn get_string(&self, key: &str) -> Option<String> {
-        let values = self.values.read().unwrap();
+        let values = self.values.read();
         values.get(key).cloned()
     }
 
