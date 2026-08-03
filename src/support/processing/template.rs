@@ -14,11 +14,10 @@ use serde_json::Value;
 
 fn format_field(key: &str, value: &Value) -> String {
     match value {
+        // Strings: render without JSON quotes for human-readable output
         Value::String(s) => format!("{}={}", key, s),
-        Value::Number(n) => format!("{}={}", key, n),
-        Value::Bool(b) => format!("{}={}", key, b),
-        Value::Null => format!("{}={}", key, "null"),
-        _ => format!("{}={}", key, value),
+        // Array/Object use JSON serialization (Display for these is JSON anyway)
+        other => format!("{}={}", key, other),
     }
 }
 
@@ -80,9 +79,7 @@ fn format_field(key: &str, value: &Value) -> String {
 /// placeholder structure is reused for all subsequent [`render()`](LogTemplate::render)
 /// calls, making rendering efficient for high-throughput logging scenarios.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct LogTemplate {
-    template: String,
     placeholders: Vec<Placeholder>,
 }
 
@@ -212,10 +209,7 @@ impl LogTemplate {
             placeholders.push(Placeholder::Literal(current));
         }
 
-        Self {
-            template: template.to_string(),
-            placeholders,
-        }
+        Self { placeholders }
     }
 
     /// Renders a log record using the template.
@@ -584,7 +578,11 @@ mod tests {
     #[test]
     fn test_template_from_str() {
         let template = LogTemplate::new("{timestamp} [{level}] {message}");
-        assert!(!template.template.is_empty());
+        // Verify template parses and renders correctly
+        let record = create_test_record();
+        let output = template.render(&record);
+        assert!(output.contains("INFO"));
+        assert!(output.contains("Test message"));
     }
 
     #[test]
