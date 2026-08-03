@@ -42,9 +42,12 @@
 //!
 //! | 指标 | 类型 | 描述 |
 //! |------|------|------|
-//! | `inklog_records_total` | Counter | 总日志记录数 |
-//! | `inklog_errors_total` | Counter | 总错误数 |
-//! | `inklog_latency_us` | Histogram | 处理延迟（微秒）|
+//! | `inklog_logs_written_total` | Counter | 总日志记录数 |
+//! | `inklog_logs_dropped_total` | Counter | 总丢弃日志数 |
+//! | `inklog_sink_errors_total` | Counter | 总错误数 |
+//! | `inklog_latency_p50_us` | Gauge | P50 延迟（微秒）|
+//! | `inklog_latency_p95_us` | Gauge | P95 延迟（微秒）|
+//! | `inklog_latency_p99_us` | Gauge | P99 延迟（微秒）|
 //! | `inklog_sink_healthy` | Gauge | Sink 健康状态 |
 //! | `inklog_uptime_seconds` | Gauge | 运行时间（秒）|
 
@@ -192,7 +195,7 @@ impl Histogram {
     pub fn record(&self, value: u64) {
         let mut index = self.bounds.len();
         for (i, &bound) in self.bounds.iter().enumerate() {
-            if value < bound {
+            if value <= bound {
                 index = i;
                 break;
             }
@@ -205,6 +208,11 @@ impl Histogram {
             .iter()
             .map(|b| b.load(Ordering::Relaxed))
             .collect()
+    }
+
+    /// Returns the bucket boundary bounds used by this histogram.
+    pub fn bounds(&self) -> &[u64] {
+        &self.bounds
     }
 
     pub fn percentile(&self, p: f64) -> u64 {
@@ -500,10 +508,9 @@ impl Metrics {
     pub fn sink_degraded(&self, name: &str, reason: String) {
         let mut map = self.sink_health.lock();
         let entry = map.entry(name.to_string()).or_insert(SinkHealth::healthy());
-        entry.status = SinkStatus::Degraded {
-            reason: reason.clone(),
-        };
-        entry.last_error = Some(reason);
+        // Move reason into status, clone only for last_error to avoid double allocation
+        entry.last_error = Some(reason.clone());
+        entry.status = SinkStatus::Degraded { reason };
     }
 
     pub fn get_status(&self, channel_len: usize, channel_cap: usize) -> HealthStatus {
@@ -552,7 +559,15 @@ impl Metrics {
                     reason: reasons.join("; "),
                 }
             } else {
-                SinkStatus::Healthy
+                // Check if all sinks are still in NotStarted state
+                let all_not_started = sinks
+                    .values()
+                    .all(|s| matches!(s.status, SinkStatus::NotStarted));
+                if all_not_started {
+                    SinkStatus::NotStarted
+                } else {
+                    SinkStatus::Healthy
+                }
             }
         };
 
@@ -671,13 +686,11 @@ impl Metrics {
             self.latency_histogram.p99()
         ));
 
-        //
+        // Always emit uptime metric (even during the first second)
         let uptime = self.uptime().as_secs();
-        if uptime > 0 {
-            s.push_str("# HELP inklog_uptime_seconds Uptime in seconds\n");
-            s.push_str("# TYPE inklog_uptime_seconds gauge\n");
-            s.push_str(&format!("inklog_uptime_seconds {}\n", uptime));
-        }
+        s.push_str("# HELP inklog_uptime_seconds Uptime in seconds\n");
+        s.push_str("# TYPE inklog_uptime_seconds gauge\n");
+        s.push_str(&format!("inklog_uptime_seconds {}\n", uptime));
 
         s.push_str("# HELP inklog_pool_hit_rate Pool hit rate percentage (0-100)\n");
         s.push_str("# TYPE inklog_pool_hit_rate gauge\n");
@@ -702,7 +715,7 @@ impl Metrics {
         //
         s.push_str("# HELP inklog_latency_bucket Latency histogram bucket\n");
         s.push_str("# TYPE inklog_latency_bucket counter\n");
-        let bounds = [1000, 5000, 10000, 50000, 100000, 500000, 1000000];
+        let bounds = self.latency_histogram.bounds();
         let buckets = self.latency_histogram.snapshot();
         for (i, &bound) in bounds.iter().enumerate() {
             if i < buckets.len() {
@@ -916,6 +929,20 @@ impl SinkHealthMonitor {
                 );
 
                 let attempt = retries.get(sink_name).cloned().unwrap_or(0) + 1;
+
+                // Cap recovery attempts at configured max_retries
+                if attempt > self.config.max_retries {
+                    tracing::warn!(
+                        event = "sink_recovery_max_retries",
+                        sink = sink_name,
+                        max_retries = self.config.max_retries,
+                        "Sink {} exceeded max recovery attempts ({})",
+                        sink_name,
+                        self.config.max_retries
+                    );
+                    return FallbackAction::None;
+                }
+
                 retries.insert(sink_name.to_string(), attempt);
 
                 // 计算指数退避延迟
@@ -968,13 +995,7 @@ impl SinkHealthMonitor {
         states: &mut HashMap<String, FallbackState>,
         retries: &mut HashMap<String, u32>,
     ) -> FallbackAction {
-        let failure_count = retries.get(sink_name).cloned().unwrap_or(0) + 1;
-        retries.insert(sink_name.to_string(), failure_count);
-
-        // 确定降级目标
-        let (fallback_target, action) = self.determine_fallback_target(sink_name, error);
-
-        // 如果降级配置未启用，只记录警告
+        // 如果降级配置未启用，只记录警告，不递增故障计数器
         if !self.config.enabled {
             tracing::warn!(
                 event = "sink_failed_disabled_fallback",
@@ -985,6 +1006,12 @@ impl SinkHealthMonitor {
             );
             return FallbackAction::None;
         }
+
+        let failure_count = retries.get(sink_name).cloned().unwrap_or(0) + 1;
+        retries.insert(sink_name.to_string(), failure_count);
+
+        // 确定降级目标
+        let (fallback_target, action) = self.determine_fallback_target(sink_name, error);
 
         // 如果达到故障阈值，触发降级
         if failure_count >= self.config.failure_threshold {
@@ -2020,9 +2047,9 @@ mod metrics_tests {
     }
 
     #[test]
-    fn test_get_status_with_not_started_sink_returns_healthy() {
-        // 覆盖 L591：当 sinks 非空且仅含 NotStarted 状态（非 Healthy/Unhealthy/Degraded）时，
-        // get_status 的 else 分支返回 SinkStatus::Healthy
+    fn test_get_status_with_not_started_sink_returns_not_started() {
+        // When all sinks are in NotStarted state, get_status should return NotStarted
+        // (not Healthy, which was the old incorrect behavior)
         let metrics = Metrics::new();
         {
             let mut map = metrics.sink_health.lock();
@@ -2030,8 +2057,8 @@ mod metrics_tests {
         }
         let status = metrics.get_status(0, 100);
         assert!(
-            matches!(status.overall_status, SinkStatus::Healthy),
-            "expected Healthy, got {:?}",
+            matches!(status.overall_status, SinkStatus::NotStarted),
+            "expected NotStarted, got {:?}",
             status.overall_status
         );
     }

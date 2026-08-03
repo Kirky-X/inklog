@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 //! # Object Pool
 //!
-//! High-performance object pool using oxcache for LRU caching and thread-safe operations.
-//! This module provides object pooling for LogRecord and String buffers.
-//! All caching is centralized through oxcache - no other cache implementations exist.
+//! High-performance object pooling with two complementary strategies:
+//!
+//! - `ObjectPool<K, V>`: LRU-cached pool backed by oxcache (async, TTL-capable).
+//! - `ThreadLocalLogRecordPool`: Per-thread pool for `LogRecord` reuse (zero-alloc hot path).
+//! - `ThreadLocalStringPool`: Per-thread pool for `String` buffer reuse.
 //!
 //! # Construction Patterns
 //!
@@ -74,6 +76,13 @@ impl Default for ObjectPoolConfig {
 ///
 /// All construction and access methods are async and return `Result` to
 /// propagate errors explicitly (no panic paths, no silent fallbacks).
+///
+/// # Cloning
+///
+/// `Clone` is derived intentionally: cloning an `ObjectPool` shares the
+/// underlying oxcache `Cache` and stats via `Arc`. Both clones read and
+/// write the same backing store. This is by design for multi-producer
+/// scenarios where several tasks need access to the same pool.
 #[derive(Clone)]
 pub struct ObjectPool<K, V>
 where
@@ -132,7 +141,6 @@ where
         } else {
             self.stats.misses.fetch_add(1, Ordering::Relaxed);
         }
-        self.stats.total_items.store(self.len(), Ordering::Relaxed);
         Ok(result)
     }
 
@@ -146,11 +154,15 @@ where
             .set(key, &value)
             .await
             .map_err(|e| InklogError::CacheError(format!("Failed to set cache: {}", e)))?;
-        self.stats.total_items.store(self.len(), Ordering::Relaxed);
+        self.stats.total_items.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
-    /// Get the current number of items in the pool (reads atomic, no async needed)
+    /// Get the approximate number of items that have been put into the pool.
+    ///
+    /// Note: This count tracks the number of `put()` calls and may over-count
+    /// if the underlying oxcache evicts entries (TTL expiry, capacity pressure).
+    /// It is an approximation, not an exact count of current cache contents.
     pub fn len(&self) -> usize {
         self.stats.total_items.load(Ordering::Relaxed)
     }
@@ -615,7 +627,8 @@ mod tests {
         put_string_buffer(s1);
 
         let s2 = get_string_buffer();
-        assert!(s2.is_empty() || !s2.is_empty()); // 验证 API 可调用
+        // Verify the API is callable and returns a String
+        let _ = s2.capacity();
     }
 
     // ============================================================================
