@@ -347,7 +347,7 @@ impl Config for InklogConfigAdapter {
                 .config
                 .database_sink
                 .as_ref()
-                .map(|d| d.archive_format.clone()),
+                .map(|d| d.archive_format.to_string()),
 
             // Performance
             "performance.worker_threads" => {
@@ -896,7 +896,7 @@ mod tests {
                 batch_size: 500,
                 flush_interval_ms: 250,
                 table_name: "app_logs".to_string(),
-                archive_format: "parquet".to_string(),
+                archive_format: crate::ArchiveFormat::Parquet,
                 ..Default::default()
             }),
             ..Default::default()

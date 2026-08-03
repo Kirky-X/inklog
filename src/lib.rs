@@ -134,6 +134,19 @@ mod validation;
 #[cfg(feature = "i18n")]
 pub mod i18n;
 
+// Emit a clear compile error when the `kit` feature is enabled without any
+// database driver.  DbNexusLogDbAdapter and InklogModule require at least
+// one of sqlite / postgres / mysql to function.
+#[cfg(all(
+    feature = "kit",
+    not(any(feature = "sqlite", feature = "postgres", feature = "mysql"))
+))]
+compile_error!(
+    "The 'kit' feature requires at least one database driver feature: \
+     \"sqlite\", \"postgres\", or \"mysql\". Enable one or more of these \
+     features alongside 'kit'."
+);
+
 // Backwards compatibility - expose modules at root level
 pub use domain::config;
 pub use domain::types::log_record;
@@ -154,9 +167,9 @@ pub mod integrations;
 
 // Re-export types from domain layer for backwards compatibility
 pub use domain::config::{
-    ChannelStrategy, ConsoleSinkConfig, DatabaseDriver, DatabaseSinkConfig, FileSinkConfig,
-    GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig, ParquetConfig,
-    PartitionStrategy, PerformanceConfig, TlsConfig,
+    ArchiveFormat, ChannelStrategy, ConsoleSinkConfig, DatabaseDriver, DatabaseSinkConfig,
+    FileSinkConfig, GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig,
+    ParquetConfig, PartitionStrategy, PerformanceConfig, TlsConfig,
 };
 pub use domain::db_provider::LogDbProvider;
 pub use domain::types::log_record::LogRecord;

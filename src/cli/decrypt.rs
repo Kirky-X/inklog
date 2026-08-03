@@ -14,31 +14,34 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
-/// 验证文件路径是否在允许的目录内，防止路径遍历攻击
-fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
-    // 检查路径中是否包含可疑字符（包括 Unicode 变体）
-    let path_str = file_path.to_string_lossy();
-    let suspicious_chars = ['~', '\0', '\u{2024}', '\u{2025}', '\u{FE52}']; // 包括各种点字符，但不包括单个 '.'
+/// 检查路径中是否包含可疑字符或遍历模式（共享逻辑）
+fn check_path_syntax(path: &Path) -> Result<()> {
+    let path_str = path.to_string_lossy();
+    let suspicious_chars = ['~', '\0', '\u{2024}', '\u{2025}', '\u{FE52}'];
     for c in path_str.chars() {
         if suspicious_chars.contains(&c) {
             return Err(anyhow!(
                 "Invalid path character detected in: {}",
-                file_path.display()
+                path.display()
             ));
         }
     }
-
-    // 检查路径遍历模式
     let path_str_lower = path_str.to_lowercase();
     if path_str_lower.contains("..") || path_str_lower.contains("~/") {
         return Err(anyhow!(
             "Path traversal pattern detected in: {}",
-            file_path.display()
+            path.display()
         ));
     }
+    Ok(())
+}
+
+/// 验证文件路径是否在允许的目录内，防止路径遍历攻击。
+/// 要求路径已存在（用于输入路径验证）。
+fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
+    check_path_syntax(file_path)?;
 
     // 检查符号链接 — 必须在 canonicalize 之前执行，防止 TOCTOU 竞态
-    // （canonicalize 会解析符号链接，先检查可避免解析窗口内的替换攻击）
     if let Ok(metadata) = file_path.symlink_metadata()
         && metadata.file_type().is_symlink()
     {
@@ -57,11 +60,58 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
         .canonicalize()
         .map_err(|e| anyhow!("Cannot canonicalize base directory: {}", e))?;
 
-    // 检查规范化后的路径是否以基础目录开头
     if !canonical_path.starts_with(&canonical_base) {
         return Err(anyhow!(
             "Path traversal attempt detected: {} is outside base directory {}",
             file_path.display(),
+            base_dir.display()
+        ));
+    }
+
+    Ok(())
+}
+
+/// 验证输出路径安全性（不要求路径已存在）。
+/// 通过验证父目录的 canonicalize 结果来确保输出在 base_dir 内。
+fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
+    check_path_syntax(output_path)?;
+
+    // 验证文件名部分不含路径遍历
+    if let Some(file_name) = output_path.file_name() {
+        let name_str = file_name.to_string_lossy();
+        if name_str.contains('\0') || name_str.contains('/') || name_str.contains('\\') {
+            return Err(anyhow!(
+                "Invalid output file name: {}",
+                output_path.display()
+            ));
+        }
+    }
+
+    // 验证父目录：canonicalize 父目录（应已存在）并检查前缀
+    let parent = output_path
+        .parent()
+        .ok_or_else(|| anyhow!("Output path has no parent directory"))?;
+
+    let canonical_parent = parent.canonicalize().map_err(|e| {
+        anyhow!(
+            "Cannot canonicalize output parent directory '{}': {}",
+            parent.display(),
+            e
+        )
+    })?;
+
+    let canonical_base = base_dir.canonicalize().map_err(|e| {
+        anyhow!(
+            "Cannot canonicalize base directory '{}': {}",
+            base_dir.display(),
+            e
+        )
+    })?;
+
+    if !canonical_parent.starts_with(&canonical_base) {
+        return Err(anyhow!(
+            "Path traversal attempt detected: output {} is outside base directory {}",
+            output_path.display(),
             base_dir.display()
         ));
     }
@@ -116,7 +166,10 @@ fn validate_glob_pattern(pattern: &str) -> Result<()> {
 
 const MAGIC_HEADER: &[u8] = b"ENCLOG1\0";
 
-#[allow(dead_code)]
+/// Decrypt a single encrypted file (legacy format).
+///
+/// Supports the original header-less encryption format.
+#[cfg(test)]
 pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) -> Result<()> {
     let mut file = File::open(input_path)
         .with_context(|| format!("Failed to open input file: {}", input_path.display()))?;
@@ -306,11 +359,7 @@ pub fn decrypt_directory_compatible(
         ));
     }
 
-    // 验证输出目录路径安全
-    if let Err(e) = validate_file_path(output_dir, output_dir) {
-        return Err(anyhow!("Invalid output directory: {}", e));
-    }
-
+    // 先创建输出目录，再验证（canonicalize 要求目录存在）
     std::fs::create_dir_all(output_dir).with_context(|| {
         format!(
             "Failed to create output directory: {}",
@@ -318,8 +367,15 @@ pub fn decrypt_directory_compatible(
         )
     })?;
 
+    // 验证已存在的输出目录路径安全
+    if let Err(e) = validate_file_path(output_dir, output_dir) {
+        return Err(anyhow!("Invalid output directory: {}", e));
+    }
+
     let entries = std::fs::read_dir(input_dir)
         .with_context(|| format!("Failed to read input directory: {}", input_dir.display()))?;
+
+    let mut failure_count = 0u32;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -328,16 +384,19 @@ pub fn decrypt_directory_compatible(
             if let Some(ext) = path.extension()
                 && ext == "enc"
             {
-                let file_name = path.file_name().unwrap();
+                let file_name = path
+                    .file_name()
+                    .ok_or_else(|| anyhow!("path has no file name: {}", path.display()))?;
                 let output_path = output_dir.join(file_name).with_extension("log");
 
-                // 验证输出路径是否在允许的目录内
-                if let Err(e) = validate_file_path(&output_path, output_dir) {
+                // 验证输出路径（不要求文件已存在）
+                if let Err(e) = validate_output_path(&output_path, output_dir) {
                     eprintln!(
                         "Path validation failed for {}: {}",
                         output_path.display(),
                         e
                     );
+                    failure_count += 1;
                     continue;
                 }
 
@@ -349,19 +408,23 @@ pub fn decrypt_directory_compatible(
 
                 if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
                     eprintln!("Failed to decrypt {}: {}", path.display(), e);
+                    failure_count += 1;
                 }
             }
         } else if recursive && path.is_dir() {
-            let file_name = path.file_name().unwrap();
+            let file_name = path
+                .file_name()
+                .ok_or_else(|| anyhow!("path has no file name: {}", path.display()))?;
             let sub_output_dir = output_dir.join(file_name);
 
-            // 验证子目录路径是否在允许的目录内
-            if let Err(e) = validate_file_path(&sub_output_dir, output_dir) {
+            // 验证子目录输出路径（不要求目录已存在）
+            if let Err(e) = validate_output_path(&sub_output_dir, output_dir) {
                 eprintln!(
                     "Path validation failed for {}: {}",
                     sub_output_dir.display(),
                     e
                 );
+                failure_count += 1;
                 continue;
             }
 
@@ -369,6 +432,12 @@ pub fn decrypt_directory_compatible(
         }
     }
 
+    if failure_count > 0 {
+        return Err(anyhow!(
+            "Decryption completed with {} failure(s). Check output above for details.",
+            failure_count
+        ));
+    }
     Ok(())
 }
 
@@ -376,16 +445,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
     // 验证 glob 模式安全性 - 防止路径遍历
     validate_glob_pattern(input_pattern)?;
 
-    let paths = glob::glob(input_pattern)
-        .map_err(|e| anyhow!("Invalid glob pattern: {}", e))?
-        .filter_map(|p| p.ok())
-        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "enc"));
-
-    // 验证输出目录路径安全
-    if let Err(e) = validate_file_path(output_dir, output_dir) {
-        return Err(anyhow!("Invalid output directory: {}", e));
-    }
-
+    // 先创建输出目录，再验证（canonicalize 要求目录存在）
     std::fs::create_dir_all(output_dir).with_context(|| {
         format!(
             "Failed to create output directory: {}",
@@ -393,17 +453,50 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
         )
     })?;
 
+    // 验证已存在的输出目录路径安全
+    if let Err(e) = validate_file_path(output_dir, output_dir) {
+        return Err(anyhow!("Invalid output directory: {}", e));
+    }
+
+    let canonical_output = output_dir.canonicalize()?;
+
+    let paths = glob::glob(input_pattern)
+        .map_err(|e| anyhow!("Invalid glob pattern: {}", e))?
+        .filter_map(|p| p.ok())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "enc"));
+
+    let mut failure_count = 0u32;
+    let mut success_count = 0u32;
+
     for path in paths {
-        let file_name = path.file_name().unwrap();
+        // 验证 glob 展开的输入路径是否在安全范围内
+        if let Ok(canonical_input) = path.canonicalize()
+            && !canonical_input.starts_with(&canonical_output)
+        {
+            // 输入路径不在输出目录内是正常场景（输入输出通常不同目录），
+            // 但仍需确保输入路径不含符号链接等危险元素
+            if let Ok(metadata) = path.symlink_metadata()
+                && metadata.file_type().is_symlink()
+            {
+                eprintln!("Skipping symlink input path: {}", path.display());
+                failure_count += 1;
+                continue;
+            }
+        }
+
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| anyhow!("path has no file name: {}", path.display()))?;
         let output_path = output_dir.join(file_name).with_extension("log");
 
-        // 验证输出路径是否在允许的目录内
-        if let Err(e) = validate_file_path(&output_path, output_dir) {
+        // 验证输出路径（不要求文件已存在）
+        if let Err(e) = validate_output_path(&output_path, output_dir) {
             eprintln!(
                 "Path validation failed for {}: {}",
                 output_path.display(),
                 e
             );
+            failure_count += 1;
             continue;
         }
 
@@ -415,9 +508,19 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
 
         if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
             eprintln!("Failed to decrypt {}: {}", path.display(), e);
+            failure_count += 1;
+        } else {
+            success_count += 1;
         }
     }
 
+    if failure_count > 0 {
+        return Err(anyhow!(
+            "Batch decryption completed: {} succeeded, {} failed.",
+            success_count,
+            failure_count
+        ));
+    }
     Ok(())
 }
 

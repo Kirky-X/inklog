@@ -172,9 +172,14 @@ impl Cache for OxCacheAdapter {
     }
 
     async fn delete(&self, key: &str) -> Result<bool, InklogError> {
-        // 先检查键是否存在，避免无谓的 delete 调用
-        let exists = self.exists(key).await?;
-        if !exists {
+        // Check existence first so we can return an accurate bool.
+        // Note: under concurrent access the key may be removed between
+        // exists() and delete() — this is an accepted tradeoff for
+        // async cache APIs and does not cause data corruption.
+        let existed = self.inner.exists(&key.to_string()).await.map_err(|e| {
+            InklogError::CacheError(format!("exists check failed for '{}': {}", key, e))
+        })?;
+        if !existed {
             return Ok(false);
         }
         self.inner.delete(&key.to_string()).await.map_err(|e| {
@@ -225,6 +230,19 @@ impl OxCacheAdapterBuilder {
     ///
     /// - `InklogError::CacheError` - oxcache 构建失败
     pub async fn build(self) -> Result<OxCacheAdapter, InklogError> {
+        // Validate builder parameters
+        if let Some(ttl) = self.ttl
+            && ttl.is_zero()
+        {
+            tracing::warn!("OxCacheAdapterBuilder: TTL is zero, using default TTL");
+        }
+        if let Some(capacity) = self.capacity
+            && capacity == 0
+        {
+            return Err(InklogError::CacheError(
+                "OxCacheAdapterBuilder: capacity must be > 0".to_string(),
+            ));
+        }
         let mut builder = OxCache::builder();
         if let Some(ttl) = self.ttl {
             builder = builder.ttl(ttl);

@@ -71,7 +71,7 @@ pub fn run_cli() -> Result<()> {
             prerequisites,
         } => {
             if prerequisites {
-                validate::check_prerequisites();
+                validate::check_prerequisites()?;
                 return Ok(());
             }
 

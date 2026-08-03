@@ -53,7 +53,11 @@ const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
         "[AWS_ACCESS_KEY_ID]",
     ),
     // AWS Secret Key pattern (40 characters, base64-like with word boundary)
-    ("[0-9a-zA-Z+/]{40}={0,2}\\b", "[AWS_SECRET_ACCESS_KEY]"),
+    // Tightened to require adjacent AWS context to reduce false positives on generic 40-char tokens.
+    (
+        "(?i)(?:aws[_-]?(?:secret[_-]?access[_-]?key|secret)[\"'\\s:=]+)[0-9a-zA-Z+/]{40}={0,2}\\b",
+        "[AWS_SECRET_ACCESS_KEY]",
+    ),
     // JWT Token pattern (with word boundaries)
     (
         "\\beyJ[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\b",
@@ -62,7 +66,8 @@ const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
     // Database connection strings (postgres, mysql, sqlite)
     ("(?i)(postgres|postgresql)://[^@]+:[^@]+@", "$1://***:***@"),
     ("(?i)mysql://[^@]+:[^@]+@", "mysql://***:***@"),
-    ("(?i)sqlite://[^?]*\\?[^&]*", "sqlite://***"),
+    // SQLite connection strings (matches both path-based and query-parameter URIs)
+    ("(?i)sqlite://[^\\s]+", "sqlite://***"),
     // API keys (generic pattern)
     (
         "(?i)(api[_-]?key|access[_-]?key|secret[_-]?key)[\"']?\\s*[=:]\\s*[\"']?[a-zA-Z0-9_\\-]{20,}",
@@ -106,8 +111,10 @@ static COMPILED_PATTERNS: LazyLock<Vec<(regex::Regex, &'static str)>> = LazyLock
         .filter_map(|(pattern, replacement)| match regex::Regex::new(pattern) {
             Ok(re) => Some((re, *replacement)),
             Err(e) => {
+                // Use eprintln during static init (tracing may not be set up yet)
+                // but prefix with clear warning marker
                 eprintln!(
-                    "Warning: failed to compile sensitive pattern '{}': {}",
+                    "[inklog] WARNING: failed to compile sensitive pattern '{}': {}",
                     pattern, e
                 );
                 None
@@ -118,12 +125,26 @@ static COMPILED_PATTERNS: LazyLock<Vec<(regex::Regex, &'static str)>> = LazyLock
 
 /// Sanitizes a message by removing sensitive information.
 /// Uses pre-compiled regex patterns for optimal performance under high-frequency logging.
-fn sanitize_message(msg: &str) -> String {
+/// Returns a borrowed reference when no patterns match (zero-allocation fast path).
+fn sanitize_message(msg: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    // Fast path: check if any pattern matches before allocating
+    let mut has_match = false;
+    for (re, _) in COMPILED_PATTERNS.iter() {
+        if re.is_match(msg) {
+            has_match = true;
+            break;
+        }
+    }
+    if !has_match {
+        return Cow::Borrowed(msg);
+    }
+    // Slow path: apply all replacements
     let mut result = msg.to_string();
     for (re, replacement) in COMPILED_PATTERNS.iter() {
-        result = re.replace_all(&result, *replacement).to_string();
+        result = re.replace_all(&result, *replacement).into_owned();
     }
-    result
+    Cow::Owned(result)
 }
 
 #[derive(Error, Debug)]
@@ -235,6 +256,10 @@ impl InklogError {
     /// // Returns: "Configuration error: Failed to load [AWS_ACCESS_KEY_ID] from [USER_HOME_PATH]/.aws/credentials"
     /// ```
     pub fn safe_message(&self) -> String {
+        // Note: source error chains (e.g. DatabaseError.source) are intentionally
+        // NOT included in safe_message output. Only the top-level message field
+        // is sanitized and displayed. This prevents sensitive data in wrapped
+        // errors from leaking through the error chain.
         match self {
             InklogError::ConfigError(msg) => {
                 format!("Configuration error: {}", sanitize_message(msg))

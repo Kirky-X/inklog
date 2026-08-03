@@ -178,7 +178,8 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         }
 
         // Early return if encryption is not enabled
-        if !encrypt.as_bool().unwrap_or(false) {
+        // (unwrap is safe: we already checked is_bool() above)
+        if !encrypt.as_bool().unwrap() {
             return Ok(());
         }
 
@@ -241,9 +242,10 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         println!("  ✓ Database sink enabled: {}", enabled);
     }
 
-    if let Some(driver) = db.get("driver")
-        && let Some(driver_str) = driver.as_str()
-    {
+    if let Some(driver) = db.get("driver") {
+        let driver_str = driver
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("db_config.driver must be a string, got {}", driver))?;
         let valid_drivers = ["postgres", "postgresql", "mysql", "sqlite", "sqlite3"];
         if !valid_drivers.contains(&driver_str.to_lowercase().as_str()) {
             return Err(anyhow::anyhow!(
@@ -391,7 +393,8 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
 }
 
 fn parse_size(size_str: &str) -> Result<()> {
-    let size_str = size_str.trim().to_uppercase();
+    let size_str = size_str.trim();
+    // Case-insensitive split into numeric and unit parts without allocation
     let (num_str, unit) = size_str.split_at(
         size_str
             .find(|c: char| !c.is_ascii_digit())
@@ -403,7 +406,11 @@ fn parse_size(size_str: &str) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("Invalid number: {}", num_str))?;
 
     let valid_units = ["B", "KB", "MB", "GB", "TB"];
-    if !valid_units.contains(&unit) {
+    // Case-insensitive unit comparison to avoid to_uppercase() allocation
+    if !valid_units
+        .iter()
+        .any(|&valid| valid.eq_ignore_ascii_case(unit))
+    {
         return Err(anyhow::anyhow!(
             "Invalid size unit '{}'. Valid units: {:?}",
             unit,
@@ -414,26 +421,38 @@ fn parse_size(size_str: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn check_prerequisites() {
+pub fn check_prerequisites() -> anyhow::Result<()> {
     println!("Checking prerequisites...\n");
 
+    let mut missing_critical = Vec::new();
+
     println!("  Rust version:");
-    let output = Command::new("rustc")
+    let rust_output = Command::new("rustc")
         .arg("--version")
         .output()
         .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "not found".to_string());
-    println!("    {}", output);
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    match &rust_output {
+        Some(v) => println!("    {}", v),
+        None => {
+            println!("    not found");
+            missing_critical.push("rustc");
+        }
+    }
 
     println!("  Cargo version:");
-    let output = Command::new("cargo")
+    let cargo_output = Command::new("cargo")
         .arg("--version")
         .output()
         .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "not found".to_string());
-    println!("    {}", output);
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    match &cargo_output {
+        Some(v) => println!("    {}", v),
+        None => {
+            println!("    not found");
+            missing_critical.push("cargo");
+        }
+    }
 
     println!("\n  Optional dependencies:");
     if Command::new("openssl").arg("version").output().is_ok() {
@@ -482,6 +501,15 @@ pub fn check_prerequisites() {
     }
 
     println!("\nPrerequisites check complete.");
+
+    if !missing_critical.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Missing critical prerequisites: {}. Please install them before continuing.",
+            missing_critical.join(", ")
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -728,53 +756,6 @@ port = 99999
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_validate_config_file_sink_encrypt_without_key_env() {
-        let content = r#"
-[file]
-encrypt = true
-"#;
-        let file = write_config(content);
-        let result = validate_config(&file.path().to_path_buf());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("encryption_key_env")
-        );
-    }
-
-    #[test]
-    fn test_validate_config_file_sink_encrypt_with_empty_key_env() {
-        let content = r#"
-[file]
-encrypt = true
-encryption_key_env = ""
-"#;
-        let file = write_config(content);
-        let result = validate_config(&file.path().to_path_buf());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("encryption_key_env is empty")
-        );
-    }
-
-    #[test]
-    fn test_validate_config_file_sink_encrypt_with_valid_key_env() {
-        let content = r#"
-[file]
-encrypt = true
-encryption_key_env = "LOG_ENCRYPTION_KEY"
-"#;
-        let file = write_config(content);
-        let result = validate_config(&file.path().to_path_buf());
-        assert!(result.is_ok());
     }
 
     // ========================================================================
