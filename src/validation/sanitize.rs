@@ -140,7 +140,12 @@ impl LogSanitizer {
         }
 
         if self.config.max_length > 0 && result.len() > self.config.max_length {
-            result.truncate(self.config.max_length);
+            // Find a safe UTF-8 char boundary to avoid splitting multi-byte characters
+            let mut end = self.config.max_length;
+            while end > 0 && !result.is_char_boundary(end) {
+                end -= 1;
+            }
+            result.truncate(end);
             result.push_str("...[truncated]");
         }
 
@@ -414,5 +419,19 @@ mod tests {
         assert!(result.contains("external"));
         assert!(!result.contains("PHONE-555"));
         assert!(!result.contains("internal"));
+    }
+
+    #[test]
+    fn test_sanitize_truncate_respects_utf8_boundaries() {
+        // T014: truncation must not split multi-byte UTF-8 characters
+        let mut config = super::SanitizerConfig::default();
+        // "你好世界" = 12 bytes (3 bytes per char), set max_length to 7
+        // Should truncate to "你好" (6 bytes) instead of splitting the 3rd char
+        config.max_length = 7;
+        let sanitizer = super::LogSanitizer::with_config(config);
+        let result = sanitizer.sanitize("你好世界");
+        // Should contain the truncated text without panicking
+        assert!(result.starts_with("你好"));
+        assert!(result.contains("...[truncated]"));
     }
 }
