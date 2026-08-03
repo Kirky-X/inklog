@@ -12,6 +12,7 @@ mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
 duckdb = ["inklog/duckdb", "dep:dbnexus", "dbnexus/duckdb"]
 compression = ["inklog/compression"]
 parquet = ["inklog/parquet"]
+i18n = ["inklog/i18n"]
 
 [dependencies]
 inklog = { path = ".." }
@@ -90,6 +91,7 @@ path = "src/bin/masking.rs"
 [[bin]]
 name = "di_example"
 path = "src/bin/di_example.rs"
+required-features = ["sqlite"]
 
 [[bin]]
 name = "object_pool"
@@ -162,3 +164,21 @@ path = "src/bin/parquet_archive.rs"
 [[bin]]
 name = "database_pg_mysql"
 path = "src/bin/database_pg_mysql.rs"
+
+# Layer 3 补全示例
+[[bin]]
+name = "tls_config"
+path = "src/bin/tls_config.rs"
+
+[[bin]]
+name = "partition_strategy"
+path = "src/bin/partition_strategy.rs"
+
+[[bin]]
+name = "i18n"
+path = "src/bin/i18n.rs"
+required-features = ["i18n"]
+
+[[bin]]
+name = "runtime_ops"
+path = "src/bin/runtime_ops.rs"

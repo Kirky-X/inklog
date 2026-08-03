@@ -134,7 +134,7 @@ pub enum InklogError {
     DatabaseError {
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     #[error("Cache error: {0}")]
@@ -144,7 +144,7 @@ pub enum InklogError {
     EncryptionError {
         message: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     #[error("Shutdown error: {0}")]
@@ -184,7 +184,7 @@ impl InklogError {
     /// Create a `DatabaseError` with a message and source error chain.
     pub fn database_error_with_source(
         message: impl Into<String>,
-        source: impl std::error::Error + Send + 'static,
+        source: impl std::error::Error + Send + Sync + 'static,
     ) -> Self {
         InklogError::DatabaseError {
             message: message.into(),
@@ -203,7 +203,7 @@ impl InklogError {
     /// Create an `EncryptionError` with a message and source error chain.
     pub fn encryption_error_with_source(
         message: impl Into<String>,
-        source: impl std::error::Error + Send + 'static,
+        source: impl std::error::Error + Send + Sync + 'static,
     ) -> Self {
         InklogError::EncryptionError {
             message: message.into(),
