@@ -191,38 +191,7 @@ impl FileSink {
 
     /// 解析文件大小字符串
     pub fn parse_size(size_str: &str) -> Option<u64> {
-        let size_str = size_str.trim();
-        if size_str.is_empty() {
-            return None;
-        }
-
-        if size_str.ends_with("TB") {
-            size_str
-                .trim_end_matches("TB")
-                .parse::<u64>()
-                .ok()
-                .map(|s| s * 1024 * 1024 * 1024 * 1024)
-        } else if size_str.ends_with("GB") {
-            size_str
-                .trim_end_matches("GB")
-                .parse::<u64>()
-                .ok()
-                .map(|s| s * 1024 * 1024 * 1024)
-        } else if size_str.ends_with("MB") {
-            size_str
-                .trim_end_matches("MB")
-                .parse::<u64>()
-                .ok()
-                .map(|s| s * 1024 * 1024)
-        } else if size_str.ends_with("KB") {
-            size_str
-                .trim_end_matches("KB")
-                .parse::<u64>()
-                .ok()
-                .map(|s| s * 1024)
-        } else {
-            size_str.parse::<u64>().ok()
-        }
+        super::rotation::parse_size(size_str).ok()
     }
 
     /// 获取加密密钥
