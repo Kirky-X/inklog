@@ -155,8 +155,10 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
         let mut inner = self.inner.lock().await;
 
         if !inner.circuit_breaker.can_execute() {
-            if let Some(ref sink) = inner.fallback_sink {
-                let _ = sink.write(record).await;
+            if let Some(ref sink) = inner.fallback_sink
+                && let Err(e) = sink.write(record).await
+            {
+                tracing::warn!("Fallback sink write failed (circuit open): {}", e);
             }
             return Ok(());
         }
@@ -175,8 +177,10 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
             if let Err(e) = Self::flush_inner(self, &mut inner).await {
                 inner.failure_count += 1;
                 inner.circuit_breaker.record_failure();
-                if let Some(ref sink) = inner.fallback_sink {
-                    let _ = sink.write(record).await;
+                if let Some(ref sink) = inner.fallback_sink
+                    && let Err(e) = sink.write(record).await
+                {
+                    tracing::warn!("Fallback sink write failed (flush error): {}", e);
                 }
                 return Err(e);
             }
@@ -272,12 +276,26 @@ pub fn convert_logs_to_parquet(
     let messages: Vec<&str> = logs.iter().map(|l| l.message.as_str()).collect();
     let fields: Vec<Option<String>> = logs
         .iter()
-        .map(|l| Some(serde_json::to_string(&l.fields).unwrap_or_default()))
+        .map(|l| {
+            serde_json::to_string(&l.fields)
+                .map_err(|e| {
+                    tracing::warn!("Failed to serialize log fields to JSON: {}", e);
+                    e
+                })
+                .ok()
+        })
         .collect();
     let files: Vec<Option<&str>> = logs.iter().map(|l| l.file.as_deref()).collect();
     let lines: Vec<Option<i32>> = logs
         .iter()
-        .map(|l| l.line.map(|line_num| line_num as i32))
+        .map(|l| {
+            l.line.and_then(|line_num| {
+                line_num.try_into().ok().or_else(|| {
+                    tracing::warn!(line_num, "line_num exceeds i32 range, clamping");
+                    Some(i32::MAX)
+                })
+            })
+        })
         .collect();
     let thread_ids: Vec<Option<&str>> = logs.iter().map(|l| Some(l.thread_id.as_str())).collect();
 

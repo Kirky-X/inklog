@@ -202,7 +202,9 @@ impl CompressionStrategy for GzipCompression {
             InklogError::CompressionError(e.to_string())
         })?;
 
-        let _ = std::fs::remove_file(path);
+        if let Err(e) = std::fs::remove_file(path) {
+            tracing::warn!("Failed to remove original file after compression: {}", e);
+        }
 
         Ok(compressed_path)
     }
@@ -247,7 +249,9 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
         InklogError::CompressionError(e.to_string())
     })?;
 
-    let _ = std::fs::remove_file(path);
+    if let Err(e) = std::fs::remove_file(path) {
+        tracing::warn!("Failed to remove original file after compression: {}", e);
+    }
 
     Ok(compressed_path)
 }

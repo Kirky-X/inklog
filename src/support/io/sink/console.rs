@@ -139,11 +139,14 @@ impl LogSink for ConsoleSink {
     }
 
     async fn flush(&self) -> Result<(), InklogError> {
+        // Flush stdout writer
         let mut writer = self
             .writer
             .lock()
             .map_err(|_| InklogError::IoError(io::Error::other("Lock poisoned")))?;
-        writer.flush().map_err(InklogError::IoError)
+        writer.flush().map_err(InklogError::IoError)?;
+        // Also flush stderr to ensure all output is written
+        io::stderr().flush().map_err(InklogError::IoError)
     }
 
     fn is_healthy(&self) -> bool {
@@ -162,6 +165,9 @@ impl Clone for ConsoleSink {
             // Clone shares the same writer (Arc ensures reference counting)
             writer: Arc::clone(&self.writer),
             template: self.template.clone(),
+            // Note: Clone creates a fresh DataMasker instance. Any learned state
+            // (e.g., dynamically added patterns) from the original masker is not shared.
+            // This is intentional: each cloned sink gets independent masking configuration.
             masker: DataMasker::new(),
         }
     }

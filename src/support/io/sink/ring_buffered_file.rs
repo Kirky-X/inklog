@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Duration as StdDuration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackpressureStrategy {
@@ -54,11 +54,13 @@ struct Inner {
 }
 
 pub struct ChannelBufferedFileSink {
-    #[allow(dead_code)]
     config: ChannelBufferedConfig,
     template: LogTemplate,
     sender: crossbeam_channel::Sender<String>,
     receiver: crossbeam_channel::Receiver<String>,
+    // Option wrapper is kept to allow future replacement of the writer
+    // during runtime (e.g., for log rotation), even though it is not
+    // currently exercised. Removing it would require significant refactoring.
     file: Arc<Mutex<Option<BufWriter<File>>>>,
     #[allow(dead_code)]
     file_path: PathBuf,
@@ -67,8 +69,7 @@ pub struct ChannelBufferedFileSink {
     bytes_written: Arc<AtomicUsize>,
     flush_count: Arc<AtomicUsize>,
     dropped_count: Arc<AtomicUsize>,
-    #[allow(dead_code)]
-    last_flush: Instant,
+    write_error_count: Arc<AtomicUsize>,
 }
 
 impl ChannelBufferedFileSink {
@@ -82,7 +83,7 @@ impl ChannelBufferedFileSink {
         let bytes_written = Arc::new(AtomicUsize::new(0));
         let flush_count = Arc::new(AtomicUsize::new(0));
         let dropped_count = Arc::new(AtomicUsize::new(0));
-        let last_flush = Instant::now();
+        let write_error_count = Arc::new(AtomicUsize::new(0));
 
         let sink = Self {
             config,
@@ -99,7 +100,7 @@ impl ChannelBufferedFileSink {
             bytes_written,
             flush_count,
             dropped_count,
-            last_flush,
+            write_error_count,
         };
 
         sink.start_io_thread();
@@ -126,6 +127,7 @@ impl ChannelBufferedFileSink {
         let file = self.file.clone();
         let shutdown_flag = self.shutdown_flag.clone();
         let bytes_written = self.bytes_written.clone();
+        let write_error_count = self.write_error_count.clone();
         let batch_size = self.config.flush_batch_size;
 
         let handle = thread::spawn(move || {
@@ -158,27 +160,54 @@ impl ChannelBufferedFileSink {
                 if let Some(writer) = file_guard.as_mut() {
                     for entry in &batch {
                         if let Err(e) = writer.write_all(entry.as_bytes()) {
-                            eprintln!("ChannelBufferedFileSink: Write error: {}", e);
+                            tracing::error!(
+                                kind = %e.kind(),
+                                "ChannelBufferedFileSink: Write error: {}",
+                                e
+                            );
+                            write_error_count.fetch_add(1, Ordering::Relaxed);
                         } else {
                             bytes_written.fetch_add(entry.len(), Ordering::Relaxed);
                         }
                     }
-                    let _ = writer.flush();
+                    if let Err(e) = writer.flush() {
+                        tracing::error!(
+                            kind = %e.kind(),
+                            "ChannelBufferedFileSink: Flush error: {}",
+                            e
+                        );
+                        write_error_count.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
 
-            // Drain remaining messages
-            while let Ok(entry) = receiver.recv_timeout(StdDuration::from_millis(100)) {
+            // Drain remaining messages from the channel before exiting.
+            // Use try_recv() to avoid blocking after shutdown flag is set.
+            while let Ok(entry) = receiver.try_recv() {
                 let mut file_guard = file.lock();
-                if let Some(writer) = file_guard.as_mut() {
-                    let _ = writer.write_all(entry.as_bytes());
+                if let Some(writer) = file_guard.as_mut()
+                    && let Err(e) = writer.write_all(entry.as_bytes())
+                {
+                    tracing::error!(
+                        kind = %e.kind(),
+                        "ChannelBufferedFileSink: Write error during drain: {}",
+                        e
+                    );
+                    write_error_count.fetch_add(1, Ordering::Relaxed);
                 }
             }
 
             // Final flush
             let mut file_guard = file.lock();
-            if let Some(writer) = file_guard.as_mut() {
-                let _ = writer.flush();
+            if let Some(writer) = file_guard.as_mut()
+                && let Err(e) = writer.flush()
+            {
+                tracing::error!(
+                    kind = %e.kind(),
+                    "ChannelBufferedFileSink: Final flush error: {}",
+                    e
+                );
+                write_error_count.fetch_add(1, Ordering::Relaxed);
             }
         });
 
@@ -190,6 +219,7 @@ impl ChannelBufferedFileSink {
         let shutdown_flag = self.shutdown_flag.clone();
         let interval_ms = self.config.flush_interval_ms;
         let flush_count = self.flush_count.clone();
+        let write_error_count = self.write_error_count.clone();
 
         let handle = thread::spawn(move || {
             loop {
@@ -202,7 +232,14 @@ impl ChannelBufferedFileSink {
                 }
                 let mut file_guard = file.lock();
                 if let Some(writer) = file_guard.as_mut() {
-                    let _ = writer.flush();
+                    if let Err(e) = writer.flush() {
+                        tracing::error!(
+                            kind = %e.kind(),
+                            "ChannelBufferedFileSink: Periodic flush error: {}",
+                            e
+                        );
+                        write_error_count.fetch_add(1, Ordering::Relaxed);
+                    }
                     flush_count.fetch_add(1, Ordering::Relaxed);
                 }
             }
@@ -232,19 +269,24 @@ impl ChannelBufferedFileSink {
             BackpressureStrategy::DropOldest => match self.sender.try_send(entry) {
                 Ok(()) => true,
                 Err(crossbeam_channel::TrySendError::Full(entry)) => {
-                    if self.receiver.try_recv().is_ok() {
+                    // Try to evict the oldest entry to make room.
+                    // The evicted entry is consumed by this thread and
+                    // discarded, so it counts as one drop.
+                    let evicted = self.receiver.try_recv().is_ok();
+                    if evicted {
                         self.dropped_count.fetch_add(1, Ordering::Relaxed);
                     }
                     match self.sender.try_send(entry) {
                         Ok(()) => true,
                         Err(_) => {
+                            // Retry also failed — the new entry is dropped too.
                             self.dropped_count.fetch_add(1, Ordering::Relaxed);
                             false
                         }
                     }
                 }
                 Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                    self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                    // Channel is dead; don't count as "dropped" since sink is shutting down
                     false
                 }
             },
@@ -258,6 +300,7 @@ impl ChannelBufferedFileSink {
             bytes_written: self.bytes_written.load(Ordering::Relaxed),
             flush_count: self.flush_count.load(Ordering::Relaxed),
             dropped_count: self.dropped_count.load(Ordering::Relaxed),
+            write_error_count: self.write_error_count.load(Ordering::Relaxed),
         }
     }
 }
@@ -269,6 +312,7 @@ pub struct ChannelBufferedMetrics {
     pub bytes_written: usize,
     pub flush_count: usize,
     pub dropped_count: usize,
+    pub write_error_count: usize,
 }
 
 impl ChannelBufferedFileSink {
@@ -306,7 +350,13 @@ impl ChannelBufferedFileSink {
 #[async_trait]
 impl LogSink for ChannelBufferedFileSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-        self.try_write(record);
+        if !self.try_write(record) {
+            return Err(InklogError::ChannelError(format!(
+                "Record dropped by ring buffer (dropped_count: {})",
+                self.dropped_count
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            )));
+        }
         Ok(())
     }
 
@@ -321,9 +371,12 @@ impl LogSink for ChannelBufferedFileSink {
 
 impl Drop for ChannelBufferedFileSink {
     fn drop(&mut self) {
-        // Ensure shutdown is called, but don't double-join threads
-        // shutdown_inner() will handle joining threads if they haven't been joined yet
-        let _ = self.shutdown_inner();
+        // Ensure shutdown is called, but don't double-join threads.
+        // Use catch_unwind to prevent nested panic if shutdown_inner panics
+        // (e.g., from a poisoned mutex or a panicking thread join).
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = self.shutdown_inner();
+        }));
     }
 }
 
@@ -435,11 +488,15 @@ mod tests {
         // fills and DropNewest kicks in.
         for i in 0..10_000 {
             let rec = make_record(&format!("drop-newest-{i}"));
-            sink.write(&rec).await.unwrap();
+            // DropNewest strategy returns error when record is dropped
+            let _ = sink.write(&rec).await;
         }
 
         let m = sink.metrics();
-        assert!(m.dropped_count > 0);
+        assert!(
+            m.dropped_count > 0,
+            "DropNewest should have dropped some records"
+        );
         sink.flush().await.unwrap();
         sink.shutdown().await.unwrap();
     }
@@ -678,10 +735,9 @@ mod tests {
             "DropOldest strategy should return false when sender is disconnected"
         );
         let m = sink.metrics();
-        assert!(
-            m.dropped_count > 0,
-            "dropped_count should be incremented for disconnected DropOldest, got: {}",
-            m.dropped_count
+        assert_eq!(
+            m.dropped_count, 0,
+            "dropped_count should NOT be incremented for disconnected (channel is dead, not 'dropped')"
         );
     }
 
