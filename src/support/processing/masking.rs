@@ -172,7 +172,6 @@ type ApplyFn = Arc<dyn Fn(&Regex, &str, &str) -> String + Send + Sync>;
 /// - `name`: Unique identifier for the rule
 /// - `pattern`: Compiled regex pattern for detection
 /// - `replacement`: Replacement string (supports capture group references like `${1}`)
-/// - `replace_count`: Maximum number of replacements per application
 /// - `priority`: Execution order (lower values execute first)
 /// - `enabled`: Whether this rule is active
 /// - `apply_fn`: Custom application function for complex masking logic
@@ -181,8 +180,6 @@ pub struct MaskRule {
     name: String,
     pattern: Regex,
     replacement: String,
-    #[allow(dead_code)]
-    replace_count: usize,
     priority: i32,
     enabled: bool,
     apply_fn: ApplyFn,
@@ -374,11 +371,9 @@ impl DataMaskerBuilder {
     }
 }
 
-#[allow(dead_code)]
 use std::sync::LazyLock;
 
 /// Pre-compiled regex patterns for better performance
-#[allow(dead_code)]
 static EMAIL_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+").expect("Invalid email regex"));
 
@@ -386,10 +381,10 @@ static PHONE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b1[3-9]\d{9}\b").expect("Invalid phone regex"));
 
 static ID_CARD_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d{6})(\d{8})(\d{3}[\dX])$").expect("Invalid ID card regex"));
+    LazyLock::new(|| Regex::new(r"\b(\d{6})(\d{8})(\d{3}[\dX])\b").expect("Invalid ID card regex"));
 
 static BANK_CARD_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(\d{4})(\d+)(\d{4})").expect("Invalid bank card regex"));
+    LazyLock::new(|| Regex::new(r"(\d{4})(\d{5,11})(\d{4})").expect("Invalid bank card regex"));
 
 /// API Key 模式 - 匹配常见的 API key 格式
 static API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -578,7 +573,6 @@ impl MaskRule {
             name: name.to_string(),
             pattern: regex,
             replacement: replacement.to_string(),
-            replace_count: 1,
             priority,
             enabled: true,
             apply_fn: apply_fn.unwrap_or_else(|| {
@@ -931,7 +925,6 @@ impl MaskRuleBuilder {
             name: self.name,
             pattern: regex,
             replacement: self.replacement,
-            replace_count: 1,
             priority: self.priority,
             enabled: self.enabled,
             apply_fn: self.apply_fn.unwrap_or_else(|| {

@@ -140,11 +140,13 @@ impl MaskRuleRegistry {
             let replacement = table
                 .get("replacement")
                 .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let priority = table
+                .unwrap_or("***REDACTED***");
+            let priority_raw = table
                 .get("priority")
                 .and_then(|v| v.as_integer())
-                .unwrap_or(100) as i32;
+                .unwrap_or(100);
+            // Clamp i64 to i32 range to avoid silent wrapping on extreme values
+            let priority = priority_raw.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
             let enabled = table
                 .get("enabled")
                 .and_then(|v| v.as_bool())
