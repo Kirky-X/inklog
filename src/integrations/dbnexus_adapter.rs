@@ -311,7 +311,7 @@ fn build_insert_sql(record: &LogRecord, table_name: &str) -> Result<String, Inkl
     let level = &record.level;
     let target = &record.target;
     let message = record.message.replace('\'', "''");
-    let fields_json = serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
+    let fields_json = serde_json::to_string(&record.fields)?;
     let fields_escaped = fields_json.replace('\'', "''");
     let file = record
         .file
