@@ -385,7 +385,13 @@ impl LoggerManager {
             path: PathBuf::from("logs/error.log"),
             ..Default::default()
         };
-        let error_sink = Arc::new(Mutex::new(FileSink::new(error_sink_config).ok()));
+        let error_sink = Arc::new(Mutex::new(match FileSink::new(error_sink_config) {
+            Ok(sink) => Some(sink),
+            Err(e) => {
+                eprintln!("Warning: failed to create error sink: {}", e);
+                None
+            }
+        }));
 
         let (handles, shutdown_txs) = Self::start_workers(WorkerParams {
             config: config.clone(),
