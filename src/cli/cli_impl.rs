@@ -27,7 +27,10 @@ pub fn run_cli() -> Result<()> {
             });
 
             if batch {
-                decrypt::batch_decrypt(input.to_str().unwrap_or("*"), &output, &key_env)?;
+                let input_str = input
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("Input path is not valid UTF-8: {:?}", input))?;
+                decrypt::batch_decrypt(input_str, &output, &key_env)?;
             } else if input.is_file() {
                 decrypt::decrypt_file_compatible(&input, &output, &key_env)?;
                 println!("Decrypted: {} -> {}", input.display(), output.display());
