@@ -34,7 +34,7 @@ use thiserror::Error;
 mod i18n_impl;
 
 /// Errors returned by [`LogI18nFormatter`] operations.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone, PartialEq)]
 pub enum I18nError {
     /// BCP-47 locale string could not be parsed.
     #[error("invalid locale '{input}': {reason}")]
@@ -60,6 +60,14 @@ pub struct LogI18nFormatter {
     decimal_formatter: DecimalFormatter,
     plural_rules: PluralRules,
     collator: CollatorBorrowed<'static>,
+}
+
+impl std::fmt::Debug for LogI18nFormatter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogI18nFormatter")
+            .field("locale", &self.locale)
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]
