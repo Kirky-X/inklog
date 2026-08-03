@@ -703,6 +703,14 @@ impl FileSink {
             inner.circuit_breaker.record_success();
         }
 
+        // Sync estimated size with actual file position to prevent drift
+        if let Some(file) = &inner.current_file {
+            // Use metadata() instead of stream_position() to avoid borrow conflicts
+            if let Ok(meta) = file.metadata() {
+                inner.current_size = meta.len();
+            }
+        }
+
         inner.last_flush_time = Instant::now();
 
         // 批量写入后检查是否需要旋转
