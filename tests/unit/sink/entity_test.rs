@@ -46,9 +46,7 @@ mod entity_tests {
     fn test_model_json_serialization_includes_required_fields() {
         let model = Model {
             id: 42,
-            timestamp: DateTime::<Utc>::from_timestamp(1700000000, 0)
-                .unwrap()
-                .naive_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp(1700000000, 0).unwrap(),
             level: "INFO".to_string(),
             target: "test_target".to_string(),
             message: "Test message".to_string(),
@@ -84,7 +82,7 @@ mod entity_tests {
     fn test_model_json_serialization_optional_fields_null_when_none() {
         let model = Model {
             id: 1,
-            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap().naive_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
             level: "WARN".to_string(),
             target: "opt_test".to_string(),
             message: "Optional fields test".to_string(),
@@ -126,9 +124,7 @@ mod entity_tests {
     fn test_model_json_serialization_with_populated_optional_fields() {
         let model = Model {
             id: 99,
-            timestamp: DateTime::<Utc>::from_timestamp(1700000000, 0)
-                .unwrap()
-                .naive_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp(1700000000, 0).unwrap(),
             level: "ERROR".to_string(),
             target: "full_test".to_string(),
             message: "Full model test".to_string(),
@@ -154,7 +150,7 @@ mod entity_tests {
     fn test_model_json_deserialization() {
         let json = r#"{
             "id": 123,
-            "timestamp": "2024-01-01T00:00:00",
+            "timestamp": "2024-01-01T00:00:00Z",
             "level": "INFO",
             "target": "deser_test",
             "message": "Deserialized message",
@@ -181,9 +177,7 @@ mod entity_tests {
     fn test_model_roundtrip_serialization_deserialization() {
         let original = Model {
             id: 555,
-            timestamp: DateTime::<Utc>::from_timestamp(1704067200, 0)
-                .unwrap()
-                .naive_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp(1704067200, 0).unwrap(),
             level: "DEBUG".to_string(),
             target: "roundtrip".to_string(),
             message: "Roundtrip test message".to_string(),
@@ -213,7 +207,7 @@ mod entity_tests {
     fn test_active_model_from_model() {
         let model = Model {
             id: 1,
-            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap().naive_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
             level: "INFO".to_string(),
             target: "active_test".to_string(),
             message: "Active model test".to_string(),
@@ -328,7 +322,7 @@ mod entity_tests {
     fn test_model_clone() {
         let model = Model {
             id: 1,
-            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap().naive_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
             level: "INFO".to_string(),
             target: "clone".to_string(),
             message: "Clone test".to_string(),
@@ -348,7 +342,7 @@ mod entity_tests {
     fn test_model_debug() {
         let model = Model {
             id: 1,
-            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap().naive_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
             level: "INFO".to_string(),
             target: "debug".to_string(),
             message: "Debug test".to_string(),

@@ -73,7 +73,7 @@ fn show_database_config_with_partition() {
         flush_interval_ms: 500,
         partition: PartitionStrategy::Monthly,
         table_name: "logs".to_string(),
-        archive_format: "json".to_string(),
+        archive_format: inklog::ArchiveFormat::default(),
         ..Default::default()
     };
 
@@ -92,7 +92,7 @@ fn show_database_config_with_partition() {
         flush_interval_ms: 500,
         partition: PartitionStrategy::Yearly,
         table_name: "logs".to_string(),
-        archive_format: "json".to_string(),
+        archive_format: inklog::ArchiveFormat::default(),
         ..Default::default()
     };
 
