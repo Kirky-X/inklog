@@ -1236,15 +1236,21 @@ enabled = "yes"
 
     #[test]
     fn test_validate_database_sink_driver_not_string() {
-        // 覆盖 driver 非字符串时 as_str() 返回 None 的分支（不触发错误）
+        // driver 非字符串时 as_str() 返回 None，应触发错误
         let content = r#"
 [database]
 driver = 123
 "#;
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
-        // driver 非字符串时不进入校验，应 Ok
-        assert!(result.is_ok());
+        // driver 非字符串时应返回错误
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("db_config.driver must be a string")
+        );
     }
 
     #[test]
