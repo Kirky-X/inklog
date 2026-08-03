@@ -71,6 +71,26 @@ impl LoggerSubscriber {
     }
 }
 
+impl Drop for LoggerSubscriber {
+    fn drop(&mut self) {
+        // Attempt to flush any remaining fallback buffer entries
+        let buffer_len = {
+            let buffer = self.fallback_buffer.lock();
+            buffer.len()
+        };
+        if buffer_len > 0 {
+            self.try_flush_fallback();
+            let remaining = self.fallback_buffer.lock().len();
+            if remaining > 0 {
+                eprintln!(
+                    "Warning: LoggerSubscriber dropped with {} unflushed fallback records",
+                    remaining
+                );
+            }
+        }
+    }
+}
+
 impl<S> Layer<S> for LoggerSubscriber
 where
     S: Subscriber,

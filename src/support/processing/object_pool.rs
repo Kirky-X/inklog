@@ -248,7 +248,8 @@ impl ThreadLocalStringPool {
 
     /// Return a String to the pool.
     /// The String is cleared before pooling for reuse.
-    pub fn put(&self, s: String) {
+    pub fn put(&self, mut s: String) {
+        s.clear(); // Clear contents to prevent data leaking between users
         THREAD_LOCAL_STRING_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             if pool.len() < self.capacity {
@@ -514,9 +515,9 @@ mod tests {
 
         pool.put("test".to_string());
 
-        // Get should return pooled string
+        // Get should return pooled string (cleared on put to prevent data leaks)
         let s2 = pool.get();
-        assert_eq!(s2, "test");
+        assert_eq!(s2, "", "put() clears string contents");
     }
 
     #[test]
@@ -538,11 +539,11 @@ mod tests {
         assert_eq!(pool.len(), 2);
 
         let s = pool.get();
-        assert_eq!(s, "second"); // LIFO
+        assert_eq!(s, ""); // LIFO, but cleared on put
         assert_eq!(pool.len(), 1);
 
         let s = pool.get();
-        assert_eq!(s, "first");
+        assert_eq!(s, "");
         assert_eq!(pool.len(), 0);
         assert!(pool.is_empty());
     }
@@ -568,12 +569,12 @@ mod tests {
             "pool should not grow beyond capacity; excess should be dropped"
         );
 
-        // Verify retained items are a and b (first two)
+        // Verify retained items are empty strings (cleared on put)
         let s1 = pool.get();
         let s2 = pool.get();
         let mut remaining = vec![s1, s2];
         remaining.sort();
-        assert_eq!(remaining, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(remaining, vec!["".to_string(), "".to_string()]);
     }
 
     #[test]
@@ -648,5 +649,17 @@ mod tests {
 
         // 4 线程 × 5 次 get = 20 次
         assert_eq!(total_gets.load(Ordering::Relaxed), 20);
+    }
+
+    #[test]
+    fn test_string_pool_clears_string_on_put() {
+        // T015: put() must clear string contents before pooling to prevent data leaks
+        let pool = super::ThreadLocalStringPool::new(10);
+        let mut s = pool.get();
+        s.push_str("sensitive data");
+        pool.put(s);
+        // Retrieved string should be empty, not contain previous data
+        let retrieved = pool.get();
+        assert_eq!(retrieved, "", "pooled string should be cleared on put");
     }
 }
