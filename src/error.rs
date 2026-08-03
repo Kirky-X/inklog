@@ -103,8 +103,15 @@ const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
 static COMPILED_PATTERNS: LazyLock<Vec<(regex::Regex, &'static str)>> = LazyLock::new(|| {
     SENSITIVE_PATTERNS
         .iter()
-        .filter_map(|(pattern, replacement)| {
-            regex::Regex::new(pattern).ok().map(|re| (re, *replacement))
+        .filter_map(|(pattern, replacement)| match regex::Regex::new(pattern) {
+            Ok(re) => Some((re, *replacement)),
+            Err(e) => {
+                eprintln!(
+                    "Warning: failed to compile sensitive pattern '{}': {}",
+                    pattern, e
+                );
+                None
+            }
         })
         .collect()
 });

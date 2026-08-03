@@ -248,7 +248,9 @@ impl DataMasker {
     pub fn mask(&self, text: &str) -> String {
         let mut result = text.to_string();
         for rule in &self.rules {
-            result = rule.apply(&result);
+            if rule.is_enabled() {
+                result = rule.apply(&result);
+            }
         }
         result
     }
@@ -264,8 +266,12 @@ impl DataMasker {
                 }
             }
             Value::Object(map) => {
-                for (_, v) in map {
-                    self.mask_value(v);
+                for (k, v) in map.iter_mut() {
+                    if Self::is_sensitive_field(k) {
+                        *v = Value::String("***MASKED***".to_string());
+                    } else {
+                        self.mask_value(v);
+                    }
                 }
             }
             _ => {}
@@ -273,8 +279,12 @@ impl DataMasker {
     }
 
     pub fn mask_hashmap(&self, map: &mut HashMap<String, Value>) {
-        for v in map.values_mut() {
-            self.mask_value(v);
+        for (k, v) in map.iter_mut() {
+            if Self::is_sensitive_field(k) {
+                *v = Value::String("***MASKED***".to_string());
+            } else {
+                self.mask_value(v);
+            }
         }
     }
 
@@ -524,7 +534,7 @@ impl MaskRule {
         Self::build_from_regex(
             "api_key",
             API_KEY_REGEX.clone(),
-            "${1}***REDACTED***${3}",
+            "${1}***REDACTED***",
             100,
             None,
         )
@@ -548,7 +558,7 @@ impl MaskRule {
         Self::build_from_regex(
             "generic_secret",
             GENERIC_SECRET_REGEX.clone(),
-            "${1}***REDACTED***${3}",
+            "${1}***REDACTED***",
             100,
             None,
         )
@@ -1326,5 +1336,59 @@ mod tests {
         let arr = value.as_array().unwrap();
         assert_eq!(arr[0]["email"], "**@**.***");
         assert_eq!(arr[1]["email"], "**@**.***");
+    }
+
+    #[test]
+    fn test_api_key_rule_does_not_panic() {
+        let masker = DataMasker::new();
+        let input = "api_key=abcdefghijklmnopqrstuvwxyz1234";
+        let result = masker.mask(input);
+        assert!(result.contains("***REDACTED***"));
+    }
+
+    #[test]
+    fn test_generic_secret_rule_does_not_panic() {
+        let masker = DataMasker::new();
+        let input = "my_token=abcdefghijklmnop1234";
+        let result = masker.mask(input);
+        assert!(result.contains("***REDACTED***"));
+    }
+
+    #[test]
+    fn test_mask_skips_disabled_rules() {
+        // T008: mask() should respect the enabled flag on rules
+        let masker = DataMasker::builder().disable_builtin("email").build();
+        let input = "user@example.com";
+        let result = masker.mask(input);
+        // Email should NOT be masked because the rule is disabled
+        assert_eq!(result, "user@example.com");
+    }
+
+    #[test]
+    fn test_mask_value_masks_sensitive_keys() {
+        // T009: mask_value should check key names for sensitive fields
+        let masker = DataMasker::new();
+        let mut value = serde_json::json!({
+            "password": "secret123",
+            "name": "Alice"
+        });
+        masker.mask_value(&mut value);
+        assert_eq!(value["password"], "***MASKED***");
+        assert_eq!(value["name"], "Alice");
+    }
+
+    #[test]
+    fn test_mask_hashmap_masks_sensitive_keys() {
+        // T009: mask_hashmap should check key names for sensitive fields
+        let masker = DataMasker::new();
+        let mut map = HashMap::new();
+        map.insert(
+            "api_key".to_string(),
+            Value::String("supersecret".to_string()),
+        );
+        map.insert("user".to_string(), Value::String("bob".to_string()));
+        masker.mask_hashmap(&mut map);
+        assert_eq!(map["api_key"], Value::String("***MASKED***".to_string()));
+        assert_eq!(map["user"], Value::String("bob".to_string()));
     }
 }
