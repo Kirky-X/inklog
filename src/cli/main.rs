@@ -35,6 +35,7 @@ enum Commands {
 
         #[arg(short, long, env = "INKLOG_DECRYPT_KEY")]
         #[arg(help = "Environment variable name containing the decryption key")]
+        #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
         key_env: String,
 
         #[arg(long)]

@@ -370,6 +370,26 @@ impl<'a> tracing::field::Visit for LogVisitor<'a> {
         if let Some(n) = serde_json::Number::from_f64(value) {
             self.fields
                 .insert(field.name().to_string(), Value::Number(n));
+        } else {
+            // NaN / Infinity cannot be represented in JSON.
+            // Store as a string sentinel so the field is not silently dropped,
+            // which would create observability gaps in production.
+            let sentinel = if value.is_nan() {
+                "NaN"
+            } else if value.is_infinite() && value.is_sign_positive() {
+                "Infinity"
+            } else {
+                "-Infinity"
+            };
+            tracing::warn!(
+                field = field.name(),
+                value = sentinel,
+                "f64 value is non-finite, stored as string sentinel"
+            );
+            self.fields.insert(
+                field.name().to_string(),
+                Value::String(sentinel.to_string()),
+            );
         }
     }
 }
