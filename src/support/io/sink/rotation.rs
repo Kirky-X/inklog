@@ -9,6 +9,30 @@ use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+/// Shared helper for generating rotation file paths.
+///
+/// Both `SizeBasedRotation` and `TimeBasedRotation` produce identical path formats.
+/// This function eliminates duplication between their `generate_next_path` implementations.
+fn generate_rotation_path(base_path: &Path, context: &RotationContext) -> PathBuf {
+    let timestamp = context.now.format("%Y%m%d_%H%M%S");
+    let seq = context.sequence;
+
+    let stem = base_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("log");
+    let ext = base_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("log");
+
+    let parent = base_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+
+    parent.join(format!("{}_{}_{}.{}", stem, timestamp, seq, ext))
+}
+
 /// Result of a rotation check
 #[derive(Debug, Clone, Default)]
 pub struct RotationResult {
@@ -27,7 +51,11 @@ pub struct RotationContext {
     pub current_path: PathBuf,
     /// Current file size in bytes
     pub current_size: u64,
-    /// Maximum allowed size (if configured)
+    /// Maximum allowed size (if configured).
+    ///
+    /// NOTE: This field is provided for custom strategy implementations.
+    /// The built-in `SizeBasedRotation` strategy uses its own internal
+    /// `max_size` field instead of consulting this context value.
     pub max_size: Option<u64>,
     /// Time when current file was opened
     pub file_opened_at: Instant,
@@ -104,23 +132,7 @@ impl RotationStrategy for SizeBasedRotation {
     }
 
     fn generate_next_path(&self, base_path: &Path, context: &RotationContext) -> PathBuf {
-        let timestamp = context.now.format("%Y%m%d_%H%M%S");
-        let seq = context.sequence;
-
-        let stem = base_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("log");
-        let ext = base_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("log");
-
-        let parent = base_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
-
-        parent.join(format!("{}_{}_{}.{}", stem, timestamp, seq, ext))
+        generate_rotation_path(base_path, context)
     }
 
     fn clone_boxed(&self) -> Box<dyn RotationStrategy> {
@@ -150,16 +162,22 @@ impl TimeBasedRotation {
 
     /// Create from a string identifier (hourly, daily, weekly, monthly).
     pub fn from_interval_string(interval: &str) -> Result<Self, String> {
-        let (secs, name) = match interval.to_lowercase().as_str() {
-            "hourly" => (3600, "hourly".to_string()),
-            "daily" => (86400, "daily".to_string()),
-            "weekly" => (604800, "weekly".to_string()),
-            "monthly" => (2592000, "monthly".to_string()),
-            _ => return Err(format!("Unknown rotation interval: {}", interval)),
+        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase()
+        let trimmed = interval.trim();
+        let (secs, name) = if trimmed.eq_ignore_ascii_case("hourly") {
+            (3600, "hourly")
+        } else if trimmed.eq_ignore_ascii_case("daily") {
+            (86400, "daily")
+        } else if trimmed.eq_ignore_ascii_case("weekly") {
+            (604800, "weekly")
+        } else if trimmed.eq_ignore_ascii_case("monthly") {
+            (2592000, "monthly")
+        } else {
+            return Err(format!("Unknown rotation interval: {}", interval));
         };
         Ok(Self {
             interval_secs: secs,
-            interval_name: name,
+            interval_name: name.to_string(),
         })
     }
 
@@ -168,8 +186,12 @@ impl TimeBasedRotation {
         self.interval_secs
     }
 
-    /// Check if the date has changed (for daily/monthly rotation).
-    fn has_date_changed(&self, context: &RotationContext) -> bool {
+    /// Check whether the configured time interval has elapsed since last rotation.
+    ///
+    /// Note: Despite the historical name `has_date_changed`, this method checks
+    /// whether the elapsed wall-clock time since `last_rotation` exceeds
+    /// `interval_secs`. It does NOT check whether the calendar date has changed.
+    fn has_interval_elapsed(&self, context: &RotationContext) -> bool {
         let elapsed = context.last_rotation.elapsed().as_secs();
         elapsed >= self.interval_secs
     }
@@ -177,7 +199,7 @@ impl TimeBasedRotation {
 
 impl RotationStrategy for TimeBasedRotation {
     fn should_rotate(&self, context: &RotationContext) -> RotationResult {
-        if self.has_date_changed(context) {
+        if self.has_interval_elapsed(context) {
             RotationResult {
                 should_rotate: true,
                 reason: Some(format!("Time interval {} elapsed", self.interval_name)),
@@ -193,23 +215,7 @@ impl RotationStrategy for TimeBasedRotation {
     }
 
     fn generate_next_path(&self, base_path: &Path, context: &RotationContext) -> PathBuf {
-        let timestamp = context.now.format("%Y%m%d_%H%M%S");
-        let seq = context.sequence;
-
-        let stem = base_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("log");
-        let ext = base_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("log");
-
-        let parent = base_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
-
-        parent.join(format!("{}_{}_{}.{}", stem, timestamp, seq, ext))
+        generate_rotation_path(base_path, context)
     }
 
     fn clone_boxed(&self) -> Box<dyn RotationStrategy> {
@@ -220,8 +226,11 @@ impl RotationStrategy for TimeBasedRotation {
 /// Combined rotation strategy that checks multiple conditions.
 ///
 /// Rotation occurs when ANY of the configured strategies triggers.
+/// `generate_next_path` uses the same strategy that triggered rotation.
 pub struct CompositeRotation {
     strategies: Vec<Box<dyn RotationStrategy>>,
+    /// Index of the strategy that last triggered rotation
+    last_triggered: std::sync::atomic::AtomicUsize,
 }
 
 impl std::fmt::Debug for CompositeRotation {
@@ -235,7 +244,10 @@ impl std::fmt::Debug for CompositeRotation {
 impl CompositeRotation {
     /// Create a new composite rotation strategy.
     pub fn new(strategies: Vec<Box<dyn RotationStrategy>>) -> Self {
-        Self { strategies }
+        Self {
+            strategies,
+            last_triggered: std::sync::atomic::AtomicUsize::new(0),
+        }
     }
 
     /// Add a strategy to the composite.
@@ -246,9 +258,11 @@ impl CompositeRotation {
 
 impl RotationStrategy for CompositeRotation {
     fn should_rotate(&self, context: &RotationContext) -> RotationResult {
-        for strategy in &self.strategies {
+        for (i, strategy) in self.strategies.iter().enumerate() {
             let result = strategy.should_rotate(context);
             if result.should_rotate {
+                self.last_triggered
+                    .store(i, std::sync::atomic::Ordering::Relaxed);
                 return result;
             }
         }
@@ -260,7 +274,10 @@ impl RotationStrategy for CompositeRotation {
     }
 
     fn generate_next_path(&self, base_path: &Path, context: &RotationContext) -> PathBuf {
-        if let Some(strategy) = self.strategies.first() {
+        let idx = self
+            .last_triggered
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if let Some(strategy) = self.strategies.get(idx) {
             strategy.generate_next_path(base_path, context)
         } else {
             base_path.to_path_buf()

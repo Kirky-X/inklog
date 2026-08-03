@@ -393,44 +393,58 @@ impl FileSink {
         let handle = thread::spawn(move || {
             let check_interval = StdDuration::from_secs(60);
 
-            loop {
-                // 检查关闭标志
-                if shutdown_flag.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                // 拆分长 sleep 为 100ms 段，每段检查 shutdown_flag。
-                // 修复根因：原 thread::sleep(60s) 期间无法响应 shutdown，
-                // 即使 FileSink::Drop 设置 flag 后也要等 sleep 结束才能退出，
-                // 导致测试进程无法退出（PID 20848 等挂起问题）。
-                let mut elapsed = StdDuration::ZERO;
-                const POLL_INTERVAL: StdDuration = StdDuration::from_millis(100);
-                while elapsed < check_interval {
+            // Wrap thread body in catch_unwind to make panics observable
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                loop {
+                    // 检查关闭标志
                     if shutdown_flag.load(Ordering::Relaxed) {
                         break;
                     }
-                    let step = std::cmp::min(POLL_INTERVAL, check_interval - elapsed);
-                    thread::sleep(step);
-                    elapsed += step;
-                }
 
-                // 检查关闭标志
-                if shutdown_flag.load(Ordering::Relaxed) {
-                    break;
-                }
+                    // 拆分长 sleep 为 100ms 段，每段检查 shutdown_flag。
+                    // 修复根因：原 thread::sleep(60s) 期间无法响应 shutdown，
+                    // 即使 FileSink::Drop 设置 flag 后也要等 sleep 结束才能退出，
+                    // 导致测试进程无法退出（PID 20848 等挂起问题）。
+                    let mut elapsed = StdDuration::ZERO;
+                    const POLL_INTERVAL: StdDuration = StdDuration::from_millis(100);
+                    while elapsed < check_interval {
+                        if shutdown_flag.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let step = std::cmp::min(POLL_INTERVAL, check_interval - elapsed);
+                        thread::sleep(step);
+                        elapsed += step;
+                    }
 
-                // 检查是否到达清理时间（使用实例级别的清理时间）
-                let mut last_cleanup = last_cleanup_time.lock();
-                let now = Instant::now();
+                    // 检查关闭标志
+                    if shutdown_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
 
-                if last_cleanup.is_none_or(|t| now.duration_since(t) >= cleanup_interval) {
-                    // 执行清理
-                    if let Err(e) = Self::perform_cleanup(&config, &path) {
-                        error!("Cleanup failed: {}", e);
-                    } else {
-                        *last_cleanup = Some(now);
+                    // 检查是否到达清理时间（使用实例级别的清理时间）
+                    let mut last_cleanup = last_cleanup_time.lock();
+                    let now = Instant::now();
+
+                    if last_cleanup.is_none_or(|t| now.duration_since(t) >= cleanup_interval) {
+                        // 执行清理
+                        if let Err(e) = Self::perform_cleanup(&config, &path) {
+                            error!("Cleanup failed: {}", e);
+                        } else {
+                            *last_cleanup = Some(now);
+                        }
                     }
                 }
+            }));
+
+            if let Err(panic_info) = result {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                tracing::error!("cleanup_timer thread panicked: {}", msg);
             }
         });
 
@@ -445,54 +459,75 @@ impl FileSink {
     /// # Errors
     ///
     /// 返回文件系统操作可能产生的错误
-    #[allow(dead_code)]
     fn perform_cleanup(config: &FileSinkConfig, log_path: &Path) -> Result<(), InklogError> {
         if let Some(parent) = log_path.parent() {
-            let entries: Result<Vec<_>, _> = fs::read_dir(parent)?.collect();
+            // Collect entries, logging error if read_dir fails
+            let entries: Vec<_> = match fs::read_dir(parent) {
+                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+                Err(e) => {
+                    warn!(
+                        "Failed to read directory '{}' for cleanup: {}",
+                        parent.display(),
+                        e
+                    );
+                    return Ok(());
+                }
+            };
 
-            if let Ok(entries) = entries {
-                // 计算截止日期
-                let cutoff_date = Utc::now()
-                    .checked_sub_signed(chrono::Duration::days(config.retention_days as i64))
-                    .unwrap_or_else(Utc::now);
+            // 计算截止日期
+            let cutoff_date = Utc::now()
+                .checked_sub_signed(chrono::Duration::days(config.retention_days as i64))
+                .unwrap_or_else(Utc::now);
 
-                let mut expired_count = 0;
-                let mut total_size = 0u64;
+            let mut expired_count = 0;
+            let mut total_size = 0u64;
 
-                for entry in &entries {
-                    total_size += entry.path().metadata()?.len();
+            for entry in &entries {
+                // Single metadata() syscall for both size and modified time
+                if let Ok(metadata) = entry.path().metadata() {
+                    total_size += metadata.len();
 
-                    if let Ok(modified) = entry.path().metadata().and_then(|m| m.modified()) {
+                    if let Ok(modified) = metadata.modified() {
                         let modified_utc: DateTime<Utc> = modified.into();
                         if modified_utc < cutoff_date {
                             expired_count += 1;
                         }
                     }
                 }
+            }
 
-                if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size) {
-                    if total_size > max_total_size_bytes {
-                        let excess_size = total_size.saturating_sub(max_total_size_bytes);
-                        let mut deleted_size: u64 = 0;
+            if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size) {
+                if total_size > max_total_size_bytes {
+                    let excess_size = total_size.saturating_sub(max_total_size_bytes);
+                    let mut deleted_size: u64 = 0;
 
-                        for entry in entries {
-                            if deleted_size >= excess_size {
-                                break;
-                            }
-
-                            if let Ok(metadata) = entry.path().metadata() {
-                                deleted_size += metadata.len();
-                            }
-
-                            if let Err(e) = fs::remove_file(entry.path()) {
-                                error!("Failed to remove {}: {}", entry.path().display(), e);
-                            }
+                    for entry in entries {
+                        if deleted_size >= excess_size {
+                            break;
                         }
-                    } else if expired_count > 0 {
-                        let to_delete =
-                            (entries.len() as i32 - config.keep_files as i32).max(0) as usize;
-                        for entry in entries.into_iter().take(to_delete) {
-                            let _ = fs::remove_file(entry.path());
+
+                        if let Ok(metadata) = entry.path().metadata() {
+                            deleted_size += metadata.len();
+                        }
+
+                        if let Err(e) = fs::remove_file(entry.path()) {
+                            warn!(
+                                "Failed to remove {} during size cleanup: {}",
+                                entry.path().display(),
+                                e
+                            );
+                        }
+                    }
+                } else if expired_count > 0 {
+                    let to_delete =
+                        (entries.len() as i32 - config.keep_files as i32).max(0) as usize;
+                    for entry in entries.into_iter().take(to_delete) {
+                        if let Err(e) = fs::remove_file(entry.path()) {
+                            warn!(
+                                "Failed to remove {} during expiry cleanup: {}",
+                                entry.path().display(),
+                                e
+                            );
                         }
                     }
                 }
@@ -629,36 +664,51 @@ impl FileSink {
 
         let timer_handle = thread::spawn(move || {
             let check_interval = StdDuration::from_secs(60); // Check every minute
-            loop {
-                // Check shutdown flag before sleeping to allow graceful exit
-                if shutdown_flag.load(Ordering::Relaxed) {
-                    break;
-                }
 
-                // 拆分长 sleep 为 100ms 段，每段检查 shutdown_flag
-                // （修复根因见 cleanup_timer 同样修改）
-                let mut elapsed = StdDuration::ZERO;
-                const POLL_INTERVAL: StdDuration = StdDuration::from_millis(100);
-                while elapsed < check_interval {
+            // Wrap thread body in catch_unwind to make panics observable
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                loop {
+                    // Check shutdown flag before sleeping to allow graceful exit
                     if shutdown_flag.load(Ordering::Relaxed) {
                         break;
                     }
-                    let step = std::cmp::min(POLL_INTERVAL, check_interval - elapsed);
-                    thread::sleep(step);
-                    elapsed += step;
-                }
 
-                // Check again after sleep to avoid race condition
-                if shutdown_flag.load(Ordering::Relaxed) {
-                    break;
-                }
+                    // 拆分长 sleep 为 100ms 段，每段检查 shutdown_flag
+                    // （修复根因见 cleanup_timer 同样修改）
+                    let mut elapsed = StdDuration::ZERO;
+                    const POLL_INTERVAL: StdDuration = StdDuration::from_millis(100);
+                    while elapsed < check_interval {
+                        if shutdown_flag.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let step = std::cmp::min(POLL_INTERVAL, check_interval - elapsed);
+                        thread::sleep(step);
+                        elapsed += step;
+                    }
 
-                let mut last_rotation_guard = last_rotation.lock();
-                if last_rotation_guard.elapsed() >= rotation_interval {
-                    // Timer will trigger rotation on next write
-                    *last_rotation_guard =
-                        Instant::now() - rotation_interval + StdDuration::from_secs(1);
+                    // Check again after sleep to avoid race condition
+                    if shutdown_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    let mut last_rotation_guard = last_rotation.lock();
+                    if last_rotation_guard.elapsed() >= rotation_interval {
+                        // Timer will trigger rotation on next write
+                        *last_rotation_guard =
+                            Instant::now() - rotation_interval + StdDuration::from_secs(1);
+                    }
                 }
+            }));
+
+            if let Err(panic_info) = result {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                tracing::error!("rotation_timer thread panicked: {}", msg);
             }
         });
 
@@ -763,11 +813,23 @@ impl FileSink {
                 );
                 return Err(e);
             }
-            let _ = fs::remove_file(&compressed_path);
+            if let Err(e) = fs::remove_file(&compressed_path) {
+                warn!(
+                    "Failed to remove compressed original file {}: {}",
+                    compressed_path.display(),
+                    e
+                );
+            }
             Ok(encrypted_path)
         } else {
             // 删除原始文件
-            let _ = fs::remove_file(path);
+            if let Err(e) = fs::remove_file(path) {
+                warn!(
+                    "Failed to remove original file after compression {}: {}",
+                    path.display(),
+                    e
+                );
+            }
             Ok(compressed_path)
         }
     }
@@ -799,7 +861,13 @@ impl FileSink {
                 );
                 return Err(e);
             }
-            let _ = fs::remove_file(&compressed_path);
+            if let Err(e) = fs::remove_file(&compressed_path) {
+                warn!(
+                    "Failed to remove compressed original file {}: {}",
+                    compressed_path.display(),
+                    e
+                );
+            }
             Ok(encrypted_path)
         } else {
             Ok(compressed_path)
@@ -884,7 +952,12 @@ impl FileSink {
             error!("Failed to rename log file: {}", e);
             // 尝试复制后删除
             if fs::copy(&self.config.path, &new_path).is_ok() {
-                let _ = fs::remove_file(&self.config.path);
+                if let Err(e) = fs::remove_file(&self.config.path) {
+                    warn!(
+                        "Failed to remove original file after copy during rotation: {}",
+                        e
+                    );
+                }
             } else {
                 return Err(InklogError::IoError(e));
             }
@@ -897,6 +970,11 @@ impl FileSink {
         inner.last_rotation = Instant::now();
         self.update_next_rotation_time_inner(inner);
         inner.current_size = 0;
+
+        // Reset circuit breaker after successful rotation:
+        // The new file handle is healthy, so the circuit breaker should not
+        // carry over failure state from the previous file.
+        inner.circuit_breaker.reset();
 
         info!("Log rotated to: {}", new_path.display());
 
@@ -972,7 +1050,12 @@ impl FileSink {
                 if let Err(e) = sink.encrypt_file(&path, &encrypted_path) {
                     error!("Failed to encrypt rotated log: {}", e);
                 } else {
-                    let _ = fs::remove_file(&path);
+                    if let Err(e) = fs::remove_file(&path) {
+                        warn!(
+                            "Failed to remove original file after encryption during rotation: {}",
+                            e
+                        );
+                    }
                 }
             });
         }
@@ -1285,7 +1368,6 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::tempdir;
 
-    #[allow(dead_code)]
     fn create_test_record(message: &str) -> LogRecord {
         LogRecord {
             timestamp: Utc::now(),
@@ -1662,7 +1744,6 @@ mod tests {
     }
 
     /// 生成测试用的 32 字节加密密钥（base64 编码），用于加密相关测试
-    #[allow(dead_code)]
     fn make_test_key() -> (Vec<u8>, String) {
         let key_bytes: Vec<u8> = vec![
             0x3a, 0x7b, 0x9c, 0x1d, 0x4e, 0x8f, 0x2c, 0x6b, 0x9a, 0x3d, 0x8e, 0x1f, 0x4a, 0x7d,
@@ -2456,7 +2537,7 @@ mod tests {
     }
 
     #[test]
-    fn test_perform_cleanup_nonexistent_parent_returns_error() {
+    fn test_perform_cleanup_nonexistent_parent_returns_ok() {
         let dir = tempdir().unwrap();
         let nonexistent_parent = dir.path().join("does_not_exist");
         let log_path = nonexistent_parent.join("test.log");
@@ -2466,9 +2547,9 @@ mod tests {
             max_total_size: "1GB".to_string(),
             ..Default::default()
         };
-        // parent 目录不存在 → read_dir 失败
+        // parent 目录不存在 → read_dir 失败，但 perform_cleanup 优雅降级为 Ok(())
         let result = FileSink::perform_cleanup(&config, &log_path);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     // ==================== Clone / Debug / is_healthy / flush / shutdown 测试 ====================

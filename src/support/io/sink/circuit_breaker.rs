@@ -97,7 +97,15 @@ impl CircuitBreaker {
         self.inner.lock().state
     }
 
-    /// 检查是否可以执行操作
+    /// Check whether an operation may proceed.
+    ///
+    /// # Side Effect
+    ///
+    /// When the current state is `Open` and the timeout has elapsed since the
+    /// last recorded failure, this method **transitions** the state to `HalfOpen`
+    /// and resets `success_count` to 0.  Callers should be aware that repeated
+    /// invocations in the timeout window are not pure reads — the first call
+    /// after the timeout will mutate the internal state.
     pub fn can_execute(&self) -> bool {
         let mut inner = self.inner.lock();
         match inner.state {
@@ -119,7 +127,7 @@ impl CircuitBreaker {
     }
 
     /// 记录成功
-    pub fn record_success(&mut self) {
+    pub fn record_success(&self) {
         let mut inner = self.inner.lock();
         match inner.state {
             CircuitState::HalfOpen => {
@@ -142,7 +150,7 @@ impl CircuitBreaker {
     }
 
     /// 记录失败
-    pub fn record_failure(&mut self) {
+    pub fn record_failure(&self) {
         let mut inner = self.inner.lock();
         inner.last_failure = Some(Instant::now());
         inner.failure_count += 1;
@@ -163,7 +171,7 @@ impl CircuitBreaker {
     }
 
     /// 重置断路器到初始状态
-    pub fn reset(&mut self) {
+    pub fn reset(&self) {
         let mut inner = self.inner.lock();
         inner.state = CircuitState::Closed;
         inner.failure_count = 0;
@@ -196,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_open_after_failures() {
-        let mut cb = CircuitBreaker::new(3, StdDuration::from_secs(1), 3);
+        let cb = CircuitBreaker::new(3, StdDuration::from_secs(1), 3);
         assert!(cb.can_execute());
 
         cb.record_failure();
@@ -213,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_half_open_after_timeout() {
-        let mut cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 3);
+        let cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -226,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_close_after_successes() {
-        let mut cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 3);
+        let cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -251,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_reset() {
-        let mut cb = CircuitBreaker::new(2, StdDuration::from_secs(1), 3);
+        let cb = CircuitBreaker::new(2, StdDuration::from_secs(1), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -285,7 +293,7 @@ mod tests {
     #[test]
     fn test_record_success_on_open_state() {
         // Test the unexpected success on Open state - should reset to Closed
-        let mut cb = CircuitBreaker::new(2, StdDuration::from_secs(60), 3);
+        let cb = CircuitBreaker::new(2, StdDuration::from_secs(60), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -299,7 +307,7 @@ mod tests {
     #[test]
     fn test_record_failure_on_half_open_state() {
         // Test failure on HalfOpen state - should transition back to Open
-        let mut cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 3);
+        let cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -316,7 +324,7 @@ mod tests {
     #[test]
     fn test_record_failure_on_open_state() {
         // Test failure on Open state - should stay Open and update failure time
-        let mut cb = CircuitBreaker::new(2, StdDuration::from_secs(60), 3);
+        let cb = CircuitBreaker::new(2, StdDuration::from_secs(60), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -331,7 +339,7 @@ mod tests {
     #[test]
     fn test_record_success_on_closed_state() {
         // Test success on Closed state - should reset failure count
-        let mut cb = CircuitBreaker::new(3, StdDuration::from_secs(60), 3);
+        let cb = CircuitBreaker::new(3, StdDuration::from_secs(60), 3);
         cb.record_failure();
         assert_eq!(cb.failure_count(), 1);
 
@@ -343,7 +351,7 @@ mod tests {
     #[test]
     fn test_half_open_can_execute() {
         // Verify HalfOpen state allows execution
-        let mut cb = CircuitBreaker::new(1, StdDuration::from_millis(50), 2);
+        let cb = CircuitBreaker::new(1, StdDuration::from_millis(50), 2);
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
 
@@ -358,7 +366,7 @@ mod tests {
     #[test]
     fn test_open_state_can_execute_before_timeout() {
         // In Open state before timeout, can_execute should return false
-        let mut cb = CircuitBreaker::new(1, StdDuration::from_secs(60), 2);
+        let cb = CircuitBreaker::new(1, StdDuration::from_secs(60), 2);
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
         assert!(!cb.can_execute());
