@@ -240,7 +240,7 @@ impl LoggerBuilder {
             flush_interval_ms: 500,
             partition: crate::PartitionStrategy::default(),
             table_name: "logs".to_string(),
-            archive_format: "json".to_string(),
+            archive_format: crate::ArchiveFormat::default(),
             parquet_config: crate::ParquetConfig::default(),
         };
         self.config.database_sink = Some(config);
@@ -435,13 +435,20 @@ impl LoggerBuilder {
     /// 设置HTTP服务器错误处理模式
     ///
     /// # Arguments
-    /// * `mode` - 错误处理模式（"warn" 或 "strict"）
+    /// * `mode` - 错误处理模式（"warn" 或 "strict"）。未知模式会记录验证错误并回退到默认值 "strict"。
     #[cfg(feature = "http")]
     pub fn http_error_mode(mut self, mode: impl Into<String>) -> Self {
-        let error_mode = match mode.into().to_lowercase().as_str() {
+        let mode_str = mode.into();
+        let error_mode = match mode_str.to_lowercase().as_str() {
             "warn" => crate::HttpErrorMode::Warn,
             "strict" => crate::HttpErrorMode::Strict,
-            _ => crate::HttpErrorMode::default(),
+            _ => {
+                self.validation_errors.push(format!(
+                    "Unknown HTTP error mode '{}'. Valid modes: warn, strict. Using default 'strict'.",
+                    mode_str
+                ));
+                crate::HttpErrorMode::default()
+            }
         };
         if let Some(ref mut http) = self.config.http_server {
             http.error_mode = error_mode;

@@ -191,6 +191,9 @@ impl InklogContainer {
     /// let container = InklogContainer::from_config(config)?;
     /// ```
     pub fn from_config(config: InklogConfig) -> Result<Self, InklogError> {
+        // NOTE: Cache is initialized with default settings since OxCacheAdapter
+        // does not currently accept configuration parameters. If cache tuning
+        // is needed, use the builder pattern to inject a custom cache.
         let cache = Arc::new(OxCacheAdapter::new()?);
         let config = Arc::new(InklogConfigAdapter::from_config(config));
 
@@ -444,7 +447,6 @@ impl InklogContainerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integrations::{InklogConfigAdapter, OxCacheAdapter};
     use serial_test::serial;
 
     #[test]
