@@ -319,12 +319,11 @@ impl InklogConfig {
         }
 
         // --- Global log level ---
-        let valid_levels = ["trace", "debug", "info", "warn", "error", "fatal"];
-        if !valid_levels.contains(&self.global.level.to_lowercase().as_str()) {
+        if !crate::LogLevel::is_valid_level(&self.global.level) {
             return Err(InklogError::ConfigError(format!(
                 "Invalid log level '{}'. Valid levels: {}",
                 self.global.level,
-                valid_levels.join(", ")
+                crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
             )));
         }
 

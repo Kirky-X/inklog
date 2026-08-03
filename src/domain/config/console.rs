@@ -82,13 +82,9 @@ impl ConsoleSinkConfig {
     /// Ensures `stderr_levels` contains only valid log level names.
     /// Invalid entries are removed with a warning.
     pub fn validate(&mut self) {
-        let valid_levels = [
-            "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical",
-        ];
         let original_len = self.stderr_levels.len();
         self.stderr_levels.retain(|level| {
-            let lower = level.to_ascii_lowercase();
-            if !valid_levels.contains(&lower.as_str()) {
+            if !crate::LogLevel::is_valid_level(level) {
                 tracing::warn!(level = %level, "Invalid stderr_levels entry, removing");
                 false
             } else {
