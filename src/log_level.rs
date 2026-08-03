@@ -32,16 +32,26 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// 从字符串解析日志级别（大小写不敏感）
+    ///
+    /// Uses case-insensitive ASCII comparison to avoid heap allocation
+    /// from `to_uppercase()`.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_uppercase().as_str() {
-            "TRACE" => Some(LogLevel::Trace),
-            "DEBUG" => Some(LogLevel::Debug),
-            "INFO" => Some(LogLevel::Info),
-            "WARN" | "WARNING" => Some(LogLevel::Warn),
-            "ERROR" => Some(LogLevel::Error),
-            "FATAL" | "CRITICAL" => Some(LogLevel::Fatal),
-            _ => None,
+        // Case-insensitive ASCII matching without allocation
+        if s.eq_ignore_ascii_case("trace") {
+            Some(LogLevel::Trace)
+        } else if s.eq_ignore_ascii_case("debug") {
+            Some(LogLevel::Debug)
+        } else if s.eq_ignore_ascii_case("info") {
+            Some(LogLevel::Info)
+        } else if s.eq_ignore_ascii_case("warn") || s.eq_ignore_ascii_case("warning") {
+            Some(LogLevel::Warn)
+        } else if s.eq_ignore_ascii_case("error") {
+            Some(LogLevel::Error)
+        } else if s.eq_ignore_ascii_case("fatal") || s.eq_ignore_ascii_case("critical") {
+            Some(LogLevel::Fatal)
+        } else {
+            None
         }
     }
 
@@ -98,12 +108,15 @@ mod tests {
     fn test_from_str_valid() {
         assert_eq!(LogLevel::from_str("INFO"), Some(LogLevel::Info));
         assert_eq!(LogLevel::from_str("info"), Some(LogLevel::Info));
-        assert_eq!(LogLevel::from_str("INFO"), Some(LogLevel::Info));
+        assert_eq!(LogLevel::from_str("Info"), Some(LogLevel::Info)); // mixed case
         assert_eq!(LogLevel::from_str("WARN"), Some(LogLevel::Warn));
         assert_eq!(LogLevel::from_str("WARNING"), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::from_str("warning"), Some(LogLevel::Warn));
         assert_eq!(LogLevel::from_str("ERROR"), Some(LogLevel::Error));
         assert_eq!(LogLevel::from_str("FATAL"), Some(LogLevel::Fatal));
         assert_eq!(LogLevel::from_str("CRITICAL"), Some(LogLevel::Fatal));
+        assert_eq!(LogLevel::from_str("TRACE"), Some(LogLevel::Trace));
+        assert_eq!(LogLevel::from_str("DEBUG"), Some(LogLevel::Debug));
     }
 
     #[test]
