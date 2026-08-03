@@ -186,12 +186,11 @@ impl LoggerBuilder {
 
     pub fn level(mut self, level: impl Into<String>) -> Self {
         let level_str = level.into();
-        let valid_levels = ["trace", "debug", "info", "warn", "error", "fatal"];
-        if !valid_levels.contains(&level_str.to_lowercase().as_str()) {
+        if !crate::LogLevel::is_valid_level(&level_str) {
             self.validation_errors.push(format!(
                 "Invalid log level '{}'. Valid levels: {}",
                 level_str,
-                valid_levels.join(", ")
+                crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
             ));
         }
         self.config.global.level = level_str;

@@ -55,6 +55,17 @@ impl LogLevel {
         }
     }
 
+    /// Returns `true` if `s` is a recognised log level name (case-insensitive),
+    /// including aliases `warning` (→ Warn) and `critical` (→ Fatal).
+    pub fn is_valid_level(s: &str) -> bool {
+        Self::from_str(s).is_some()
+    }
+
+    /// Canonical list of valid log level names (lowercase, including aliases).
+    pub const VALID_LEVEL_STRINGS: &'static [&'static str] = &[
+        "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical",
+    ];
+
     /// 获取日志级别的字符串表示
     pub fn as_str(&self) -> &'static str {
         match self {
