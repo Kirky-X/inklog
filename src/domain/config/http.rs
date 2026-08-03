@@ -88,10 +88,13 @@ impl Default for HttpAuthConfig {
 }
 
 // ============================================================================
-// HttpErrorMode - HTTP server error handling mode
+// TlsConfig - TLS configuration
 // ============================================================================
 
 /// TLS configuration for the HTTP server.
+///
+/// Specifies the paths to the PEM-encoded certificate and private key files
+/// used for HTTPS connections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsConfig {
     /// Path to the PEM-encoded certificate file.
@@ -100,7 +103,15 @@ pub struct TlsConfig {
     pub key_path: String,
 }
 
+// ============================================================================
+// HttpErrorMode - HTTP server error handling mode
+// ============================================================================
+
 /// HTTP server error handling mode.
+///
+/// Controls how the HTTP server handles and reports errors.
+/// - `Warn`: Log errors as warnings and continue operation.
+/// - `Strict`: Return error responses to callers (default).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum HttpErrorMode {

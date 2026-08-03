@@ -13,7 +13,9 @@ pub mod performance;
 
 pub use config::InklogConfig;
 pub use console::ConsoleSinkConfig;
-pub use database::{DatabaseDriver, DatabaseSinkConfig, ParquetConfig, PartitionStrategy};
+pub use database::{
+    ArchiveFormat, DatabaseDriver, DatabaseSinkConfig, ParquetConfig, PartitionStrategy,
+};
 pub use file_sink::FileSinkConfig;
 pub use global::GlobalConfig;
 pub use http::{HttpAuthConfig, HttpErrorMode, HttpServerConfig, TlsConfig};
