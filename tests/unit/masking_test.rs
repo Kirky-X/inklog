@@ -775,4 +775,110 @@ pattern = "\\bTEST\\b"
         // Custom rule works
         assert_eq!(masker.mask("#FF0000"), "#******");
     }
+
+    // === with_registry 测试 (R-rule-registry-002) ===
+
+    #[test]
+    fn test_builder_with_registry() {
+        let mut registry = MaskRuleRegistry::default();
+        registry
+            .register(
+                MaskRule::builder("custom_tag")
+                    .pattern(r"\bTAG-\d{4}\b")
+                    .replacement("***TAGGED***")
+                    .priority(10)
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let masker = DataMasker::builder().with_registry(registry).build();
+        // Custom rule from registry works
+        let result = masker.mask("Order TAG-1234 shipped");
+        assert!(result.contains("***TAGGED***"), "Registry rule: {}", result);
+        // Built-in email rule should NOT be present (registry has no email rule)
+        let result = masker.mask("test@example.com");
+        assert_eq!(result, "test@example.com", "No builtin email rule");
+    }
+
+    #[test]
+    fn test_builder_with_registry_plus_extra() {
+        let mut registry = MaskRuleRegistry::with_builtins();
+        let initial_active = registry.active_rules().len();
+
+        let masker = DataMasker::builder()
+            .with_registry(registry.clone())
+            .add_rule(
+                MaskRule::builder("extra_rule")
+                    .pattern(r"\bEXTRA-\d+\b")
+                    .replacement("***EXTRA***")
+                    .priority(200)
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+
+        // Built-in rules from registry should work
+        let result = masker.mask("test@example.com");
+        assert_eq!(result, "**@**.***");
+        // Extra rule should also work
+        let result = masker.mask("Code EXTRA-42");
+        assert!(result.contains("***EXTRA***"), "Extra rule: {}", result);
+        // Total rules = registry rules + extra
+        assert!(initial_active >= 21);
+    }
+
+    #[test]
+    fn test_builder_with_registry_disable_builtin() {
+        let registry = MaskRuleRegistry::with_builtins();
+        let masker = DataMasker::builder()
+            .with_registry(registry)
+            .disable_builtin("email")
+            .build();
+        // Email should NOT be masked
+        let result = masker.mask("test@example.com");
+        assert_eq!(result, "test@example.com");
+        // Phone should still be masked
+        let result = masker.mask("13812345678");
+        assert_eq!(result, "***-****-****");
+    }
+
+    // === MAC 地址优先级测试 (design.md §5) ===
+
+    #[test]
+    fn test_mac_address_priority_before_ipv6() {
+        // MAC address must run BEFORE IPv6 to prevent IPv6 regex from matching
+        // 6-group colon-separated MAC addresses (e.g. 00:1A:2B:3C:4D:5E).
+        // Design.md specified 25, but actual priority is 19 (< IPv4=20, < IPv6=21).
+        let registry = MaskRuleRegistry::with_builtins();
+        let active = registry.active_rules();
+        let mac_rule = active.iter().find(|r| r.name() == "mac_address");
+        assert!(mac_rule.is_some(), "MAC address rule should exist");
+        let mac_priority = mac_rule.unwrap().priority();
+        let ipv6_priority = active
+            .iter()
+            .find(|r| r.name() == "ipv6")
+            .unwrap()
+            .priority();
+        assert!(
+            mac_priority < ipv6_priority,
+            "MAC ({}) must run before IPv6 ({})",
+            mac_priority,
+            ipv6_priority
+        );
+    }
+
+    // === IPv4 负面测试 (R-masking-rules-003) ===
+
+    #[test]
+    fn test_ipv4_invalid_address_not_matched() {
+        let masker = DataMasker::new();
+        // 256.1.1.1 is NOT a valid IPv4 address (octet > 255)
+        let result = masker.mask("Invalid IP: 256.1.1.1");
+        assert!(
+            result.contains("256.1.1.1"),
+            "Invalid IPv4 should not be masked: {}",
+            result
+        );
+    }
 }
