@@ -164,7 +164,7 @@ fn make_test_db_config(name: &str, enabled: bool) -> inklog::config::DatabaseSin
         flush_interval_ms: 500,
         partition: inklog::config::PartitionStrategy::default(),
         table_name: "logs".to_string(),
-        archive_format: "json".to_string(),
+        archive_format: inklog::ArchiveFormat::default(),
         parquet_config: inklog::config::ParquetConfig::default(),
     }
 }

@@ -187,7 +187,7 @@ fn show_database_sink_with_parquet() {
         table_name: "logs".to_string(),
         batch_size: 1000,
         flush_interval_ms: 5000,
-        archive_format: "parquet".to_string(),
+        archive_format: inklog::ArchiveFormat::Parquet,
         parquet_config: ParquetConfig {
             compression_level: 6,
             max_row_group_size: 20000,

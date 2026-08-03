@@ -49,7 +49,7 @@ async fn setup_sink(url: &str, batch_size: usize, flush_interval_ms: u64) -> Dat
         pool_size: 3,
         partition: inklog::config::PartitionStrategy::default(),
         table_name: "logs".to_string(),
-        archive_format: "json".to_string(),
+        archive_format: inklog::ArchiveFormat::default(),
         parquet_config: inklog::config::ParquetConfig::default(),
     };
     DatabaseSink::new_with_config(db, Some(config)).expect("Failed to create DatabaseSink")

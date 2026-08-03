@@ -2052,7 +2052,7 @@ mod config_validation_e2e {
             config.stderr_levels,
             vec!["error".to_string(), "warn".to_string()]
         );
-        assert!(!config.masking_enabled);
+        assert!(config.masking_enabled);
     }
 
     #[test]

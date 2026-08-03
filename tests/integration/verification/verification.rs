@@ -145,7 +145,7 @@ fn verify_database_sink_sqlite() {
         pool_size: 5,
         partition: inklog::config::PartitionStrategy::default(),
         table_name: "logs".to_string(),
-        archive_format: "json".to_string(),
+        archive_format: inklog::ArchiveFormat::default(),
         parquet_config: inklog::config::ParquetConfig::default(),
     };
 
