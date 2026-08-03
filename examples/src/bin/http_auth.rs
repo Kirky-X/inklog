@@ -158,6 +158,7 @@ fn show_full_secure_config() {
             token_env: "INKLOG_HTTP_AUTH_TOKEN".to_string(),
         }),
         ip_whitelist: Some(vec!["10.0.0.0/8".to_string(), "127.0.0.1".to_string()]),
+        tls: None,
     };
 
     println!("生产级 HttpServerConfig：");
