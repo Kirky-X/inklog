@@ -304,6 +304,7 @@ pub struct DataMaskerBuilder {
     extra_rules: Vec<MaskRule>,
     disabled_builtins: Vec<String>,
     use_builtins: bool,
+    custom_registry: Option<super::masking_registry::MaskRuleRegistry>,
 }
 
 impl DataMaskerBuilder {
@@ -312,12 +313,23 @@ impl DataMaskerBuilder {
             extra_rules: Vec::new(),
             disabled_builtins: Vec::new(),
             use_builtins: true,
+            custom_registry: None,
         }
     }
 
     /// Add a custom rule to the masker.
     pub fn add_rule(mut self, rule: MaskRule) -> Self {
         self.extra_rules.push(rule);
+        self
+    }
+
+    /// Use a custom [`MaskRuleRegistry`] as the rule source instead of builtins.
+    ///
+    /// When set, the registry's rules replace the default built-in rules.
+    /// `add_rule()` and `disable_builtin()` still apply on top.
+    pub fn with_registry(mut self, registry: super::masking_registry::MaskRuleRegistry) -> Self {
+        self.custom_registry = Some(registry);
+        self.use_builtins = false;
         self
     }
 
@@ -329,7 +341,9 @@ impl DataMaskerBuilder {
 
     /// Build the [`DataMasker`] with all configured rules sorted by priority.
     pub fn build(self) -> DataMasker {
-        let mut rules = if self.use_builtins {
+        let mut rules = if let Some(registry) = self.custom_registry {
+            registry.active_rules().into_iter().cloned().collect()
+        } else if self.use_builtins {
             DataMasker::new().into_rules()
         } else {
             Vec::new()
@@ -670,7 +684,7 @@ impl MaskRule {
             "mac_address",
             MAC_ADDRESS_REGEX.clone(),
             "XX:**:**:**:**:XX",
-            20,
+            19,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
                     .replace_all(text, |caps: &regex::Captures| {
