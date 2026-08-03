@@ -903,9 +903,9 @@ mod security_e2e {
 
     #[test]
     fn test_derive_key_from_password_deterministic_with_same_salt() {
-        let (key1, salt1) = derive_key_from_password("password123", Some(b"fixed_salt"))
+        let (key1, salt1) = derive_key_from_password("password12345", Some(b"fixed_salt"))
             .expect("derive should succeed");
-        let (key2, salt2) = derive_key_from_password("password123", Some(b"fixed_salt"))
+        let (key2, salt2) = derive_key_from_password("password12345", Some(b"fixed_salt"))
             .expect("derive should succeed");
 
         assert_eq!(key1, key2, "same password+salt should produce same key");
@@ -915,18 +915,18 @@ mod security_e2e {
 
     #[test]
     fn test_derive_key_from_password_different_salts_produce_different_keys() {
-        let (key1, _) =
-            derive_key_from_password("password", Some(b"salt1")).expect("derive should succeed");
-        let (key2, _) =
-            derive_key_from_password("password", Some(b"salt2")).expect("derive should succeed");
+        let (key1, _) = derive_key_from_password("password12345", Some(b"salt1"))
+            .expect("derive should succeed");
+        let (key2, _) = derive_key_from_password("password12345", Some(b"salt2"))
+            .expect("derive should succeed");
         assert_ne!(key1, key2, "different salts should produce different keys");
     }
 
     #[test]
     fn test_derive_key_from_password_different_passwords_produce_different_keys() {
-        let (key1, _) = derive_key_from_password("password1", Some(b"same_salt"))
+        let (key1, _) = derive_key_from_password("password1234a", Some(b"same_salt"))
             .expect("derive should succeed");
-        let (key2, _) = derive_key_from_password("password2", Some(b"same_salt"))
+        let (key2, _) = derive_key_from_password("password1234b", Some(b"same_salt"))
             .expect("derive should succeed");
         assert_ne!(
             key1, key2,
@@ -936,7 +936,7 @@ mod security_e2e {
 
     #[test]
     fn test_derive_key_from_password_random_salt_is_16_bytes() {
-        let (key, salt) = derive_key_from_password("password", None)
+        let (key, salt) = derive_key_from_password("password12345", None)
             .expect("derive with random salt should succeed");
         assert_eq!(key.len(), 32);
         assert_eq!(salt.len(), 16, "random salt should be 16 bytes");
@@ -944,24 +944,22 @@ mod security_e2e {
 
     #[test]
     fn test_derive_key_from_password_random_salt_is_unique() {
-        let (_, salt1) = derive_key_from_password("password", None).unwrap();
-        let (_, salt2) = derive_key_from_password("password", None).unwrap();
+        let (_, salt1) = derive_key_from_password("password12345", None).unwrap();
+        let (_, salt2) = derive_key_from_password("password12345", None).unwrap();
         assert_ne!(salt1, salt2, "two random salts should differ");
     }
 
     #[test]
     fn test_derive_key_from_password_empty_password_succeeds() {
-        // PBKDF2 允许空密码
+        // 最低密码长度为 12，空密码应返回错误
         let result = derive_key_from_password("", Some(b"salt"));
-        assert!(result.is_ok());
-        let (key, _) = result.unwrap();
-        assert_eq!(key.len(), 32);
+        assert!(result.is_err(), "empty password should be rejected");
     }
 
     #[test]
     fn test_derive_key_from_password_long_salt_succeeds() {
         let long_salt = vec![0u8; 64];
-        let result = derive_key_from_password("password", Some(&long_salt));
+        let result = derive_key_from_password("password12345", Some(&long_salt));
         assert!(result.is_ok());
         let (key, salt) = result.unwrap();
         assert_eq!(key.len(), 32);
@@ -1388,9 +1386,7 @@ mod inklog_error_e2e {
 
     #[test]
     fn test_inklog_error_safe_message_database_error() {
-        let error = InklogError::DatabaseError(
-            "connection refused to postgres://user:pass@host".to_string(),
-        );
+        let error = InklogError::database_error("connection refused to postgres://user:pass@host");
         let safe = error.safe_message();
         // 数据库 URL 中可能包含密码，safe_message 应脱敏
         assert!(
@@ -1408,7 +1404,7 @@ mod inklog_error_e2e {
 
     #[test]
     fn test_inklog_error_safe_message_encryption_error() {
-        let error = InklogError::EncryptionError("invalid key length".to_string());
+        let error = InklogError::encryption_error("invalid key length");
         let safe = error.safe_message();
         assert!(!safe.is_empty());
     }
