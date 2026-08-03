@@ -192,3 +192,41 @@ impl Default for DatabaseSinkConfig {
         }
     }
 }
+
+impl DatabaseSinkConfig {
+    /// Validate and adjust the configuration.
+    ///
+    /// When using SQLite, `pool_size` is overridden to 1 since SQLite
+    /// only supports a single writer connection.
+    pub fn validate(&mut self) {
+        if self.driver == DatabaseDriver::SQLite && self.pool_size != 1 {
+            self.pool_size = 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sqlite_pool_size_defaults_to_one() {
+        let mut config = DatabaseSinkConfig::default();
+        config.driver = DatabaseDriver::SQLite;
+        config.pool_size = 10;
+        config.validate();
+        assert_eq!(config.pool_size, 1, "SQLite pool_size must be 1");
+    }
+
+    #[test]
+    fn test_non_sqlite_pool_size_unchanged() {
+        let mut config = DatabaseSinkConfig::default();
+        config.driver = DatabaseDriver::PostgreSQL;
+        config.pool_size = 10;
+        config.validate();
+        assert_eq!(
+            config.pool_size, 10,
+            "non-SQLite pool_size should be unchanged"
+        );
+    }
+}
