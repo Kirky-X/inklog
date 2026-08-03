@@ -22,13 +22,19 @@ pub enum DatabaseDriver {
 }
 
 impl std::str::FromStr for DatabaseDriver {
-    type Err = ();
+    type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "postgres" | "postgresql" => Ok(DatabaseDriver::PostgreSQL),
-            "mysql" => Ok(DatabaseDriver::MySQL),
-            "sqlite" | "sqlite3" => Ok(DatabaseDriver::SQLite),
-            _ => Err(()),
+        if s.eq_ignore_ascii_case("postgres") || s.eq_ignore_ascii_case("postgresql") {
+            Ok(DatabaseDriver::PostgreSQL)
+        } else if s.eq_ignore_ascii_case("mysql") {
+            Ok(DatabaseDriver::MySQL)
+        } else if s.eq_ignore_ascii_case("sqlite") || s.eq_ignore_ascii_case("sqlite3") {
+            Ok(DatabaseDriver::SQLite)
+        } else {
+            Err(format!(
+                "Unknown database driver '{}'. Valid drivers: postgres, mysql, sqlite",
+                s
+            ))
         }
     }
 }
@@ -61,10 +67,12 @@ pub enum PartitionStrategy {
 impl std::str::FromStr for PartitionStrategy {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "monthly" | "month" => Ok(PartitionStrategy::Monthly),
-            "yearly" | "year" => Ok(PartitionStrategy::Yearly),
-            _ => Err(format!("Unknown partition strategy: {}", s)),
+        if s.eq_ignore_ascii_case("monthly") || s.eq_ignore_ascii_case("month") {
+            Ok(PartitionStrategy::Monthly)
+        } else if s.eq_ignore_ascii_case("yearly") || s.eq_ignore_ascii_case("year") {
+            Ok(PartitionStrategy::Yearly)
+        } else {
+            Err(format!("Unknown partition strategy: {}", s))
         }
     }
 }
@@ -84,6 +92,7 @@ impl std::fmt::Display for PartitionStrategy {
 
 /// Parquet export configuration for database sink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParquetConfig {
     #[serde(default = "default_parquet_compression_level")]
     pub compression_level: i32,
@@ -123,11 +132,55 @@ impl Default for ParquetConfig {
 }
 
 // ============================================================================
+// ArchiveFormat - Database archive export format
+// ============================================================================
+
+/// Supported archive formats for database log export.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ArchiveFormat {
+    #[default]
+    Json,
+    Parquet,
+    Csv,
+}
+
+impl std::str::FromStr for ArchiveFormat {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase()
+        if s.eq_ignore_ascii_case("json") {
+            Ok(ArchiveFormat::Json)
+        } else if s.eq_ignore_ascii_case("parquet") {
+            Ok(ArchiveFormat::Parquet)
+        } else if s.eq_ignore_ascii_case("csv") {
+            Ok(ArchiveFormat::Csv)
+        } else {
+            Err(format!(
+                "Unknown archive format: '{}'. Valid: json, parquet, csv",
+                s
+            ))
+        }
+    }
+}
+
+impl std::fmt::Display for ArchiveFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArchiveFormat::Json => write!(f, "json"),
+            ArchiveFormat::Parquet => write!(f, "parquet"),
+            ArchiveFormat::Csv => write!(f, "csv"),
+        }
+    }
+}
+
+// ============================================================================
 // DatabaseSinkConfig - Database sink settings
 // ============================================================================
 
 /// Database sink configuration for persistent log storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatabaseSinkConfig {
     #[serde(default = "default_db_sink_name")]
     pub name: String,
@@ -147,8 +200,8 @@ pub struct DatabaseSinkConfig {
     pub partition: PartitionStrategy,
     #[serde(default = "default_db_table_name")]
     pub table_name: String,
-    #[serde(default = "default_db_archive_format")]
-    pub archive_format: String,
+    #[serde(default)]
+    pub archive_format: ArchiveFormat,
     #[serde(default)]
     pub parquet_config: ParquetConfig,
 }
@@ -171,9 +224,7 @@ fn default_db_flush_interval_ms() -> u64 {
 fn default_db_table_name() -> String {
     "logs".to_string()
 }
-fn default_db_archive_format() -> String {
-    "json".to_string()
-}
+// ArchiveFormat default is Json via #[default] derive
 
 impl Default for DatabaseSinkConfig {
     fn default() -> Self {
@@ -187,7 +238,7 @@ impl Default for DatabaseSinkConfig {
             flush_interval_ms: default_db_flush_interval_ms(),
             partition: PartitionStrategy::default(),
             table_name: default_db_table_name(),
-            archive_format: default_db_archive_format(),
+            archive_format: ArchiveFormat::default(),
             parquet_config: ParquetConfig::default(),
         }
     }
@@ -196,11 +247,30 @@ impl Default for DatabaseSinkConfig {
 impl DatabaseSinkConfig {
     /// Validate and adjust the configuration.
     ///
-    /// When using SQLite, `pool_size` is overridden to 1 since SQLite
-    /// only supports a single writer connection.
+    /// - When using SQLite, `pool_size` is overridden to 1 since SQLite
+    ///   only supports a single writer connection.
+    /// - Rejects zero `batch_size` and `flush_interval_ms` to prevent
+    ///   busy-loops or panics at runtime.
+    /// - Validates `compression_level` is within the valid zstd range (1–22).
     pub fn validate(&mut self) {
         if self.driver == DatabaseDriver::SQLite && self.pool_size != 1 {
             self.pool_size = 1;
+        }
+        if self.batch_size == 0 {
+            tracing::warn!("database_sink.batch_size is 0, resetting to default 100");
+            self.batch_size = 100;
+        }
+        if self.flush_interval_ms == 0 {
+            tracing::warn!("database_sink.flush_interval_ms is 0, resetting to default 500");
+            self.flush_interval_ms = 500;
+        }
+        // Clamp Parquet compression level to valid zstd range 1–22
+        if !(1..=22).contains(&self.parquet_config.compression_level) {
+            tracing::warn!(
+                level = self.parquet_config.compression_level,
+                "parquet_config.compression_level out of range 1-22, clamping to 3"
+            );
+            self.parquet_config.compression_level = 3;
         }
     }
 }

@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 /// enabled = true
 /// colored = true
 /// stderr_levels = ["error", "warn"]
-/// masking_enabled = false
+/// masking_enabled = true
 /// ```
 ///
 /// # Stream Routing
@@ -53,7 +53,11 @@ pub struct ConsoleSinkConfig {
     pub stderr_levels: Vec<String>,
 
     /// Enable sensitive data masking for console output.
-    #[serde(default)]
+    ///
+    /// Defaults to `true` for security consistency with [`GlobalConfig`].
+    /// When enabled, PII patterns (emails, phone numbers, etc.) are
+    /// automatically redacted from console log output.
+    #[serde(default = "default_true")]
     pub masking_enabled: bool,
 }
 
@@ -67,7 +71,35 @@ impl Default for ConsoleSinkConfig {
             enabled: default_true(),
             colored: default_true(),
             stderr_levels: default_stderr_levels(),
-            masking_enabled: false,
+            masking_enabled: default_true(),
+        }
+    }
+}
+
+impl ConsoleSinkConfig {
+    /// Validate console sink configuration.
+    ///
+    /// Ensures `stderr_levels` contains only valid log level names.
+    /// Invalid entries are removed with a warning.
+    pub fn validate(&mut self) {
+        let valid_levels = [
+            "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical",
+        ];
+        let original_len = self.stderr_levels.len();
+        self.stderr_levels.retain(|level| {
+            let lower = level.to_ascii_lowercase();
+            if !valid_levels.contains(&lower.as_str()) {
+                tracing::warn!(level = %level, "Invalid stderr_levels entry, removing");
+                false
+            } else {
+                true
+            }
+        });
+        if self.stderr_levels.len() != original_len {
+            tracing::info!(
+                remaining = self.stderr_levels.len(),
+                "Removed invalid stderr_levels entries"
+            );
         }
     }
 }
