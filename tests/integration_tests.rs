@@ -484,6 +484,7 @@ async fn test_http_server_startup_with_default_config() {
         error_mode: HttpErrorMode::Strict,
         auth: None,
         ip_whitelist: None,
+        tls: None,
     };
 
     let inklog_config = HttpInklogConfig {
@@ -511,6 +512,7 @@ async fn test_http_server_error_mode_panic() {
         error_mode: HttpErrorMode::Strict,
         auth: None,
         ip_whitelist: None,
+        tls: None,
     };
 
     match config.error_mode {
@@ -533,6 +535,7 @@ async fn test_http_server_error_mode_warn() {
         error_mode: HttpErrorMode::Warn,
         auth: None,
         ip_whitelist: None,
+        tls: None,
     };
 
     match config.error_mode {
@@ -555,6 +558,7 @@ async fn test_http_server_error_mode_strict() {
         error_mode: HttpErrorMode::Strict,
         auth: None,
         ip_whitelist: None,
+        tls: None,
     };
 
     match config.error_mode {
