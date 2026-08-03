@@ -170,7 +170,13 @@ impl LoggerManager {
                 &health_path,
                 get(|| async move {
                     let status = health_status_getter();
-                    axum::Json(serde_json::to_value(&status).unwrap_or_default())
+                    match serde_json::to_value(&status) {
+                        Ok(v) => axum::Json(v),
+                        Err(e) => {
+                            tracing::error!("Failed to serialize health status: {}", e);
+                            axum::Json(serde_json::json!({"error": "serialization failed"}))
+                        }
+                    }
                 }),
             )
             .route(

@@ -82,9 +82,9 @@ impl Drop for LoggerSubscriber {
             self.try_flush_fallback();
             let remaining = self.fallback_buffer.lock().len();
             if remaining > 0 {
-                eprintln!(
-                    "Warning: LoggerSubscriber dropped with {} unflushed fallback records",
-                    remaining
+                tracing::warn!(
+                    unflushed_records = remaining,
+                    "LoggerSubscriber dropped with unflushed fallback records"
                 );
             }
         }
@@ -126,7 +126,10 @@ where
                     }
                     buffer.push_back(record);
                 } else {
-                    self.metrics.inc_channel_blocked();
+                    // Timeout on non-critical log: message is lost (send_timeout returns
+                    // ownership but we have nowhere to buffer it). Only count as dropped,
+                    // not as channel_blocked, to keep metric semantics distinct:
+                    // channel_blocked = backpressure event, logs_dropped = data loss.
                     self.metrics.inc_logs_dropped();
                 }
             }
@@ -455,15 +458,16 @@ mod tests {
     }
 
     // =========================================================================
-    // on_event 错误路径覆盖：非关键级别 async 超时 → metrics 递增
-    // 显式覆盖行 128-129（inc_channel_blocked + inc_logs_dropped）
+    // on_event 错误路径覆盖：非关键级别 async 超时 → 仅 logs_dropped 递增
+    // channel_blocked 仅在背压事件（send_timeout 返回 Full）时递增，
+    // 而超时丢弃消息仅属于数据丢失，不属于背压。
     // =========================================================================
 
     #[test]
     #[serial]
     fn test_on_event_non_critical_async_timeout_increments_blocked_and_dropped() {
         // async channel 容量 0（rendezvous）→ send_timeout 必然超时
-        // INFO 级别非关键 → 走行 128-129（inc_channel_blocked + inc_logs_dropped）
+        // INFO 级别非关键 → 仅 increment logs_dropped (not channel_blocked)
         let (console_tx, _console_rx) = bounded(10);
         let (async_tx, _async_rx) = bounded(0);
         let metrics = Arc::new(Metrics::new());
@@ -478,11 +482,13 @@ mod tests {
             tracing::info!(target: "test::subscriber", message = "non-critical timeout");
         });
 
-        // 非关键级别 + async 超时：channel_blocked 和 logs_dropped 各 +1
+        // Metric semantics: channel_blocked = backpressure event,
+        // logs_dropped = data loss.  A timeout on a non-critical log
+        // is data-loss only, not backpressure.
         assert_eq!(
             metrics.channel_blocked(),
-            before_blocked + 1,
-            "non-critical async timeout should increment channel_blocked"
+            before_blocked,
+            "non-critical async timeout should NOT increment channel_blocked"
         );
         assert_eq!(
             metrics.logs_dropped(),
