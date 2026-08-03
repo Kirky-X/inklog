@@ -107,6 +107,10 @@ impl LogI18nFormatter {
         let time = Time::try_new(0, 0, 0, 0).map_err(|e| I18nError::DateError(e.to_string()))?;
         let datetime = DateTime { date, time };
 
+        // DateTimeFormatter construction is non-trivial (loads locale data).
+        // In a hot-path scenario, consider caching this on the struct.
+        // For now it is constructed per call since format_timestamp is
+        // typically called at low frequency (log formatting, not per-record).
         let dtf = DateTimeFormatter::try_new(self.locale.clone().into(), YMD::medium())
             .map_err(|e| I18nError::FormatError(e.to_string()))?;
         let formatted = dtf.format(&datetime);
