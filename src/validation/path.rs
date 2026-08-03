@@ -100,7 +100,12 @@ impl PathValidator {
     pub fn validate(&self, path: &Path) -> ValidationResult {
         let path_str = path.to_string_lossy();
 
-        if path_str.contains("..") {
+        // Check for path traversal using component iteration instead of substring match.
+        // `contains("..")` would reject legitimate filenames like "foo..bar".
+        if path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
             warn!("Path traversal detected: {}", path_str);
             return ValidationResult::invalid("Path traversal detected");
         }
@@ -557,5 +562,22 @@ mod tests {
             "expected base directory error, got: {:?}",
             result.error
         );
+    }
+
+    #[test]
+    fn test_validate_accepts_filenames_with_double_dots() {
+        // T017: filenames containing ".." as part of the name should be accepted
+        // e.g., "foo..bar" is a valid filename, not a path traversal
+        let validator = super::PathValidator::new();
+        let result = validator.validate(Path::new("foo..bar"));
+        assert!(
+            result.valid,
+            "foo..bar should be accepted, got error: {:?}",
+            result.error
+        );
+
+        // But actual parent directory traversal should still be rejected
+        let result = validator.validate(Path::new("../etc/passwd"));
+        assert!(!result.valid, "../etc/passwd should be rejected");
     }
 }
