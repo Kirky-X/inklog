@@ -3,7 +3,9 @@
 use aes_gcm::Aes256Gcm;
 use aes_gcm::aead::{Aead, KeyInit};
 use anyhow::{Context, Result, anyhow};
+#[cfg(test)]
 use base64::{Engine as _, engine::general_purpose};
+#[cfg(test)]
 use inklog::sink::encryption::derive_key_from_password;
 #[cfg(test)]
 use sha2::Digest as Sha256Digest;
@@ -12,7 +14,6 @@ use sha2::Sha256;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tracing::warn;
 
 /// 检查路径中是否包含可疑字符或遍历模式（共享逻辑）
 fn check_path_syntax(path: &Path) -> Result<()> {
@@ -301,49 +302,7 @@ pub fn decrypt_file_compatible(
 }
 
 fn get_encryption_key_cli(env_var: &str) -> Result<[u8; 32]> {
-    let key_str = std::env::var(env_var)
-        .map_err(|_| anyhow!("Encryption key environment variable not set. Please ensure INKLOG_DECRYPT_KEY or INKLOG_ENCRYPTION_KEY is defined."))?;
-
-    let raw_bytes = key_str.as_bytes();
-
-    // 如果长度是32字节，尝试直接使用原始字节
-    if raw_bytes.len() == 32 {
-        let mut key = [0u8; 32];
-        key.copy_from_slice(raw_bytes);
-        return Ok(key);
-    }
-
-    // 尝试解码 Base64 编码的密钥
-    if let Ok(decoded) = general_purpose::STANDARD.decode(key_str.trim()) {
-        if decoded.len() == 32 {
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&decoded);
-            return Ok(key);
-        } else {
-            return Err(anyhow!(
-                "Encryption key must be exactly 32 bytes (256 bits) after Base64 decoding, got {} bytes. \
-                 Please provide a valid 32-byte key encoded in Base64.",
-                decoded.len()
-            ));
-        }
-    }
-
-    // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
-    if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
-        warn!(
-            "Using PBKDF2 key derivation for password-based key. For better security, use a 32-byte key."
-        );
-        let (key, _salt) = derive_key_from_password(&key_str, None)
-            .map_err(|e| anyhow!("Failed to derive key from password: {}", e))?;
-        return Ok(key);
-    }
-
-    // 密钥长度无效
-    Err(anyhow!(
-        "Encryption key must be exactly 32 bytes (256 bits) for raw keys, or a password string (1-127 chars) for key derivation. Got {} bytes. \
-         Please provide a valid 32-byte key in raw or Base64 format, or use a password string.",
-        raw_bytes.len()
-    ))
+    inklog::sink::encryption::get_encryption_key(env_var).map_err(|e| anyhow!("{}", e))
 }
 
 pub fn decrypt_directory_compatible(
