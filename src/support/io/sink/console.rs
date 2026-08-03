@@ -48,18 +48,10 @@ impl ConsoleSink {
         let formatted_message = self.template.render(record);
 
         if use_color {
-            let level_colored = match record.level.as_str() {
-                "ERROR" | "error" => record.level.red().to_string(),
-                "WARN" | "warn" => record.level.yellow().to_string(),
-                "INFO" | "info" => record.level.green().to_string(),
-                "DEBUG" | "debug" => record.level.blue().to_string(),
-                "TRACE" | "trace" => record.level.magenta().to_string(),
-                _ => record.level.clone(),
-            };
             writeln!(
                 writer,
                 "{}",
-                self.apply_color(&formatted_message, &level_colored)
+                self.apply_color(&formatted_message, &record.level)
             )
         } else {
             writeln!(writer, "{}", formatted_message)

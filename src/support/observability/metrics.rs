@@ -472,26 +472,18 @@ impl Metrics {
             SinkStatus::Unhealthy { error: error_msg }
         };
 
-        let (new_failures, new_error) = if healthy {
-            (0, None)
+        // Single lock acquisition to avoid TOCTOU race between read and write
+        let mut map = self.sink_health.lock();
+        let entry = map
+            .entry(name.to_string())
+            .or_insert_with(SinkHealth::healthy);
+        entry.status = status;
+        if healthy {
+            entry.consecutive_failures = 0;
+            entry.last_error = None;
         } else {
-            // 需要获取当前失败次数，所以需要先读取
-            let current_failures = {
-                let map = self.sink_health.lock();
-                map.get(name).map(|h| h.consecutive_failures).unwrap_or(0)
-            };
-            (current_failures + 1, error)
-        };
-
-        // 现在快速更新
-        {
-            let mut map = self.sink_health.lock();
-            let entry = map
-                .entry(name.to_string())
-                .or_insert_with(SinkHealth::healthy);
-            entry.status = status;
-            entry.consecutive_failures = new_failures;
-            entry.last_error = new_error;
+            entry.consecutive_failures += 1;
+            entry.last_error = error;
         }
     }
 
@@ -700,9 +692,10 @@ impl Metrics {
         let health_map = self.sink_health.lock();
         for (name, health) in health_map.iter() {
             let value = if health.status.is_operational() { 1 } else { 0 };
+            let safe_name = sanitize_prometheus_label(name);
             s.push_str(&format!(
                 "inklog_sink_healthy{{sink=\"{}\"}} {}\n",
-                name, value
+                safe_name, value
             ));
         }
 
@@ -728,6 +721,22 @@ impl Metrics {
 
         s
     }
+}
+
+/// Sanitize a string for use as a Prometheus label value.
+///
+/// Replaces any character not matching `[a-zA-Z0-9_:]` with `_`.
+fn sanitize_prometheus_label(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == ':' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// 降级状态追踪
@@ -2024,6 +2033,47 @@ mod metrics_tests {
             matches!(status.overall_status, SinkStatus::Healthy),
             "expected Healthy, got {:?}",
             status.overall_status
+        );
+    }
+
+    #[test]
+    fn test_prometheus_label_sanitizes_special_characters() {
+        // T020: Prometheus label values must only contain [a-zA-Z0-9_:]
+        assert_eq!(super::sanitize_prometheus_label("file-sink"), "file_sink");
+        assert_eq!(super::sanitize_prometheus_label("db/sink"), "db_sink");
+        assert_eq!(super::sanitize_prometheus_label("sink@v1"), "sink_v1");
+        assert_eq!(
+            super::sanitize_prometheus_label("valid_name:1"),
+            "valid_name:1"
+        );
+    }
+
+    #[test]
+    fn test_update_sink_health_concurrent_no_lost_updates() {
+        // R-observability-001: concurrent calls must not lose failure counts
+        let metrics = std::sync::Arc::new(super::Metrics::new());
+        let num_threads = 10;
+        let increments_per_thread = 100;
+
+        let mut handles = vec![];
+        for _ in 0..num_threads {
+            let m = std::sync::Arc::clone(&metrics);
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..increments_per_thread {
+                    m.update_sink_health("test_sink", false, Some("err".to_string()));
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let health = metrics.sink_health.lock();
+        let entry = health.get("test_sink").expect("sink entry should exist");
+        assert_eq!(
+            entry.consecutive_failures,
+            num_threads * increments_per_thread,
+            "no failure updates should be lost"
         );
     }
 }
