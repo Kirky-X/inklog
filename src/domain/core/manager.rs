@@ -388,7 +388,7 @@ impl LoggerManager {
         let error_sink = Arc::new(Mutex::new(match FileSink::new(error_sink_config) {
             Ok(sink) => Some(sink),
             Err(e) => {
-                eprintln!("Warning: failed to create error sink: {}", e);
+                tracing::warn!(error = %e, "Failed to create error sink");
                 None
             }
         }));
@@ -486,7 +486,7 @@ impl LoggerManager {
 
     pub fn get_health_status(&self) -> HealthStatus {
         let channel_len = self.sender.len();
-        let channel_cap = self.effective_capacity.load(Ordering::Relaxed);
+        let channel_cap = self.effective_capacity.load(Ordering::Acquire);
         self.metrics.get_status(channel_len, channel_cap)
     }
 
@@ -499,7 +499,7 @@ impl LoggerManager {
     }
 
     pub fn effective_channel_capacity(&self) -> usize {
-        self.effective_capacity.load(Ordering::Relaxed)
+        self.effective_capacity.load(Ordering::Acquire)
     }
 
     pub fn channel_len(&self) -> usize {
@@ -525,7 +525,9 @@ impl LoggerManager {
         // 历史缺陷：原先使用单一 `shutdown_tx`，send 一次只能让首个 worker 退出，
         // 其余 worker 进入死循环，导致进程无法退出（PID 20848 等挂起问题）。
         for tx in &self.shutdown_txs {
-            let _ = tx.send(());
+            if tx.send(()).is_err() {
+                tracing::warn!("Shutdown signal lost: worker channel already disconnected");
+            }
         }
 
         // 关闭HTTP服务器
