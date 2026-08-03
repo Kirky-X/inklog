@@ -158,3 +158,52 @@ impl Default for FileSinkConfig {
         }
     }
 }
+
+impl FileSinkConfig {
+    /// Validate the configuration.
+    ///
+    /// Checks:
+    /// - `compression_level` is in valid range (1..=22 for zstd, 1..=9 for gzip)
+    /// - If `encrypt` is true, `encryption_key_env` must be `Some`
+    pub fn validate(&self) -> Result<(), String> {
+        if self.compression_level < 1 || self.compression_level > 22 {
+            return Err(format!(
+                "compression_level must be between 1 and 22, got {}",
+                self.compression_level
+            ));
+        }
+        if self.encrypt && self.encryption_key_env.is_none() {
+            return Err("encrypt is enabled but encryption_key_env is not set".to_string());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_rejects_invalid_compression_level() {
+        let mut config = FileSinkConfig::default();
+        config.compression_level = 0;
+        assert!(config.validate().is_err());
+
+        config.compression_level = 23;
+        assert!(config.validate().is_err());
+
+        config.compression_level = 3;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_encrypt_without_key_env() {
+        let mut config = FileSinkConfig::default();
+        config.encrypt = true;
+        config.encryption_key_env = None;
+        assert!(config.validate().is_err());
+
+        config.encryption_key_env = Some("MY_KEY".to_string());
+        assert!(config.validate().is_ok());
+    }
+}

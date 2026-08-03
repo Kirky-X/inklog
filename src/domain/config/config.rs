@@ -78,7 +78,16 @@ impl InklogConfig {
     fn apply_env_overrides(config: &mut Self) {
         // Global config overrides
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_LEVEL") {
-            config.global.level = val;
+            // Validate against known log levels before applying
+            let valid_levels = ["trace", "debug", "info", "warn", "error"];
+            if valid_levels.contains(&val.to_lowercase().as_str()) {
+                config.global.level = val;
+            } else {
+                eprintln!(
+                    "Warning: invalid INKLOG_GLOBAL_LEVEL '{}', keeping current value '{}'",
+                    val, config.global.level
+                );
+            }
         }
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_FORMAT") {
             config.global.format = val;
@@ -426,5 +435,23 @@ mod tests {
         // When no config files exist, should return default config
         let config = InklogConfig::from_search_paths().unwrap();
         assert_eq!(config.global.level, "info");
+    }
+
+    #[test]
+    fn test_env_override_invalid_level_falls_back() {
+        // T025: invalid log level should not be applied
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_LEVEL", "invalid_level");
+        }
+        let mut config = InklogConfig::default();
+        let original_level = config.global.level.clone();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(
+            config.global.level, original_level,
+            "invalid level should not override current value"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_LEVEL");
+        }
     }
 }
