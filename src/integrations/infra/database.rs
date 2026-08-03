@@ -4,6 +4,8 @@
 //!
 //! 提供日志记录批量写入和健康检查的抽象接口。
 
+use std::sync::Arc;
+
 use crate::InklogError;
 use crate::LogRecord;
 use async_trait::async_trait;
@@ -73,6 +75,8 @@ pub trait Database: Send + Sync {
 // ============================================================================
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use dbnexus::ConnectionPool;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use dbnexus::database::pool::DbPool;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use dbnexus::foundation::config::DbConfig;
@@ -104,7 +108,7 @@ use dbnexus::foundation::config::DbConfig;
 /// ```
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub struct DbNexusAdapter {
-    pool: DbPool,
+    pool: Arc<dyn ConnectionPool + Send + Sync>,
     table_name: String,
 }
 
@@ -138,7 +142,7 @@ impl DbNexusAdapter {
     /// let db = DbNexusAdapter::new("sqlite://logs.db", 1).await?;
     /// ```
     pub async fn new(url: &str, pool_size: u32) -> Result<Self, InklogError> {
-        Self::with_table_name(url, pool_size, "logs").await
+        Self::with_table_name(url, pool_size, crate::support::io::sink::entity::TABLE_NAME).await
     }
 
     /// 创建带有自定义表名的适配器
@@ -181,7 +185,7 @@ impl DbNexusAdapter {
             })?;
 
         Ok(Self {
-            pool,
+            pool: Arc::new(pool),
             table_name: table_name.to_string(),
         })
     }
@@ -197,14 +201,34 @@ impl DbNexusAdapter {
     pub fn from_pool(pool: DbPool, table_name: &str) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
         Ok(Self {
+            pool: Arc::new(pool),
+            table_name: table_name.to_string(),
+        })
+    }
+
+    /// 从已有的 `ConnectionPool` trait 对象创建适配器
+    ///
+    /// 用于 trait-kit DI 场景：kit 提供 `Arc<dyn ConnectionPool + Send + Sync>`，
+    /// 直接包装为 `Database` trait 实现，无需重新创建连接池。
+    ///
+    /// # 参数
+    ///
+    /// * `pool` - dbnexus 连接池 trait 对象（通常来自 `kit.require::<DbNexusModule>()`）
+    /// * `table_name` - 日志表名称
+    pub fn from_connection_pool(
+        pool: Arc<dyn ConnectionPool + Send + Sync>,
+        table_name: &str,
+    ) -> Result<Self, InklogError> {
+        validate_table_name(table_name)?;
+        Ok(Self {
             pool,
             table_name: table_name.to_string(),
         })
     }
 
     /// 获取底层连接池引用
-    pub fn pool(&self) -> &DbPool {
-        &self.pool
+    pub fn pool(&self) -> &dyn ConnectionPool {
+        self.pool.as_ref()
     }
 
     /// 获取表名
@@ -369,8 +393,8 @@ impl DbNexusAdapter {
 // MockDatabaseAdapter - 测试用 Mock 实现
 // ============================================================================
 
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
 
 /// Mock 数据库适配器，用于单元测试
 ///
