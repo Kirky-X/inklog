@@ -338,6 +338,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("注册自定义规则后: {}", registry.len());
     println!("活跃规则数: {}", registry.active_rules().len());
 
+    // 9.4 TOML 配置加载
+    print_section("9.4 MaskRuleRegistry::load_from_toml");
+    let toml_config = r#"
+[[masking_rules]]
+name = "order_id"
+pattern = "\\bORD-\\d{8}\\b"
+replacement = "ORD-***"
+priority = 60
+enabled = true
+
+[[masking_rules]]
+name = "trace_id"
+pattern = "\\bTRACE-[A-F0-9]{16}\\b"
+replacement = "***TRACE***"
+"#;
+    let toml_rules = MaskRuleRegistry::load_from_toml(toml_config).expect("Invalid TOML");
+    println!("从 TOML 加载了 {} 条自定义规则", toml_rules.len());
+    for rule in &toml_rules {
+        println!(
+            "  规则: {} (priority={}, enabled={})",
+            rule.name(),
+            rule.priority(),
+            rule.is_enabled()
+        );
+    }
+    // 将 TOML 规则注册到注册中心并构建 DataMasker
+    let mut toml_registry = MaskRuleRegistry::with_builtins();
+    for rule in toml_rules {
+        let _ = toml_registry.register(rule);
+    }
+    let toml_masker = DataMasker::builder().with_registry(toml_registry).build();
+    let order_text = "Order ORD-20260803 processed, trace: TRACE-0123456789ABCDEF";
+    println!("原始: {}", order_text);
+    println!("脱敏: {}", toml_masker.mask(order_text));
+
     // 10. 性能提示
     print_separator("10. 性能提示");
 
