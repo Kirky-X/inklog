@@ -2,42 +2,15 @@
 // SPDX-License-Identifier: MIT
 //! `InklogModule` — trait-kit 0.2.2 `AsyncKit` integration for inklog.
 //!
-//! Phase 6 (T044 Red / T045 Green) of the `trait-kit-async-integration`
-//! change. Wires inklog's `LogDbProvider` abstraction into the `AsyncKit`
-//! dependency injection framework, depending on `DbNexusModule` for the
-//! database pool capability.
+//! Wires inklog's `Database` abstraction into the `AsyncKit` dependency
+//! injection framework, depending on `DbNexusModule` for the database
+//! pool capability.
 //!
-//! # Rule 7 divergences from `design.md` / `spec.md`
-//!
-//! `spec.md` R-inklog-module-003 specifies:
-//!
-//! 1. `AsyncAutoBuilder::Capability = Arc<dyn LogSink + Send + Sync>` —
-//!    `LoggerManager` does **not** implement `LogSink` (the trait is for
-//!    sink implementations like `ConsoleSink` / `FileSink`, not the
-//!    manager). Returning `Arc<LoggerManager> as Arc<dyn LogSink>` would
-//!    not compile. We return `Arc<dyn LogDbProvider + Send + Sync>`
-//!    instead — the capability that `InklogModule` actually produces.
-//!    Consumers can retrieve it via `kit.require::<InklogModule>()` and
-//!    inject into `LoggerManager::builder().with_database(...)` themselves
-//!    (note: `with_database` takes `Arc<dyn Database>`, not
-//!    `Arc<dyn LogDbProvider>` — a future change can add a bridge adapter
-//!    from `LogDbProvider` to `Database`).
-//!
-//! 2. `build` body: `kit.require::<DbNexusModule>()` → wrap as
-//!    `DbNexusLogDbAdapter` → `kit.config::<InklogConfig>()` →
-//!    `LoggerManager::builder().config(config).database(adapter).build()`.
-//!    `LoggerBuilder` has no `.database(adapter)` method accepting a
-//!    `LogDbProvider` — only `.with_database(Arc<dyn Database>)` or
-//!    `.database(url: impl Into<String>)`. Rather than modifying
-//!    `LoggerBuilder` (out of scope for T044/T045), `InklogModule::build`
-//!    returns the `DbNexusLogDbAdapter` directly as a
-//!    `Arc<dyn LogDbProvider>` capability. A follow-up change can add
-//!    a `LogDbProvider → Database` bridge and full `LoggerManager`
-//!    construction inside `build`.
-//!
-//! 3. `table_name` is hardcoded to `"logs"` (matching the default in
-//!    `DbNexusAdapter::new`). A future change can read this from
-//!    `InklogConfig` or `DatabaseSinkConfig`.
+//! `InklogModule::build` retrieves `Arc<dyn ConnectionPool + Send + Sync>`
+//! from `DbNexusModule`, wraps it in `DbNexusAdapter` (which implements
+//! `Database`), and returns it as `Arc<dyn Database + Send + Sync>`.
+//! Consumers can inject this directly into `DatabaseSink` via
+//! `LoggerBuilder::with_database(...)`.
 
 use std::any::TypeId;
 use std::future::Future;
@@ -48,22 +21,21 @@ use trait_kit::prelude::*;
 
 use dbnexus::DbNexusModule;
 
-use crate::integrations::DbNexusLogDbAdapter;
-use crate::{InklogError, LogDbProvider};
+use crate::InklogError;
+use crate::integrations::infra::Database;
+use crate::integrations::infra::database::DbNexusAdapter;
 
-/// trait-kit `AsyncKit` module that constructs an inklog `LogDbProvider`.
+/// trait-kit `AsyncKit` module that constructs an inklog `Database` impl.
 ///
 /// Depends on `DbNexusModule` (registered first via topological sort).
 /// Register with `AsyncKit::register::<InklogModule>()`, then
 /// `kit.build().await` and retrieve the capability with
 /// `kit.require::<InklogModule>()`.
 ///
-/// The returned `Arc<dyn LogDbProvider + Send + Sync>` wraps a
-/// `DbNexusLogDbAdapter` that proxies `execute_log` / `batch_insert`
-/// through the dbnexus `ConnectionPool`. See the module-level docs for
-/// the design-divergence rationale (spec.md wrote
-/// `Capability = Arc<dyn LogSink>`, but `LoggerManager` does not
-/// implement `LogSink`).
+/// The returned `Arc<dyn Database + Send + Sync>` wraps a `DbNexusAdapter`
+/// that proxies `insert_batch` / `is_healthy` through the dbnexus
+/// `ConnectionPool`. This capability can be injected directly into
+/// `LoggerBuilder::with_database(...)`.
 pub struct InklogModule;
 
 impl ModuleMeta for InklogModule {
@@ -77,7 +49,7 @@ impl ModuleMeta for InklogModule {
 }
 
 impl AsyncAutoBuilder for InklogModule {
-    type Capability = Arc<dyn LogDbProvider + Send + Sync>;
+    type Capability = Arc<dyn Database + Send + Sync>;
     type Error = InklogError;
 
     fn build<'a>(
@@ -89,11 +61,14 @@ impl AsyncAutoBuilder for InklogModule {
                 .require::<DbNexusModule>()
                 .map_err(|e| InklogError::database_error(format!("require DbNexusModule: {e}")))?;
 
-            // 2. Wrap in DbNexusLogDbAdapter — adapts ConnectionPool to LogDbProvider.
-            let adapter = DbNexusLogDbAdapter::new(pool, "logs")?;
+            // 2. Wrap in DbNexusAdapter — adapts ConnectionPool to Database.
+            let adapter = DbNexusAdapter::from_connection_pool(
+                pool,
+                crate::support::io::sink::entity::TABLE_NAME,
+            )?;
 
-            // 3. Return as Arc<dyn LogDbProvider + Send + Sync>.
-            Ok(Arc::new(adapter) as Arc<dyn LogDbProvider + Send + Sync>)
+            // 3. Return as Arc<dyn Database + Send + Sync>.
+            Ok(Arc::new(adapter) as Arc<dyn Database + Send + Sync>)
         })
     }
 }
@@ -128,16 +103,16 @@ mod tests {
     #[test]
     fn inklog_module_satisfies_async_auto_builder_bounds() {
         fn assert_cap<T: Clone + Send + Sync + 'static>() {}
-        assert_cap::<Arc<dyn LogDbProvider + Send + Sync>>();
+        assert_cap::<Arc<dyn Database + Send + Sync>>();
         fn assert_err<T: std::error::Error + Send + 'static>() {}
         assert_err::<InklogError>();
     }
 
     /// R-inklog-module-003 #4: Full integration — register OxcacheModule +
     /// DbNexusModule + InklogModule, set configs, build, require
-    /// InklogModule → get a working `Arc<dyn LogDbProvider + Send + Sync>`.
+    /// InklogModule → get a working `Arc<dyn Database + Send + Sync>`.
     #[tokio::test]
-    async fn inklog_module_build_returns_log_db_provider() {
+    async fn inklog_module_build_returns_database() {
         use dbnexus::foundation::config::DbConfig;
         use oxcache::integrations::kit::{OxcacheConfig, OxcacheModule};
 
@@ -157,14 +132,11 @@ mod tests {
             .expect("register InklogModule");
         let kit = kit.build().await.expect("AsyncKit::build");
 
-        let provider: Arc<dyn LogDbProvider + Send + Sync> =
+        let db: Arc<dyn Database + Send + Sync> =
             kit.require::<InklogModule>().expect("require InklogModule");
 
-        // Verify the provider is usable — execute a DDL statement.
-        provider
-            .execute_log("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY)")
-            .await
-            .expect("execute_log should succeed");
+        // Verify the database is usable — health check should pass.
+        assert!(db.is_healthy().await);
     }
 
     /// R-inklog-module-003 #5: build fails with a clear error if

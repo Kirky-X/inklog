@@ -135,7 +135,7 @@ mod validation;
 pub mod i18n;
 
 // Emit a clear compile error when the `kit` feature is enabled without any
-// database driver.  DbNexusLogDbAdapter and InklogModule require at least
+// database driver.  DbNexusAdapter and InklogModule require at least
 // one of sqlite / postgres / mysql to function.
 #[cfg(all(
     feature = "kit",
@@ -171,15 +171,11 @@ pub use domain::config::{
     FileSinkConfig, GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig,
     ParquetConfig, PartitionStrategy, PerformanceConfig, TlsConfig,
 };
-pub use domain::db_provider::LogDbProvider;
 pub use domain::types::log_record::LogRecord;
 pub use error::InklogError;
 pub use error::InklogResult;
-#[cfg(all(
-    feature = "kit",
-    any(feature = "sqlite", feature = "postgres", feature = "mysql")
-))]
-pub use integrations::DbNexusLogDbAdapter;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+pub use integrations::DbNexusAdapter;
 #[cfg(all(
     feature = "kit",
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
