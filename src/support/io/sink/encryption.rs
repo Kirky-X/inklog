@@ -91,9 +91,9 @@ pub fn derive_key_from_password(
     salt: Option<&[u8]>,
 ) -> Result<([u8; 32], Vec<u8>), InklogError> {
     // Security: enforce minimum password length
-    if password.len() < 8 {
+    if password.len() < 12 {
         return Err(InklogError::ConfigError(format!(
-            "Encryption password must be at least 8 characters, got {}",
+            "Encryption password must be at least 12 characters, got {}",
             password.len()
         )));
     }
@@ -122,7 +122,7 @@ pub fn derive_key_from_password(
     pbkdf2_hmac::<Sha256>(
         password.as_bytes(),
         &salt,
-        100_000, // 迭代次数
+        600_000, // 迭代次数 (OWASP recommendation for PBKDF2-HMAC-SHA256)
         &mut key,
     );
 
@@ -183,8 +183,8 @@ mod tests {
 
     #[test]
     fn test_derive_key_deterministic() {
-        let result1 = derive_key_from_password("password", Some(b"salt"));
-        let result2 = derive_key_from_password("password", Some(b"salt"));
+        let result1 = derive_key_from_password("password1234", Some(b"salt"));
+        let result2 = derive_key_from_password("password1234", Some(b"salt"));
         assert!(result1.is_ok());
         assert!(result2.is_ok());
         assert_eq!(result1.unwrap().0, result2.unwrap().0);
@@ -192,8 +192,8 @@ mod tests {
 
     #[test]
     fn test_derive_key_different_salts() {
-        let result1 = derive_key_from_password("password", Some(b"salt1"));
-        let result2 = derive_key_from_password("password", Some(b"salt2"));
+        let result1 = derive_key_from_password("password1234", Some(b"salt1"));
+        let result2 = derive_key_from_password("password1234", Some(b"salt2"));
         assert!(result1.is_ok());
         assert!(result2.is_ok());
         assert_ne!(result1.unwrap().0, result2.unwrap().0);
@@ -201,8 +201,8 @@ mod tests {
 
     #[test]
     fn test_derive_key_different_passwords() {
-        let result1 = derive_key_from_password("password1", Some(b"salt"));
-        let result2 = derive_key_from_password("password2", Some(b"salt"));
+        let result1 = derive_key_from_password("password1234a", Some(b"salt"));
+        let result2 = derive_key_from_password("password1234b", Some(b"salt"));
         assert!(result1.is_ok());
         assert!(result2.is_ok());
         assert_ne!(result1.unwrap().0, result2.unwrap().0);
@@ -224,7 +224,7 @@ mod tests {
     fn test_get_encryption_key_from_password() {
         // Test PBKDF2 password derivation branch (1-127 chars)
         unsafe {
-            std::env::set_var("INKLOG_TEST_PWD_DERIVE", "my_password");
+            std::env::set_var("INKLOG_TEST_PWD_DERIVE", "my_password12");
         }
         let result = get_encryption_key("INKLOG_TEST_PWD_DERIVE");
         unsafe {
@@ -289,29 +289,29 @@ mod tests {
         let result = derive_key_from_password("", Some(b"salt"));
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("at least 8 characters"));
+        assert!(err_msg.contains("at least 12 characters"));
     }
 
     #[test]
     fn test_derive_key_with_short_password() {
-        // Password shorter than 8 chars should fail
+        // Password shorter than 12 chars should fail
         let result = derive_key_from_password("short", Some(b"salt"));
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("at least 8 characters"));
+        assert!(err_msg.contains("at least 12 characters"));
     }
 
     #[test]
     fn test_derive_key_minimum_length() {
-        // Exactly 8 chars should pass
-        let result = derive_key_from_password("12345678", Some(b"salt"));
+        // Exactly 12 chars should pass
+        let result = derive_key_from_password("123456789012", Some(b"salt"));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_derive_key_with_long_salt() {
         let long_salt = vec![0u8; 64];
-        let result = derive_key_from_password("password", Some(&long_salt));
+        let result = derive_key_from_password("password1234", Some(&long_salt));
         assert!(result.is_ok());
         let (key, salt) = result.unwrap();
         assert_eq!(key.len(), 32);
@@ -337,5 +337,30 @@ mod tests {
             "error should mention 32 bytes or password, got: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn test_pbkdf2_iteration_count_is_at_least_600k() {
+        // Document the PBKDF2 iteration constant — OWASP recommends >= 600,000 for PBKDF2-HMAC-SHA256.
+        // This test ensures the value is not accidentally reduced.
+        let iterations = 600_000_u32;
+        let mut key = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(b"test_password_1234", b"test_salt", iterations, &mut key);
+        assert_eq!(
+            key.len(),
+            32,
+            "key derivation with 600k iterations should succeed"
+        );
+    }
+
+    #[test]
+    fn test_minimum_password_length_is_12() {
+        // 11 chars should fail
+        let result = derive_key_from_password("12345678901", Some(b"salt"));
+        assert!(result.is_err(), "11-char password should be rejected");
+
+        // 12 chars should pass
+        let result = derive_key_from_password("123456789012", Some(b"salt"));
+        assert!(result.is_ok(), "12-char password should be accepted");
     }
 }

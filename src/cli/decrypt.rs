@@ -37,6 +37,17 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
         ));
     }
 
+    // 检查符号链接 — 必须在 canonicalize 之前执行，防止 TOCTOU 竞态
+    // （canonicalize 会解析符号链接，先检查可避免解析窗口内的替换攻击）
+    if let Ok(metadata) = file_path.symlink_metadata()
+        && metadata.file_type().is_symlink()
+    {
+        return Err(anyhow!(
+            "Symbolic links are not allowed: {}",
+            file_path.display()
+        ));
+    }
+
     // 规范化路径
     let canonical_path = file_path
         .canonicalize()
@@ -52,16 +63,6 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
             "Path traversal attempt detected: {} is outside base directory {}",
             file_path.display(),
             base_dir.display()
-        ));
-    }
-
-    // 检查符号链接
-    if let Ok(metadata) = file_path.metadata()
-        && metadata.file_type().is_symlink()
-    {
-        return Err(anyhow!(
-            "Symbolic links are not allowed: {}",
-            file_path.display()
         ));
     }
 
@@ -738,5 +739,33 @@ mod tests {
         unsafe {
             std::env::remove_var("TEST_LONG_KEY");
         };
+    }
+
+    #[test]
+    fn test_symlink_detected_before_canonicalize() {
+        // T005: symlink check must use symlink_metadata() to detect symlinks
+        // on the original path before canonicalize resolves them.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_dir = temp_dir.path();
+
+        // Create a real file and a symlink to it
+        let real_file = base_dir.join("real.log");
+        File::create(&real_file).unwrap();
+        let symlink_path = base_dir.join("link.log");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real_file, &symlink_path).unwrap();
+
+        #[cfg(unix)]
+        {
+            // The symlink should be rejected
+            let result = validate_file_path(&symlink_path, base_dir);
+            assert!(result.is_err(), "symlinks should be rejected");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("Symbolic links"),
+                "error should mention symbolic links, got: {}",
+                err_msg
+            );
+        }
     }
 }
