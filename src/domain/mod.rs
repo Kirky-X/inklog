@@ -4,5 +4,4 @@
 
 pub mod config;
 pub mod core;
-pub mod db_provider;
 pub mod types;
