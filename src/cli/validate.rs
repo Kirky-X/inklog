@@ -70,12 +70,11 @@ fn validate_toml_content(content: &str, config_path: &PathBuf) -> Result<()> {
 fn validate_global_config(global: &toml::Table) -> Result<()> {
     if let Some(level) = global.get("level") {
         let level_str = level.as_str().unwrap_or("");
-        let valid_levels = ["trace", "debug", "info", "warn", "error"];
-        if !valid_levels.contains(&level_str.to_lowercase().as_str()) {
+        if !inklog::LogLevel::is_valid_level(level_str) {
             return Err(anyhow::anyhow!(
-                "Invalid log level '{}'. Valid levels: {:?}",
+                "Invalid log level '{}'. Valid levels: {}",
                 level_str,
-                valid_levels
+                inklog::LogLevel::VALID_LEVEL_STRINGS.join(", ")
             ));
         }
         println!("  ✓ Global level: {}", level_str);
