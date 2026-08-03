@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 /// Channel sizing strategy for log buffer management.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelStrategy {
     #[serde(rename = "fixed")]
@@ -22,10 +22,13 @@ pub enum ChannelStrategy {
 impl std::str::FromStr for ChannelStrategy {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "fixed" => Ok(ChannelStrategy::Fixed),
-            "adaptive" => Ok(ChannelStrategy::Adaptive),
-            _ => Err(format!("Unknown channel strategy: {}", s)),
+        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase()
+        if s.eq_ignore_ascii_case("fixed") {
+            Ok(ChannelStrategy::Fixed)
+        } else if s.eq_ignore_ascii_case("adaptive") {
+            Ok(ChannelStrategy::Adaptive)
+        } else {
+            Err(format!("Unknown channel strategy: {}", s))
         }
     }
 }
@@ -44,7 +47,7 @@ impl std::fmt::Display for ChannelStrategy {
 // ============================================================================
 
 /// Performance tuning configuration for log channel and worker management.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PerformanceConfig {
     #[serde(default = "default_channel_capacity")]
     pub channel_capacity: usize,
@@ -97,6 +100,37 @@ impl Default for PerformanceConfig {
             shrink_wait_seconds: default_shrink_wait(),
             min_capacity: default_min_capacity(),
             max_capacity: default_max_capacity(),
+        }
+    }
+}
+
+impl PerformanceConfig {
+    /// Validate performance tuning parameters.
+    ///
+    /// Ensures:
+    /// - Percentage thresholds are within 0–100
+    /// - `min_capacity <= max_capacity`
+    /// - `shrink_threshold_percent < expand_threshold_percent`
+    pub fn validate(&mut self) {
+        self.expand_threshold_percent = self.expand_threshold_percent.min(100);
+        self.shrink_threshold_percent = self.shrink_threshold_percent.min(100);
+
+        if self.min_capacity > self.max_capacity {
+            tracing::warn!(
+                min = self.min_capacity,
+                max = self.max_capacity,
+                "min_capacity > max_capacity, swapping"
+            );
+            std::mem::swap(&mut self.min_capacity, &mut self.max_capacity);
+        }
+        if self.shrink_threshold_percent >= self.expand_threshold_percent {
+            tracing::warn!(
+                shrink = self.shrink_threshold_percent,
+                expand = self.expand_threshold_percent,
+                "shrink_threshold >= expand_threshold, resetting to defaults"
+            );
+            self.shrink_threshold_percent = default_shrink_threshold();
+            self.expand_threshold_percent = default_expand_threshold();
         }
     }
 }

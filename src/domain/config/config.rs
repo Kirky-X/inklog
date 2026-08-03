@@ -83,9 +83,10 @@ impl InklogConfig {
             if valid_levels.contains(&val.to_lowercase().as_str()) {
                 config.global.level = val;
             } else {
-                eprintln!(
-                    "Warning: invalid INKLOG_GLOBAL_LEVEL '{}', keeping current value '{}'",
-                    val, config.global.level
+                tracing::warn!(
+                    "Invalid INKLOG_GLOBAL_LEVEL '{}', keeping current value '{}'",
+                    val,
+                    config.global.level
                 );
             }
         }
@@ -107,12 +108,35 @@ impl InklogConfig {
             file_config.enabled = true;
         }
         if let Ok(val) = std::env::var("INKLOG_FILE_SINK_PATH") {
-            let file_config = config.file_sink.get_or_insert_with(Default::default);
-            file_config.path = std::path::PathBuf::from(val);
+            // 验证路径不含遍历模式或可疑字符
+            let path_buf = std::path::PathBuf::from(&val);
+            let has_traversal = path_buf
+                .components()
+                .any(|c| c == std::path::Component::ParentDir);
+            let has_null = val.contains('\0');
+            if has_traversal || has_null {
+                tracing::warn!(
+                    "INKLOG_FILE_SINK_PATH '{}' contains unsafe characters, ignoring",
+                    val
+                );
+            } else {
+                let file_config = config.file_sink.get_or_insert_with(Default::default);
+                file_config.path = path_buf;
+            }
         }
         if let Ok(val) = std::env::var("INKLOG_FILE_SINK_MAX_SIZE") {
-            let file_config = config.file_sink.get_or_insert_with(Default::default);
-            file_config.max_size = val;
+            // Validate that the value looks like a parseable size string
+            let trimmed = val.trim();
+            let has_numeric = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+            if has_numeric == 0 {
+                tracing::warn!(
+                    "INKLOG_FILE_SINK_MAX_SIZE '{}' is not a valid size format (e.g., '100MB'), ignoring",
+                    val
+                );
+            } else {
+                let file_config = config.file_sink.get_or_insert_with(Default::default);
+                file_config.max_size = val;
+            }
         }
 
         // HTTP server overrides
@@ -140,10 +164,16 @@ impl InklogConfig {
         }
         if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_ERROR_MODE") {
             let http_config = config.http_server.get_or_insert_with(Default::default);
-            http_config.error_mode = match val.to_lowercase().as_str() {
-                "strict" => HttpErrorMode::Strict,
-                "warn" => HttpErrorMode::Warn,
-                _ => http_config.error_mode.clone(),
+            http_config.error_mode = if val.eq_ignore_ascii_case("strict") {
+                HttpErrorMode::Strict
+            } else if val.eq_ignore_ascii_case("warn") {
+                HttpErrorMode::Warn
+            } else {
+                tracing::warn!(
+                    "Unknown INKLOG_HTTP_SERVER_ERROR_MODE '{}', keeping current value",
+                    val
+                );
+                http_config.error_mode.clone()
             };
         }
 
@@ -178,8 +208,22 @@ impl InklogConfig {
         ];
         search_paths.push(Self::system_config_path());
 
+        // Maximum config file size (1 MB) to prevent memory exhaustion
+        const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
+
         for path_opt in search_paths.into_iter().flatten() {
             if std::path::Path::new(&path_opt).exists() {
+                // Guard against oversized config files (potential DoS)
+                if let Ok(meta) = std::fs::metadata(&path_opt)
+                    && meta.len() > MAX_CONFIG_SIZE
+                {
+                    return Err(InklogError::ConfigError(format!(
+                        "Config file '{}' exceeds maximum size ({} bytes > {} bytes)",
+                        path_opt,
+                        meta.len(),
+                        MAX_CONFIG_SIZE
+                    )));
+                }
                 let content = std::fs::read_to_string(&path_opt).map_err(|e| {
                     InklogError::ConfigError(format!(
                         "Failed to read config file '{}': {}",
@@ -233,6 +277,22 @@ impl InklogConfig {
             sinks.push("database");
         }
         sinks
+    }
+
+    /// Normalize configuration values by auto-correcting invalid settings.
+    ///
+    /// Unlike `validate()` which returns errors, this method adjusts values
+    /// in-place with warnings. Call before `validate()` to auto-fix common
+    /// misconfigurations.
+    pub fn normalize(&mut self) {
+        self.global.validate();
+        self.performance.validate();
+        if let Some(ref mut db) = self.database_sink {
+            db.validate();
+        }
+        if let Some(ref mut console) = self.console_sink {
+            console.validate();
+        }
     }
 
     /// Validate the configuration.
@@ -290,7 +350,7 @@ impl InklogConfig {
             && http.port == 0
         {
             return Err(InklogError::ConfigError(
-                "http_server.port must be in range 1-65535".to_string(),
+                "http_server.port must not be 0 when enabled".to_string(),
             ));
         }
 
