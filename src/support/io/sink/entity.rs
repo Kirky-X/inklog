@@ -14,8 +14,8 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
     pub id: i64,
-    #[sea_orm(column_type = "TimestampWithTimeZone", enum_name = "Timestamp")]
-    pub timestamp: chrono::NaiveDateTime,
+    #[sea_orm(column_type = "TimestampWithTimeZone")]
+    pub timestamp: chrono::DateTime<chrono::Utc>,
     pub level: String,
     pub target: String,
     pub message: String,
