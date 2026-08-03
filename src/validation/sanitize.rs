@@ -6,6 +6,7 @@
 //! and ensure safe log output for SIEM systems.
 
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// Escape mode for log content sanitization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -54,6 +55,47 @@ pub struct LogSanitizer {
     sensitive_regexes: Vec<(Regex, String)>,
 }
 
+/// Default sensitive patterns compiled once and shared across all LogSanitizer instances.
+/// Using LazyLock avoids recompiling these stable regex patterns on every constructor call.
+static DEFAULT_SENSITIVE_PATTERNS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+        (
+            Regex::new(r"\b\d{13,16}\b").expect("hardcoded card number regex is valid"),
+            "[CARD_NUM]".to_string(),
+        ),
+        (
+            Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
+                .expect("hardcoded email regex is valid"),
+            "[EMAIL]".to_string(),
+        ),
+        (
+            Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("hardcoded SSN regex is valid"),
+            "[SSN]".to_string(),
+        ),
+        (
+            Regex::new(r"(?i)password\s*[=:]\s*\S+").expect("hardcoded password regex is valid"),
+            "password=[REDACTED]".to_string(),
+        ),
+        (
+            Regex::new(r"(?i)token\s*[=:]\s*\S+").expect("hardcoded token regex is valid"),
+            "token=[REDACTED]".to_string(),
+        ),
+        (
+            Regex::new(r"(?i)api[_-]?key\s*[=:]\s*\S+").expect("hardcoded api_key regex is valid"),
+            "api_key=[REDACTED]".to_string(),
+        ),
+        (
+            Regex::new(r"Bearer\s+[A-Za-z0-9\-\.]+")
+                .expect("hardcoded Bearer token regex is valid"),
+            "Bearer [TOKEN]".to_string(),
+        ),
+        (
+            Regex::new(r"Basic\s+[A-Za-z0-9+/=]+").expect("hardcoded Basic auth regex is valid"),
+            "Basic [AUTH]".to_string(),
+        ),
+    ]
+});
+
 impl LogSanitizer {
     /// Create a new LogSanitizer with default configuration.
     pub fn new() -> Self {
@@ -64,53 +106,20 @@ impl LogSanitizer {
     }
 
     /// Create with custom configuration.
-    pub fn with_config(config: SanitizerConfig) -> Self {
+    /// User-provided `sensitive_patterns` are merged with default patterns.
+    pub fn with_config(mut config: SanitizerConfig) -> Self {
+        let mut sensitive_regexes = Self::default_sensitive_patterns();
+        sensitive_regexes.append(&mut config.sensitive_patterns);
         Self {
             config,
-            sensitive_regexes: Self::default_sensitive_patterns(),
+            sensitive_regexes,
         }
     }
 
+    /// Clone from the shared LazyLock cache to avoid recompiling regexes.
+    /// Each caller gets its own owned copy so mutations (add_pattern) don't affect others.
     fn default_sensitive_patterns() -> Vec<(Regex, String)> {
-        vec![
-            (
-                Regex::new(r"\b\d{13,16}\b").expect("hardcoded card number regex is valid"),
-                "[CARD_NUM]".to_string(),
-            ),
-            (
-                Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
-                    .expect("hardcoded email regex is valid"),
-                "[EMAIL]".to_string(),
-            ),
-            (
-                Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("hardcoded SSN regex is valid"),
-                "[SSN]".to_string(),
-            ),
-            (
-                Regex::new(r"(?i)password\s*[=:]\s*\S+")
-                    .expect("hardcoded password regex is valid"),
-                "password=[REDACTED]".to_string(),
-            ),
-            (
-                Regex::new(r"(?i)token\s*[=:]\s*\S+").expect("hardcoded token regex is valid"),
-                "token=[REDACTED]".to_string(),
-            ),
-            (
-                Regex::new(r"(?i)api[_-]?key\s*[=:]\s*\S+")
-                    .expect("hardcoded api_key regex is valid"),
-                "api_key=[REDACTED]".to_string(),
-            ),
-            (
-                Regex::new(r"Bearer\s+[A-Za-z0-9\-_\.]+")
-                    .expect("hardcoded Bearer token regex is valid"),
-                "Bearer [TOKEN]".to_string(),
-            ),
-            (
-                Regex::new(r"Basic\s+[A-Za-z0-9+/=]+")
-                    .expect("hardcoded Basic auth regex is valid"),
-                "Basic [AUTH]".to_string(),
-            ),
-        ]
+        DEFAULT_SENSITIVE_PATTERNS.clone()
     }
 
     /// Sanitize a log message.
@@ -168,10 +177,25 @@ impl LogSanitizer {
         result
     }
 
+    /// Strict escape mode: converts control characters and quotes to `\uXXXX` form.
+    ///
+    /// This method is idempotent: calling it twice on the same input produces
+    /// the same output, because already-escaped `\uXXXX` sequences are detected
+    /// and not re-escaped.
     fn escape_strict(&self, s: &str) -> String {
         let mut result = String::with_capacity(s.len());
-        for c in s.chars() {
-            if c.is_control() || c == '\\' || c == '"' {
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            // Check if this backslash starts an existing \uXXXX escape sequence
+            if c == '\\' {
+                if chars.peek() == Some(&'u') {
+                    // Pass through existing \uXXXX sequences unchanged
+                    result.push(c);
+                } else {
+                    // Escape standalone backslashes
+                    result.push_str(&format!("\\u{:04x}", c as u32));
+                }
+            } else if c.is_control() || c == '"' {
                 result.push_str(&format!("\\u{:04x}", c as u32));
             } else {
                 result.push(c);

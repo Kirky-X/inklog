@@ -98,15 +98,18 @@ impl PathValidator {
 
     /// Validate a path.
     pub fn validate(&self, path: &Path) -> ValidationResult {
-        let path_str = path.to_string_lossy();
-
         // Check for path traversal using component iteration instead of substring match.
         // `contains("..")` would reject legitimate filenames like "foo..bar".
         if path
             .components()
             .any(|c| c == std::path::Component::ParentDir)
         {
-            warn!("Path traversal detected: {}", path_str);
+            // Log only the path display name, not the full path, to avoid leaking
+            // sensitive directory information into application logs.
+            warn!(
+                "Path traversal detected in path with {} components",
+                path.components().count()
+            );
             return ValidationResult::invalid("Path traversal detected");
         }
 
@@ -153,6 +156,17 @@ impl PathValidator {
     }
 
     /// Validate and sanitize a path.
+    ///
+    /// # Behavior
+    ///
+    /// This method first calls `validate()` which strictly rejects paths
+    /// containing `..` (parent directory) traversal components. Only paths
+    /// that pass validation are then sanitized.
+    ///
+    /// Since `validate()` already rejects all traversal attempts, the
+    /// `sanitize()` step here primarily serves to normalize path separators
+    /// and remove any redundant components from already-safe paths. It will
+    /// **not** "fix" a traversal path — those are always rejected.
     pub fn validate_and_sanitize(&self, path: &Path) -> ValidationResult {
         let result = self.validate(path);
         if result.valid {
