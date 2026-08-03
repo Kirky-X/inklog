@@ -297,7 +297,9 @@ impl RotationStrategy for CompositeRotation {
 pub fn parse_size(size_str: &str) -> Result<u64, String> {
     let size_str = size_str.trim().to_uppercase();
 
-    let (multiplier, suffix_len) = if size_str.ends_with("GB") {
+    let (multiplier, suffix_len) = if size_str.ends_with("TB") {
+        (1024 * 1024 * 1024 * 1024, 2)
+    } else if size_str.ends_with("GB") {
         (1024 * 1024 * 1024, 2)
     } else if size_str.ends_with("MB") {
         (1024 * 1024, 2)
