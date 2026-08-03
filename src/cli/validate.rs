@@ -382,7 +382,7 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
             .or(config.get("file_sink"))
             .and_then(|t| t.as_table())
         && let Some(enabled) = file.get("enabled").and_then(|v| v.as_bool())
-        && !enabled
+        && enabled
     {
         eprintln!("  ⚠ Both file and database sinks enabled - logs will be written to both");
     }
