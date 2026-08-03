@@ -3,11 +3,17 @@
 //! HTTP server for health checks and metrics.
 
 use super::LoggerManager;
+#[cfg(feature = "http")]
 use crate::InklogError;
+#[cfg(feature = "http")]
 use crate::LogRecord;
+#[cfg(feature = "http")]
 use crate::Metrics;
+#[cfg(feature = "http")]
 use crossbeam_channel::Sender;
+#[cfg(feature = "http")]
 use std::sync::atomic::AtomicUsize;
+#[cfg(feature = "http")]
 use std::sync::{Arc, Mutex};
 
 impl LoggerManager {
