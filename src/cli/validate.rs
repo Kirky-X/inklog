@@ -392,32 +392,9 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
 }
 
 fn parse_size(size_str: &str) -> Result<()> {
-    let size_str = size_str.trim();
-    // Case-insensitive split into numeric and unit parts without allocation
-    let (num_str, unit) = size_str.split_at(
-        size_str
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(size_str.len()),
-    );
-
-    let _: f64 = num_str
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid number: {}", num_str))?;
-
-    let valid_units = ["B", "KB", "MB", "GB", "TB"];
-    // Case-insensitive unit comparison to avoid to_uppercase() allocation
-    if !valid_units
-        .iter()
-        .any(|&valid| valid.eq_ignore_ascii_case(unit))
-    {
-        return Err(anyhow::anyhow!(
-            "Invalid size unit '{}'. Valid units: {:?}",
-            unit,
-            valid_units
-        ));
-    }
-
-    Ok(())
+    inklog::sink::rotation::parse_size(size_str)
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 pub fn check_prerequisites() -> anyhow::Result<()> {
