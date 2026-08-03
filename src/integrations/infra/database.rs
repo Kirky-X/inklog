@@ -153,6 +153,8 @@ impl DbNexusAdapter {
         pool_size: u32,
         table_name: &str,
     ) -> Result<Self, InklogError> {
+        validate_table_name(table_name)?;
+
         // 创建 DbConfig
         let config = DbConfig {
             url: url.to_string(),
@@ -192,11 +194,12 @@ impl DbNexusAdapter {
     ///
     /// * `pool` - 已创建的连接池实例
     /// * `table_name` - 日志表名称
-    pub fn from_pool(pool: DbPool, table_name: &str) -> Self {
-        Self {
+    pub fn from_pool(pool: DbPool, table_name: &str) -> Result<Self, InklogError> {
+        validate_table_name(table_name)?;
+        Ok(Self {
             pool,
             table_name: table_name.to_string(),
-        }
+        })
     }
 
     /// 获取底层连接池引用
@@ -208,6 +211,36 @@ impl DbNexusAdapter {
     pub fn table_name(&self) -> &str {
         &self.table_name
     }
+}
+
+/// Validate that a table name contains only safe identifier characters.
+///
+/// Rejects names that don't match `^[a-zA-Z_][a-zA-Z0-9_]*$` to prevent SQL injection
+/// via table name interpolation.
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+fn validate_table_name(name: &str) -> Result<(), InklogError> {
+    if name.is_empty() {
+        return Err(InklogError::ConfigError(
+            "Table name must not be empty".to_string(),
+        ));
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return Err(InklogError::ConfigError(format!(
+            "Invalid table name '{}': must start with a letter or underscore",
+            name
+        )));
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            return Err(InklogError::ConfigError(format!(
+                "Invalid table name '{}': contains forbidden character '{}'",
+                name, c
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -255,7 +288,7 @@ impl Database for DbNexusAdapter {
                      VALUES ('{}', '{}', '{}', '{}', '{}', {}, {}, '{}')",
                     self.table_name,
                     timestamp,
-                    level,
+                    level.replace('\'', "''"),
                     target.replace('\'', "''"),
                     message,
                     fields_escaped,
@@ -509,7 +542,7 @@ mod tests {
         let pool = DbPool::with_config(config)
             .await
             .expect("Failed to create pool");
-        let db = DbNexusAdapter::from_pool(pool, "logs");
+        let db = DbNexusAdapter::from_pool(pool, "logs").expect("from_pool should succeed");
 
         // 创建表用于健康检查
         let session = db
@@ -592,7 +625,7 @@ mod tests {
         let pool = DbPool::with_config(config)
             .await
             .expect("Failed to create pool");
-        let db = DbNexusAdapter::from_pool(pool, "logs");
+        let db = DbNexusAdapter::from_pool(pool, "logs").expect("from_pool should succeed");
 
         // 创建 logs 表
         let session = db
@@ -829,5 +862,55 @@ mod tests {
         assert_eq!(count, 0, "empty batch must return 0");
 
         let _ = std::fs::remove_file(&db_path);
+    }
+
+    // ============================================================================
+    // T003: SQL injection via unescaped level field
+    // ============================================================================
+
+    #[test]
+    fn test_level_field_single_quote_escaping() {
+        // Verify that the escaping pattern used in insert_batch correctly neutralizes
+        // SQL injection via single quotes in the level field.
+        let malicious_level = "INFO'OR'1'='1";
+        let escaped = malicious_level.replace('\'', "''");
+        assert_eq!(escaped, "INFO''OR''1''=''1");
+        // After escaping, every original single quote should be doubled,
+        // so the string cannot break out of a SQL string literal.
+        assert_eq!(
+            escaped.matches('\'').count(),
+            8,
+            "all 4 original quotes should be doubled"
+        );
+    }
+
+    // ============================================================================
+    // T004: Table name validation
+    // ============================================================================
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_table_name_accepts_valid_names() {
+        assert!(validate_table_name("logs").is_ok());
+        assert!(validate_table_name("my_logs").is_ok());
+        assert!(validate_table_name("_private").is_ok());
+        assert!(validate_table_name("Logs123").is_ok());
+        assert!(validate_table_name("a").is_ok());
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_table_name_rejects_sql_injection() {
+        // SQL injection attempts
+        assert!(validate_table_name("logs; DROP TABLE users").is_err());
+        assert!(validate_table_name("logs' OR '1'='1").is_err());
+        assert!(validate_table_name("logs--comment").is_err());
+        assert!(validate_table_name("logs\";").is_err());
+        // Empty name
+        assert!(validate_table_name("").is_err());
+        // Starts with digit
+        assert!(validate_table_name("123logs").is_err());
+        // Contains dot (schema.table)
+        assert!(validate_table_name("public.logs").is_err());
     }
 }
