@@ -942,4 +942,23 @@ mod tests {
             "overwrite should replace value"
         );
     }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_builder_zero_ttl_warns() {
+        // TTL=0 should trigger warning but still succeed (line 237)
+        let cache = OxCacheAdapter::builder()
+            .ttl(std::time::Duration::from_secs(0))
+            .build()
+            .await;
+        assert!(cache.is_ok(), "zero TTL should warn but not error");
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_builder_zero_capacity_errors() {
+        // capacity=0 should return error (lines 242-243)
+        let result = OxCacheAdapter::builder().capacity(0).build().await;
+        assert!(result.is_err(), "zero capacity should error");
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("capacity must be > 0"));
+    }
 }
