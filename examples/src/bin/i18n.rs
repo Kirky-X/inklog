@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! 国际化 (i18n) 格式化示例
 //!
-//! 演示 `inklog::i18n::LogI18nFormatter` 的使用（需启用 `i18n` feature）：
+//! 演示 `inklog::i18n::LogI18nFormatter` 的使用：
 //!
 //! 1. 创建多语言格式化器（en-US / zh-CN）
 //! 2. 数字格式化（千分位、小数点）
@@ -13,20 +13,12 @@
 //! # 运行
 //!
 //! ```bash
-//! cargo run --bin i18n --features i18n
+//! cargo run --bin i18n
 //! ```
 
-#[cfg(feature = "i18n")]
 use inklog::i18n::LogI18nFormatter;
-#[cfg(feature = "i18n")]
 use inklog_examples::common::{print_section, print_separator};
 
-#[cfg(not(feature = "i18n"))]
-fn main() {
-    eprintln!("本示例需要 i18n feature: cargo run --bin i18n --features i18n");
-}
-
-#[cfg(feature = "i18n")]
 fn main() {
     print_separator("inklog 国际化 (i18n) 格式化示例");
 
@@ -42,7 +34,6 @@ fn main() {
 }
 
 /// 演示多语言格式化器创建
-#[cfg(feature = "i18n")]
 fn show_locale_creation() {
     use std::cmp::Ordering;
 
@@ -69,7 +60,6 @@ fn show_locale_creation() {
 }
 
 /// 演示数字格式化
-#[cfg(feature = "i18n")]
 fn show_number_formatting() {
     print_section("示例 2：数字格式化");
 
@@ -94,7 +84,6 @@ fn show_number_formatting() {
 }
 
 /// 演示事件计数复数形式
-#[cfg(feature = "i18n")]
 fn show_event_count_plural() {
     print_section("示例 3：事件计数复数形式");
 
@@ -118,7 +107,6 @@ fn show_event_count_plural() {
 }
 
 /// 演示时间戳格式化
-#[cfg(feature = "i18n")]
 fn show_timestamp_formatting() {
     print_section("示例 4：时间戳格式化");
 
@@ -146,7 +134,6 @@ fn show_timestamp_formatting() {
 }
 
 /// 演示日志级别规范化
-#[cfg(feature = "i18n")]
 fn show_log_level_normalization() {
     print_section("示例 5：日志级别规范化");
 
@@ -167,7 +154,6 @@ fn show_log_level_normalization() {
 }
 
 /// 演示字段名区域排序比较
-#[cfg(feature = "i18n")]
 fn show_field_comparison() {
     use std::cmp::Ordering;
 
@@ -202,7 +188,6 @@ fn show_field_comparison() {
 }
 
 /// 演示错误处理
-#[cfg(feature = "i18n")]
 fn show_error_handling() {
     print_section("示例 7：错误处理");
 

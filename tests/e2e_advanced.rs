@@ -127,6 +127,7 @@ mod console_sink_e2e {
             colored: false,
             stderr_levels: vec!["error".to_string(), "warn".to_string()],
             masking_enabled: false,
+            output_format: Default::default(),
         };
         let template = LogTemplate::default();
         let sink = ConsoleSink::new(config, template);
@@ -149,6 +150,7 @@ mod console_sink_e2e {
             colored: true,
             stderr_levels: vec!["error".to_string(), "warn".to_string()],
             masking_enabled: false,
+            output_format: Default::default(),
         };
         let template = LogTemplate::default();
         let sink = ConsoleSink::new(config, template);
@@ -178,6 +180,7 @@ mod console_sink_e2e {
             colored: false,
             stderr_levels: vec![],
             masking_enabled: true,
+            output_format: Default::default(),
         };
         let template = LogTemplate::default();
         let sink = ConsoleSink::new(config, template);
@@ -2901,10 +2904,9 @@ mod compression_e2e {
 }
 
 // ============================================================================
-// i18n feature: LogI18nFormatter E2E
+// i18n: LogI18nFormatter E2E
 // ============================================================================
 
-#[cfg(feature = "i18n")]
 #[cfg(test)]
 mod i18n_e2e {
     use inklog::i18n::{I18nError, LogI18nFormatter};
