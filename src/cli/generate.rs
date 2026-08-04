@@ -39,9 +39,11 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
         "database" => generate_database_config(),
         "file" => generate_file_config(),
         _ => {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("type", config_type.to_string());
             return Err(anyhow::anyhow!(
-                "Unknown config type: {}. Use: minimal, full, database, file",
-                config_type
+                "{}",
+                inklog::i18n::tr_args("cli-generate-unknown-type", args)
             ));
         }
     };
@@ -52,7 +54,9 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
     file.write_all(config_content.as_bytes())
         .with_context(|| "Failed to write config content")?;
 
-    println!("Generated config file: {}", output_file.display());
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("path", output_file.display().to_string());
+    println!("{}", inklog::i18n::tr_args("cli-generate-config", args));
     Ok(())
 }
 
@@ -263,7 +267,9 @@ INKLOG_DECRYPT_KEY=your-decryption-key-here
     file.write_all(env_content.as_bytes())
         .with_context(|| "Failed to write env example content")?;
 
-    println!("Generated env example file: {}", output_file.display());
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("path", output_file.display().to_string());
+    println!("{}", inklog::i18n::tr_args("cli-generate-env", args));
     Ok(())
 }
 

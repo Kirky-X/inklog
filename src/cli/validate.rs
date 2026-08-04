@@ -5,29 +5,33 @@ use std::path::PathBuf;
 use std::process::Command;
 
 pub fn validate_config(config_path: &PathBuf) -> Result<()> {
-    println!("Validating configuration file: {}", config_path.display());
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("path", config_path.display().to_string());
+    println!("{}", inklog::i18n::tr_args("cli-validate-validating", args));
 
     if !config_path.exists() {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", config_path.display().to_string());
         return Err(anyhow::anyhow!(
-            "Config file does not exist: {}",
-            config_path.display()
+            "{}",
+            inklog::i18n::tr_args("cli-err-config-not-exist", args)
         ));
     }
 
     // Manual TOML parsing and validation
     let content = std::fs::read_to_string(config_path)
-        .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
+        .with_context(|| inklog::i18n::tr("cli-err-read-config"))?;
 
     validate_toml_content(&content, config_path)?;
 
-    println!("✓ Configuration file is valid");
+    println!("{}", inklog::i18n::tr("cli-validate-valid"));
     Ok(())
 }
 
 fn validate_toml_content(content: &str, config_path: &PathBuf) -> Result<()> {
     let config: toml::Table = content
         .parse()
-        .with_context(|| "Failed to parse TOML content")?;
+        .with_context(|| inklog::i18n::tr("cli-err-parse-toml"))?;
 
     if let Some(global) = config.get("global").and_then(|t| t.as_table()) {
         validate_global_config(global)?;
@@ -71,22 +75,37 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
     if let Some(level) = global.get("level") {
         let level_str = level.as_str().unwrap_or("");
         if !inklog::LogLevel::is_valid_level(level_str) {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("level", level_str.to_string());
+            args.set("valid", inklog::LogLevel::VALID_LEVEL_STRINGS.join(", "));
             return Err(anyhow::anyhow!(
-                "Invalid log level '{}'. Valid levels: {}",
-                level_str,
-                inklog::LogLevel::VALID_LEVEL_STRINGS.join(", ")
+                "{}",
+                inklog::i18n::tr_args("cli-err-invalid-log-level", args)
             ));
         }
-        println!("  ✓ Global level: {}", level_str);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("level", level_str.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-global-level", args)
+        );
     }
 
     if let Some(format) = global.get("format")
         && let Some(format_str) = format.as_str()
     {
         if format_str.is_empty() {
-            return Err(anyhow::anyhow!("Global format cannot be empty"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-empty-format")
+            ));
         }
-        println!("  ✓ Global format: {} chars", format_str.len());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("len", format_str.len().to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-global-format", args)
+        );
     }
 
     Ok(())
@@ -95,15 +114,26 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
 fn validate_console_sink(console: &toml::Table) -> Result<()> {
     if let Some(enabled) = console.get("enabled") {
         if !enabled.is_bool() {
-            return Err(anyhow::anyhow!("console_sink.enabled must be a boolean"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-console-enabled")
+            ));
         }
-        println!("  ✓ Console sink enabled: {}", enabled);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("enabled", enabled.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-console-enabled", args)
+        );
     }
 
     if let Some(colored) = console.get("colored")
         && !colored.is_bool()
     {
-        return Err(anyhow::anyhow!("console_sink.colored must be a boolean"));
+        return Err(anyhow::anyhow!(
+            "{}",
+            inklog::i18n::tr("cli-err-console-colored")
+        ));
     }
 
     if let Some(stderr_levels) = console.get("stderr_levels")
@@ -112,11 +142,17 @@ fn validate_console_sink(console: &toml::Table) -> Result<()> {
         for level in levels {
             if !level.is_str() {
                 return Err(anyhow::anyhow!(
-                    "console_sink.stderr_levels must be an array of strings"
+                    "{}",
+                    inklog::i18n::tr("cli-err-console-stderr")
                 ));
             }
         }
-        println!("  ✓ Console stderr_levels: {} levels", levels.len());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("count", levels.len().to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-console-stderr", args)
+        );
     }
 
     Ok(())
@@ -125,55 +161,90 @@ fn validate_console_sink(console: &toml::Table) -> Result<()> {
 fn validate_file_sink(file: &toml::Table) -> Result<()> {
     if let Some(enabled) = file.get("enabled") {
         if !enabled.is_bool() {
-            return Err(anyhow::anyhow!("file_sink.enabled must be a boolean"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-file-enabled")
+            ));
         }
-        println!("  ✓ File sink enabled: {}", enabled);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("enabled", enabled.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-file-enabled", args)
+        );
     }
 
     if let Some(path) = file.get("path")
         && let Some(path_str) = path.as_str()
     {
         if path_str.is_empty() {
-            return Err(anyhow::anyhow!("file_sink.path cannot be empty"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-file-path-empty")
+            ));
         }
-        println!("  ✓ File path: {}", path_str);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", path_str.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-file-path", args)
+        );
     }
 
     if let Some(max_size) = file.get("max_size")
         && let Some(size_str) = max_size.as_str()
     {
         if parse_size(size_str).is_err() {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("size", size_str.to_string());
             return Err(anyhow::anyhow!(
-                "Invalid file_sink.max_size format: {}. Use format like '100MB', '1GB'",
-                size_str
+                "{}",
+                inklog::i18n::tr_args("cli-err-file-max-size", args)
             ));
         }
-        println!("  ✓ Max size: {}", size_str);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("size", size_str.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-file-max-size", args)
+        );
     }
 
     if let Some(keep_files) = file.get("keep_files")
         && let Some(n) = keep_files.as_integer()
         && n < 1
     {
-        return Err(anyhow::anyhow!("file_sink.keep_files must be >= 1"));
+        return Err(anyhow::anyhow!(
+            "{}",
+            inklog::i18n::tr("cli-err-file-keep-files")
+        ));
     }
 
     if let Some(retention_days) = file.get("retention_days")
         && let Some(n) = retention_days.as_integer()
         && n < 1
     {
-        return Err(anyhow::anyhow!("file_sink.retention_days must be >= 1"));
+        return Err(anyhow::anyhow!(
+            "{}",
+            inklog::i18n::tr("cli-err-file-retention")
+        ));
     }
 
     if let Some(compress) = file.get("compress")
         && !compress.is_bool()
     {
-        return Err(anyhow::anyhow!("file_sink.compress must be a boolean"));
+        return Err(anyhow::anyhow!(
+            "{}",
+            inklog::i18n::tr("cli-err-file-compress")
+        ));
     }
 
     if let Some(encrypt) = file.get("encrypt") {
         if !encrypt.is_bool() {
-            return Err(anyhow::anyhow!("file_sink.encrypt must be a boolean"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-file-encrypt")
+            ));
         }
 
         // Early return if encryption is not enabled
@@ -187,7 +258,8 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
             Some(v) => v,
             None => {
                 return Err(anyhow::anyhow!(
-                    "file_sink.encrypt is true but encryption_key_env is not set"
+                    "{}",
+                    inklog::i18n::tr("cli-err-file-encrypt-no-key")
                 ));
             }
         };
@@ -195,17 +267,26 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         let env_name = match key_env.as_str() {
             Some(s) => s,
             None => {
-                return Err(anyhow::anyhow!("encryption_key_env must be a string"));
+                return Err(anyhow::anyhow!(
+                    "{}",
+                    inklog::i18n::tr("cli-err-file-key-env-type")
+                ));
             }
         };
 
         if env_name.is_empty() {
             return Err(anyhow::anyhow!(
-                "file_sink.encrypt is true but encryption_key_env is empty"
+                "{}",
+                inklog::i18n::tr("cli-err-file-key-env-empty")
             ));
         }
 
-        println!("  ✓ Encryption key env: {}", env_name);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("env", env_name.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-file-encrypt-key", args)
+        );
     }
 
     Ok(())
@@ -216,18 +297,34 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
         && let Some(n) = capacity.as_integer()
     {
         if n < 1 {
-            return Err(anyhow::anyhow!("performance.channel_capacity must be >= 1"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-perf-capacity")
+            ));
         }
-        println!("  ✓ Channel capacity: {}", n);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("n", n.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-perf-capacity", args)
+        );
     }
 
     if let Some(threads) = perf.get("worker_threads")
         && let Some(n) = threads.as_integer()
     {
         if n < 1 {
-            return Err(anyhow::anyhow!("performance.worker_threads must be >= 1"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-perf-threads")
+            ));
         }
-        println!("  ✓ Worker threads: {}", n);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("n", n.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-perf-threads", args)
+        );
     }
 
     Ok(())
@@ -236,34 +333,56 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
 fn validate_database_sink(db: &toml::Table) -> Result<()> {
     if let Some(enabled) = db.get("enabled") {
         if !enabled.is_bool() {
-            return Err(anyhow::anyhow!("db_config.enabled must be a boolean"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-db-enabled")
+            ));
         }
-        println!("  ✓ Database sink enabled: {}", enabled);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("enabled", enabled.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-db-enabled", args)
+        );
     }
 
     if let Some(driver) = db.get("driver") {
-        let driver_str = driver
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("db_config.driver must be a string, got {}", driver))?;
+        let driver_str = driver.as_str().ok_or_else(|| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("driver", driver.to_string());
+            anyhow::anyhow!("{}", inklog::i18n::tr_args("cli-err-db-driver-type", args))
+        })?;
         let valid_drivers = ["postgres", "postgresql", "mysql", "sqlite", "sqlite3"];
         if !valid_drivers.contains(&driver_str.to_lowercase().as_str()) {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("driver", driver_str.to_string());
+            args.set("valid", format!("{:?}", valid_drivers));
             return Err(anyhow::anyhow!(
-                "Invalid database driver '{}'. Valid drivers: {:?}",
-                driver_str,
-                valid_drivers
+                "{}",
+                inklog::i18n::tr_args("cli-err-db-driver-invalid", args)
             ));
         }
-        println!("  ✓ Database driver: {}", driver_str);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("driver", driver_str.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-db-driver", args)
+        );
     }
 
     if let Some(url) = db.get("url")
         && let Some(url_str) = url.as_str()
     {
         if url_str.is_empty() {
-            return Err(anyhow::anyhow!("db_config.url cannot be empty"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-db-url-empty")
+            ));
         }
         validate_database_url(url_str)?;
-        println!("  ✓ Database URL: {} bytes", url_str.len());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("len", url_str.len().to_string());
+        println!("  {}", inklog::i18n::tr_args("cli-validate-db-url", args));
     }
 
     if let Some(pool_size) = db.get("pool_size")
@@ -271,7 +390,8 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         && !(1..=100).contains(&n)
     {
         return Err(anyhow::anyhow!(
-            "db_config.pool_size must be between 1 and 100"
+            "{}",
+            inklog::i18n::tr("cli-err-db-pool-size")
         ));
     }
 
@@ -279,18 +399,25 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         && let Some(n) = batch_size.as_integer()
         && n < 1
     {
-        return Err(anyhow::anyhow!("db_config.batch_size must be >= 1"));
+        return Err(anyhow::anyhow!(
+            "{}",
+            inklog::i18n::tr("cli-err-db-batch-size")
+        ));
     }
 
     if let Some(table_name) = db.get("table_name")
         && let Some(name) = table_name.as_str()
     {
         if name.is_empty() {
-            return Err(anyhow::anyhow!("db_config.table_name cannot be empty"));
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr("cli-err-db-table-empty")
+            ));
         }
         if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(anyhow::anyhow!(
-                "db_config.table_name must contain only alphanumeric characters and underscores"
+                "{}",
+                inklog::i18n::tr("cli-err-db-table-chars")
             ));
         }
     }
@@ -309,9 +436,11 @@ fn validate_database_url(url: &str) -> Result<()> {
     let is_valid = valid_prefixes.iter().any(|p| url.starts_with(p));
 
     if !is_valid {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("prefixes", format!("{:?}", valid_prefixes));
         return Err(anyhow::anyhow!(
-            "Invalid database URL. Must start with one of: {:?}",
-            valid_prefixes
+            "{}",
+            inklog::i18n::tr_args("cli-err-db-url-invalid", args)
         ));
     }
 
@@ -322,25 +451,31 @@ fn validate_http_server(http: &toml::Table) -> Result<()> {
     if let Some(enabled) = http.get("enabled")
         && !enabled.is_bool()
     {
-        return Err(anyhow::anyhow!("http_server.enabled must be a boolean"));
+        return Err(anyhow::anyhow!(
+            "{}",
+            inklog::i18n::tr("cli-err-http-enabled")
+        ));
     }
 
     if let Some(port) = http.get("port")
         && let Some(n) = port.as_integer()
     {
         if !(1..=65535).contains(&n) {
-            return Err(anyhow::anyhow!(
-                "http_server.port must be between 1 and 65535"
-            ));
+            return Err(anyhow::anyhow!("{}", inklog::i18n::tr("cli-err-http-port")));
         }
-        println!("  ✓ HTTP port: {}", n);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("n", n.to_string());
+        println!(
+            "  {}",
+            inklog::i18n::tr_args("cli-validate-http-port", args)
+        );
     }
 
     if let Some(host) = http.get("host")
         && let Some(host_str) = host.as_str()
         && host_str.is_empty()
     {
-        return Err(anyhow::anyhow!("http_server.host cannot be empty"));
+        return Err(anyhow::anyhow!("{}", inklog::i18n::tr("cli-err-http-host")));
     }
 
     Ok(())
@@ -368,7 +503,12 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
 
     for key in config.keys() {
         if !valid_sections.contains(&key.as_str()) {
-            eprintln!("  ⚠ Unknown configuration section: [{}]", key);
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("section", key.to_string());
+            eprintln!(
+                "  {}",
+                inklog::i18n::tr_args("cli-warn-unknown-section", args)
+            );
         }
     }
 
@@ -385,7 +525,7 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
         && let Some(enabled) = file.get("enabled").and_then(|v| v.as_bool())
         && enabled
     {
-        eprintln!("  ⚠ Both file and database sinks enabled - logs will be written to both");
+        eprintln!("{}", inklog::i18n::tr("cli-warn-dual-sink"));
     }
 
     Ok(())
@@ -398,11 +538,11 @@ fn parse_size(size_str: &str) -> Result<()> {
 }
 
 pub fn check_prerequisites() -> anyhow::Result<()> {
-    println!("Checking prerequisites...\n");
+    println!("{}\n", inklog::i18n::tr("cli-prereq-checking"));
 
     let mut missing_critical = Vec::new();
 
-    println!("  Rust version:");
+    println!("  {}", inklog::i18n::tr("cli-prereq-rust"));
     let rust_output = Command::new("rustc")
         .arg("--version")
         .output()
@@ -411,12 +551,12 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     match &rust_output {
         Some(v) => println!("    {}", v),
         None => {
-            println!("    not found");
+            println!("    {}", inklog::i18n::tr("cli-prereq-not-found"));
             missing_critical.push("rustc");
         }
     }
 
-    println!("  Cargo version:");
+    println!("  {}", inklog::i18n::tr("cli-prereq-cargo"));
     let cargo_output = Command::new("cargo")
         .arg("--version")
         .output()
@@ -425,25 +565,25 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     match &cargo_output {
         Some(v) => println!("    {}", v),
         None => {
-            println!("    not found");
+            println!("    {}", inklog::i18n::tr("cli-prereq-not-found"));
             missing_critical.push("cargo");
         }
     }
 
-    println!("\n  Optional dependencies:");
+    println!("\n  {}", inklog::i18n::tr("cli-prereq-optional"));
     if Command::new("openssl").arg("version").output().is_ok() {
-        println!("    ✓ OpenSSL available");
+        println!("    {}", inklog::i18n::tr("cli-prereq-openssl-ok"));
     } else {
-        eprintln!("    ⚠ OpenSSL not found (needed for encryption)");
+        eprintln!("    {}", inklog::i18n::tr("cli-prereq-openssl-miss"));
     }
 
     if Command::new("zstd").arg("--version").output().is_ok() {
-        println!("    ✓ zstd available");
+        println!("    {}", inklog::i18n::tr("cli-prereq-zstd-ok"));
     } else {
-        eprintln!("    ⚠ zstd not found (for compression support)");
+        eprintln!("    {}", inklog::i18n::tr("cli-prereq-zstd-miss"));
     }
 
-    println!("\n  Configuration check:");
+    println!("\n  {}", inklog::i18n::tr("cli-prereq-config-check"));
 
     #[cfg(unix)]
     let home_config = std::path::PathBuf::from("/etc/inklog/config.toml");
@@ -461,27 +601,45 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     let config_example = std::path::PathBuf::from("./config.example.toml");
 
     if home_config.exists() {
-        println!("    ✓ System config exists: {}", home_config.display());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", home_config.display().to_string());
+        println!("    {}", inklog::i18n::tr_args("cli-prereq-sys-ok", args));
     } else {
-        eprintln!("    ⚠ System config not found: {}", home_config.display());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", home_config.display().to_string());
+        eprintln!("    {}", inklog::i18n::tr_args("cli-prereq-sys-miss", args));
     }
 
     if local_config.exists() {
-        println!("    ✓ Local config exists: {}", local_config.display());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", local_config.display().to_string());
+        println!("    {}", inklog::i18n::tr_args("cli-prereq-local-ok", args));
     } else {
-        eprintln!("    ⚠ Local config not found: {}", local_config.display());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", local_config.display().to_string());
+        eprintln!(
+            "    {}",
+            inklog::i18n::tr_args("cli-prereq-local-miss", args)
+        );
     }
 
     if config_example.exists() {
-        println!("    ✓ Config example exists: {}", config_example.display());
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", config_example.display().to_string());
+        println!(
+            "    {}",
+            inklog::i18n::tr_args("cli-prereq-example-ok", args)
+        );
     }
 
-    println!("\nPrerequisites check complete.");
+    println!("\n{}", inklog::i18n::tr("cli-prereq-done"));
 
     if !missing_critical.is_empty() {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("deps", missing_critical.join(", "));
         return Err(anyhow::anyhow!(
-            "Missing critical prerequisites: {}. Please install them before continuing.",
-            missing_critical.join(", ")
+            "{}",
+            inklog::i18n::tr_args("cli-prereq-missing", args)
         ));
     }
 
