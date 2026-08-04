@@ -96,12 +96,12 @@ impl LogLevel {
     /// names (e.g. "INFO"), this method returns the locale-aware translation.
     pub fn localized_name(&self) -> String {
         match self {
-            LogLevel::Trace => crate::i18n::tr("log_level.name_trace"),
-            LogLevel::Debug => crate::i18n::tr("log_level.name_debug"),
-            LogLevel::Info => crate::i18n::tr("log_level.name_info"),
-            LogLevel::Warn => crate::i18n::tr("log_level.name_warn"),
-            LogLevel::Error => crate::i18n::tr("log_level.name_error"),
-            LogLevel::Fatal => crate::i18n::tr("log_level.name_fatal"),
+            LogLevel::Trace => crate::i18n::tr("log_level-name_trace"),
+            LogLevel::Debug => crate::i18n::tr("log_level-name_debug"),
+            LogLevel::Info => crate::i18n::tr("log_level-name_info"),
+            LogLevel::Warn => crate::i18n::tr("log_level-name_warn"),
+            LogLevel::Error => crate::i18n::tr("log_level-name_error"),
+            LogLevel::Fatal => crate::i18n::tr("log_level-name_fatal"),
         }
     }
 }
@@ -222,5 +222,41 @@ mod tests {
     fn test_from_str_trait_empty_string() {
         let result: Result<LogLevel, _> = "".parse();
         assert!(result.is_err());
+    }
+
+    // ── localized_name() tests ────────────────────────────────────
+
+    #[test]
+    fn test_localized_name_all_levels() {
+        let levels = [
+            (LogLevel::Trace, "TRACE"),
+            (LogLevel::Debug, "DEBUG"),
+            (LogLevel::Info, "INFO"),
+            (LogLevel::Warn, "WARN"),
+            (LogLevel::Error, "ERROR"),
+            (LogLevel::Fatal, "FATAL"),
+        ];
+        for (level, expected_en) in levels {
+            let name = level.localized_name();
+            // In en locale (or fallback), should match English name.
+            // In other locales, should at least be non-empty.
+            assert!(!name.is_empty(), "localized_name() empty for {:?}", level);
+            // If current locale is en, verify exact match
+            if crate::i18n::current_locale() == "en" {
+                assert_eq!(name, expected_en, "en locale mismatch for {:?}", level);
+            }
+        }
+    }
+
+    #[test]
+    fn test_localized_name_differs_from_as_str_in_zh_cn() {
+        // This test only validates behavior when locale is zh-CN.
+        // In other locales, it simply confirms localized_name() is non-empty.
+        let name = LogLevel::Info.localized_name();
+        assert!(!name.is_empty());
+        if crate::i18n::current_locale() == "zh-CN" {
+            assert_eq!(name, "信息");
+            assert_ne!(name, LogLevel::Info.as_str());
+        }
     }
 }

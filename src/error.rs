@@ -249,40 +249,40 @@ impl InklogError {
     pub fn localized_message(&self) -> String {
         match self {
             InklogError::ConfigError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.config_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-config_error"), msg)
             }
             InklogError::IoError(e) => {
-                format!("{}: {}", crate::i18n::tr("error.io_error"), e)
+                format!("{}: {}", crate::i18n::tr("error-io_error"), e)
             }
             InklogError::SerializationError(e) => {
-                format!("{}: {}", crate::i18n::tr("error.serialization_error"), e)
+                format!("{}: {}", crate::i18n::tr("error-serialization_error"), e)
             }
             InklogError::DatabaseError { message, .. } => {
-                format!("{}: {}", crate::i18n::tr("error.database_error"), message)
+                format!("{}: {}", crate::i18n::tr("error-database_error"), message)
             }
             InklogError::CacheError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.cache_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-cache_error"), msg)
             }
             InklogError::EncryptionError { message, .. } => {
-                format!("{}: {}", crate::i18n::tr("error.encryption_error"), message)
+                format!("{}: {}", crate::i18n::tr("error-encryption_error"), message)
             }
             InklogError::Shutdown(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.shutdown_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-shutdown_error"), msg)
             }
             InklogError::ChannelError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.channel_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-channel_error"), msg)
             }
             InklogError::CompressionError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.compression_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-compression_error"), msg)
             }
             InklogError::RuntimeError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.runtime_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-runtime_error"), msg)
             }
             InklogError::HttpServerError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.http_server_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-http_server_error"), msg)
             }
             InklogError::Unknown(msg) => {
-                format!("{}: {}", crate::i18n::tr("error.unknown_error"), msg)
+                format!("{}: {}", crate::i18n::tr("error-unknown_error"), msg)
             }
         }
     }
@@ -738,5 +738,60 @@ mod tests {
         let msg = err.safe_message();
         assert!(msg.contains("Database error:"));
         assert!(msg.contains("conn refused"));
+    }
+
+    // ── localized_message() tests ─────────────────────────────────
+
+    #[test]
+    fn test_localized_message_config_error() {
+        let err = InklogError::ConfigError("bad value".into());
+        let msg = err.localized_message();
+        // English fallback: "Configuration error: bad value"
+        assert!(msg.contains("Configuration error"));
+        assert!(msg.contains("bad value"));
+    }
+
+    #[test]
+    fn test_localized_message_io_error() {
+        let err = InklogError::IoError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file missing",
+        ));
+        let msg = err.localized_message();
+        assert!(msg.contains("IO error"));
+        assert!(msg.contains("file missing"));
+    }
+
+    #[test]
+    fn test_localized_message_all_variants_non_empty() {
+        let json_err: serde_json::Error =
+            serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
+        let variants: Vec<InklogError> = vec![
+            InklogError::ConfigError("x".into()),
+            InklogError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "x")),
+            InklogError::SerializationError(json_err),
+            InklogError::database_error("x"),
+            InklogError::CacheError("x".into()),
+            InklogError::encryption_error("x"),
+            InklogError::Shutdown("x".into()),
+            InklogError::ChannelError("x".into()),
+            InklogError::CompressionError("x".into()),
+            InklogError::RuntimeError("x".into()),
+            InklogError::HttpServerError("x".into()),
+            InklogError::Unknown("x".into()),
+        ];
+        for err in variants {
+            let msg = err.localized_message();
+            assert!(
+                !msg.is_empty(),
+                "localized_message() returned empty for {:?}",
+                err
+            );
+            assert!(
+                msg.contains("x"),
+                "localized_message() missing detail for {:?}",
+                err
+            );
+        }
     }
 }
