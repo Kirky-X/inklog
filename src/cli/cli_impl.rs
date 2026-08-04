@@ -27,20 +27,27 @@ pub fn run_cli() -> Result<()> {
             });
 
             if batch {
-                let input_str = input
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("Input path is not valid UTF-8: {:?}", input))?;
+                let input_str = input.to_str().ok_or_else(|| {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("path", format!("{:?}", input));
+                    anyhow::anyhow!(
+                        "{}",
+                        inklog::i18n::tr_args("cli-decrypt-err-input-utf8", args)
+                    )
+                })?;
                 decrypt::batch_decrypt(input_str, &output, &key_env)?;
             } else if input.is_file() {
                 decrypt::decrypt_file_compatible(&input, &output, &key_env)?;
-                println!("Decrypted: {} -> {}", input.display(), output.display());
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("input", input.display().to_string());
+                args.set("output", output.display().to_string());
+                println!("{}", inklog::i18n::tr_args("cli-decrypt-done", args));
             } else {
                 decrypt::decrypt_directory_compatible(&input, &output, &key_env, recursive)?;
-                println!(
-                    "Decrypted all files in {} to {}",
-                    input.display(),
-                    output.display()
-                );
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("input", input.display().to_string());
+                args.set("output", output.display().to_string());
+                println!("{}", inklog::i18n::tr_args("cli-decrypt-dir-done", args));
             }
         }
 
