@@ -40,8 +40,6 @@ kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
 compression = ["dep:zstd"]
 # Parquet/Arrow export support for database sink archival.
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
-# ICU4X i18n formatting support (always compiled, feature for workspace compat).
-i18n = []
 # Aho-Corasick multi-pattern masking acceleration.
 fast-masking = ["dep:aho-corasick"]
 

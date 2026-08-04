@@ -12,7 +12,6 @@ mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
 duckdb = ["inklog/duckdb", "dep:dbnexus", "dbnexus/duckdb"]
 compression = ["inklog/compression"]
 parquet = ["inklog/parquet"]
-i18n = ["inklog/i18n"]
 
 [dependencies]
 inklog = { path = ".." }
@@ -177,7 +176,6 @@ path = "src/bin/partition_strategy.rs"
 [[bin]]
 name = "i18n"
 path = "src/bin/i18n.rs"
-required-features = ["i18n"]
 
 [[bin]]
 name = "runtime_ops"
