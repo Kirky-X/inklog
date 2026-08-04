@@ -3,6 +3,7 @@
 //! Console sink configuration.
 
 use super::global::default_true;
+use crate::support::processing::template::OutputFormat;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -59,6 +60,12 @@ pub struct ConsoleSinkConfig {
     /// automatically redacted from console log output.
     #[serde(default = "default_true")]
     pub masking_enabled: bool,
+
+    /// Output format: text (template-based) or JSON (NDJSON).
+    ///
+    /// When `Json`, colored output is automatically disabled.
+    #[serde(default)]
+    pub output_format: OutputFormat,
 }
 
 fn default_stderr_levels() -> Vec<String> {
@@ -72,6 +79,7 @@ impl Default for ConsoleSinkConfig {
             colored: default_true(),
             stderr_levels: default_stderr_levels(),
             masking_enabled: default_true(),
+            output_format: OutputFormat::default(),
         }
     }
 }

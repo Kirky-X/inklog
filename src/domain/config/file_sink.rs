@@ -3,6 +3,7 @@
 //! File sink configuration.
 
 use super::global::default_true;
+use crate::support::processing::template::OutputFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -104,6 +105,10 @@ pub struct FileSinkConfig {
     /// Enable sensitive data masking for file output.
     #[serde(default = "default_true")]
     pub masking_enabled: bool,
+
+    /// Output format: text or JSON (NDJSON).
+    #[serde(default)]
+    pub output_format: OutputFormat,
 }
 
 fn default_log_path() -> PathBuf {
@@ -155,6 +160,7 @@ impl Default for FileSinkConfig {
             batch_size: default_batch_size(),
             flush_interval_ms: default_flush_interval_ms(),
             masking_enabled: default_true(),
+            output_format: OutputFormat::default(),
         }
     }
 }

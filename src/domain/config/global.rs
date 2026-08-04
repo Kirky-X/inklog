@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::support::processing::template::OutputFormat;
+
 /// Returns `true` — shared default for several `bool` fields.
 pub(crate) fn default_true() -> bool {
     true
@@ -129,6 +131,16 @@ pub struct GlobalConfig {
     /// `10` retries
     #[serde(default = "default_fallback_max_retries")]
     pub fallback_max_retries: u32,
+
+    /// Output format for log sinks.
+    ///
+    /// Controls whether logs are rendered as human-readable text or JSON.
+    ///
+    /// # Default
+    ///
+    /// `OutputFormat::Text`
+    #[serde(default)]
+    pub output_format: OutputFormat,
 }
 
 fn default_global_level() -> String {
@@ -157,6 +169,7 @@ impl Default for GlobalConfig {
             fallback_initial_delay_ms: default_fallback_initial_delay(),
             fallback_max_delay_ms: default_fallback_max_delay(),
             fallback_max_retries: default_fallback_max_retries(),
+            output_format: OutputFormat::default(),
         }
     }
 }
