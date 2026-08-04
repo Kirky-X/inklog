@@ -63,8 +63,11 @@ impl Default for InklogConfig {
 impl InklogConfig {
     /// Load configuration synchronously from the default search paths.
     pub fn load_sync() -> Result<Self, InklogError> {
-        Self::from_search_paths()
-            .map_err(|e| InklogError::ConfigError(format!("Failed to load config: {}", e)))
+        Self::from_search_paths().map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-load_failed", args))
+        })
     }
 
     /// Load configuration with custom environment variable overrides.
@@ -83,11 +86,10 @@ impl InklogConfig {
             if valid_levels.contains(&val.to_lowercase().as_str()) {
                 config.global.level = val;
             } else {
-                tracing::warn!(
-                    "Invalid INKLOG_GLOBAL_LEVEL '{}', keeping current value '{}'",
-                    val,
-                    config.global.level
-                );
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("val", val.clone());
+                args.set("current", config.global.level.clone());
+                tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_level", args));
             }
         }
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_FORMAT") {
@@ -115,10 +117,9 @@ impl InklogConfig {
                 .any(|c| c == std::path::Component::ParentDir);
             let has_null = val.contains('\0');
             if has_traversal || has_null {
-                tracing::warn!(
-                    "INKLOG_FILE_SINK_PATH '{}' contains unsafe characters, ignoring",
-                    val
-                );
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("path", val.clone());
+                tracing::warn!("{}", crate::i18n::tr_args("config-env_unsafe_path", args));
             } else {
                 let file_config = config.file_sink.get_or_insert_with(Default::default);
                 file_config.path = path_buf;
@@ -129,10 +130,9 @@ impl InklogConfig {
             let trimmed = val.trim();
             let has_numeric = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
             if has_numeric == 0 {
-                tracing::warn!(
-                    "INKLOG_FILE_SINK_MAX_SIZE '{}' is not a valid size format (e.g., '100MB'), ignoring",
-                    val
-                );
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("val", val.clone());
+                tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_size", args));
             } else {
                 let file_config = config.file_sink.get_or_insert_with(Default::default);
                 file_config.max_size = val;
@@ -169,9 +169,11 @@ impl InklogConfig {
             } else if val.eq_ignore_ascii_case("warn") {
                 HttpErrorMode::Warn
             } else {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("val", val.clone());
                 tracing::warn!(
-                    "Unknown INKLOG_HTTP_SERVER_ERROR_MODE '{}', keeping current value",
-                    val
+                    "{}",
+                    crate::i18n::tr_args("config-env_unknown_error_mode", args)
                 );
                 http_config.error_mode.clone()
             };
@@ -217,24 +219,26 @@ impl InklogConfig {
                 if let Ok(meta) = std::fs::metadata(&path_opt)
                     && meta.len() > MAX_CONFIG_SIZE
                 {
-                    return Err(InklogError::ConfigError(format!(
-                        "Config file '{}' exceeds maximum size ({} bytes > {} bytes)",
-                        path_opt,
-                        meta.len(),
-                        MAX_CONFIG_SIZE
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("path", path_opt.clone());
+                    args.set("size", meta.len().to_string());
+                    args.set("max", MAX_CONFIG_SIZE.to_string());
+                    return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                        "config-exceeds_max_size",
+                        args,
                     )));
                 }
                 let content = std::fs::read_to_string(&path_opt).map_err(|e| {
-                    InklogError::ConfigError(format!(
-                        "Failed to read config file '{}': {}",
-                        path_opt, e
-                    ))
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("path", path_opt.clone());
+                    args.set("err", e.to_string());
+                    InklogError::ConfigError(crate::i18n::tr_args("config-read_failed", args))
                 })?;
                 let config: Self = toml::from_str(&content).map_err(|e| {
-                    InklogError::ConfigError(format!(
-                        "Failed to parse config file '{}': {}",
-                        path_opt, e
-                    ))
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("path", path_opt.clone());
+                    args.set("err", e.to_string());
+                    InklogError::ConfigError(crate::i18n::tr_args("config-parse_failed", args))
                 })?;
                 return Ok(config);
             }
@@ -302,28 +306,33 @@ impl InklogConfig {
     pub fn validate(&self) -> Result<(), InklogError> {
         // --- Performance ---
         if self.performance.channel_capacity == 0 {
-            return Err(InklogError::ConfigError(
-                "channel_capacity cannot be 0".to_string(),
-            ));
+            return Err(InklogError::ConfigError(crate::i18n::tr(
+                "config-channel_capacity_zero",
+            )));
         }
         if self.performance.worker_threads == 0 {
-            return Err(InklogError::ConfigError(
-                "worker_threads cannot be 0".to_string(),
-            ));
+            return Err(InklogError::ConfigError(crate::i18n::tr(
+                "config-worker_threads_zero",
+            )));
         }
         if self.performance.max_capacity < self.performance.min_capacity {
-            return Err(InklogError::ConfigError(format!(
-                "performance.max_capacity ({}) must be >= min_capacity ({})",
-                self.performance.max_capacity, self.performance.min_capacity
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("max", self.performance.max_capacity.to_string());
+            args.set("min", self.performance.min_capacity.to_string());
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-max_capacity_lt_min",
+                args,
             )));
         }
 
         // --- Global log level ---
         if !crate::LogLevel::is_valid_level(&self.global.level) {
-            return Err(InklogError::ConfigError(format!(
-                "Invalid log level '{}'. Valid levels: {}",
-                self.global.level,
-                crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("level", self.global.level.clone());
+            args.set("valid", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-invalid_log_level",
+                args,
             )));
         }
 
@@ -332,14 +341,14 @@ impl InklogConfig {
             && file.enabled
         {
             if file.path.as_os_str().is_empty() {
-                return Err(InklogError::ConfigError(
-                    "file_sink.path must not be empty when file sink is enabled".to_string(),
-                ));
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "config-file_path_empty",
+                )));
             }
             if file.batch_size == 0 {
-                return Err(InklogError::ConfigError(
-                    "file_sink.batch_size must be > 0".to_string(),
-                ));
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "config-file_batch_size_zero",
+                )));
             }
         }
 
@@ -348,9 +357,9 @@ impl InklogConfig {
             && http.enabled
             && http.port == 0
         {
-            return Err(InklogError::ConfigError(
-                "http_server.port must not be 0 when enabled".to_string(),
-            ));
+            return Err(InklogError::ConfigError(crate::i18n::tr(
+                "config-http_port_zero",
+            )));
         }
 
         Ok(())
