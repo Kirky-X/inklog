@@ -236,7 +236,47 @@ mod tests {
 
     #[test]
     fn test_tr_returns_translation_or_id() {
-        let result = tr("error.config_error");
+        let result = tr("error-config_error");
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_tr_en_fallback_returns_english_text() {
+        // When the current locale doesn't have a key, en fallback
+        // should return the English translation.
+        let result = tr("error-io_error");
+        // In en locale: "IO error"; in zh-CN: "I/O 错误";
+        // either way, non-empty.
+        assert!(!result.is_empty());
+        // If locale is en, verify exact content
+        if current_locale() == "en" {
+            assert_eq!(result, "IO error");
+        }
+    }
+
+    #[test]
+    fn test_tr_unknown_key_returns_id() {
+        // Non-existent keys should return the key itself
+        let result = tr("nonexistent.key.that.does.not.exist");
+        assert_eq!(result, "nonexistent.key.that.does.not.exist");
+    }
+
+    #[test]
+    fn test_tr_log_level_names() {
+        let levels = [
+            ("log_level-name_trace", "TRACE"),
+            ("log_level-name_debug", "DEBUG"),
+            ("log_level-name_info", "INFO"),
+            ("log_level-name_warn", "WARN"),
+            ("log_level-name_error", "ERROR"),
+            ("log_level-name_fatal", "FATAL"),
+        ];
+        for (key, expected_en) in levels {
+            let result = tr(key);
+            assert!(!result.is_empty(), "tr({}) returned empty", key);
+            if current_locale() == "en" {
+                assert_eq!(result, expected_en, "tr({}) en mismatch", key);
+            }
+        }
     }
 }
