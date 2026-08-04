@@ -13,7 +13,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use super::CircuitBreaker;
@@ -40,6 +40,10 @@ use database_impl::{ADAPTIVE_WINDOW_SIZE, MAX_BATCH_SIZE, MIN_BATCH_SIZE};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 struct DatabaseSinkInner {
     buffer: Vec<LogRecord>,
+    /// Double-buffer: swap target for lock-free flush.
+    /// After swap, `buffer` is empty (writers fill it) and `flush_buffer`
+    /// holds the records to be flushed outside the lock.
+    flush_buffer: Vec<LogRecord>,
     last_flush: Instant,
     fallback_sink: Option<FileSink>,
     circuit_breaker: CircuitBreaker,
@@ -488,6 +492,7 @@ mod tests {
     fn make_test_inner(batch_size: usize) -> DatabaseSinkInner {
         DatabaseSinkInner {
             buffer: Vec::new(),
+            flush_buffer: Vec::new(),
             last_flush: Instant::now(),
             fallback_sink: None,
             circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),

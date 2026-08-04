@@ -94,6 +94,7 @@ impl DatabaseSink {
 
         let inner = DatabaseSinkInner {
             buffer: Vec::with_capacity(batch_size),
+            flush_buffer: Vec::with_capacity(batch_size),
             last_flush: Instant::now(),
             fallback_sink,
             circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),
@@ -105,7 +106,7 @@ impl DatabaseSink {
         };
 
         Ok(Self {
-            inner: tokio::sync::Mutex::new(inner),
+            inner: parking_lot::Mutex::new(inner),
             database,
             masker: Arc::new(crate::DataMasker::new()),
             stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -113,7 +114,7 @@ impl DatabaseSink {
     }
 
     pub async fn set_metrics(&self, metrics: Arc<Metrics>) {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock();
         inner.metrics = Some(metrics);
     }
 
@@ -152,10 +153,42 @@ impl fmt::Display for DatabaseSink {
 #[async_trait]
 impl crate::support::io::sink::LogSink for DatabaseSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-        let mut inner = self.inner.lock().await;
+        // Phase 1: under lock — check circuit breaker, push record, maybe swap buffers
+        let (records_to_flush, should_flush, circuit_open) = {
+            let mut inner = self.inner.lock();
 
-        if !inner.circuit_breaker.can_execute() {
-            if let Some(ref sink) = inner.fallback_sink
+            if !inner.circuit_breaker.can_execute() {
+                (Vec::new(), false, true)
+            } else {
+                let masked_record = LogRecord {
+                    message: self.masker.mask(&record.message),
+                    ..record.clone()
+                };
+                inner.buffer.push(masked_record);
+
+                let should = inner.buffer.len() >= inner.current_batch_size
+                    || inner.last_flush.elapsed()
+                        > Duration::from_millis(DEFAULT_FLUSH_INTERVAL_MS);
+
+                if should {
+                    // Double-buffer swap via mem::take (avoids split-borrow issue)
+                    let tmp = std::mem::take(&mut inner.buffer);
+                    inner.buffer = std::mem::take(&mut inner.flush_buffer);
+                    inner.flush_buffer = tmp;
+                    inner.last_flush = Instant::now();
+                    let records = std::mem::take(&mut inner.flush_buffer);
+                    (records, true, false)
+                } else {
+                    (Vec::new(), false, false)
+                }
+            }
+        };
+        // Lock released — no parking_lot MutexGuard held across await
+
+        // Circuit breaker open → fallback to file sink
+        if circuit_open {
+            let fallback = self.inner.lock().fallback_sink.clone();
+            if let Some(sink) = fallback
                 && let Err(e) = sink.write(record).await
             {
                 tracing::warn!("Fallback sink write failed (circuit open): {}", e);
@@ -163,81 +196,136 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
             return Ok(());
         }
 
-        let masked_record = LogRecord {
-            message: self.masker.mask(&record.message),
-            ..record.clone()
-        };
-
-        inner.buffer.push(masked_record);
-
-        if inner.buffer.len() >= inner.current_batch_size
-            || inner.last_flush.elapsed() > Duration::from_millis(DEFAULT_FLUSH_INTERVAL_MS)
-        {
+        if should_flush {
             let start = Instant::now();
-            if let Err(e) = Self::flush_inner(self, &mut inner).await {
-                inner.failure_count += 1;
-                inner.circuit_breaker.record_failure();
-                if let Some(ref sink) = inner.fallback_sink
-                    && let Err(e) = sink.write(record).await
-                {
-                    tracing::warn!("Fallback sink write failed (flush error): {}", e);
+            let result = self.db_insert_batch(&records_to_flush).await;
+
+            match result {
+                Ok(written) => {
+                    let mut inner = self.inner.lock();
+                    if let Some(ref m) = inner.metrics {
+                        m.add_db_batch_records_total(written);
+                        m.update_sink_health("database", true, None);
+                    }
+                    inner.success_count += 1;
+                    inner.write_latencies.push(start.elapsed());
+                    Self::adjust_batch_size(&mut inner);
+                    inner.circuit_breaker.record_success();
                 }
-                return Err(e);
+                Err(e) => {
+                    let fallback;
+                    {
+                        let mut inner = self.inner.lock();
+                        inner.failure_count += 1;
+                        inner.circuit_breaker.record_failure();
+                        if let Some(ref m) = inner.metrics {
+                            m.inc_sink_error();
+                            m.update_sink_health("database", false, Some(e.to_string()));
+                        }
+                        // Re-queue records for retry
+                        inner.buffer.extend(records_to_flush);
+                        fallback = inner.fallback_sink.clone();
+                    }
+                    // Fallback write outside lock
+                    if let Some(sink) = fallback
+                        && let Err(e) = sink.write(record).await
+                    {
+                        tracing::warn!("Fallback sink write failed (flush error): {}", e);
+                    }
+                    return Err(e);
+                }
             }
-            inner.success_count += 1;
-            inner.write_latencies.push(start.elapsed());
-            Self::adjust_batch_size(&mut inner);
+        } else {
+            self.inner.lock().circuit_breaker.record_success();
         }
 
-        inner.circuit_breaker.record_success();
         Ok(())
     }
 
     async fn flush(&self) -> Result<(), InklogError> {
-        let mut inner = self.inner.lock().await;
-        Self::flush_inner(self, &mut inner).await
+        let records_to_flush;
+        let metrics_clone;
+
+        {
+            let mut inner = self.inner.lock();
+            if inner.buffer.is_empty() {
+                return Ok(());
+            }
+            let tmp = std::mem::take(&mut inner.buffer);
+            inner.buffer = std::mem::take(&mut inner.flush_buffer);
+            inner.flush_buffer = tmp;
+            inner.last_flush = Instant::now();
+            records_to_flush = std::mem::take(&mut inner.flush_buffer);
+            metrics_clone = inner.metrics.clone();
+        }
+        // Lock released
+
+        self.finish_flush(records_to_flush, metrics_clone).await
     }
 
     async fn shutdown(&self) -> Result<(), InklogError> {
         self.stop.store(true, Ordering::Relaxed);
-        let mut inner = self.inner.lock().await;
-        let _ = Self::flush_inner(self, &mut inner).await;
+        let records_to_flush;
+        let metrics_clone;
+
+        {
+            let mut inner = self.inner.lock();
+            let tmp = std::mem::take(&mut inner.buffer);
+            inner.buffer = std::mem::take(&mut inner.flush_buffer);
+            inner.flush_buffer = tmp;
+            inner.last_flush = Instant::now();
+            records_to_flush = std::mem::take(&mut inner.flush_buffer);
+            metrics_clone = inner.metrics.clone();
+        }
+        // Lock released
+
+        let _ = self.finish_flush(records_to_flush, metrics_clone).await;
         tracing::info!("Database sink shutdown complete");
         Ok(())
     }
 }
 
 impl DatabaseSink {
-    async fn flush_inner(&self, inner: &mut DatabaseSinkInner) -> Result<(), InklogError> {
-        if inner.buffer.is_empty() {
+    /// Insert a batch of records into the database (no lock held).
+    async fn db_insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {
+        let written = self.database.insert_batch(records).await?;
+        Ok(written)
+    }
+
+    /// Complete a flush operation: insert batch + update metrics/state.
+    /// Called after the lock has been released (double-buffer pattern).
+    async fn finish_flush(
+        &self,
+        records: Vec<LogRecord>,
+        metrics: Option<Arc<Metrics>>,
+    ) -> Result<(), InklogError> {
+        if records.is_empty() {
             return Ok(());
         }
 
-        let records = std::mem::take(&mut inner.buffer);
-        inner.last_flush = Instant::now();
         let batch_size = records.len();
-        if let Some(metrics) = &inner.metrics {
-            metrics.set_db_batch_size(batch_size);
+        if let Some(ref m) = metrics {
+            m.set_db_batch_size(batch_size);
         }
 
-        // 使用注入的 database 实现
-        // 所有数据库操作通过 Database trait 进行，完全符合 DI 架构要求
-        // 直接 await，不再通过 execute_async + block_in_place 包装（T010）
         match self.database.insert_batch(&records).await {
             Ok(written) => {
-                if let Some(m) = &inner.metrics {
+                if let Some(ref m) = metrics {
                     m.add_db_batch_records_total(written);
                     m.update_sink_health("database", true, None);
                 }
                 Ok(())
             }
             Err(e) => {
-                if let Some(m) = &inner.metrics {
+                if let Some(ref m) = metrics {
                     m.inc_sink_error();
                     m.update_sink_health("database", false, Some(e.to_string()));
                 }
-                // 恢复 buffer，让下次 flush 重试
-                inner.buffer = records;
+                // Re-queue records for retry
+                let mut inner = self.inner.lock();
+                let mut retry_records = records;
+                retry_records.append(&mut inner.buffer);
+                inner.buffer = retry_records;
                 Err(e)
             }
         }
