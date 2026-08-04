@@ -231,6 +231,13 @@ impl DbNexusAdapter {
         self.pool.as_ref()
     }
 
+    /// 获取底层连接池的 `Arc` 克隆
+    ///
+    /// 用于需要共享连接池创建新适配器的场景（见 [`Self::from_connection_pool`]）。
+    pub fn pool_arc(&self) -> Arc<dyn ConnectionPool + Send + Sync> {
+        Arc::clone(&self.pool)
+    }
+
     /// 获取表名
     pub fn table_name(&self) -> &str {
         &self.table_name
