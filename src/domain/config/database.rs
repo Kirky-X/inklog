@@ -299,4 +299,128 @@ mod tests {
             "non-SQLite pool_size should be unchanged"
         );
     }
+
+    #[test]
+    fn test_database_driver_from_str() {
+        assert_eq!(
+            "postgres".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::PostgreSQL
+        );
+        assert_eq!(
+            "PostgreSQL".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::PostgreSQL
+        );
+        assert_eq!(
+            "postgresql".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::PostgreSQL
+        );
+        assert_eq!(
+            "mysql".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::MySQL
+        );
+        assert_eq!(
+            "MYSQL".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::MySQL
+        );
+        assert_eq!(
+            "sqlite".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::SQLite
+        );
+        assert_eq!(
+            "sqlite3".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::SQLite
+        );
+        assert!("oracle".parse::<DatabaseDriver>().is_err());
+    }
+
+    #[test]
+    fn test_database_driver_display() {
+        assert_eq!(DatabaseDriver::PostgreSQL.to_string(), "postgres");
+        assert_eq!(DatabaseDriver::MySQL.to_string(), "mysql");
+        assert_eq!(DatabaseDriver::SQLite.to_string(), "sqlite");
+    }
+
+    #[test]
+    fn test_partition_strategy_from_str() {
+        assert_eq!(
+            "monthly".parse::<PartitionStrategy>().unwrap(),
+            PartitionStrategy::Monthly
+        );
+        assert_eq!(
+            "month".parse::<PartitionStrategy>().unwrap(),
+            PartitionStrategy::Monthly
+        );
+        assert_eq!(
+            "yearly".parse::<PartitionStrategy>().unwrap(),
+            PartitionStrategy::Yearly
+        );
+        assert_eq!(
+            "year".parse::<PartitionStrategy>().unwrap(),
+            PartitionStrategy::Yearly
+        );
+        assert!("weekly".parse::<PartitionStrategy>().is_err());
+    }
+
+    #[test]
+    fn test_partition_strategy_display() {
+        assert_eq!(PartitionStrategy::Monthly.to_string(), "monthly");
+        assert_eq!(PartitionStrategy::Yearly.to_string(), "yearly");
+    }
+
+    #[test]
+    fn test_archive_format_from_str() {
+        assert_eq!(
+            "json".parse::<ArchiveFormat>().unwrap(),
+            ArchiveFormat::Json
+        );
+        assert_eq!(
+            "JSON".parse::<ArchiveFormat>().unwrap(),
+            ArchiveFormat::Json
+        );
+        assert_eq!(
+            "parquet".parse::<ArchiveFormat>().unwrap(),
+            ArchiveFormat::Parquet
+        );
+        assert_eq!("csv".parse::<ArchiveFormat>().unwrap(), ArchiveFormat::Csv);
+        assert!("xml".parse::<ArchiveFormat>().is_err());
+    }
+
+    #[test]
+    fn test_archive_format_display() {
+        assert_eq!(ArchiveFormat::Json.to_string(), "json");
+        assert_eq!(ArchiveFormat::Parquet.to_string(), "parquet");
+        assert_eq!(ArchiveFormat::Csv.to_string(), "csv");
+    }
+
+    #[test]
+    fn test_validate_batch_size_zero() {
+        let mut config = DatabaseSinkConfig::default();
+        config.batch_size = 0;
+        config.validate();
+        assert_eq!(config.batch_size, 100);
+    }
+
+    #[test]
+    fn test_validate_flush_interval_zero() {
+        let mut config = DatabaseSinkConfig::default();
+        config.flush_interval_ms = 0;
+        config.validate();
+        assert_eq!(config.flush_interval_ms, 500);
+    }
+
+    #[test]
+    fn test_validate_compression_level_clamp() {
+        let mut config = DatabaseSinkConfig::default();
+        config.parquet_config.compression_level = 99;
+        config.validate();
+        assert_eq!(config.parquet_config.compression_level, 3);
+    }
+
+    #[test]
+    fn test_validate_compression_level_zero() {
+        let mut config = DatabaseSinkConfig::default();
+        config.parquet_config.compression_level = 0;
+        config.validate();
+        assert_eq!(config.parquet_config.compression_level, 3);
+    }
 }

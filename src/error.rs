@@ -564,4 +564,59 @@ mod tests {
             "Channel error: closed"
         );
     }
+
+    #[test]
+    fn test_database_error_constructor() {
+        let err = InklogError::database_error("connection refused");
+        assert!(matches!(
+            err,
+            InklogError::DatabaseError { source: None, .. }
+        ));
+        assert!(err.to_string().contains("connection refused"));
+    }
+
+    #[test]
+    fn test_database_error_with_source_constructor() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err = InklogError::database_error_with_source("db init failed", io_err);
+        match &err {
+            InklogError::DatabaseError { message, source } => {
+                assert_eq!(message, "db init failed");
+                assert!(source.is_some());
+            }
+            _ => panic!("expected DatabaseError"),
+        }
+        assert!(err.to_string().contains("db init failed"));
+    }
+
+    #[test]
+    fn test_encryption_error_constructor() {
+        let err = InklogError::encryption_error("invalid key");
+        assert!(matches!(
+            err,
+            InklogError::EncryptionError { source: None, .. }
+        ));
+        assert!(err.to_string().contains("invalid key"));
+    }
+
+    #[test]
+    fn test_encryption_error_with_source_constructor() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let err = InklogError::encryption_error_with_source("key load failed", io_err);
+        match &err {
+            InklogError::EncryptionError { message, source } => {
+                assert_eq!(message, "key load failed");
+                assert!(source.is_some());
+            }
+            _ => panic!("expected EncryptionError"),
+        }
+    }
+
+    #[test]
+    fn test_inklog_result_type_alias() {
+        let ok: InklogResult<i32> = Ok(42);
+        assert_eq!(ok.unwrap(), 42);
+        let err: InklogResult<i32> = Err(InklogError::Unknown("test".into()));
+        assert!(err.is_err());
+    }
 }
