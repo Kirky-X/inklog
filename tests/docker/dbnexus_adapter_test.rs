@@ -205,11 +205,11 @@ async fn test_dbnexus_adapter_from_pool_reuses_connection() {
     let adapter1 = DbNexusAdapter::new(&url, 3)
         .await
         .expect("first adapter failed");
-    let pool = adapter1.pool().clone();
+    let pool = adapter1.pool_arc();
 
     // 用同一个 pool 创建第二个适配器（不同表名）
-    let adapter2 =
-        DbNexusAdapter::from_pool(pool, "shared_pool_logs").expect("from_pool should succeed");
+    let adapter2 = DbNexusAdapter::from_connection_pool(pool, "shared_pool_logs")
+        .expect("from_connection_pool should succeed");
     assert_eq!(adapter2.table_name(), "shared_pool_logs");
     assert!(adapter2.is_healthy().await, "共享连接池的适配器应健康");
 }
