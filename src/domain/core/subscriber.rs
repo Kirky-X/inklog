@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT
 use crate::LogRecord;
 use crate::Metrics;
+use crate::support::processing::RateLimiter;
+use crate::validation::sanitize::LogSanitizer;
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
+use serde_json::Value;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::Layer;
@@ -13,6 +17,8 @@ use tracing_subscriber::layer::Context;
 
 const DEFAULT_SEND_TIMEOUT_MS: u64 = 100;
 const FALLBACK_BUFFER_SIZE: usize = 100;
+/// Sampling rate for ERROR/FATAL logs when rate-limited: keep 1 in N.
+const ERROR_SAMPLING_RATE: u64 = 100;
 
 /// High-performance logging subscriber with lock-free hot path.
 ///
@@ -31,6 +37,12 @@ pub struct LoggerSubscriber {
     send_timeout_ms: u64,
     /// Fallback buffer for critical logs
     fallback_buffer: Arc<Mutex<VecDeque<Arc<LogRecord>>>>,
+    /// Optional log sanitizer for preventing log injection (CWE-117)
+    sanitizer: Option<Arc<LogSanitizer>>,
+    /// Optional rate limiter for log throughput control
+    rate_limiter: Option<Arc<RateLimiter>>,
+    /// Counter for ERROR/FATAL sampling when rate-limited
+    error_sample_counter: AtomicU64,
 }
 
 impl LoggerSubscriber {
@@ -45,6 +57,9 @@ impl LoggerSubscriber {
             metrics,
             send_timeout_ms: DEFAULT_SEND_TIMEOUT_MS,
             fallback_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(FALLBACK_BUFFER_SIZE))),
+            sanitizer: None,
+            rate_limiter: None,
+            error_sample_counter: AtomicU64::new(0),
         }
     }
 
@@ -53,8 +68,32 @@ impl LoggerSubscriber {
         self
     }
 
+    /// Set the log sanitizer for preventing log injection attacks.
+    pub fn with_sanitizer(mut self, sanitizer: Arc<LogSanitizer>) -> Self {
+        self.sanitizer = Some(sanitizer);
+        self
+    }
+
+    /// Set the rate limiter for log throughput control.
+    pub fn with_rate_limiter(mut self, rate_limiter: Arc<RateLimiter>) -> Self {
+        self.rate_limiter = Some(rate_limiter);
+        self
+    }
+
     fn is_critical_level(level: &str) -> bool {
         level == "ERROR" || level == "FATAL"
+    }
+
+    /// Sanitize a log record's message and fields values.
+    fn sanitize_record(&self, record: &mut LogRecord) {
+        if let Some(ref sanitizer) = self.sanitizer {
+            record.message = sanitizer.sanitize(&record.message);
+            for value in record.fields.values_mut() {
+                if let Value::String(s) = value {
+                    *s = sanitizer.sanitize(s);
+                }
+            }
+        }
     }
 
     pub fn try_flush_fallback(&self) {
@@ -96,7 +135,29 @@ where
     S: Subscriber,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let record = LogRecord::from_event(event);
+        let mut record = LogRecord::from_event(event);
+
+        // Rate limiting check (before sanitization to save work on dropped logs)
+        if let Some(ref limiter) = self.rate_limiter
+            && !limiter.try_acquire()
+        {
+            // Rate limited: only keep ERROR/FATAL with 1-in-N sampling
+            if Self::is_critical_level(&record.level) {
+                let count = self.error_sample_counter.fetch_add(1, Ordering::Relaxed);
+                if !count.is_multiple_of(ERROR_SAMPLING_RATE) {
+                    self.metrics.inc_logs_dropped();
+                    return;
+                }
+                // Sampled: fall through to send
+            } else {
+                self.metrics.inc_logs_dropped();
+                return;
+            }
+        }
+
+        // Sanitize message and fields before sending to channels
+        self.sanitize_record(&mut record);
+
         let record = Arc::new(record);
 
         // Fast path: Console - lock-free try_send, never block
@@ -550,6 +611,133 @@ mod tests {
             metrics.logs_dropped(),
             before_dropped,
             "critical level should not increment logs_dropped"
+        );
+    }
+
+    // =========================================================================
+    // T003: sanitizer integration tests
+    // =========================================================================
+
+    #[test]
+    fn test_with_sanitizer_escapes_newline_in_message() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let sanitizer = Arc::new(LogSanitizer::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics).with_sanitizer(sanitizer);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            // tracing will把 \n 保留在 message 中
+            tracing::info!(target: "test::sanitizer", message = "line1\nline2");
+        });
+
+        let received = console_rx.recv().unwrap();
+        // Sanitizer should have escaped the newline
+        assert!(
+            received.message.contains("\\n"),
+            "message should contain escaped newline, got: {:?}",
+            received.message
+        );
+        assert!(
+            !received.message.contains('\n'),
+            "message should not contain raw newline"
+        );
+    }
+
+    #[test]
+    fn test_without_sanitizer_message_unchanged() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        // No sanitizer set — default behavior
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::no_sanitizer", message = "plain message");
+        });
+
+        let received = console_rx.recv().unwrap();
+        assert_eq!(received.message, "plain message");
+    }
+
+    // =========================================================================
+    // T005: rate limiter integration tests
+    // =========================================================================
+
+    #[test]
+    fn test_rate_limiter_drops_non_critical_logs() {
+        let (console_tx, console_rx) = bounded(100);
+        let (async_tx, _async_rx) = bounded(100);
+        let metrics = Arc::new(Metrics::new());
+        // Rate of 2 tokens: only 2 logs allowed initially
+        let limiter = Arc::new(RateLimiter::new(2));
+
+        let layer =
+            LoggerSubscriber::new(console_tx, async_tx, metrics.clone()).with_rate_limiter(limiter);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            for _ in 0..10 {
+                tracing::info!(target: "test::rate", message = "flood");
+            }
+        });
+
+        // Only 2 should have gotten through (bucket started with 2 tokens)
+        let mut count = 0;
+        while console_rx.try_recv().is_ok() {
+            count += 1;
+        }
+        assert!(
+            count <= 2,
+            "at most 2 logs should pass rate limiter, got {}",
+            count
+        );
+        // Dropped logs should be counted
+        assert!(
+            metrics.logs_dropped() >= 8,
+            "at least 8 logs should be dropped, got {}",
+            metrics.logs_dropped()
+        );
+    }
+
+    #[test]
+    fn test_rate_limiter_samples_error_on_rejection() {
+        let (console_tx, console_rx) = bounded(200);
+        let (async_tx, _async_rx) = bounded(200);
+        let metrics = Arc::new(Metrics::new());
+        // Rate of 1: only 1 log allowed, then all rejected
+        let limiter = Arc::new(RateLimiter::new(1));
+
+        let layer =
+            LoggerSubscriber::new(console_tx, async_tx, metrics.clone()).with_rate_limiter(limiter);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            // First INFO consumes the token
+            tracing::info!(target: "test::rate", message = "consume token");
+            // Now send 100 ERRORs — only 1-in-100 should pass
+            for _ in 0..100 {
+                tracing::error!(target: "test::rate", message = "error flood");
+            }
+        });
+
+        // Drain console channel
+        let mut error_count = 0;
+        while let Ok(record) = console_rx.try_recv() {
+            if record.level == "ERROR" {
+                error_count += 1;
+            }
+        }
+        // First ERROR passes (counter=0, 0%100==0), rest are sampled at 1/100
+        // So we expect ~1-2 ERRORs through (the first sampled one)
+        assert!(
+            error_count >= 1 && error_count <= 5,
+            "expected ~1 sampled ERROR through rate limiter, got {}",
+            error_count
         );
     }
 }
