@@ -722,4 +722,158 @@ level = "debug"
             std::env::remove_var("INKLOG_GLOBAL_AUTO_FALLBACK");
         }
     }
+
+    #[test]
+    fn test_load_sync_returns_config() {
+        // Must hold ENV_MUTEX to ensure INKLOG_CONFIG_PATH is not set by another test
+        let _lock = ENV_MUTEX.lock().unwrap();
+        // load_sync calls from_search_paths which falls back to default
+        let config = InklogConfig::load_sync().unwrap();
+        assert_eq!(config.global.level, "info");
+    }
+
+    #[test]
+    fn test_load_with_env_overrides_applies() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
+        }
+        let config = InklogConfig::load_with_env_overrides().unwrap();
+        assert_eq!(config.global.level, "debug");
+        // Cleanup is guaranteed by _lock Drop (mutex release)
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_LEVEL");
+        }
+    }
+
+    #[test]
+    fn test_from_search_paths_rejects_oversized_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("oversized.toml");
+        // Create a file > 1MB
+        let oversized = vec![b'#'; 1024 * 1024 + 1];
+        std::fs::write(&config_path, oversized).unwrap();
+
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        }
+        let result = InklogConfig::from_search_paths();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds maximum size")
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
+    }
+
+    #[test]
+    fn test_sinks_enabled_with_database() {
+        let mut config = InklogConfig::default();
+        config.database_sink = Some(DatabaseSinkConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        let sinks = config.sinks_enabled();
+        assert!(sinks.contains(&"console"));
+        assert!(sinks.contains(&"database"));
+    }
+
+    #[test]
+    fn test_normalize_with_database_sink() {
+        let mut config = InklogConfig::default();
+        config.database_sink = Some(DatabaseSinkConfig {
+            enabled: true,
+            batch_size: 0,
+            ..Default::default()
+        });
+        // normalize should call db.validate() without panic
+        config.normalize();
+    }
+
+    #[test]
+    fn test_apply_env_overrides_file_sink_enabled() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.file_sink.is_some());
+        assert!(config.file_sink.as_ref().unwrap().enabled);
+        unsafe {
+            std::env::remove_var("INKLOG_FILE_SINK_ENABLED");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_file_sink_max_size_valid() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "100MB");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.file_sink.is_some());
+        assert_eq!(config.file_sink.as_ref().unwrap().max_size, "100MB");
+        unsafe {
+            std::env::remove_var("INKLOG_FILE_SINK_MAX_SIZE");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_file_sink_max_size_invalid() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "INVALID");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        // Invalid size should be ignored, file_sink should remain None
+        assert!(config.file_sink.is_none());
+        unsafe {
+            std::env::remove_var("INKLOG_FILE_SINK_MAX_SIZE");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_http_metrics_and_health_path() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/custom/metrics");
+            std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/custom/health");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.http_server.is_some());
+        let http = config.http_server.as_ref().unwrap();
+        assert_eq!(http.metrics_path, "/custom/metrics");
+        assert_eq!(http.health_path, "/custom/health");
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_METRICS_PATH");
+            std::env::remove_var("INKLOG_HTTP_SERVER_HEALTH_PATH");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_error_mode_unknown_keeps_current() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "unknown_mode");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        // Unknown mode should keep current value (default is Strict)
+        assert!(matches!(
+            config.http_server.as_ref().unwrap().error_mode,
+            HttpErrorMode::Strict
+        ));
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        }
+    }
 }

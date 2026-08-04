@@ -1487,4 +1487,26 @@ mod tests {
         assert!(!result.contains("123-45-6789"));
         assert!(result.contains("***-**-6789"));
     }
+
+    #[test]
+    fn test_mask_credit_card_luhn_failure_still_masked_by_bank_card() {
+        // A number matching Visa pattern but failing Luhn check
+        // is NOT masked by the credit_card rule, but IS masked by
+        // the bank_card rule (which has lower priority = runs after).
+        let masker = DataMasker::new();
+        // 4111111111111112 fails Luhn (last digit changed from 1 to 2)
+        let result = masker.mask("Card: 4111111111111112");
+        // bank_card rule masks it with its own pattern
+        assert!(!result.contains("4111111111111112"));
+    }
+
+    #[test]
+    fn test_mask_builder_no_builtins_no_custom() {
+        // Use with_registry with an empty (default) registry to test the empty rules path
+        let registry = crate::support::processing::masking_registry::MaskRuleRegistry::default();
+        let masker = DataMasker::builder().with_registry(registry).build();
+        // No rules means nothing gets masked
+        let result = masker.mask("user@example.com 4111111111111111");
+        assert_eq!(result, "user@example.com 4111111111111111");
+    }
 }

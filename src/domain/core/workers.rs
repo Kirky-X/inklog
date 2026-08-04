@@ -36,6 +36,100 @@ pub(crate) struct WorkerParams {
 pub(crate) type WorkerStartResult =
     Result<(Vec<tokio::task::JoinHandle<()>>, Vec<Sender<()>>), InklogError>;
 
+// ============================================================================
+// Extracted pure functions (testable without runtime/threads)
+// ============================================================================
+
+/// Check whether auto-recovery should be attempted based on consecutive
+/// failure count and elapsed time since the last failure.
+pub(crate) fn should_auto_recover(
+    consecutive_failures: u32,
+    last_failure_time: Option<Instant>,
+) -> bool {
+    consecutive_failures > 5
+        && last_failure_time
+            .map(|t| t.elapsed() > Duration::from_secs(60))
+            .unwrap_or(false)
+}
+
+/// Check whether a recovery attempt should be made, respecting a cooldown
+/// period between attempts.
+pub(crate) fn should_attempt_recovery(last_attempt: Option<&Instant>, cooldown: Duration) -> bool {
+    match last_attempt {
+        None => true,
+        Some(inst) => inst.elapsed() > cooldown,
+    }
+}
+
+/// Result of classifying a [`SinkControlMessage`] for a specific target sink.
+pub(crate) enum ControlAction {
+    /// Attempt to recover the target sink.
+    Recover,
+    /// Report status (GetStatus received).
+    Status,
+    /// Message is for a different sink; ignore.
+    Ignore,
+}
+
+/// Classify a control message relative to a target sink name.
+pub(crate) fn classify_control_message(
+    msg: &SinkControlMessage,
+    target_sink: &str,
+) -> ControlAction {
+    match msg {
+        SinkControlMessage::RecoverSink(name) if name == target_sink => ControlAction::Recover,
+        SinkControlMessage::GetStatus => ControlAction::Status,
+        _ => ControlAction::Ignore,
+    }
+}
+
+/// Compute the new adaptive channel capacity given current usage.
+///
+/// Returns the updated capacity value.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn update_adaptive_capacity(
+    current_eff: usize,
+    channel_len: usize,
+    min_capacity: usize,
+    max_capacity: usize,
+    expand_threshold_percent: u8,
+    shrink_threshold_percent: u8,
+    shrink_wait: Duration,
+    low_usage_since: &mut Option<Instant>,
+) -> usize {
+    let usage = if current_eff > 0 {
+        channel_len as f64 / current_eff as f64
+    } else {
+        0.0
+    };
+    let usage_percent = (usage * 100.0).round() as u8;
+
+    if usage_percent >= expand_threshold_percent && current_eff < max_capacity {
+        let grow_to = (current_eff + current_eff / 2).min(max_capacity);
+        *low_usage_since = None;
+        grow_to
+    } else if usage_percent <= shrink_threshold_percent && current_eff > min_capacity {
+        match low_usage_since {
+            None => {
+                *low_usage_since = Some(Instant::now());
+                current_eff
+            }
+            Some(inst) => {
+                if inst.elapsed() >= shrink_wait {
+                    let shrink_to = (current_eff.saturating_mul(70) / 100).max(min_capacity);
+                    *low_usage_since = None;
+                    shrink_to
+                } else {
+                    current_eff
+                }
+            }
+        }
+    } else {
+        *low_usage_since = None;
+        current_eff
+    }
+}
+
 impl LoggerManager {
     pub(crate) fn start_workers(params: WorkerParams) -> WorkerStartResult {
         let runtime_handle = tokio::runtime::Handle::current();
@@ -288,12 +382,9 @@ impl LoggerManager {
 
                             // Check for control messages
                             if let Ok(control_msg) = control_rx_file.try_recv() {
-                                match control_msg {
-                                    SinkControlMessage::RecoverSink(sink_name)
-                                        if sink_name == "file" =>
-                                    {
+                                match classify_control_message(&control_msg, "file") {
+                                    ControlAction::Recover => {
                                         tracing::info!("File sink: Received recovery command");
-                                        // Attempt to recreate the sink
                                         if let Ok(new_sink) = FileSink::new(cfg_clone.clone()) {
                                             sink = new_sink;
                                             consecutive_failures = 0;
@@ -304,10 +395,10 @@ impl LoggerManager {
                                             tracing::error!("File sink: Recovery failed");
                                         }
                                     }
-                                    SinkControlMessage::GetStatus => {
+                                    ControlAction::Status => {
                                         // Status is already tracked in metrics
                                     }
-                                    _ => {} // Ignore messages for other sinks
+                                    ControlAction::Ignore => {}
                                 }
                             }
 
@@ -382,16 +473,13 @@ impl LoggerManager {
                                     }
                                 }
 
-                                // Auto-recovery trigger: if we have too many consecutive failures
+                                // Auto-recovery trigger
                                 if !write_succeeded
-                                    && consecutive_failures > 5
-                                    && let Some(last_failure) = last_failure_time
-                                    && last_failure.elapsed() > Duration::from_secs(60)
+                                    && should_auto_recover(consecutive_failures, last_failure_time)
                                 {
                                     tracing::warn!(
                                         "File sink: Triggering auto-recovery due to consecutive failures"
                                     );
-                                    // Attempt to recreate the sink
                                     if let Ok(new_sink) = FileSink::new(cfg_clone.clone()) {
                                         sink = new_sink;
                                         consecutive_failures = 0;
@@ -525,9 +613,10 @@ impl LoggerManager {
 
                                         // Auto-recovery trigger
                                         if !write_succeeded
-                                            && consecutive_failures > 5
-                                            && let Some(last_failure) = last_failure_time
-                                            && last_failure.elapsed() > Duration::from_secs(60)
+                                            && should_auto_recover(
+                                                consecutive_failures,
+                                                last_failure_time,
+                                            )
                                         {
                                             tracing::warn!(
                                                 "Database sink: Triggering auto-recovery due to consecutive failures"
@@ -561,14 +650,11 @@ impl LoggerManager {
 
                                 // Check for control messages
                                 if let Ok(control_msg) = control_rx_db.try_recv() {
-                                    match control_msg {
-                                        SinkControlMessage::RecoverSink(sink_name)
-                                            if sink_name == "database" =>
-                                        {
+                                    match classify_control_message(&control_msg, "database") {
+                                        ControlAction::Recover => {
                                             tracing::info!(
                                                 "Database sink: Received recovery command"
                                             );
-                                            // Attempt to recreate the sink
                                             if let Ok(new_sink) =
                                                 crate::support::io::DatabaseSink::new(
                                                     db_for_recovery.clone(),
@@ -589,10 +675,10 @@ impl LoggerManager {
                                                 tracing::error!("Database sink: Recovery failed");
                                             }
                                         }
-                                        SinkControlMessage::GetStatus => {
+                                        ControlAction::Status => {
                                             // Status is already tracked in metrics
                                         }
-                                        _ => {} // Ignore messages for other sinks
+                                        ControlAction::Ignore => {}
                                     }
                                 }
 
@@ -646,9 +732,10 @@ impl LoggerManager {
 
                                     // Auto-recovery trigger
                                     if !write_succeeded
-                                        && consecutive_failures > 5
-                                        && let Some(last_failure) = last_failure_time
-                                        && last_failure.elapsed() > Duration::from_secs(60)
+                                        && should_auto_recover(
+                                            consecutive_failures,
+                                            last_failure_time,
+                                        )
                                     {
                                         tracing::warn!(
                                             "Database sink: Triggering auto-recovery due to consecutive failures"
@@ -703,41 +790,17 @@ impl LoggerManager {
 
                 // Adaptive capacity strategy
                 if config.performance.channel_strategy == crate::ChannelStrategy::Adaptive {
-                    let usage = if current_eff > 0 {
-                        channel_len_now as f64 / current_eff as f64
-                    } else {
-                        0.0
-                    };
-                    let usage_percent = (usage * 100.0).round() as u8;
-
-                    // Expand when usage is high
-                    if usage_percent >= config.performance.expand_threshold_percent
-                        && current_eff < config.performance.max_capacity
-                    {
-                        let grow_to =
-                            (current_eff + current_eff / 2).min(config.performance.max_capacity);
-                        effective_capacity_health.store(grow_to, Ordering::Relaxed);
-                        low_usage_since = None;
-                    } else if usage_percent <= config.performance.shrink_threshold_percent
-                        && current_eff > config.performance.min_capacity
-                    {
-                        // Track low usage duration for shrink
-                        match low_usage_since {
-                            None => low_usage_since = Some(Instant::now()),
-                            Some(inst) => {
-                                if inst.elapsed()
-                                    >= Duration::from_secs(config.performance.shrink_wait_seconds)
-                                {
-                                    let shrink_to = (current_eff.saturating_mul(70) / 100)
-                                        .max(config.performance.min_capacity);
-                                    effective_capacity_health.store(shrink_to, Ordering::Relaxed);
-                                    low_usage_since = None;
-                                }
-                            }
-                        }
-                    } else {
-                        low_usage_since = None;
-                    }
+                    let new_cap = update_adaptive_capacity(
+                        current_eff,
+                        channel_len_now,
+                        config.performance.min_capacity,
+                        config.performance.max_capacity,
+                        config.performance.expand_threshold_percent,
+                        config.performance.shrink_threshold_percent,
+                        Duration::from_secs(config.performance.shrink_wait_seconds),
+                        &mut low_usage_since,
+                    );
+                    effective_capacity_health.store(new_cap, Ordering::Relaxed);
                 }
                 for (name, sink_status) in status.sinks {
                     if !sink_status.status.is_operational() {
@@ -748,13 +811,10 @@ impl LoggerManager {
                         );
 
                         // Check if we should attempt recovery
-                        let should_recover = {
-                            let last_attempt = last_recovery_attempt.get(&name);
-                            match last_attempt {
-                                None => true,                                           // Never attempted
-                                Some(inst) => inst.elapsed() > Duration::from_secs(30), // 30s cooldown
-                            }
-                        };
+                        let should_recover = should_attempt_recovery(
+                            last_recovery_attempt.get(&name),
+                            Duration::from_secs(30),
+                        );
 
                         if should_recover && sink_status.consecutive_failures > 3 {
                             tracing::warn!("Health Check: Attempting recovery for sink '{}'", name);
@@ -810,5 +870,219 @@ impl LoggerManager {
         let shutdown_txs = vec![shutdown_tx_console, shutdown_tx_file, shutdown_tx_health];
 
         Ok((handles, shutdown_txs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // should_auto_recover
+    // ========================================================================
+
+    #[test]
+    fn test_should_auto_recover_low_failures() {
+        assert!(!should_auto_recover(
+            5,
+            Some(Instant::now() - Duration::from_secs(120))
+        ));
+        assert!(!should_auto_recover(
+            0,
+            Some(Instant::now() - Duration::from_secs(120))
+        ));
+    }
+
+    #[test]
+    fn test_should_auto_recover_high_failures_no_time() {
+        assert!(!should_auto_recover(10, None));
+    }
+
+    #[test]
+    fn test_should_auto_recover_high_failures_recent() {
+        assert!(!should_auto_recover(
+            10,
+            Some(Instant::now() - Duration::from_secs(30))
+        ));
+    }
+
+    #[test]
+    fn test_should_auto_recover_high_failures_old() {
+        assert!(should_auto_recover(
+            6,
+            Some(Instant::now() - Duration::from_secs(61))
+        ));
+        assert!(should_auto_recover(
+            100,
+            Some(Instant::now() - Duration::from_secs(300))
+        ));
+    }
+
+    // ========================================================================
+    // should_attempt_recovery
+    // ========================================================================
+
+    #[test]
+    fn test_should_attempt_recovery_never() {
+        assert!(should_attempt_recovery(None, Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn test_should_attempt_recovery_within_cooldown() {
+        let recent = Instant::now() - Duration::from_secs(10);
+        assert!(!should_attempt_recovery(
+            Some(&recent),
+            Duration::from_secs(30)
+        ));
+    }
+
+    #[test]
+    fn test_should_attempt_recovery_after_cooldown() {
+        let old = Instant::now() - Duration::from_secs(60);
+        assert!(should_attempt_recovery(Some(&old), Duration::from_secs(30)));
+    }
+
+    // ========================================================================
+    // classify_control_message
+    // ========================================================================
+
+    #[test]
+    fn test_classify_control_recover_matching() {
+        let msg = SinkControlMessage::RecoverSink("file".to_string());
+        assert!(matches!(
+            classify_control_message(&msg, "file"),
+            ControlAction::Recover
+        ));
+    }
+
+    #[test]
+    fn test_classify_control_recover_non_matching() {
+        let msg = SinkControlMessage::RecoverSink("database".to_string());
+        assert!(matches!(
+            classify_control_message(&msg, "file"),
+            ControlAction::Ignore
+        ));
+    }
+
+    #[test]
+    fn test_classify_control_get_status() {
+        let msg = SinkControlMessage::GetStatus;
+        assert!(matches!(
+            classify_control_message(&msg, "file"),
+            ControlAction::Status
+        ));
+        assert!(matches!(
+            classify_control_message(&msg, "database"),
+            ControlAction::Status
+        ));
+    }
+
+    // ========================================================================
+    // update_adaptive_capacity
+    // ========================================================================
+
+    #[test]
+    fn test_update_adaptive_capacity_expand() {
+        let mut low_usage_since: Option<Instant> = None;
+        // 80% usage → should expand
+        let new_cap = update_adaptive_capacity(
+            100,
+            80,
+            50,
+            200,
+            70,
+            30,
+            Duration::from_secs(60),
+            &mut low_usage_since,
+        );
+        assert_eq!(new_cap, 150); // 100 + 100/2
+        assert!(low_usage_since.is_none());
+    }
+
+    #[test]
+    fn test_update_adaptive_capacity_shrink_after_wait() {
+        let mut low_usage_since = Some(Instant::now() - Duration::from_secs(120));
+        // 10% usage, low for 120s > 60s wait → should shrink
+        let new_cap = update_adaptive_capacity(
+            100,
+            10,
+            50,
+            200,
+            70,
+            30,
+            Duration::from_secs(60),
+            &mut low_usage_since,
+        );
+        assert_eq!(new_cap, 70); // 100 * 70 / 100
+        assert!(low_usage_since.is_none());
+    }
+
+    #[test]
+    fn test_update_adaptive_capacity_shrink_starts_timer() {
+        let mut low_usage_since: Option<Instant> = None;
+        // 10% usage, first time → start timer, keep capacity
+        let new_cap = update_adaptive_capacity(
+            100,
+            10,
+            50,
+            200,
+            70,
+            30,
+            Duration::from_secs(60),
+            &mut low_usage_since,
+        );
+        assert_eq!(new_cap, 100);
+        assert!(low_usage_since.is_some());
+    }
+
+    #[test]
+    fn test_update_adaptive_capacity_stable() {
+        let mut low_usage_since: Option<Instant> = None;
+        // 50% usage, between thresholds → no change
+        let new_cap = update_adaptive_capacity(
+            100,
+            50,
+            50,
+            200,
+            70,
+            30,
+            Duration::from_secs(60),
+            &mut low_usage_since,
+        );
+        assert_eq!(new_cap, 100);
+    }
+
+    #[test]
+    fn test_update_adaptive_capacity_respects_max() {
+        let mut low_usage_since: Option<Instant> = None;
+        // 90% usage but already at max → stay at max
+        let new_cap = update_adaptive_capacity(
+            200,
+            180,
+            50,
+            200,
+            70,
+            30,
+            Duration::from_secs(60),
+            &mut low_usage_since,
+        );
+        assert_eq!(new_cap, 200);
+    }
+
+    #[test]
+    fn test_update_adaptive_capacity_respects_min() {
+        let mut low_usage_since = Some(Instant::now() - Duration::from_secs(120));
+        // 0% usage, at min → stay at min
+        let new_cap = update_adaptive_capacity(
+            50,
+            0,
+            50,
+            200,
+            70,
+            30,
+            Duration::from_secs(60),
+            &mut low_usage_since,
+        );
+        assert_eq!(new_cap, 50);
     }
 }
