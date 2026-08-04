@@ -107,34 +107,41 @@ impl PathValidator {
             // Log only the path display name, not the full path, to avoid leaking
             // sensitive directory information into application logs.
             warn!(
-                "Path traversal detected in path with {} components",
+                "{} ({} components)",
+                crate::i18n::tr("validation-path_traversal"),
                 path.components().count()
             );
-            return ValidationResult::invalid("Path traversal detected");
+            return ValidationResult::invalid(&crate::i18n::tr("validation-path_traversal"));
         }
 
         for component in path.components() {
             if let std::path::Component::Normal(name) = component {
                 let name_str = name.to_string_lossy();
                 if self.config.deny_components.iter().any(|d| name_str == *d) {
-                    warn!("Dangerous path component detected: {}", name_str);
-                    return ValidationResult::invalid(&format!(
-                        "Dangerous path component: {}",
+                    warn!(
+                        "{}: {}",
+                        crate::i18n::tr("validation-dangerous_component"),
                         name_str
+                    );
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("component", name_str.to_string());
+                    return ValidationResult::invalid(&crate::i18n::tr_args(
+                        "validation-dangerous_component",
+                        args,
                     ));
                 }
             }
         }
 
         if !self.config.allow_absolute && path.is_absolute() {
-            return ValidationResult::invalid("Absolute paths are not allowed");
+            return ValidationResult::invalid(&crate::i18n::tr("validation-no_absolute"));
         }
 
         if !self.config.allow_symlinks
             && let Ok(metadata) = std::fs::symlink_metadata(path)
             && metadata.file_type().is_symlink()
         {
-            return ValidationResult::invalid("Symlinks are not allowed");
+            return ValidationResult::invalid(&crate::i18n::tr("validation-no_symlinks"));
         }
 
         if let Some(ref base_dir) = self.config.base_dir {
@@ -148,7 +155,7 @@ impl PathValidator {
             };
 
             if !canonical_path.starts_with(&canonical_base) {
-                return ValidationResult::invalid("Path is outside base directory");
+                return ValidationResult::invalid(&crate::i18n::tr("validation-outside_base"));
             }
         }
 
