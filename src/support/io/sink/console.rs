@@ -6,6 +6,7 @@ use crate::DataMasker;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use crate::support::processing::OutputFormat;
 use async_trait::async_trait;
 use is_terminal::IsTerminal;
 use owo_colors::OwoColorize;
@@ -45,16 +46,22 @@ impl ConsoleSink {
         record: &LogRecord,
         use_color: bool,
     ) -> io::Result<()> {
-        let formatted_message = self.template.render(record);
-
-        if use_color {
-            writeln!(
-                writer,
-                "{}",
-                self.apply_color(&formatted_message, &record.level)
-            )
+        if self.config.output_format == OutputFormat::Json {
+            // JSON mode: serialize the full record, no color
+            let json = serde_json::to_string(record).map_err(io::Error::other)?;
+            writeln!(writer, "{}", json)
         } else {
-            writeln!(writer, "{}", formatted_message)
+            let formatted_message = self.template.render(record);
+
+            if use_color {
+                writeln!(
+                    writer,
+                    "{}",
+                    self.apply_color(&formatted_message, &record.level)
+                )
+            } else {
+                writeln!(writer, "{}", formatted_message)
+            }
         }
     }
 
@@ -70,6 +77,10 @@ impl ConsoleSink {
     }
 
     fn should_colorize(&self, is_stderr: bool) -> bool {
+        // JSON mode never uses color (would corrupt JSON structure)
+        if self.config.output_format == OutputFormat::Json {
+            return false;
+        }
         if !self.config.colored {
             return false;
         }
@@ -805,6 +816,7 @@ mod tests {
             colored: true,
             stderr_levels: vec!["error".to_string(), "warn".to_string()],
             masking_enabled: true,
+            output_format: Default::default(),
         };
         let sink = ConsoleSink::new(config, LogTemplate::default());
         let cloned = sink.clone();

@@ -792,6 +792,7 @@ mod tests {
                 colored: false,
                 stderr_levels: vec!["error".to_string(), "fatal".to_string()],
                 masking_enabled: true,
+                output_format: Default::default(),
             }),
             ..Default::default()
         };
@@ -841,6 +842,7 @@ mod tests {
                 batch_size: 200,
                 flush_interval_ms: 50,
                 masking_enabled: false,
+                output_format: Default::default(),
             }),
             ..Default::default()
         };

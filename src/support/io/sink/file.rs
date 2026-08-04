@@ -14,6 +14,7 @@ use crate::DataMasker;
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
+use crate::support::processing::OutputFormat;
 use crate::validation::PathValidatorConfig;
 use aes_gcm::KeyInit;
 use aes_gcm::aead::Aead;
@@ -311,11 +312,10 @@ impl FileSink {
             let reason = validation_result
                 .error
                 .unwrap_or_else(|| "unknown".to_string());
-            warn!(
-                "Rejecting unsafe log path {}: {}",
-                self.config.path.display(),
-                reason
-            );
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("path", self.config.path.display().to_string());
+            args.set("reason", reason.clone());
+            warn!("{}", crate::i18n::tr_args("sink-file_reject_path", args));
             return Err(InklogError::ConfigError(format!(
                 "Unsafe log path rejected: {reason}"
             )));
@@ -324,7 +324,10 @@ impl FileSink {
         if let Some(parent) = self.config.path.parent()
             && let Err(e) = fs::create_dir_all(parent)
         {
-            error!("Failed to create log directory {}: {}", parent.display(), e);
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("dir", parent.display().to_string());
+            args.set("err", e.to_string());
+            error!("{}", crate::i18n::tr_args("sink-file_mkdir_failed", args));
             return Err(InklogError::IoError(e));
         }
 
@@ -413,7 +416,9 @@ impl FileSink {
                 } else {
                     "unknown panic".to_string()
                 };
-                tracing::error!("cleanup_timer thread panicked: {}", msg);
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("msg", msg.to_string());
+                tracing::error!("{}", crate::i18n::tr_args("sink-file_cleanup_panic", args));
             }
         });
 
@@ -677,7 +682,9 @@ impl FileSink {
                 } else {
                     "unknown panic".to_string()
                 };
-                tracing::error!("rotation_timer thread panicked: {}", msg);
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("msg", msg.to_string());
+                tracing::error!("{}", crate::i18n::tr_args("sink-file_rotation_panic", args));
             }
         });
 
@@ -694,22 +701,26 @@ impl FileSink {
 
         if let Some(file) = &mut inner.current_file {
             for record in &records {
-                match writeln!(
-                    file,
-                    "{} [{}] {} - {}",
-                    record.timestamp.to_rfc3339(),
-                    record.level,
-                    record.target,
-                    record.message
-                ) {
-                    Ok(_) => {
-                        let len = record.timestamp.to_rfc3339().len()
-                            + record.level.len()
-                            + record.target.len()
-                            + record.message.len()
-                            + 7; // " []  - \n"
+                let write_result = if self.config.output_format == OutputFormat::Json {
+                    // NDJSON: each record is a single-line JSON object
+                    match serde_json::to_string(record) {
+                        Ok(json) => writeln!(file, "{}", json),
+                        Err(e) => Err(std::io::Error::other(e)),
+                    }
+                } else {
+                    writeln!(
+                        file,
+                        "{} [{}] {} - {}",
+                        record.timestamp.to_rfc3339(),
+                        record.level,
+                        record.target,
+                        record.message
+                    )
+                };
 
-                        inner.current_size += len as u64;
+                match write_result {
+                    Ok(_) => {
+                        // Sync estimated size with actual file position to prevent drift
                     }
                     Err(e) => {
                         error!("Batch write error: {}", e);
@@ -1410,6 +1421,7 @@ mod tests {
             batch_size: 100,
             flush_interval_ms: 100,
             masking_enabled: true,
+            output_format: Default::default(),
         };
 
         // Create test files
@@ -2478,6 +2490,7 @@ mod tests {
             batch_size: 100,
             flush_interval_ms: 100,
             masking_enabled: true,
+            output_format: Default::default(),
         };
 
         let result = FileSink::perform_cleanup(&config, &dir.path().join("test.log"));

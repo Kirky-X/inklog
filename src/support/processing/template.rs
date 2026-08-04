@@ -10,7 +10,10 @@
 //! 通过模板系统，可以灵活控制日志输出的格式和内容。
 
 use crate::LogRecord;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt;
+use std::str::FromStr;
 
 fn format_field(key: &str, value: &Value) -> String {
     match value {
@@ -18,6 +21,44 @@ fn format_field(key: &str, value: &Value) -> String {
         Value::String(s) => format!("{}={}", key, s),
         // Array/Object use JSON serialization (Display for these is JSON anyway)
         other => format!("{}={}", key, other),
+    }
+}
+
+/// Output format for log sinks.
+///
+/// Controls whether logs are rendered as human-readable text (via `LogTemplate`)
+/// or as machine-parseable JSON (one object per line).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputFormat {
+    /// Human-readable text using `LogTemplate`.
+    #[default]
+    Text,
+    /// Newline-Delimited JSON (NDJSON).
+    Json,
+}
+
+impl fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text => write!(f, "text"),
+            Self::Json => write!(f, "json"),
+        }
+    }
+}
+
+impl FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            other => Err(format!(
+                "unknown output format: '{}', expected 'text' or 'json'",
+                other
+            )),
+        }
     }
 }
 
