@@ -971,4 +971,94 @@ mod tests {
             .expect("humidity should exist");
         assert_eq!(humidity.as_f64(), Some(0.75));
     }
+
+    #[test]
+    fn test_log_record_from_event_with_nan_f64() {
+        use std::sync::{Arc, Mutex};
+        use tracing::subscriber::with_default;
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::Context;
+        use tracing_subscriber::prelude::*;
+
+        struct CaptureLayer(Arc<Mutex<Option<LogRecord>>>);
+
+        impl<S: tracing::Subscriber> Layer<S> for CaptureLayer {
+            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+                let record = LogRecord::from_event(event);
+                *self.0.lock().unwrap() = Some(record);
+            }
+        }
+
+        let captured: Arc<Mutex<Option<LogRecord>>> = Arc::new(Mutex::new(None));
+        let layer = CaptureLayer(captured.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::warn!(
+                target: "test::nan",
+                message = "nan test",
+                value = f64::NAN,
+            );
+        });
+
+        let record = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("should capture record");
+        let val = record
+            .fields
+            .get("value")
+            .expect("value field should exist");
+        // NaN should be stored as string sentinel
+        assert_eq!(val.as_str(), Some("NaN"));
+    }
+
+    #[test]
+    fn test_log_record_from_event_with_infinity_f64() {
+        use std::sync::{Arc, Mutex};
+        use tracing::subscriber::with_default;
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::Context;
+        use tracing_subscriber::prelude::*;
+
+        struct CaptureLayer(Arc<Mutex<Option<LogRecord>>>);
+
+        impl<S: tracing::Subscriber> Layer<S> for CaptureLayer {
+            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+                let record = LogRecord::from_event(event);
+                *self.0.lock().unwrap() = Some(record);
+            }
+        }
+
+        let captured: Arc<Mutex<Option<LogRecord>>> = Arc::new(Mutex::new(None));
+        let layer = CaptureLayer(captured.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::warn!(
+                target: "test::inf",
+                message = "inf test",
+                pos_inf = f64::INFINITY,
+                neg_inf = f64::NEG_INFINITY,
+            );
+        });
+
+        let record = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("should capture record");
+        let pos = record
+            .fields
+            .get("pos_inf")
+            .expect("pos_inf field should exist");
+        assert_eq!(pos.as_str(), Some("Infinity"));
+
+        let neg = record
+            .fields
+            .get("neg_inf")
+            .expect("neg_inf field should exist");
+        assert_eq!(neg.as_str(), Some("-Infinity"));
+    }
 }

@@ -619,4 +619,76 @@ mod tests {
         let err: InklogResult<i32> = Err(InklogError::Unknown("test".into()));
         assert!(err.is_err());
     }
+
+    #[test]
+    fn test_safe_message_cache_error() {
+        let err = InklogError::CacheError("connection lost".into());
+        let msg = err.safe_message();
+        assert!(msg.contains("Cache error:"));
+        assert!(msg.contains("connection lost"));
+    }
+
+    #[test]
+    fn test_safe_message_encryption_error() {
+        let err = InklogError::encryption_error("key expired");
+        let msg = err.safe_message();
+        assert!(msg.contains("Encryption error:"));
+        assert!(msg.contains("key expired"));
+    }
+
+    #[test]
+    fn test_safe_message_shutdown() {
+        let err = InklogError::Shutdown("timeout".into());
+        let msg = err.safe_message();
+        assert!(msg.contains("Shutdown error:"));
+        assert!(msg.contains("timeout"));
+    }
+
+    #[test]
+    fn test_safe_message_channel_error() {
+        let err = InklogError::ChannelError("disconnected".into());
+        let msg = err.safe_message();
+        assert!(msg.contains("Channel error:"));
+        assert!(msg.contains("disconnected"));
+    }
+
+    #[test]
+    fn test_safe_message_compression_error() {
+        let err = InklogError::CompressionError("zlib failed".into());
+        let msg = err.safe_message();
+        assert!(msg.contains("Compression error:"));
+        assert!(msg.contains("zlib failed"));
+    }
+
+    #[test]
+    fn test_safe_message_runtime_error() {
+        let err = InklogError::RuntimeError("panic".into());
+        let msg = err.safe_message();
+        assert!(msg.contains("Runtime error:"));
+        assert!(msg.contains("panic"));
+    }
+
+    #[test]
+    fn test_safe_message_http_server_error() {
+        let err = InklogError::HttpServerError("bind failed".into());
+        let msg = err.safe_message();
+        assert!(msg.contains("HTTP server error:"));
+        assert!(msg.contains("bind failed"));
+    }
+
+    #[test]
+    fn test_safe_message_unknown() {
+        let err = InklogError::Unknown("something".into());
+        let msg = err.safe_message();
+        assert!(msg.contains("Unknown error:"));
+        assert!(msg.contains("something"));
+    }
+
+    #[test]
+    fn test_safe_message_database_error() {
+        let err = InklogError::database_error("conn refused");
+        let msg = err.safe_message();
+        assert!(msg.contains("Database error:"));
+        assert!(msg.contains("conn refused"));
+    }
 }
