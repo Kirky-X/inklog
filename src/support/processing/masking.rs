@@ -1384,4 +1384,107 @@ mod tests {
         assert_eq!(map["api_key"], Value::String("***MASKED***".to_string()));
         assert_eq!(map["user"], Value::String("bob".to_string()));
     }
+
+    #[test]
+    fn test_mask_rule_debug() {
+        let rule = MaskRule::builder("test_debug")
+            .pattern(r"\d+")
+            .replacement("***")
+            .build()
+            .unwrap();
+        let debug_str = format!("{:?}", rule);
+        assert!(debug_str.contains("MaskRule"));
+        assert!(debug_str.contains("test_debug"));
+        assert!(debug_str.contains("<fn>"));
+    }
+
+    #[test]
+    fn test_builder_add_rule() {
+        let custom_rule = MaskRule::builder("custom_upper")
+            .pattern(r"[a-z]+")
+            .replacement("REPLACED")
+            .priority(1)
+            .build()
+            .unwrap();
+        let masker = DataMasker::builder().add_rule(custom_rule).build();
+        let result = masker.mask("hello");
+        assert!(result.contains("REPLACED"));
+    }
+
+    #[test]
+    fn test_builder_with_registry() {
+        let mut registry =
+            crate::support::processing::masking_registry::MaskRuleRegistry::with_builtins();
+        registry.set_enabled("email", false);
+        let masker = DataMasker::builder().with_registry(registry).build();
+        // email rule disabled via registry, so email should not be masked
+        let result = masker.mask("user@example.com");
+        assert_eq!(result, "user@example.com");
+    }
+
+    #[test]
+    fn test_mask_credit_card_visa() {
+        let masker = DataMasker::new();
+        // Valid Visa card (Luhn check passes)
+        let result = masker.mask("Card: 4111111111111111");
+        assert!(!result.contains("4111111111111111"));
+        assert!(result.contains("****-****-****-1111"));
+    }
+
+    #[test]
+    fn test_mask_credit_card_amex() {
+        let masker = DataMasker::new();
+        // Valid Amex card (Luhn check passes)
+        let result = masker.mask("Card: 378282246310005");
+        assert!(!result.contains("378282246310005"));
+        assert!(result.contains("****-******-0005"));
+    }
+
+    #[test]
+    fn test_mask_ipv4() {
+        let masker = DataMasker::new();
+        let result = masker.mask("Server IP: 192.168.1.100");
+        assert!(!result.contains("192.168.1.100"));
+        assert!(result.contains("***.***.***.100"));
+    }
+
+    #[test]
+    fn test_mask_ipv6() {
+        let masker = DataMasker::new();
+        let result = masker.mask("IPv6: 2001:0db8:85a3:0000:0000:8a2e:0370:7334");
+        assert!(!result.contains("2001:0db8:85a3:0000:0000:8a2e:0370:7334"));
+        assert!(result.contains("7334"));
+    }
+
+    #[test]
+    fn test_mask_mac_address_colon() {
+        let masker = DataMasker::new();
+        let result = masker.mask("MAC: AA:BB:CC:DD:EE:FF");
+        assert!(!result.contains("AA:BB:CC:DD:EE:FF"));
+        assert!(result.contains("AA:**:**:**:**:FF"));
+    }
+
+    #[test]
+    fn test_mask_mac_address_dash() {
+        let masker = DataMasker::new();
+        let result = masker.mask("MAC: 00-1A-2B-3C-4D-5E");
+        assert!(!result.contains("00-1A-2B-3C-4D-5E"));
+        assert!(result.contains("00-**-**-**-**-5E"));
+    }
+
+    #[test]
+    fn test_mask_passport() {
+        let masker = DataMasker::new();
+        let result = masker.mask("Passport: E12345678");
+        assert!(!result.contains("E12345678"));
+        assert!(result.contains("E******78"));
+    }
+
+    #[test]
+    fn test_mask_ssn() {
+        let masker = DataMasker::new();
+        let result = masker.mask("SSN: 123-45-6789");
+        assert!(!result.contains("123-45-6789"));
+        assert!(result.contains("***-**-6789"));
+    }
 }
