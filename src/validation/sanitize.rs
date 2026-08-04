@@ -8,6 +8,10 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+/// Pre-compiled regex for ANSI SGR (Select Graphic Rendition) escape sequences.
+static ANSI_SGR_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*m").expect("hardcoded ANSI SGR regex is valid"));
+
 /// Escape mode for log content sanitization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EscapeMode {
@@ -124,7 +128,8 @@ impl LogSanitizer {
 
     /// Sanitize a log message.
     pub fn sanitize(&self, message: &str) -> String {
-        let mut result = message.to_string();
+        // Strip ANSI escape sequences before any other processing
+        let mut result = self.strip_ansi(message).into_owned();
 
         for (pattern, replacement) in &self.sensitive_regexes {
             result = pattern
@@ -230,6 +235,17 @@ impl LogSanitizer {
     /// Add a custom string replacement.
     pub fn add_replacement(&mut self, from: String, to: String) {
         self.config.custom_replacements.push((from, to));
+    }
+
+    /// Strip ANSI SGR escape sequences from the input string.
+    ///
+    /// Fast path: if the input contains no `\x1b` (ESC) character,
+    /// returns the original string without any allocation.
+    pub fn strip_ansi<'a>(&self, input: &'a str) -> std::borrow::Cow<'a, str> {
+        if !input.contains('\x1b') {
+            return std::borrow::Cow::Borrowed(input);
+        }
+        std::borrow::Cow::Owned(ANSI_SGR_REGEX.replace_all(input, "").into_owned())
     }
 }
 
@@ -447,15 +463,62 @@ mod tests {
 
     #[test]
     fn test_sanitize_truncate_respects_utf8_boundaries() {
-        // T014: truncation must not split multi-byte UTF-8 characters
         let mut config = super::SanitizerConfig::default();
-        // "你好世界" = 12 bytes (3 bytes per char), set max_length to 7
-        // Should truncate to "你好" (6 bytes) instead of splitting the 3rd char
         config.max_length = 7;
         let sanitizer = super::LogSanitizer::with_config(config);
         let result = sanitizer.sanitize("你好世界");
-        // Should contain the truncated text without panicking
         assert!(result.starts_with("你好"));
         assert!(result.contains("...[truncated]"));
+    }
+
+    #[test]
+    fn test_strip_ansi_sgr_sequence() {
+        let sanitizer = LogSanitizer::new();
+        assert_eq!(sanitizer.strip_ansi("\x1b[31mERROR\x1b[0m"), "ERROR");
+    }
+
+    #[test]
+    fn test_strip_ansi_multiple_sequences() {
+        let sanitizer = LogSanitizer::new();
+        assert_eq!(sanitizer.strip_ansi("\x1b[1;32mOK\x1b[0m"), "OK");
+    }
+
+    #[test]
+    fn test_strip_ansi_fast_path_no_esc() {
+        let sanitizer = LogSanitizer::new();
+        let input = "no ansi here";
+        let result = sanitizer.strip_ansi(input);
+        assert_eq!(result, "no ansi here");
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_strip_ansi_nested_sequences() {
+        let sanitizer = LogSanitizer::new();
+        assert_eq!(
+            sanitizer.strip_ansi("\x1b[1m\x1b[31mBOLD RED\x1b[0m\x1b[0m"),
+            "BOLD RED"
+        );
+    }
+
+    #[test]
+    fn test_strip_ansi_empty_input() {
+        let sanitizer = LogSanitizer::new();
+        assert_eq!(sanitizer.strip_ansi(""), "");
+    }
+
+    #[test]
+    fn test_strip_ansi_only_esc_char() {
+        let sanitizer = LogSanitizer::new();
+        let result = sanitizer.strip_ansi("\x1b");
+        assert_eq!(result, "\x1b");
+    }
+
+    #[test]
+    fn test_sanitize_strips_ansi_before_processing() {
+        let sanitizer = LogSanitizer::new();
+        let result = sanitizer.sanitize("\x1b[31mERROR\x1b[0m");
+        assert_eq!(result, "ERROR");
+        assert!(!result.contains('\x1b'));
     }
 }
