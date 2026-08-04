@@ -384,15 +384,24 @@ impl LoggerManager {
                             if let Ok(control_msg) = control_rx_file.try_recv() {
                                 match classify_control_message(&control_msg, "file") {
                                     ControlAction::Recover => {
-                                        tracing::info!("File sink: Received recovery command");
+                                        tracing::info!(
+                                            "{}",
+                                            crate::i18n::tr("sink-file_recovery_received")
+                                        );
                                         if let Ok(new_sink) = FileSink::new(cfg_clone.clone()) {
                                             sink = new_sink;
                                             consecutive_failures = 0;
                                             last_failure_time = None;
                                             metrics_file.update_sink_health("file", true, None);
-                                            tracing::info!("File sink: Successfully recovered");
+                                            tracing::info!(
+                                                "{}",
+                                                crate::i18n::tr("sink-file_recovered")
+                                            );
                                         } else {
-                                            tracing::error!("File sink: Recovery failed");
+                                            tracing::error!(
+                                                "{}",
+                                                crate::i18n::tr("sink-file_recovery_failed")
+                                            );
                                         }
                                     }
                                     ControlAction::Status => {
@@ -478,14 +487,18 @@ impl LoggerManager {
                                     && should_auto_recover(consecutive_failures, last_failure_time)
                                 {
                                     tracing::warn!(
-                                        "File sink: Triggering auto-recovery due to consecutive failures"
+                                        "{}",
+                                        crate::i18n::tr("sink-file_auto_recovery")
                                     );
                                     if let Ok(new_sink) = FileSink::new(cfg_clone.clone()) {
                                         sink = new_sink;
                                         consecutive_failures = 0;
                                         last_failure_time = None;
                                         metrics_file.update_sink_health("file", true, None);
-                                        tracing::info!("File sink: Auto-recovery successful");
+                                        tracing::info!(
+                                            "{}",
+                                            crate::i18n::tr("sink-file_auto_recovery_ok")
+                                        );
                                     }
                                 }
                             } else {
@@ -619,7 +632,8 @@ impl LoggerManager {
                                             )
                                         {
                                             tracing::warn!(
-                                                "Database sink: Triggering auto-recovery due to consecutive failures"
+                                                "{}",
+                                                crate::i18n::tr("sink-db_auto_recovery")
                                             );
                                             if let Ok(new_sink) =
                                                 crate::support::io::DatabaseSink::new(
@@ -634,7 +648,8 @@ impl LoggerManager {
                                                 metrics_db
                                                     .update_sink_health("database", true, None);
                                                 tracing::info!(
-                                                    "Database sink: Auto-recovery successful"
+                                                    "{}",
+                                                    crate::i18n::tr("sink-db_auto_recovery_ok")
                                                 );
                                             }
                                         }
@@ -653,7 +668,8 @@ impl LoggerManager {
                                     match classify_control_message(&control_msg, "database") {
                                         ControlAction::Recover => {
                                             tracing::info!(
-                                                "Database sink: Received recovery command"
+                                                "{}",
+                                                crate::i18n::tr("sink-db_recovery_received")
                                             );
                                             if let Ok(new_sink) =
                                                 crate::support::io::DatabaseSink::new(
@@ -669,10 +685,14 @@ impl LoggerManager {
                                                 metrics_db
                                                     .update_sink_health("database", true, None);
                                                 tracing::info!(
-                                                    "Database sink: Successfully recovered"
+                                                    "{}",
+                                                    crate::i18n::tr("sink-db_recovered")
                                                 );
                                             } else {
-                                                tracing::error!("Database sink: Recovery failed");
+                                                tracing::error!(
+                                                    "{}",
+                                                    crate::i18n::tr("sink-db_recovery_failed")
+                                                );
                                             }
                                         }
                                         ControlAction::Status => {
@@ -738,7 +758,8 @@ impl LoggerManager {
                                         )
                                     {
                                         tracing::warn!(
-                                            "Database sink: Triggering auto-recovery due to consecutive failures"
+                                            "{}",
+                                            crate::i18n::tr("sink-db_auto_recovery")
                                         );
                                         if let Ok(new_sink) = crate::support::io::DatabaseSink::new(
                                             db_for_recovery.clone(),
@@ -750,7 +771,8 @@ impl LoggerManager {
                                             consecutive_failures = 0;
                                             metrics_db.update_sink_health("database", true, None);
                                             tracing::info!(
-                                                "Database sink: Auto-recovery successful"
+                                                "{}",
+                                                crate::i18n::tr("sink-db_auto_recovery_ok")
                                             );
                                         }
                                     }
@@ -804,11 +826,10 @@ impl LoggerManager {
                 }
                 for (name, sink_status) in status.sinks {
                     if !sink_status.status.is_operational() {
-                        tracing::warn!(
-                            "Health Check: Sink '{}' is unhealthy. Last error: {:?}",
-                            name,
-                            sink_status.last_error
-                        );
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("name", name.clone());
+                        args.set("error", format!("{:?}", sink_status.last_error));
+                        tracing::warn!("{}", crate::i18n::tr_args("sink-health_unhealthy", args));
 
                         // Check if we should attempt recovery
                         let should_recover = should_attempt_recovery(
@@ -817,16 +838,23 @@ impl LoggerManager {
                         );
 
                         if should_recover && sink_status.consecutive_failures > 3 {
-                            tracing::warn!("Health Check: Attempting recovery for sink '{}'", name);
+                            let mut args = fluent_bundle::FluentArgs::new();
+                            args.set("name", name.clone());
+                            tracing::warn!(
+                                "{}",
+                                crate::i18n::tr_args("sink-health_attempting_recovery", args)
+                            );
 
                             // Send recovery command
                             if let Err(e) =
                                 control_tx.send(SinkControlMessage::RecoverSink(name.clone()))
                             {
+                                let mut args = fluent_bundle::FluentArgs::new();
+                                args.set("name", name.clone());
+                                args.set("err", e.to_string());
                                 tracing::error!(
-                                    "Health Check: Failed to send recovery command for '{}': {}",
-                                    name,
-                                    e
+                                    "{}",
+                                    crate::i18n::tr_args("sink-health_send_failed", args)
                                 );
                             } else {
                                 last_recovery_attempt.insert(name.clone(), Instant::now());

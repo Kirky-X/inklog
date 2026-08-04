@@ -161,39 +161,47 @@ impl OxCacheAdapter {
 impl Cache for OxCacheAdapter {
     async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
         self.inner.get(&key.to_string()).await.map_err(|e| {
-            InklogError::CacheError(format!("Failed to get cache key '{}': {}", key, e))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("key", key.to_string());
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-get_failed", args))
         })
     }
 
     async fn set(&self, key: &str, value: String) -> Result<(), InklogError> {
         self.inner.set(&key.to_string(), &value).await.map_err(|e| {
-            InklogError::CacheError(format!("Failed to set cache key '{}': {}", key, e))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("key", key.to_string());
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-set_failed", args))
         })
     }
 
     async fn delete(&self, key: &str) -> Result<bool, InklogError> {
-        // Check existence first so we can return an accurate bool.
-        // Note: under concurrent access the key may be removed between
-        // exists() and delete() — this is an accepted tradeoff for
-        // async cache APIs and does not cause data corruption.
         let existed = self.inner.exists(&key.to_string()).await.map_err(|e| {
-            InklogError::CacheError(format!("exists check failed for '{}': {}", key, e))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("key", key.to_string());
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-exists_failed", args))
         })?;
         if !existed {
             return Ok(false);
         }
         self.inner.delete(&key.to_string()).await.map_err(|e| {
-            InklogError::CacheError(format!("Failed to delete cache key '{}': {}", key, e))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("key", key.to_string());
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-delete_failed", args))
         })?;
         Ok(true)
     }
 
     async fn exists(&self, key: &str) -> Result<bool, InklogError> {
         self.inner.exists(&key.to_string()).await.map_err(|e| {
-            InklogError::CacheError(format!(
-                "Failed to check existence of cache key '{}': {}",
-                key, e
-            ))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("key", key.to_string());
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-check_failed", args))
         })
     }
 }
@@ -239,9 +247,9 @@ impl OxCacheAdapterBuilder {
         if let Some(capacity) = self.capacity
             && capacity == 0
         {
-            return Err(InklogError::CacheError(
-                "OxCacheAdapterBuilder: capacity must be > 0".to_string(),
-            ));
+            return Err(InklogError::CacheError(crate::i18n::tr(
+                "cache-capacity_zero",
+            )));
         }
         let mut builder = OxCache::builder();
         if let Some(ttl) = self.ttl {
@@ -250,10 +258,11 @@ impl OxCacheAdapterBuilder {
         if let Some(capacity) = self.capacity {
             builder = builder.capacity(capacity);
         }
-        let cache = builder
-            .build()
-            .await
-            .map_err(|e| InklogError::CacheError(format!("Failed to build oxcache: {}", e)))?;
+        let cache = builder.build().await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-build_failed", args))
+        })?;
         Ok(OxCacheAdapter { inner: cache })
     }
 }

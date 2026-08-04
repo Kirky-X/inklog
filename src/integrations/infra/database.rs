@@ -177,12 +177,14 @@ impl DbNexusAdapter {
         };
 
         // 使用 DbPool::with_config 创建连接池
-        let pool = DbPool::with_config(config)
-            .await
-            .map_err(|e| InklogError::DatabaseError {
-                message: format!("Failed to create connection pool: {}", e),
+        let pool = DbPool::with_config(config).await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::DatabaseError {
+                message: crate::i18n::tr_args("db-pool_create_failed", args),
                 source: Some(Box::new(e)),
-            })?;
+            }
+        })?;
 
         Ok(Self {
             pool: Arc::new(pool),
@@ -251,23 +253,26 @@ impl DbNexusAdapter {
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn validate_table_name(name: &str) -> Result<(), InklogError> {
     if name.is_empty() {
-        return Err(InklogError::ConfigError(
-            "Table name must not be empty".to_string(),
-        ));
+        return Err(InklogError::ConfigError(crate::i18n::tr("db-table_empty")));
     }
     let mut chars = name.chars();
     let first = chars.next().unwrap();
     if !first.is_ascii_alphabetic() && first != '_' {
-        return Err(InklogError::ConfigError(format!(
-            "Invalid table name '{}': must start with a letter or underscore",
-            name
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("name", name.to_string());
+        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+            "db-table_invalid_start",
+            args,
         )));
     }
     for c in chars {
         if !c.is_ascii_alphanumeric() && c != '_' {
-            return Err(InklogError::ConfigError(format!(
-                "Invalid table name '{}': contains forbidden character '{}'",
-                name, c
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("name", name.to_string());
+            args.set("char", c.to_string());
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "db-table_invalid_char",
+                args,
             )));
         }
     }
@@ -283,14 +288,14 @@ impl Database for DbNexusAdapter {
         }
 
         // 获取写会话 (使用 admin 角色，因为默认权限配置只允许 admin/system)
-        let session =
-            self.pool
-                .get_session("admin")
-                .await
-                .map_err(|e| InklogError::DatabaseError {
-                    message: format!("Failed to get session: {}", e),
-                    source: Some(Box::new(e)),
-                })?;
+        let session = self.pool.get_session("admin").await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::DatabaseError {
+                message: crate::i18n::tr_args("db-session_failed", args),
+                source: Some(Box::new(e)),
+            }
+        })?;
 
         // 构建所有记录的 INSERT SQL 语句
         let sqls: Vec<String> = records
@@ -336,9 +341,12 @@ impl Database for DbNexusAdapter {
             .batch_execute_in_transaction(sql_refs)
             .await
             .map_err(|e| {
-                tracing::error!("Batch insert failed, transaction rolled back: {}", e);
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("err", e.to_string());
+                let msg = crate::i18n::tr_args("db-batch_insert_failed", args);
+                tracing::error!("{}", msg);
                 InklogError::DatabaseError {
-                    message: format!("Batch insert failed: {}", e),
+                    message: msg,
                     source: Some(Box::new(e)),
                 }
             })?;
