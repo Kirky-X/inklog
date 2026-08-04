@@ -89,6 +89,21 @@ impl LogLevel {
             LogLevel::Fatal => "FTL",
         }
     }
+
+    /// Returns the translated log level name for the current locale.
+    ///
+    /// Unlike [`as_str()`](Self::as_str) which always returns English uppercase
+    /// names (e.g. "INFO"), this method returns the locale-aware translation.
+    pub fn localized_name(&self) -> String {
+        match self {
+            LogLevel::Trace => crate::i18n::tr("log_level.name_trace"),
+            LogLevel::Debug => crate::i18n::tr("log_level.name_debug"),
+            LogLevel::Info => crate::i18n::tr("log_level.name_info"),
+            LogLevel::Warn => crate::i18n::tr("log_level.name_warn"),
+            LogLevel::Error => crate::i18n::tr("log_level.name_error"),
+            LogLevel::Fatal => crate::i18n::tr("log_level.name_fatal"),
+        }
+    }
 }
 
 impl fmt::Display for LogLevel {
