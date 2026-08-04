@@ -239,6 +239,54 @@ impl InklogError {
         }
     }
 
+    /// Returns a localized error message using the current locale.
+    ///
+    /// The error type prefix is translated according to the active locale,
+    /// while the detail message remains in its original language.
+    /// Sensitive data is NOT sanitized — use [`safe_message()`](Self::safe_message) for that.
+    ///
+    /// Note: `safe_message()` and `localized_message()` are independent paths.
+    pub fn localized_message(&self) -> String {
+        match self {
+            InklogError::ConfigError(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.config_error"), msg)
+            }
+            InklogError::IoError(e) => {
+                format!("{}: {}", crate::i18n::tr("error.io_error"), e)
+            }
+            InklogError::SerializationError(e) => {
+                format!("{}: {}", crate::i18n::tr("error.serialization_error"), e)
+            }
+            InklogError::DatabaseError { message, .. } => {
+                format!("{}: {}", crate::i18n::tr("error.database_error"), message)
+            }
+            InklogError::CacheError(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.cache_error"), msg)
+            }
+            InklogError::EncryptionError { message, .. } => {
+                format!("{}: {}", crate::i18n::tr("error.encryption_error"), message)
+            }
+            InklogError::Shutdown(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.shutdown_error"), msg)
+            }
+            InklogError::ChannelError(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.channel_error"), msg)
+            }
+            InklogError::CompressionError(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.compression_error"), msg)
+            }
+            InklogError::RuntimeError(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.runtime_error"), msg)
+            }
+            InklogError::HttpServerError(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.http_server_error"), msg)
+            }
+            InklogError::Unknown(msg) => {
+                format!("{}: {}", crate::i18n::tr("error.unknown_error"), msg)
+            }
+        }
+    }
+
     /// Returns a sanitized error message that does not contain sensitive information.
     ///
     /// This method is useful for logging and displaying errors to users
