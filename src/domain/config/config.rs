@@ -369,6 +369,9 @@ impl std::str::FromStr for InklogConfig {
 mod tests {
     use super::*;
 
+    // Mutex to serialize env var tests (env vars are process-global state)
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_validate_default_config() {
         let config = InklogConfig::default();
@@ -498,6 +501,7 @@ mod tests {
 
     #[test]
     fn test_env_override_invalid_level_falls_back() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         // T025: invalid log level should not be applied
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_LEVEL", "invalid_level");
@@ -511,6 +515,211 @@ mod tests {
         );
         unsafe {
             std::env::remove_var("INKLOG_GLOBAL_LEVEL");
+        }
+    }
+
+    #[test]
+    fn test_sinks_enabled_default() {
+        let config = InklogConfig::default();
+        let sinks = config.sinks_enabled();
+        // default has console enabled
+        assert!(sinks.contains(&"console"));
+    }
+
+    #[test]
+    fn test_sinks_enabled_with_file() {
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            path: std::path::PathBuf::from("test.log"),
+            ..Default::default()
+        });
+        let sinks = config.sinks_enabled();
+        assert!(sinks.contains(&"console"));
+        assert!(sinks.contains(&"file"));
+    }
+
+    #[test]
+    fn test_sinks_enabled_none() {
+        let mut config = InklogConfig::default();
+        config.console_sink = None;
+        config.file_sink = None;
+        config.database_sink = None;
+        let sinks = config.sinks_enabled();
+        assert!(sinks.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_fixes_invalid_settings() {
+        let mut config = InklogConfig::default();
+        config.global.fallback_max_retries = 0;
+        config.performance.expand_threshold_percent = 200;
+        config.normalize();
+        // global.validate() should reset retries
+        assert_eq!(config.global.fallback_max_retries, 1);
+        // performance.validate() should clamp
+        assert_eq!(config.performance.expand_threshold_percent, 100);
+    }
+
+    #[test]
+    fn test_from_str_parses_toml() {
+        let toml_str = r#"
+[global]
+level = "debug"
+"#;
+        let config: InklogConfig = toml_str.parse().expect("should parse TOML");
+        assert_eq!(config.global.level, "debug");
+    }
+
+    #[test]
+    fn test_apply_env_overrides_valid_level() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_LEVEL", "warn");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(config.global.level, "warn");
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_LEVEL");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_format() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_FORMAT", "{message}");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(config.global.format, "{message}");
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_FORMAT");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_file_sink_path() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test.log");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.file_sink.is_some());
+        assert_eq!(
+            config.file_sink.as_ref().unwrap().path,
+            std::path::PathBuf::from("/tmp/test.log")
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_FILE_SINK_PATH");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_file_sink_path_traversal_rejected() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_FILE_SINK_PATH", "../etc/passwd");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        // path with parent dir traversal should be ignored, file_sink should remain None
+        assert!(config.file_sink.is_none());
+        unsafe {
+            std::env::remove_var("INKLOG_FILE_SINK_PATH");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_http_server() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+            std::env::set_var("INKLOG_HTTP_SERVER_HOST", "0.0.0.0");
+            std::env::set_var("INKLOG_HTTP_SERVER_PORT", "8080");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.http_server.is_some());
+        let http = config.http_server.as_ref().unwrap();
+        assert!(http.enabled);
+        assert_eq!(http.host, "0.0.0.0");
+        assert_eq!(http.port, 8080);
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
+            std::env::remove_var("INKLOG_HTTP_SERVER_HOST");
+            std::env::remove_var("INKLOG_HTTP_SERVER_PORT");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_performance() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");
+            std::env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "2048");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(config.performance.worker_threads, 8);
+        assert_eq!(config.performance.channel_capacity, 2048);
+        unsafe {
+            std::env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+            std::env::remove_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_error_mode_strict() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "strict");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.http_server.is_some());
+        assert!(matches!(
+            config.http_server.as_ref().unwrap().error_mode,
+            HttpErrorMode::Strict
+        ));
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_error_mode_warn() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(matches!(
+            config.http_server.as_ref().unwrap().error_mode,
+            HttpErrorMode::Warn
+        ));
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_masking_and_fallback() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_MASKING_ENABLED", "false");
+            std::env::set_var("INKLOG_GLOBAL_AUTO_FALLBACK", "false");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(!config.global.masking_enabled);
+        assert!(!config.global.auto_fallback);
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_MASKING_ENABLED");
+            std::env::remove_var("INKLOG_GLOBAL_AUTO_FALLBACK");
         }
     }
 }
