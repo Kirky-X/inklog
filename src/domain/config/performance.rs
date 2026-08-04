@@ -134,3 +134,77 @@ impl PerformanceConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_channel_strategy_from_str() {
+        assert_eq!(
+            "fixed".parse::<ChannelStrategy>().unwrap(),
+            ChannelStrategy::Fixed
+        );
+        assert_eq!(
+            "FIXED".parse::<ChannelStrategy>().unwrap(),
+            ChannelStrategy::Fixed
+        );
+        assert_eq!(
+            "adaptive".parse::<ChannelStrategy>().unwrap(),
+            ChannelStrategy::Adaptive
+        );
+        assert_eq!(
+            "Adaptive".parse::<ChannelStrategy>().unwrap(),
+            ChannelStrategy::Adaptive
+        );
+        assert!("unknown".parse::<ChannelStrategy>().is_err());
+    }
+
+    #[test]
+    fn test_channel_strategy_display() {
+        assert_eq!(ChannelStrategy::Fixed.to_string(), "fixed");
+        assert_eq!(ChannelStrategy::Adaptive.to_string(), "adaptive");
+    }
+
+    #[test]
+    fn test_performance_config_default() {
+        let cfg = PerformanceConfig::default();
+        assert_eq!(cfg.channel_capacity, 10000);
+        assert_eq!(cfg.worker_threads, 3);
+        assert_eq!(cfg.expand_threshold_percent, 80);
+        assert_eq!(cfg.shrink_threshold_percent, 20);
+        assert_eq!(cfg.min_capacity, 1000);
+        assert_eq!(cfg.max_capacity, 50000);
+    }
+
+    #[test]
+    fn test_validate_clamps_percentages() {
+        let mut cfg = PerformanceConfig::default();
+        cfg.expand_threshold_percent = 150;
+        cfg.shrink_threshold_percent = 50;
+        cfg.validate();
+        // 150 clamped to 100; shrink 50 < expand 100, no reset
+        assert_eq!(cfg.expand_threshold_percent, 100);
+        assert_eq!(cfg.shrink_threshold_percent, 50);
+    }
+
+    #[test]
+    fn test_validate_swaps_min_max() {
+        let mut cfg = PerformanceConfig::default();
+        cfg.min_capacity = 99999;
+        cfg.max_capacity = 100;
+        cfg.validate();
+        assert_eq!(cfg.min_capacity, 100);
+        assert_eq!(cfg.max_capacity, 99999);
+    }
+
+    #[test]
+    fn test_validate_resets_shrink_ge_expand() {
+        let mut cfg = PerformanceConfig::default();
+        cfg.shrink_threshold_percent = 80;
+        cfg.expand_threshold_percent = 50;
+        cfg.validate();
+        assert_eq!(cfg.shrink_threshold_percent, default_shrink_threshold());
+        assert_eq!(cfg.expand_threshold_percent, default_expand_threshold());
+    }
+}

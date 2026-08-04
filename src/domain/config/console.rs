@@ -99,3 +99,54 @@ impl ConsoleSinkConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_console_sink_config() {
+        let cfg = ConsoleSinkConfig::default();
+        assert!(cfg.enabled);
+        assert!(cfg.colored);
+        assert_eq!(
+            cfg.stderr_levels,
+            vec!["error".to_string(), "warn".to_string()]
+        );
+        assert!(cfg.masking_enabled);
+    }
+
+    #[test]
+    fn test_validate_removes_invalid_levels() {
+        let mut cfg = ConsoleSinkConfig::default();
+        cfg.stderr_levels = vec![
+            "error".into(),
+            "invalid_level".into(),
+            "warn".into(),
+            "bogus".into(),
+        ];
+        cfg.validate();
+        assert_eq!(
+            cfg.stderr_levels,
+            vec!["error".to_string(), "warn".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_validate_keeps_valid_levels() {
+        let mut cfg = ConsoleSinkConfig::default();
+        cfg.stderr_levels = vec![
+            "trace".into(),
+            "debug".into(),
+            "info".into(),
+            "warn".into(),
+            "warning".into(),
+            "error".into(),
+            "fatal".into(),
+            "critical".into(),
+        ];
+        let original_len = cfg.stderr_levels.len();
+        cfg.validate();
+        assert_eq!(cfg.stderr_levels.len(), original_len);
+    }
+}
