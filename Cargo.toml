@@ -18,7 +18,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"i18n\", \"compression\", \"parquet\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\"))"] }
 
 [features]
 default = []
@@ -35,12 +35,15 @@ cli = ["dep:clap", "dep:glob"]
 debug = []
 metrics = []
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
-i18n = ["dep:icu", "dep:writeable"]
 # Zstd compression support for rotated log files (optional to avoid zstd-sys
 # symbol conflicts with downstream projects that bundle their own zstd).
 compression = ["dep:zstd"]
 # Parquet/Arrow export support for database sink archival.
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
+# ICU4X i18n formatting support (always compiled, feature for workspace compat).
+i18n = []
+# Aho-Corasick multi-pattern masking acceleration.
+fast-masking = ["dep:aho-corasick"]
 
 [dependencies]
 log = "0.4"
@@ -84,8 +87,13 @@ clap = { version = "4.6", features = ["derive", "env"], optional = true }
 glob = { version = "0.3", optional = true }
 ipnet = "2.12"
 subtle = "2.6"
-icu = { version = "2.2", optional = true }
-writeable = { version = "0.6", optional = true }
+icu = "2.2"
+writeable = "0.6"
+fluent-bundle = "0.15"
+unic-langid = "0.9"
+intl-memoizer = "0.5"
+sys-locale = "0.3"
+aho-corasick = { version = "1.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.27"

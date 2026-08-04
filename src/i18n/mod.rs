@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! ICU4X-backed internationalization formatting for log operations.
+//! Internationalization and locale-aware formatting for log operations.
+//!
+//! This is a **core feature** — always compiled, no cargo feature gate required.
 //!
 //! Provides locale-aware number formatting, date formatting, plural rules,
 //! and string collation via the `icu` crate (ICU4X 2.x). Useful for
@@ -32,6 +34,9 @@ use icu::plurals::PluralRules;
 use thiserror::Error;
 
 mod i18n_impl;
+mod locale_manager;
+
+pub use locale_manager::{current_locale, init_locale, tr, tr_args};
 
 /// Errors returned by [`LogI18nFormatter`] operations.
 #[derive(Debug, Error, Clone, PartialEq)]

@@ -130,9 +130,13 @@ mod error;
 mod log_level;
 mod validation;
 
-// ICU4X-backed internationalization (optional, enabled via `i18n` feature)
-#[cfg(feature = "i18n")]
+// Internationalization — core feature, always compiled
 pub mod i18n;
+
+/// Global locale initializer — ensures translations are available.
+static _LOCALE_INIT: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
+    i18n::init_locale();
+});
 
 // Emit a clear compile error when the `kit` feature is enabled without any
 // database driver.  DbNexusAdapter and InklogModule require at least
