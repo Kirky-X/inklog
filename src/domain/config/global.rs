@@ -182,3 +182,48 @@ impl GlobalConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_values() {
+        let cfg = GlobalConfig::default();
+        assert_eq!(cfg.level, "info");
+        assert_eq!(cfg.format, "{timestamp} [{level}] {target} - {message}");
+        assert!(cfg.masking_enabled);
+        assert!(cfg.auto_fallback);
+        assert_eq!(cfg.fallback_initial_delay_ms, 1000);
+        assert_eq!(cfg.fallback_max_delay_ms, 60000);
+        assert_eq!(cfg.fallback_max_retries, 10);
+    }
+
+    #[test]
+    fn test_validate_clamps_initial_delay() {
+        let mut cfg = GlobalConfig::default();
+        cfg.fallback_initial_delay_ms = 99999;
+        cfg.fallback_max_delay_ms = 5000;
+        cfg.validate();
+        assert_eq!(cfg.fallback_initial_delay_ms, 5000);
+    }
+
+    #[test]
+    fn test_validate_resets_zero_retries() {
+        let mut cfg = GlobalConfig::default();
+        cfg.fallback_max_retries = 0;
+        cfg.validate();
+        assert_eq!(cfg.fallback_max_retries, 1);
+    }
+
+    #[test]
+    fn test_validate_no_change_when_valid() {
+        let mut cfg = GlobalConfig::default();
+        cfg.fallback_initial_delay_ms = 1000;
+        cfg.fallback_max_delay_ms = 60000;
+        cfg.fallback_max_retries = 3;
+        cfg.validate();
+        assert_eq!(cfg.fallback_initial_delay_ms, 1000);
+        assert_eq!(cfg.fallback_max_retries, 3);
+    }
+}

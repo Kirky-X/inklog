@@ -186,4 +186,28 @@ mod tests {
             "apple == apple"
         );
     }
+
+    #[test]
+    fn test_debug_impl() {
+        let fmt = LogI18nFormatter::new("en-US").expect("en-US locale");
+        let debug_str = format!("{:?}", fmt);
+        assert!(debug_str.contains("LogI18nFormatter"));
+        assert!(debug_str.contains("locale"));
+    }
+
+    #[test]
+    fn test_format_event_count_arabic_zero() {
+        // Arabic has a "Zero" plural category for count=0
+        let fmt = LogI18nFormatter::new("ar").expect("ar locale");
+        let result = fmt.format_event_count(0).expect("plural 0");
+        assert_eq!(result, "Zero");
+    }
+
+    #[test]
+    fn test_format_event_count_polish_few() {
+        // Polish has a "Few" plural category for count=2,3,4
+        let fmt = LogI18nFormatter::new("pl").expect("pl locale");
+        let result = fmt.format_event_count(3).expect("plural 3");
+        assert_eq!(result, "Few");
+    }
 }

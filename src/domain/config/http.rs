@@ -121,3 +121,35 @@ pub enum HttpErrorMode {
     #[default]
     Strict,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_http_server_config_default() {
+        let cfg = HttpServerConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.port, 9090);
+        assert_eq!(cfg.metrics_path, "/metrics");
+        assert_eq!(cfg.health_path, "/health");
+        assert!(matches!(cfg.error_mode, HttpErrorMode::Strict));
+        assert!(cfg.auth.is_none());
+        assert!(cfg.ip_whitelist.is_none());
+        assert!(cfg.tls.is_none());
+    }
+
+    #[test]
+    fn test_http_auth_config_default() {
+        let cfg = HttpAuthConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.token_env, "INKLOG_HTTP_AUTH_TOKEN");
+    }
+
+    #[test]
+    fn test_http_error_mode_default() {
+        let mode = HttpErrorMode::default();
+        assert!(matches!(mode, HttpErrorMode::Strict));
+    }
+}

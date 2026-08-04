@@ -133,6 +133,46 @@ mod tests {
             Ok(_) => panic!("Expected build to fail with validation errors"),
         }
     }
+
+    #[test]
+    fn test_builder_file_when_no_file_sink() {
+        let mut builder = LoggerBuilder::new();
+        builder.config.file_sink = None;
+        builder = builder.file("/tmp/test.log");
+        assert!(builder.config.file_sink.is_some());
+        let file_cfg = builder.config.file_sink.as_ref().unwrap();
+        assert!(file_cfg.enabled);
+        assert_eq!(file_cfg.path, std::path::PathBuf::from("/tmp/test.log"));
+    }
+
+    #[test]
+    fn test_builder_file_when_file_sink_exists() {
+        let mut builder = LoggerBuilder::new();
+        builder.config.file_sink = Some(FileSinkConfig::default());
+        builder = builder.file("/tmp/updated.log");
+        let file_cfg = builder.config.file_sink.as_ref().unwrap();
+        assert!(file_cfg.enabled);
+        assert_eq!(file_cfg.path, std::path::PathBuf::from("/tmp/updated.log"));
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_builder_http_error_mode_unknown() {
+        let builder = LoggerBuilder::new().http_error_mode("invalid_mode");
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert!(builder.validation_errors[0].contains("Unknown HTTP error mode"));
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_builder_http_error_mode_warn() {
+        let builder = LoggerBuilder::new().http_error_mode("warn");
+        assert!(builder.validation_errors.is_empty());
+        assert!(matches!(
+            builder.config.http_server.as_ref().unwrap().error_mode,
+            crate::HttpErrorMode::Warn
+        ));
+    }
 }
 
 // ============================================================================
