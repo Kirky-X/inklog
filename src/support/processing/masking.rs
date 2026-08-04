@@ -160,7 +160,11 @@ static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 /// `DataMasker` is immutable and can be safely shared between threads.
 #[derive(Debug, Clone, Default)]
 pub struct DataMasker {
+    /// Regex-based rules (includes all rules when `fast-masking` is off).
     rules: Vec<MaskRule>,
+    /// Aho-Corasick fast path for literal-pattern rules.
+    #[cfg(feature = "fast-masking")]
+    ac_masker: Option<super::masking_ac::AcMasker>,
 }
 
 /// Type alias for the custom apply function used in masking rules.
@@ -183,6 +187,8 @@ pub struct MaskRule {
     priority: i32,
     enabled: bool,
     apply_fn: ApplyFn,
+    /// When true, the pattern is a literal string (eligible for AC acceleration).
+    is_literal: bool,
 }
 
 impl std::fmt::Debug for MaskRule {
@@ -194,6 +200,7 @@ impl std::fmt::Debug for MaskRule {
             .field("priority", &self.priority)
             .field("enabled", &self.enabled)
             .field("apply_fn", &"<fn>")
+            .field("is_literal", &self.is_literal)
             .finish()
     }
 }
@@ -227,7 +234,11 @@ impl DataMasker {
             MaskRule::new_private_key_rule(),
         ];
         rules.sort_by_key(|r| r.priority());
-        Self { rules }
+        Self {
+            rules,
+            #[cfg(feature = "fast-masking")]
+            ac_masker: None,
+        }
     }
 
     /// 检查字段名是否为敏感字段（大小写不敏感，使用词边界正则避免误判）
@@ -243,7 +254,17 @@ impl DataMasker {
     }
 
     pub fn mask(&self, text: &str) -> String {
+        #[cfg(feature = "fast-masking")]
+        let mut result = {
+            if let Some(ref ac) = self.ac_masker {
+                ac.mask_fast(text)
+            } else {
+                text.to_string()
+            }
+        };
+        #[cfg(not(feature = "fast-masking"))]
         let mut result = text.to_string();
+
         for rule in &self.rules {
             if rule.is_enabled() {
                 result = rule.apply(&result);
@@ -347,6 +368,10 @@ impl DataMaskerBuilder {
     }
 
     /// Build the [`DataMasker`] with all configured rules sorted by priority.
+    ///
+    /// When the `fast-masking` feature is enabled, literal-pattern rules are
+    /// extracted into an [`AcMasker`](super::masking_ac::AcMasker) for single-pass
+    /// acceleration; remaining regex rules stay in the sequential path.
     pub fn build(self) -> DataMasker {
         let mut rules = if let Some(registry) = self.custom_registry {
             registry.active_rules().into_iter().cloned().collect()
@@ -367,6 +392,34 @@ impl DataMaskerBuilder {
         // Sort by priority
         rules.sort_by_key(|r| r.priority());
 
+        #[cfg(feature = "fast-masking")]
+        {
+            // Partition: literal rules → AC, regex rules → sequential
+            let (literal_rules, regex_rules): (Vec<_>, Vec<_>) = rules
+                .into_iter()
+                .partition(|r| r.is_literal() && r.is_enabled());
+
+            let ac_masker = if !literal_rules.is_empty() {
+                let patterns: Vec<String> = literal_rules
+                    .iter()
+                    .map(|r| r.pattern.as_str().to_string())
+                    .collect();
+                let replacements: Vec<String> = literal_rules
+                    .iter()
+                    .map(|r| r.replacement.clone())
+                    .collect();
+                super::masking_ac::AcMasker::new(patterns, replacements)
+            } else {
+                None
+            };
+
+            DataMasker {
+                rules: regex_rules,
+                ac_masker,
+            }
+        }
+
+        #[cfg(not(feature = "fast-masking"))]
         DataMasker { rules }
     }
 }
@@ -580,6 +633,7 @@ impl MaskRule {
                     regex.replace(text, replacement).to_string()
                 })
             }),
+            is_literal: false,
         }
     }
 
@@ -834,6 +888,11 @@ impl MaskRule {
         self.enabled = enabled;
     }
 
+    /// Returns whether this rule uses a literal (fixed-string) pattern.
+    pub fn is_literal(&self) -> bool {
+        self.is_literal
+    }
+
     /// Creates a new builder for constructing a `MaskRule`.
     pub fn builder(name: &str) -> MaskRuleBuilder {
         MaskRuleBuilder::new(name)
@@ -866,6 +925,7 @@ pub struct MaskRuleBuilder {
     priority: i32,
     enabled: bool,
     apply_fn: Option<ApplyFn>,
+    is_literal: bool,
 }
 
 impl MaskRuleBuilder {
@@ -877,6 +937,7 @@ impl MaskRuleBuilder {
             priority: 100,
             enabled: true,
             apply_fn: None,
+            is_literal: false,
         }
     }
 
@@ -910,6 +971,15 @@ impl MaskRuleBuilder {
         self
     }
 
+    /// Mark this rule's pattern as a literal string (eligible for AC acceleration).
+    ///
+    /// When `true`, the pattern is treated as a fixed string rather than a regex,
+    /// enabling the Aho-Corasick fast path when `fast-masking` feature is enabled.
+    pub fn literal(mut self, is_literal: bool) -> Self {
+        self.is_literal = is_literal;
+        self
+    }
+
     /// Builds the [`MaskRule`], compiling the regex pattern.
     ///
     /// # Errors
@@ -932,6 +1002,7 @@ impl MaskRuleBuilder {
                     regex.replace(text, replacement).to_string()
                 })
             }),
+            is_literal: self.is_literal,
         })
     }
 }
