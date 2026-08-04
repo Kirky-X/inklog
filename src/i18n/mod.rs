@@ -210,4 +210,20 @@ mod tests {
         let result = fmt.format_event_count(3).expect("plural 3");
         assert_eq!(result, "Few");
     }
+
+    #[test]
+    fn test_format_event_count_arabic_two() {
+        // Arabic has a "Two" plural category for count=2
+        let fmt = LogI18nFormatter::new("ar").expect("ar locale");
+        let result = fmt.format_event_count(2).expect("plural 2");
+        assert_eq!(result, "Two");
+    }
+
+    #[test]
+    fn test_format_event_count_arabic_many() {
+        // Arabic has a "Many" plural category for count=11..99
+        let fmt = LogI18nFormatter::new("ar").expect("ar locale");
+        let result = fmt.format_event_count(11).expect("plural 11");
+        assert_eq!(result, "Many");
+    }
 }

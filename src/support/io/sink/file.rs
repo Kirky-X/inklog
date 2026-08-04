@@ -4199,4 +4199,95 @@ mod tests {
         assert!(inner.current_file.is_some(), "file should be opened");
         assert!(log_path.exists(), "log file should exist on disk");
     }
+
+    // ==================== Rotatable / DiskCheckable trait impl 测试 ====================
+
+    #[test]
+    fn test_rotatable_trait_start_and_stop_rotation_timer() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("rotatable_test.log"),
+            rotation_time: "daily".to_string(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        // start_rotation_timer via Rotatable trait (line 1203-1205)
+        Rotatable::start_rotation_timer(&sink);
+        // Verify timer was set
+        {
+            let inner = sink.inner.read();
+            assert!(inner.timer_handle.is_some(), "timer handle should be set");
+        }
+        // stop_rotation_timer via Rotatable trait (lines 1208-1211)
+        Rotatable::stop_rotation_timer(&sink);
+        {
+            let inner = sink.inner.read();
+            assert!(
+                inner.rotation_timer.is_none(),
+                "rotation timer should be None"
+            );
+        }
+    }
+
+    #[test]
+    fn test_disk_checkable_trait_check_disk_space() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("disk_check_test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        // check_disk_space via DiskCheckable trait (lines 1216-1218)
+        let result = DiskCheckable::check_disk_space(&sink);
+        assert!(result.is_ok(), "check_disk_space should succeed");
+        assert!(result.unwrap(), "disk should have sufficient space");
+    }
+
+    #[tokio::test]
+    async fn test_write_batch_flush_after_rotation() {
+        // Cover lines 1117-1124: batch flush triggered after rotation during write
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("batch_rotation.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            max_size: "100".to_string(), // Very small to trigger rotation
+            batch_size: 2,               // Small batch size
+            flush_interval_ms: 10000,    // Long interval so size triggers flush
+            rotation_time: "daily".to_string(),
+            compress: false,
+            encrypt: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        // Open the file first
+        {
+            let mut inner = sink.inner.write();
+            sink.open_file_inner(&mut inner).unwrap();
+        }
+        // Write enough records to trigger rotation and batch flush
+        for i in 0..10 {
+            let record = create_test_record(&format!("batch rotation message {}", i));
+            sink.write(&record).await.unwrap();
+        }
+        // Flush remaining
+        sink.flush().await.unwrap();
+        // Verify some content was written
+        let mut any_content = false;
+        for entry in std::fs::read_dir(temp_dir.path()).unwrap() {
+            let entry = entry.unwrap();
+            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                if content.contains("batch rotation message") {
+                    any_content = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            any_content,
+            "at least one file should contain written records"
+        );
+    }
 }
