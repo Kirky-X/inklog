@@ -30,6 +30,20 @@ fn plural_category_name(category: PluralCategory) -> &'static str {
 }
 
 impl LogI18nFormatter {
+    /// Create a new formatter using the current system locale.
+    ///
+    /// Delegates to [`LogI18nFormatter::new`] with the locale
+    /// detected by the [`LocaleManager`](super::locale_manager).
+    ///
+    /// # Errors
+    /// Returns [`I18nError::InvalidLocale`] if the detected locale
+    /// cannot be parsed, or [`I18nError::FormatError`] if ICU4X
+    /// lacks compiled data for it.
+    pub fn new_default() -> Result<Self, I18nError> {
+        let locale = super::locale_manager::current_locale();
+        Self::new(&locale)
+    }
+
     /// Create a new formatter for the given BCP-47 locale tag.
     ///
     /// # Errors

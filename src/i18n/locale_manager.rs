@@ -115,7 +115,7 @@ fn resolve_locale() -> String {
     // 1. Environment variable (highest priority)
     if let Ok(locale) = std::env::var("INKLOG_LOCALE") {
         let locale = locale.trim().to_string();
-        if !locale.is_empty() {
+        if !locale.is_empty() && is_valid_locale(&locale) {
             return locale;
         }
     }
@@ -123,13 +123,28 @@ fn resolve_locale() -> String {
     // 2. System locale detection
     if let Some(sys_locale) = sys_locale::get_locale() {
         let sys_locale = sys_locale.trim().to_string();
-        if !sys_locale.is_empty() {
+        if !sys_locale.is_empty() && is_valid_locale(&sys_locale) {
             return sys_locale;
         }
     }
 
     // 3. Fallback
     "en".to_string()
+}
+
+/// Check if a locale string is a valid BCP-47 language tag.
+///
+/// Rejects POSIX locale names like `"C"`, `"POSIX"`, or `"en_US.UTF-8"`
+/// that `sys-locale` may return on some platforms.
+fn is_valid_locale(locale: &str) -> bool {
+    // Reject known non-BCP-47 values
+    if matches!(locale, "C" | "POSIX") {
+        return false;
+    }
+    // Strip encoding suffix (e.g. "en_US.UTF-8" → "en_US")
+    let tag = locale.split('.').next().unwrap_or(locale);
+    // Validate as a BCP-47 language identifier
+    tag.parse::<LanguageIdentifier>().is_ok()
 }
 
 fn load_resources() -> (

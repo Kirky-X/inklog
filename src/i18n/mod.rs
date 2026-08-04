@@ -10,17 +10,19 @@
 //! formatting log counters, displaying log timestamps, normalizing log
 //! levels, and sorting log fields by locale-specific collation rules.
 //!
-//! Enable with the `i18n` cargo feature:
-//! ```toml
-//! [dependencies]
-//! inklog = { version = "...", features = ["i18n"] }
-//! ```
+//! Runtime message translation is provided by `fluent-bundle` with `.ftl`
+//! translation files. Locale is automatically detected via `sys-locale`
+//! and can be overridden with the `INKLOG_LOCALE` environment variable.
 //!
 //! # Example
 //!
 //! ```rust,ignore
 //! use inklog::i18n::LogI18nFormatter;
 //!
+//! // Use the current system locale
+//! let fmt = LogI18nFormatter::new_default()?;
+//!
+//! // Or specify a locale explicitly
 //! let fmt = LogI18nFormatter::new("en-US")?;
 //! let plural = fmt.format_event_count(1)?; // "One"
 //! let ts = fmt.format_timestamp(2026, 7, 11)?;
@@ -230,5 +232,26 @@ mod tests {
         let fmt = LogI18nFormatter::new("ar").expect("ar locale");
         let result = fmt.format_event_count(11).expect("plural 11");
         assert_eq!(result, "Many");
+    }
+
+    #[test]
+    fn test_new_default() {
+        // new_default() should create a formatter using the current system locale
+        let current = current_locale();
+        let fmt = LogI18nFormatter::new_default();
+        assert!(
+            fmt.is_ok(),
+            "new_default() should succeed for locale '{}', got error: {:?}",
+            current,
+            fmt.err()
+        );
+        let fmt = fmt.unwrap();
+        let debug_str = format!("{:?}", fmt);
+        assert!(
+            debug_str.contains(&current),
+            "formatter locale should match current_locale '{}', got: {}",
+            current,
+            debug_str
+        );
     }
 }
