@@ -65,6 +65,9 @@ pub struct PerformanceConfig {
     pub min_capacity: usize,
     #[serde(default = "default_max_capacity")]
     pub max_capacity: usize,
+    /// Maximum log rate in logs/sec. `None` = unlimited.
+    #[serde(default)]
+    pub rate_limit: Option<u64>,
 }
 
 fn default_channel_capacity() -> usize {
@@ -100,6 +103,7 @@ impl Default for PerformanceConfig {
             shrink_wait_seconds: default_shrink_wait(),
             min_capacity: default_min_capacity(),
             max_capacity: default_max_capacity(),
+            rate_limit: None,
         }
     }
 }
@@ -131,6 +135,14 @@ impl PerformanceConfig {
             );
             self.shrink_threshold_percent = default_shrink_threshold();
             self.expand_threshold_percent = default_expand_threshold();
+        }
+
+        // Validate rate_limit: Some(0) is invalid, reset to None
+        if let Some(rate) = self.rate_limit
+            && rate == 0
+        {
+            tracing::warn!("rate_limit = 0 is invalid, resetting to None (unlimited)");
+            self.rate_limit = None;
         }
     }
 }
@@ -206,5 +218,29 @@ mod tests {
         cfg.validate();
         assert_eq!(cfg.shrink_threshold_percent, default_shrink_threshold());
         assert_eq!(cfg.expand_threshold_percent, default_expand_threshold());
+    }
+
+    #[test]
+    fn test_validate_rate_limit_zero_reset_to_none() {
+        let mut cfg = PerformanceConfig::default();
+        cfg.rate_limit = Some(0);
+        cfg.validate();
+        assert_eq!(cfg.rate_limit, None);
+    }
+
+    #[test]
+    fn test_validate_rate_limit_positive_preserved() {
+        let mut cfg = PerformanceConfig::default();
+        cfg.rate_limit = Some(10000);
+        cfg.validate();
+        assert_eq!(cfg.rate_limit, Some(10000));
+    }
+
+    #[test]
+    fn test_validate_rate_limit_none_unchanged() {
+        let mut cfg = PerformanceConfig::default();
+        cfg.rate_limit = None;
+        cfg.validate();
+        assert_eq!(cfg.rate_limit, None);
     }
 }

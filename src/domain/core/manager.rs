@@ -18,6 +18,8 @@ use crate::integrations::Cache;
 use crate::integrations::Database;
 use crate::support::io::ConsoleSink;
 use crate::support::io::FileSink;
+use crate::support::processing::RateLimiter;
+use crate::validation::sanitize::LogSanitizer;
 use crate::{FileSinkConfig, InklogConfig};
 use crate::{HealthStatus, Metrics};
 use crate::{LogAdapter, LogLogger};
@@ -354,8 +356,18 @@ impl LoggerManager {
         )));
 
         // Initialize tracing subscriber with console_sender channel
-        let subscriber =
+        let mut subscriber =
             LoggerSubscriber::new(console_sender.clone(), sender.clone(), metrics.clone());
+
+        // Wire sanitizer when security features are enabled (CWE-117 prevention)
+        if config.global.masking_enabled {
+            subscriber = subscriber.with_sanitizer(Arc::new(LogSanitizer::new()));
+        }
+
+        // Wire rate limiter when configured
+        if let Some(rate) = config.performance.rate_limit {
+            subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(rate)));
+        }
 
         // Filter — use EnvFilter to support RUST_LOG per-module filtering
         // Configured level serves as the global default; RUST_LOG overrides
