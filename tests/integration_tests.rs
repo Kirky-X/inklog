@@ -1212,20 +1212,7 @@ async fn verify_database_sink_sqlite() {
     let mock_ref = mock_db_arc.as_ref() as &inklog::integrations::infra::MockDatabaseAdapter;
     assert_eq!(mock_ref.record_count(), 1);
 
-    // 可选：验证真实数据库（使用不同的数据库路径避免冲突）
-    {
-        use inklog::sink::entity::{
-            Entity,
-            sea_orm::{Database, EntityTrait},
-        };
-
-        let db = Database::connect(&url)
-            .await
-            .expect("Failed to connect to database");
-        let logs = Entity::find().all(&db).await.expect("Failed to query logs");
-        // 注意：MockDatabaseAdapter 不会写入真实数据库，查询成功即表示表存在
-        let _ = logs;
-    }
+    // MockDatabaseAdapter 不写入真实数据库，跳过 ORM 验证（entity 模块已迁移至 dbnexus 原生 SQL）
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -1233,17 +1220,24 @@ async fn create_logs_table(url: &str) -> Result<(), String> {
     let pool = dbnexus::DbPool::new(url).await.map_err(|e| e.to_string())?;
     let session = pool.get_session("admin").await.map_err(|e| e.to_string())?;
 
-    use inklog::sink::entity::sea_orm::{ConnectionTrait, Schema};
-
-    let conn = session.connection().map_err(|e| e.to_string())?;
-    let schema = Schema::new(conn.get_database_backend());
-    conn.execute(
-        schema
-            .create_table_from_entity(inklog::sink::entity::Entity)
-            .if_not_exists(),
-    )
-    .await
-    .map_err(|e: inklog::sink::entity::sea_orm::DbErr| e.to_string())?;
+    session
+        .execute_raw_ddl(
+            "CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                target TEXT NOT NULL,
+                message TEXT NOT NULL,
+                fields TEXT,
+                file TEXT,
+                line INTEGER,
+                thread_id TEXT NOT NULL,
+                module_path TEXT,
+                metadata TEXT
+            )",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

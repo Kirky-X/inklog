@@ -363,28 +363,28 @@ mod tests {
 
     #[test]
     fn test_generate_config_rejects_path_traversal() {
-        let result = generate_config(&Path::new("../etc/config.toml"), "minimal");
+        let result = generate_config(Path::new("../etc/config.toml"), "minimal");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("traversal"));
     }
 
     #[test]
     fn test_generate_env_example_rejects_path_traversal() {
-        let result = generate_env_example(&Path::new("../../etc/.env.example"));
+        let result = generate_env_example(Path::new("../../etc/.env.example"));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("traversal"));
     }
 
     #[test]
     fn test_validate_output_path_safety_rejects_null_bytes() {
-        let result = validate_output_path_safety(&Path::new("file\0.toml"));
+        let result = validate_output_path_safety(Path::new("file\0.toml"));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_validate_output_path_safety_accepts_normal_paths() {
-        assert!(validate_output_path_safety(&Path::new("config.toml")).is_ok());
-        assert!(validate_output_path_safety(&Path::new("/tmp/config.toml")).is_ok());
-        assert!(validate_output_path_safety(&Path::new("subdir/config.toml")).is_ok());
+        assert!(validate_output_path_safety(Path::new("config.toml")).is_ok());
+        assert!(validate_output_path_safety(Path::new("/tmp/config.toml")).is_ok());
+        assert!(validate_output_path_safety(Path::new("subdir/config.toml")).is_ok());
     }
 }
