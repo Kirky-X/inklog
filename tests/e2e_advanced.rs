@@ -1687,7 +1687,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_closed_to_open_after_threshold() {
-        let mut cb = CircuitBreaker::new(3, Duration::from_secs(30), 2);
+        let cb = CircuitBreaker::new(3, Duration::from_secs(30), 2);
         assert!(matches!(cb.state(), CircuitState::Closed));
 
         // 2 次失败未达阈值
@@ -1709,7 +1709,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_open_to_half_open_after_timeout() {
-        let mut cb = CircuitBreaker::new(1, Duration::from_millis(10), 1);
+        let cb = CircuitBreaker::new(1, Duration::from_millis(10), 1);
         cb.record_failure();
         assert!(matches!(cb.state(), CircuitState::Open));
 
@@ -1727,7 +1727,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_half_open_to_closed_after_success_threshold() {
-        let mut cb = CircuitBreaker::new(1, Duration::from_millis(10), 2);
+        let cb = CircuitBreaker::new(1, Duration::from_millis(10), 2);
         cb.record_failure();
         assert!(matches!(cb.state(), CircuitState::Open));
 
@@ -1753,7 +1753,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_half_open_to_open_on_failure() {
-        let mut cb = CircuitBreaker::new(1, Duration::from_millis(10), 2);
+        let cb = CircuitBreaker::new(1, Duration::from_millis(10), 2);
         cb.record_failure();
         std::thread::sleep(Duration::from_millis(50));
         let _ = cb.can_execute(); // Open → HalfOpen
@@ -1768,7 +1768,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_closed_resets_failure_count_on_success() {
-        let mut cb = CircuitBreaker::new(5, Duration::from_secs(30), 3);
+        let cb = CircuitBreaker::new(5, Duration::from_secs(30), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.failure_count(), 2);
@@ -1784,7 +1784,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_reset() {
-        let mut cb = CircuitBreaker::new(1, Duration::from_secs(30), 1);
+        let cb = CircuitBreaker::new(1, Duration::from_secs(30), 1);
         cb.record_failure();
         assert!(matches!(cb.state(), CircuitState::Open));
 
@@ -1810,7 +1810,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_open_stays_open_within_timeout() {
-        let mut cb = CircuitBreaker::new(1, Duration::from_secs(60), 1);
+        let cb = CircuitBreaker::new(1, Duration::from_secs(60), 1);
         cb.record_failure();
         assert!(matches!(cb.state(), CircuitState::Open));
 
@@ -1822,7 +1822,7 @@ mod circuit_breaker_e2e {
 
     #[test]
     fn test_circuit_breaker_open_record_failure_stays_open() {
-        let mut cb = CircuitBreaker::new(1, Duration::from_secs(60), 1);
+        let cb = CircuitBreaker::new(1, Duration::from_secs(60), 1);
         cb.record_failure(); // → Open
         cb.record_failure(); // 应保持 Open
         assert!(matches!(cb.state(), CircuitState::Open));
@@ -2585,9 +2585,8 @@ mod file_sink_e2e {
         assert_eq!(FileSink::parse_size("1TB"), Some(1024 * 1024 * 1024 * 1024));
         // 纯数字（无后缀）- 视为字节数
         assert_eq!(FileSink::parse_size("1024"), Some(1024));
-        // "1024B" 不支持 - FileSink::parse_size 没有 "B" 后缀分支，会走 else 分支
-        // 尝试 parse::<u64>("1024B") 失败，返回 None
-        assert_eq!(FileSink::parse_size("1024B"), None);
+        // "1024B" — parse_size supports "B" suffix (bytes)
+        assert_eq!(FileSink::parse_size("1024B"), Some(1024));
         assert_eq!(FileSink::parse_size("invalid"), None);
         assert_eq!(FileSink::parse_size(""), None);
     }
