@@ -81,19 +81,22 @@ impl InklogConfig {
     fn apply_env_overrides(config: &mut Self) {
         // Global config overrides
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_LEVEL") {
-            // Validate against known log levels before applying
-            let valid_levels = ["trace", "debug", "info", "warn", "error"];
-            if valid_levels.contains(&val.to_lowercase().as_str()) {
+            // Validate against known log levels before applying (case-insensitive, includes aliases)
+            if crate::LogLevel::is_valid_level(&val) {
                 config.global.level = val;
             } else {
                 let mut args = fluent_bundle::FluentArgs::new();
-                args.set("val", val.clone());
-                args.set("current", config.global.level.clone());
+                args.set("val", &val);
+                args.set("current", &config.global.level);
                 tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_level", args));
             }
         }
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_FORMAT") {
-            config.global.format = val;
+            if !val.is_empty() {
+                config.global.format = val;
+            } else {
+                tracing::warn!("{}", crate::i18n::tr("config-env_invalid_format"));
+            }
         }
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_MASKING_ENABLED") {
             config.global.masking_enabled = val.parse().unwrap_or(config.global.masking_enabled);
@@ -118,7 +121,7 @@ impl InklogConfig {
             let has_null = val.contains('\0');
             if has_traversal || has_null {
                 let mut args = fluent_bundle::FluentArgs::new();
-                args.set("path", val.clone());
+                args.set("path", &val);
                 tracing::warn!("{}", crate::i18n::tr_args("config-env_unsafe_path", args));
             } else {
                 let file_config = config.file_sink.get_or_insert_with(Default::default);
@@ -131,7 +134,7 @@ impl InklogConfig {
             let has_numeric = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
             if has_numeric == 0 {
                 let mut args = fluent_bundle::FluentArgs::new();
-                args.set("val", val.clone());
+                args.set("val", &val);
                 tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_size", args));
             } else {
                 let file_config = config.file_sink.get_or_insert_with(Default::default);
@@ -155,12 +158,34 @@ impl InklogConfig {
             http_config.port = val.parse().unwrap_or(http_config.port);
         }
         if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_METRICS_PATH") {
-            let http_config = config.http_server.get_or_insert_with(Default::default);
-            http_config.metrics_path = val;
+            // Validate HTTP path: must start with '/' and contain no traversal
+            if val.starts_with('/') && !val.contains("..") && !val.contains('\0') {
+                let http_config = config.http_server.get_or_insert_with(Default::default);
+                http_config.metrics_path = val;
+            } else {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("path", &val);
+                args.set("env_var", "INKLOG_HTTP_SERVER_METRICS_PATH");
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("config-env_unsafe_http_path", args)
+                );
+            }
         }
         if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_HEALTH_PATH") {
-            let http_config = config.http_server.get_or_insert_with(Default::default);
-            http_config.health_path = val;
+            // Validate HTTP path: must start with '/' and contain no traversal
+            if val.starts_with('/') && !val.contains("..") && !val.contains('\0') {
+                let http_config = config.http_server.get_or_insert_with(Default::default);
+                http_config.health_path = val;
+            } else {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("path", &val);
+                args.set("env_var", "INKLOG_HTTP_SERVER_HEALTH_PATH");
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("config-env_unsafe_http_path", args)
+                );
+            }
         }
         if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_ERROR_MODE") {
             let http_config = config.http_server.get_or_insert_with(Default::default);
@@ -170,7 +195,7 @@ impl InklogConfig {
                 HttpErrorMode::Warn
             } else {
                 let mut args = fluent_bundle::FluentArgs::new();
-                args.set("val", val.clone());
+                args.set("val", &val);
                 tracing::warn!(
                     "{}",
                     crate::i18n::tr_args("config-env_unknown_error_mode", args)
@@ -187,6 +212,36 @@ impl InklogConfig {
         if let Ok(val) = std::env::var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY") {
             config.performance.channel_capacity =
                 val.parse().unwrap_or(config.performance.channel_capacity);
+        }
+
+        // Database sink overrides
+        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_URL") {
+            let path_buf = std::path::PathBuf::from(&val);
+            let has_traversal = path_buf
+                .components()
+                .any(|c| c == std::path::Component::ParentDir);
+            if has_traversal || val.contains('\0') {
+                tracing::warn!("{}", crate::i18n::tr("config-env_invalid_db_url"));
+            } else {
+                let db_config = config.database_sink.get_or_insert_with(Default::default);
+                db_config.url = val;
+            }
+        }
+        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_POOL_SIZE") {
+            let db_config = config.database_sink.get_or_insert_with(Default::default);
+            db_config.pool_size = val.parse().unwrap_or(db_config.pool_size);
+        }
+        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_BATCH_SIZE") {
+            let db_config = config.database_sink.get_or_insert_with(Default::default);
+            db_config.batch_size = val.parse().unwrap_or(db_config.batch_size);
+        }
+        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_FLUSH_INTERVAL_MS") {
+            let db_config = config.database_sink.get_or_insert_with(Default::default);
+            db_config.flush_interval_ms = val.parse().unwrap_or(db_config.flush_interval_ms);
+        }
+        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_TABLE_NAME") {
+            let db_config = config.database_sink.get_or_insert_with(Default::default);
+            db_config.table_name = val;
         }
     }
 
@@ -359,6 +414,19 @@ impl InklogConfig {
         {
             return Err(InklogError::ConfigError(crate::i18n::tr(
                 "config-http_port_zero",
+            )));
+        }
+
+        // --- Console sink stderr_levels ---
+        if let Some(ref console) = self.console_sink
+            && let Some(invalid) = console.invalid_stderr_levels().first()
+        {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("level", *invalid);
+            args.set("valid", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-invalid_stderr_level",
+                args,
             )));
         }
 
@@ -883,6 +951,93 @@ level = "debug"
         ));
         unsafe {
             std::env::remove_var("INKLOG_HTTP_SERVER_ERROR_MODE");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_database_sink_url() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_DATABASE_SINK_URL", "postgres://localhost/testdb");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.database_sink.is_some());
+        assert_eq!(
+            config.database_sink.as_ref().unwrap().url,
+            "postgres://localhost/testdb"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_DATABASE_SINK_URL");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_database_sink_pool_size() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_DATABASE_SINK_POOL_SIZE", "20");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(config.database_sink.is_some());
+        assert_eq!(config.database_sink.as_ref().unwrap().pool_size, 20);
+        unsafe {
+            std::env::remove_var("INKLOG_DATABASE_SINK_POOL_SIZE");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_global_format_empty() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_FORMAT", "");
+        }
+        let mut config = InklogConfig::default();
+        let original_format = config.global.format.clone();
+        InklogConfig::apply_env_overrides(&mut config);
+        // Empty format should be ignored, keeping original value
+        assert_eq!(config.global.format, original_format);
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_FORMAT");
+        }
+    }
+
+    #[test]
+    fn test_validate_invalid_stderr_levels() {
+        let mut config = InklogConfig::default();
+        config.console_sink = Some(ConsoleSinkConfig {
+            stderr_levels: vec!["error".into(), "bogus_level".into()],
+            ..Default::default()
+        });
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("bogus_level"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_file_sink_retained_with_invalid_max_size() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test.log");
+            std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "INVALID");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        // file_sink should be created with the path, even though max_size is invalid
+        assert!(config.file_sink.is_some());
+        assert_eq!(
+            config.file_sink.as_ref().unwrap().path,
+            std::path::PathBuf::from("/tmp/test.log")
+        );
+        // max_size should remain default ("100MB") since INVALID was rejected
+        assert_eq!(config.file_sink.as_ref().unwrap().max_size, "100MB");
+        unsafe {
+            std::env::remove_var("INKLOG_FILE_SINK_PATH");
+            std::env::remove_var("INKLOG_FILE_SINK_MAX_SIZE");
         }
     }
 }

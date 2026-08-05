@@ -19,3 +19,7 @@ config-env_invalid_level = Invalid INKLOG_GLOBAL_LEVEL '{ $val }', keeping curre
 config-env_unsafe_path = INKLOG_FILE_SINK_PATH '{ $path }' contains unsafe characters, ignoring
 config-env_invalid_size = INKLOG_FILE_SINK_MAX_SIZE '{ $val }' is not a valid size format (e.g., '100MB'), ignoring
 config-env_unknown_error_mode = Unknown INKLOG_HTTP_SERVER_ERROR_MODE '{ $val }', keeping current value
+config-env_unsafe_http_path = HTTP path '{ $path }' (env: { $env_var }) is not a valid URL path (must start with '/' and contain no traversal), ignoring
+config-invalid_stderr_level = Invalid stderr_levels entry '{ $level }'. Valid levels: { $valid }
+config-env_invalid_format = INKLOG_GLOBAL_FORMAT is empty, ignoring
+config-env_invalid_db_url = INKLOG_DATABASE_SINK_URL contains unsafe characters, ignoring

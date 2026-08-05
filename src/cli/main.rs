@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 mod cli_impl;
@@ -43,7 +43,7 @@ enum Commands {
         recursive: bool,
 
         #[arg(long)]
-        #[arg(help = "Batch mode: glob pattern for multiple files")]
+        #[arg(help = "Enable batch mode for multiple files")]
         batch: bool,
     },
 
@@ -57,7 +57,7 @@ enum Commands {
         #[arg(short, long)]
         #[arg(help = "Config type: minimal, full, database, file")]
         #[arg(default_value = "full")]
-        config_type: String,
+        config_type: ConfigType,
 
         #[arg(long)]
         #[arg(help = "Generate environment variable example file")]
@@ -65,16 +65,36 @@ enum Commands {
     },
 
     #[command(name = "validate")]
-    #[command(about = "Validate inklog configuration files")]
+    #[command(about = "Validate inklog configuration files (default: inklog_config.toml)")]
     Validate {
         #[arg(short, long)]
         #[arg(help = "Path to configuration file")]
         config: Option<PathBuf>,
 
         #[arg(long)]
-        #[arg(help = "Check system prerequisites")]
+        #[arg(help = "Check system prerequisites instead of config file")]
         prerequisites: bool,
     },
+}
+
+/// Configuration template type for the generate command.
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ConfigType {
+    Minimal,
+    Full,
+    Database,
+    File,
+}
+
+impl std::fmt::Display for ConfigType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigType::Minimal => write!(f, "minimal"),
+            ConfigType::Full => write!(f, "full"),
+            ConfigType::Database => write!(f, "database"),
+            ConfigType::File => write!(f, "file"),
+        }
+    }
 }
 
 fn main() {

@@ -19,3 +19,7 @@ config-env_invalid_level = 无效的 INKLOG_GLOBAL_LEVEL '{ $val }'，保留当�
 config-env_unsafe_path = INKLOG_FILE_SINK_PATH '{ $path }' 包含不安全字符，已忽略
 config-env_invalid_size = INKLOG_FILE_SINK_MAX_SIZE '{ $val }' 不是有效的大小格式（如 '100MB'），已忽略
 config-env_unknown_error_mode = 未知的 INKLOG_HTTP_SERVER_ERROR_MODE '{ $val }'，保留当前值
+config-env_unsafe_http_path = HTTP 路径 '{ $path }'（环境变量: { $env_var }）不是有效的 URL 路径（必须以 '/' 开头且不含遍历模式），已忽略
+config-invalid_stderr_level = 无效的 stderr_levels 条目 '{ $level }'。有效级别: { $valid }
+config-env_invalid_format = INKLOG_GLOBAL_FORMAT 为空，已忽略
+config-env_invalid_db_url = INKLOG_DATABASE_SINK_URL 包含不安全字符，已忽略
