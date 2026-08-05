@@ -76,7 +76,7 @@ fn show_from_str_display() {
 
     println!("\n无效输入：");
     for input in ["", "oracle", "mongodb", "invalid"] {
-        let result: Result<DatabaseDriver, ()> = input.parse();
+        let result: Result<DatabaseDriver, String> = input.parse();
         match result {
             Ok(d) => println!("  {:>10}.parse() → Ok({:?})", input, d),
             Err(_) => println!("  {:>10}.parse() → Err(())", input),

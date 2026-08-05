@@ -139,6 +139,7 @@ fn show_adaptive_thresholds() {
         shrink_wait_seconds: 60,
         min_capacity: 5000,
         max_capacity: 100000,
+        rate_limit: None,
     };
     println!(
         "  channel_capacity        = {}",
@@ -180,6 +181,7 @@ fn show_performance_profiles() {
                 shrink_wait_seconds: 30,
                 min_capacity: 1000,
                 max_capacity: 50000,
+                rate_limit: None,
             },
         ),
         (
@@ -193,6 +195,7 @@ fn show_performance_profiles() {
                 shrink_wait_seconds: 30,
                 min_capacity: 1000,
                 max_capacity: 20000,
+                rate_limit: None,
             },
         ),
         (
@@ -206,6 +209,7 @@ fn show_performance_profiles() {
                 shrink_wait_seconds: 30,
                 min_capacity: 500,
                 max_capacity: 5000,
+                rate_limit: None,
             },
         ),
         (
@@ -219,6 +223,7 @@ fn show_performance_profiles() {
                 shrink_wait_seconds: 45,
                 min_capacity: 2000,
                 max_capacity: 80000,
+                rate_limit: None,
             },
         ),
     ];

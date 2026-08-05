@@ -166,6 +166,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         colored: true,
         stderr_levels: vec!["error".to_string(), "warn".to_string()],
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let console_sink = ConsoleSink::new(console_config, LogTemplate::new("[{level}] {message}"));
     println!("Console Sink: 已配置");
@@ -187,6 +188,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         batch_size: 10,
         flush_interval_ms: 100,
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let file_sink = FileSink::new(file_config)?;
     println!("File Sink: 已配置");
@@ -294,6 +296,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         batch_size: 1,
         flush_interval_ms: 10,
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let backup_sink = FileSink::new(backup_config)?;
     println!("备用 File Sink: 已就绪");
@@ -304,6 +307,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         colored: true,
         stderr_levels: vec![],
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let console_sink = ConsoleSink::new(primary_config, LogTemplate::new("[{level}] {message}"));
 
@@ -469,6 +473,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         batch_size: 10,
         flush_interval_ms: 100,
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let primary_sink = FileSink::new(primary_config)?;
 
@@ -488,6 +493,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         batch_size: 10,
         flush_interval_ms: 100,
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let fallback_sink = FileSink::new(fallback_config)?;
 

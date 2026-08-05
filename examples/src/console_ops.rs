@@ -24,6 +24,7 @@ pub fn create_console_config(colored: bool, stderr_levels: Vec<String>) -> Conso
         colored,
         stderr_levels,
         masking_enabled: false,
+        output_format: Default::default(),
     }
 }
 

@@ -32,6 +32,7 @@ db-batch_insert_failed = 批量插入失败: { $err }
 db-table_empty = 表名不能为空
 db-table_invalid_start = 无效的表名 '{ $name }': 必须以字母或下划线开头
 db-table_invalid_char = 无效的表名 '{ $name }': 包含禁止字符 '{ $char }'
+db-ensure_table_failed = 确保表存在失败: { $err }
 
 # Cache 适配器消息
 cache-get_failed = 获取缓存键 '{ $key }' 失败: { $err }

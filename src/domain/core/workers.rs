@@ -174,9 +174,12 @@ impl LoggerManager {
                                 );
                             }
                             let adapter = handle.block_on(async {
-                                crate::integrations::infra::DbNexusAdapter::new(
+                                crate::integrations::infra::DbNexusAdapter::with_full_config(
                                     &cfg_url,
                                     effective_pool_size,
+                                    &cfg.table_name,
+                                    cfg.permissions_path.clone(),
+                                    &cfg.admin_role,
                                 )
                                 .await
                             })?;
