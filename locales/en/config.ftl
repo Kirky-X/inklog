@@ -93,3 +93,5 @@ config-create_config_failed = Failed to create config file: { $path }
 config-write_config_failed = Failed to write config content
 config-create_env_failed = Failed to create env example file: { $path }
 config-write_env_failed = Failed to write env example content
+config-unknown_log_level = Unknown log level: { $level }
+config-invalid_encryption_key = Invalid key: { $err }
