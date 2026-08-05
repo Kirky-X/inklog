@@ -34,9 +34,7 @@
 //! cargo run --bin circuit_breaker
 //! ```
 
-use inklog::support::io::sink::circuit_breaker::{
-    CircuitBreaker, CircuitBreakerConfig, CircuitState,
-};
+use inklog::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 use inklog_examples::common::{print_section, print_separator};
 use std::time::Duration;
 
