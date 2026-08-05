@@ -242,7 +242,7 @@ impl OxCacheAdapterBuilder {
         if let Some(ttl) = self.ttl
             && ttl.is_zero()
         {
-            tracing::warn!("OxCacheAdapterBuilder: TTL is zero, using default TTL");
+            tracing::warn!("{}", crate::i18n::tr("warn-cache_ttl_zero"));
         }
         if let Some(capacity) = self.capacity
             && capacity == 0

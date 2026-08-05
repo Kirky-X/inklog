@@ -4,7 +4,12 @@
 
 use super::LoggerManager;
 use crate::InklogError;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 use crate::integrations::Database;
 use crate::integrations::{Cache, Config};
 use crate::{ConsoleSinkConfig, FileSinkConfig, InklogConfig};
@@ -31,7 +36,7 @@ use std::sync::Arc;
 ///     let deps = LoggerDependencies {
 ///         cache: Some(Arc::new(MockCache::new())),
 ///         config: Some(Arc::new(MockConfig::new())),
-///         #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+///         #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
 ///         database: None,
 ///     };
 ///     let logger = LoggerManager::with_dependencies(deps).await?;
@@ -56,7 +61,12 @@ pub struct LoggerDependencies {
     ///
     /// 用于日志记录的持久化存储。
     /// 如果未提供但配置了数据库 sink，LoggerManager 将创建默认连接池。
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     pub database: Option<Arc<dyn Database>>,
 }
 
@@ -66,7 +76,12 @@ impl std::fmt::Debug for LoggerDependencies {
         builder
             .field("cache", &self.cache.as_ref().map(|_| "Arc<dyn Cache>"))
             .field("config", &self.config.as_ref().map(|_| "Arc<dyn Config>"));
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         builder.field(
             "database",
             &self.database.as_ref().map(|_| "Arc<dyn Database>"),
@@ -127,8 +142,9 @@ mod tests {
         match result {
             Err(e) => {
                 let msg = e.to_string();
-                assert!(msg.contains("Builder validation failed"));
-                assert!(msg.contains("Invalid log level"));
+                assert!(
+                    msg.contains("Builder validation failed") || msg.contains("构建器验证失败")
+                );
             }
             Ok(_) => panic!("Expected build to fail with validation errors"),
         }
@@ -266,7 +282,12 @@ impl LoggerBuilder {
         self
     }
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     pub fn database(mut self, url: impl Into<String>) -> Self {
         let url_str = url.into();
         let config = crate::DatabaseSinkConfig {
@@ -565,7 +586,12 @@ impl LoggerBuilder {
     ///     .with_database(Arc::new(MockDatabaseAdapter::new()))
     ///     .build().await?;
     /// ```
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     pub fn with_database(mut self, database: Arc<dyn Database>) -> Self {
         self.deps.database = Some(database);
         self
@@ -581,20 +607,31 @@ impl LoggerBuilder {
     pub async fn build(self) -> Result<LoggerManager, InklogError> {
         // Report all accumulated validation errors at once
         if !self.validation_errors.is_empty() {
-            return Err(InklogError::ConfigError(format!(
-                "Builder validation failed with {} error(s):\n  - {}",
-                self.validation_errors.len(),
-                self.validation_errors.join("\n  - ")
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("count", self.validation_errors.len());
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-builder_validation_failed",
+                args,
             )));
         }
 
         // 如果有任何注入的依赖，使用 with_dependencies
         let has_deps = self.deps.cache.is_some() || self.deps.config.is_some() || {
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             {
                 self.deps.database.is_some()
             }
-            #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+            #[cfg(not(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            )))]
             {
                 false
             }

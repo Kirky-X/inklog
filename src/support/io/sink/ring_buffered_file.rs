@@ -62,8 +62,6 @@ pub struct ChannelBufferedFileSink {
     // during runtime (e.g., for log rotation), even though it is not
     // currently exercised. Removing it would require significant refactoring.
     file: Arc<Mutex<Option<BufWriter<File>>>>,
-    #[allow(dead_code)]
-    file_path: PathBuf,
     inner: Mutex<Inner>,
     shutdown_flag: Arc<AtomicBool>,
     bytes_written: Arc<AtomicUsize>,
@@ -91,7 +89,6 @@ impl ChannelBufferedFileSink {
             sender,
             receiver,
             file,
-            file_path,
             inner: Mutex::new(Inner {
                 io_thread: None,
                 flush_thread: None,
@@ -351,10 +348,15 @@ impl ChannelBufferedFileSink {
 impl LogSink for ChannelBufferedFileSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         if !self.try_write(record) {
-            return Err(InklogError::ChannelError(format!(
-                "Record dropped by ring buffer (dropped_count: {})",
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set(
+                "count",
                 self.dropped_count
-                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            );
+            return Err(InklogError::ChannelError(crate::i18n::tr_args(
+                "config-ring_buffer_dropped",
+                args,
             )));
         }
         Ok(())

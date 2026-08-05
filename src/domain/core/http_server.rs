@@ -79,15 +79,19 @@ impl LoggerManager {
                 match std::env::var(token_env) {
                     Ok(t) if !t.is_empty() => (true, Some(t)),
                     Ok(_) => {
-                        return Err(InklogError::ConfigError(format!(
-                            "HTTP auth enabled but token env var '{}' is empty",
-                            token_env
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("env", token_env);
+                        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                            "config-http_auth_token_empty",
+                            args,
                         )));
                     }
                     Err(_) => {
-                        return Err(InklogError::ConfigError(format!(
-                            "HTTP auth enabled but token env var '{}' is not set",
-                            token_env
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("env", token_env);
+                        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                            "config-http_auth_token_not_set",
+                            args,
                         )));
                     }
                 }
@@ -191,7 +195,12 @@ impl LoggerManager {
 
         let addr: std::net::SocketAddr = format!("{}:{}", config.host, config.port)
             .parse()
-            .map_err(|e| InklogError::ConfigError(format!("Invalid HTTP server address: {}", e)))?;
+            .map_err(|e: std::net::AddrParseError| {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("addr", format!("{}:{}", config.host, config.port));
+                args.set("err", e.to_string());
+                InklogError::ConfigError(crate::i18n::tr_args("config-invalid_http_address", args))
+            })?;
 
         let auth_enabled = config.auth.as_ref().map(|a| a.enabled).unwrap_or(false);
         let ip_whitelist = config.ip_whitelist.clone();

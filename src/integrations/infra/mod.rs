@@ -75,7 +75,12 @@ pub use database::Database;
 pub use cache::OxCacheAdapter;
 pub use config::InklogConfigAdapter;
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 pub use database::DbNexusAdapter;
 
 // ============================================================================

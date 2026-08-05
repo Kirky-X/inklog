@@ -310,40 +310,88 @@ impl InklogError {
         // errors from leaking through the error chain.
         match self {
             InklogError::ConfigError(msg) => {
-                format!("Configuration error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-config_error"),
+                    sanitize_message(msg)
+                )
             }
             InklogError::IoError(e) => {
-                format!("IO error: {}", sanitize_message(&e.to_string()))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-io_error"),
+                    sanitize_message(&e.to_string())
+                )
             }
             InklogError::SerializationError(e) => {
-                format!("Serialization error: {}", sanitize_message(&e.to_string()))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-serialization_error"),
+                    sanitize_message(&e.to_string())
+                )
             }
             InklogError::DatabaseError { message, .. } => {
-                format!("Database error: {}", sanitize_message(message))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-database_error"),
+                    sanitize_message(message)
+                )
             }
             InklogError::CacheError(msg) => {
-                format!("Cache error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-cache_error"),
+                    sanitize_message(msg)
+                )
             }
             InklogError::EncryptionError { message, .. } => {
-                format!("Encryption error: {}", sanitize_message(message))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-encryption_error"),
+                    sanitize_message(message)
+                )
             }
             InklogError::Shutdown(msg) => {
-                format!("Shutdown error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-shutdown_error"),
+                    sanitize_message(msg)
+                )
             }
             InklogError::ChannelError(msg) => {
-                format!("Channel error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-channel_error"),
+                    sanitize_message(msg)
+                )
             }
             InklogError::CompressionError(msg) => {
-                format!("Compression error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-compression_error"),
+                    sanitize_message(msg)
+                )
             }
             InklogError::RuntimeError(msg) => {
-                format!("Runtime error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-runtime_error"),
+                    sanitize_message(msg)
+                )
             }
             InklogError::HttpServerError(msg) => {
-                format!("HTTP server error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-http_server_error"),
+                    sanitize_message(msg)
+                )
             }
             InklogError::Unknown(msg) => {
-                format!("Unknown error: {}", sanitize_message(msg))
+                format!(
+                    "{}: {}",
+                    crate::i18n::tr("error-unknown_error"),
+                    sanitize_message(msg)
+                )
             }
         }
     }

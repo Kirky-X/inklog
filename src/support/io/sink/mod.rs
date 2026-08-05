@@ -3,10 +3,20 @@
 pub mod circuit_breaker;
 pub mod compression;
 pub mod console;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 pub mod database;
 pub mod encryption;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 pub mod entity;
 pub mod file;
 pub mod registry;
@@ -18,7 +28,12 @@ pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use compression::ZstdCompression;
 pub use compression::{CompressionStrategy, GzipCompression, NoCompression};
 pub use console::ConsoleSink;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 pub use database::DatabaseSink;
 pub use file::FileSink;
 pub use registry::{FileSinkFactory, SinkFactory, SinkMetadata, SinkRegistry};

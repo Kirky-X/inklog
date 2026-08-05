@@ -49,9 +49,11 @@ impl MaskRuleRegistry {
     /// 若已存在同名规则，返回 `Err(InklogError)`。
     pub fn register(&mut self, rule: MaskRule) -> Result<(), InklogError> {
         if self.rules.iter().any(|r| r.name() == rule.name()) {
-            return Err(InklogError::ConfigError(format!(
-                "Masking rule '{}' already registered",
-                rule.name()
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("name", rule.name());
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-rule_already_registered",
+                args,
             )));
         }
         self.rules.push(rule);
@@ -113,28 +115,33 @@ impl MaskRuleRegistry {
     /// - 缺少 `name` 或 `pattern` 字段返回 `Err(InklogError)`
     /// - 无效正则在构建规则时返回 `Err(InklogError)`
     pub fn load_from_toml(toml_str: &str) -> Result<Vec<MaskRule>, InklogError> {
-        let parsed: toml::Value = toml::from_str(toml_str)
-            .map_err(|e| InklogError::ConfigError(format!("Failed to parse TOML: {}", e)))?;
+        let parsed: toml::Value = toml::from_str(toml_str).map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-failed_parse_toml", args))
+        })?;
 
         let rules_tables = parsed
             .get("masking_rules")
             .and_then(|v| v.as_array())
             .ok_or_else(|| {
-                InklogError::ConfigError("TOML missing '[[masking_rules]]' array".to_string())
+                InklogError::ConfigError(crate::i18n::tr("config-toml_missing_masking_rules"))
             })?;
 
         let mut rules = Vec::new();
         for table in rules_tables {
             let name = table.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
-                InklogError::ConfigError("masking_rules entry missing 'name' field".to_string())
+                InklogError::ConfigError(crate::i18n::tr("config-masking_missing_name"))
             })?;
             let pattern = table
                 .get("pattern")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| {
-                    InklogError::ConfigError(format!(
-                        "masking_rules entry '{}' missing 'pattern' field",
-                        name
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("name", name);
+                    InklogError::ConfigError(crate::i18n::tr_args(
+                        "config-masking_missing_pattern",
+                        args,
                     ))
                 })?;
             let replacement = table
