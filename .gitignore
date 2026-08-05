@@ -71,6 +71,7 @@ desktop.ini
 # Rust specific
 **/*.rs.bk
 *.pdb
+examples/Cargo.lock
 
 # Dependency directories
 vendor/
