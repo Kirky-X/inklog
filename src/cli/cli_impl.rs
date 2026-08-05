@@ -66,7 +66,7 @@ pub fn run_cli() -> Result<()> {
                     .to_path_buf()
             };
 
-            generate::generate_config(&output_path, &config_type)?;
+            generate::generate_config(&output_path, &config_type.to_string())?;
 
             if env_example {
                 generate::generate_env_example(&output_path)?;
