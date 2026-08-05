@@ -74,7 +74,7 @@ jobs:
         # `collect2: fatal error: ld terminated with signal 7 [Bus error]`.
         run: cargo tarpaulin --verbose --all-features --lib --timeout 120 --out xml --fail-under-lines 80
       - name: Upload to codecov.io
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
