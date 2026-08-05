@@ -13,11 +13,11 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseDriver {
     #[serde(rename = "postgres")]
-    #[default]
     PostgreSQL,
     #[serde(rename = "mysql")]
     MySQL,
     #[serde(rename = "sqlite")]
+    #[default]
     SQLite,
     #[serde(rename = "duckdb")]
     DuckDB,
