@@ -15,23 +15,23 @@ parquet = ["inklog/parquet"]
 
 [dependencies]
 inklog = { path = ".." }
-async-trait = "0.1"
-dbnexus = { version = "0.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1.20", features = ["v4"] }
-chrono = "0.4"
-aes-gcm = "0.10"
-base64 = "0.22"
-rand = "0.10"
-tempfile = "3.27"
+async-trait = { workspace = true }
+dbnexus = { workspace = true, optional = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { version = "1.20", default-features = false, features = ["v4"] }
+chrono = { workspace = true }
+aes-gcm = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+tempfile = { workspace = true }
 # Layer 0 示例所需：log crate 适配器、channel、自定义正则模式
-log = "0.4"
-crossbeam-channel = "0.5"
-regex = "1.12"
+log = { workspace = true }
+crossbeam-channel = { workspace = true }
+regex = { workspace = true }
 
 [[bin]]
 name = "console"

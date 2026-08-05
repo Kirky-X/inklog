@@ -1334,6 +1334,7 @@ dependencies = [
  "futures",
  "icu",
  "oxcache",
+ "rand 0.10.2",
  "regex",
  "sea-orm",
  "serde",

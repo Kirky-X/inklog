@@ -81,6 +81,9 @@ use dbnexus::database::pool::DbPool;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use dbnexus::foundation::config::DbConfig;
 
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use crate::domain::config::database::DatabaseDriver;
+
 /// dbnexus 适配器
 ///
 /// 将 dbnexus 库的 `DbPool` 适配为 `Database` trait。
@@ -110,6 +113,7 @@ use dbnexus::foundation::config::DbConfig;
 pub struct DbNexusAdapter {
     pool: Arc<dyn ConnectionPool + Send + Sync>,
     table_name: String,
+    admin_role: String,
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -157,23 +161,48 @@ impl DbNexusAdapter {
         pool_size: u32,
         table_name: &str,
     ) -> Result<Self, InklogError> {
+        Self::with_full_config(url, pool_size, table_name, None, "admin").await
+    }
+
+    /// 创建带完整配置的适配器
+    ///
+    /// 支持自定义权限配置文件路径和管理员角色名。
+    /// 构造完成后自动调用 `ensure_table_exists()` 创建日志表。
+    ///
+    /// # 参数
+    ///
+    /// * `url` - 数据库连接字符串
+    /// * `pool_size` - 连接池大小（最大连接数）
+    /// * `table_name` - 日志表名称
+    /// * `permissions_path` - 权限配置文件路径，`None` 时不启用权限校验
+    /// * `admin_role` - 管理员角色名
+    pub async fn with_full_config(
+        url: &str,
+        pool_size: u32,
+        table_name: &str,
+        permissions_path: Option<String>,
+        admin_role: &str,
+    ) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
 
         // 创建 DbConfig
         let config = DbConfig {
             url: url.to_string(),
-            max_connections: pool_size,
-            min_connections: 1,
-            idle_timeout: 300,
-            acquire_timeout: 5000,
-            permissions_path: None,
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: pool_size,
+                min_connections: 1,
+                idle_timeout: 300,
+                acquire_timeout: 5000,
+            },
+            permissions_path,
             migrations_dir: None,
             auto_migrate: false,
             migration_timeout: 60,
-            admin_role: "admin".to_string(),
+            admin_role: admin_role.to_string(),
             warmup_timeout: 30,
             warmup_retries: 3,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
+            retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
         };
 
         // 使用 DbPool::with_config 创建连接池
@@ -186,10 +215,16 @@ impl DbNexusAdapter {
             }
         })?;
 
-        Ok(Self {
+        let adapter = Self {
             pool: Arc::new(pool),
             table_name: table_name.to_string(),
-        })
+            admin_role: admin_role.to_string(),
+        };
+
+        // 自动建表
+        adapter.ensure_table_exists(url).await?;
+
+        Ok(adapter)
     }
 
     /// 从现有 DbPool 创建适配器
@@ -205,6 +240,7 @@ impl DbNexusAdapter {
         Ok(Self {
             pool: Arc::new(pool),
             table_name: table_name.to_string(),
+            admin_role: "admin".to_string(),
         })
     }
 
@@ -225,6 +261,7 @@ impl DbNexusAdapter {
         Ok(Self {
             pool,
             table_name: table_name.to_string(),
+            admin_role: "admin".to_string(),
         })
     }
 
@@ -243,6 +280,32 @@ impl DbNexusAdapter {
     /// 获取表名
     pub fn table_name(&self) -> &str {
         &self.table_name
+    }
+
+    /// 确保日志表存在，若不存在则自动创建。
+    ///
+    /// 使用管理员角色获取 session 并执行 DDL。
+    /// 驱动类型通过 URL 前缀自动识别。
+    async fn ensure_table_exists(&self, url: &str) -> Result<(), InklogError> {
+        let driver = detect_driver_from_url(url);
+        let ddl = generate_create_table_sql(&self.table_name, &driver);
+        let session = self.pool.get_session(&self.admin_role).await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::DatabaseError {
+                message: crate::i18n::tr_args("db-session_failed", args),
+                source: Some(Box::new(e)),
+            }
+        })?;
+        session.execute_raw_ddl(&ddl).await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::DatabaseError {
+                message: crate::i18n::tr_args("db-ensure_table_failed", args),
+                source: Some(Box::new(e)),
+            }
+        })?;
+        Ok(())
     }
 }
 
@@ -279,6 +342,85 @@ fn validate_table_name(name: &str) -> Result<(), InklogError> {
     Ok(())
 }
 
+/// 转义 SQL 字符串中的单引号，防止 SQL 注入。
+///
+/// 所有通过 `insert_batch` 写入的字符串字段必须经过此函数。
+/// 采用标准 SQL 转义规则：将单引号 `'` 替换为双单引号 `''`。
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[inline]
+fn escape_sql_string(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+/// 根据数据库驱动生成 CREATE TABLE DDL 语句。
+///
+/// 不同后端使用不同的数据类型：
+/// - SQLite: `INTEGER PRIMARY KEY AUTOINCREMENT`, `TEXT`
+/// - PostgreSQL: `BIGSERIAL PRIMARY KEY`, `TIMESTAMPTZ`, `TEXT`
+/// - MySQL: `BIGINT AUTO_INCREMENT PRIMARY KEY`, `TIMESTAMP`, `TEXT`
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+fn generate_create_table_sql(table_name: &str, driver: &DatabaseDriver) -> String {
+    match driver {
+        DatabaseDriver::SQLite => format!(
+            "CREATE TABLE IF NOT EXISTS {} (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                timestamp TEXT NOT NULL, \
+                level TEXT NOT NULL, \
+                target TEXT NOT NULL, \
+                message TEXT NOT NULL, \
+                fields TEXT, \
+                file TEXT, \
+                line INTEGER, \
+                thread_id TEXT NOT NULL\
+            )",
+            table_name
+        ),
+        DatabaseDriver::PostgreSQL => format!(
+            "CREATE TABLE IF NOT EXISTS {} (\
+                id BIGSERIAL PRIMARY KEY, \
+                timestamp TIMESTAMPTZ NOT NULL, \
+                level TEXT NOT NULL, \
+                target TEXT NOT NULL, \
+                message TEXT NOT NULL, \
+                fields TEXT, \
+                file TEXT, \
+                line INTEGER, \
+                thread_id TEXT NOT NULL\
+            )",
+            table_name
+        ),
+        DatabaseDriver::MySQL => format!(
+            "CREATE TABLE IF NOT EXISTS {} (\
+                id BIGINT AUTO_INCREMENT PRIMARY KEY, \
+                timestamp TIMESTAMP NOT NULL, \
+                level TEXT NOT NULL, \
+                target TEXT NOT NULL, \
+                message TEXT NOT NULL, \
+                fields TEXT, \
+                file TEXT, \
+                line INTEGER, \
+                thread_id TEXT NOT NULL\
+            )",
+            table_name
+        ),
+    }
+}
+
+/// 从数据库 URL 推断驱动类型。
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+fn detect_driver_from_url(url: &str) -> DatabaseDriver {
+    if url.starts_with("sqlite:") || url.starts_with("sqlite3:") {
+        DatabaseDriver::SQLite
+    } else if url.starts_with("postgres:") || url.starts_with("postgresql:") {
+        DatabaseDriver::PostgreSQL
+    } else if url.starts_with("mysql:") {
+        DatabaseDriver::MySQL
+    } else {
+        // 默认回退到 PostgreSQL
+        DatabaseDriver::PostgreSQL
+    }
+}
+
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 #[async_trait]
 impl Database for DbNexusAdapter {
@@ -287,8 +429,10 @@ impl Database for DbNexusAdapter {
             return Ok(0);
         }
 
-        // 获取写会话 (使用 admin 角色，因为默认权限配置只允许 admin/system)
-        let session = self.pool.get_session("admin").await.map_err(|e| {
+        let start = std::time::Instant::now();
+
+        // 获取写会话 (使用配置的管理员角色)
+        let session = self.pool.get_session(&self.admin_role).await.map_err(|e| {
             let mut args = fluent_bundle::FluentArgs::new();
             args.set("err", e.to_string());
             InklogError::DatabaseError {
@@ -302,35 +446,35 @@ impl Database for DbNexusAdapter {
             .iter()
             .map(|record| {
                 let timestamp = record.timestamp.to_rfc3339();
-                let level = &record.level;
-                let target = &record.target;
-                let message = record.message.replace('\'', "''");
+                let level = escape_sql_string(&record.level);
+                let target = escape_sql_string(&record.target);
+                let message = escape_sql_string(&record.message);
                 let fields_json =
                     serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
-                let fields_escaped = fields_json.replace('\'', "''");
+                let fields_escaped = escape_sql_string(&fields_json);
                 let file = record
                     .file
                     .as_ref()
-                    .map(|f| format!("'{}'", f.replace('\'', "''")))
+                    .map(|f| format!("'{}'", escape_sql_string(f)))
                     .unwrap_or_else(|| "NULL".to_string());
                 let line = record
                     .line
                     .map(|l| l.to_string())
                     .unwrap_or_else(|| "NULL".to_string());
-                let thread_id = &record.thread_id;
+                let thread_id = escape_sql_string(&record.thread_id);
 
                 format!(
                     "INSERT INTO {} (timestamp, level, target, message, fields, file, line, thread_id) \
                      VALUES ('{}', '{}', '{}', '{}', '{}', {}, {}, '{}')",
                     self.table_name,
                     timestamp,
-                    level.replace('\'', "''"),
-                    target.replace('\'', "''"),
+                    level,
+                    target,
                     message,
                     fields_escaped,
                     file,
                     line,
-                    thread_id.replace('\'', "''")
+                    thread_id
                 )
             })
             .collect();
@@ -341,21 +485,35 @@ impl Database for DbNexusAdapter {
             .batch_execute_in_transaction(sql_refs)
             .await
             .map_err(|e| {
+                let elapsed_ms = start.elapsed().as_millis();
+                tracing::warn!(
+                    table = %self.table_name,
+                    error = %e,
+                    elapsed_ms = elapsed_ms,
+                    "Database batch insert failed"
+                );
                 let mut args = fluent_bundle::FluentArgs::new();
                 args.set("err", e.to_string());
                 let msg = crate::i18n::tr_args("db-batch_insert_failed", args);
-                tracing::error!("{}", msg);
                 InklogError::DatabaseError {
                     message: msg,
                     source: Some(Box::new(e)),
                 }
             })?;
 
+        let elapsed_ms = start.elapsed().as_millis();
+        tracing::debug!(
+            table = %self.table_name,
+            count = records.len(),
+            elapsed_ms = elapsed_ms,
+            "Database batch insert succeeded"
+        );
+
         Ok(records.len())
     }
 
     async fn is_healthy(&self) -> bool {
-        // 健康检查：仅验证连接池能获取 admin 会话。
+        // 健康检查：仅验证连接池能获取管理员会话。
         //
         // 不执行 `SELECT 1` 之类的探针 SQL，原因：
         // dbnexus 启用 `sql-parser` + `permission` features 后，
@@ -363,13 +521,13 @@ impl Database for DbNexusAdapter {
         // 无表名的 `SELECT 1` 会被 `Permission("SQL statement requires a valid
         // table name for permission checking")` 拒绝。
         //
-        // `get_session("admin")` 内部调用 `acquire_connection`：
+        // `get_session` 内部调用 `acquire_connection`：
         // - 空闲队列有连接时直接返回（池已验证过初始可达性，见 `with_config`）
         // - 空闲队列为空时调用 `create_connection` 重新建立连接，失败则返回 Err
         //
         // 因此 `get_session` 成功即可认为数据库当前可达，符合 `is_healthy()`
         // 文档要求的"轻量级，适合频繁调用"。
-        match self.pool.get_session("admin").await {
+        match self.pool.get_session(&self.admin_role).await {
             Ok(_) => true,
             Err(e) => {
                 tracing::warn!("Database health check failed: {}", e);
@@ -564,10 +722,12 @@ mod tests {
 
         let config = DbConfig {
             url: db_url,
-            max_connections: 1,
-            min_connections: 1,
-            idle_timeout: 300,
-            acquire_timeout: 30000,
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 1,
+                min_connections: 1,
+                idle_timeout: 300,
+                acquire_timeout: 30000,
+            },
             permissions_path: Some(perm_path.to_string_lossy().to_string()),
             migrations_dir: None,
             auto_migrate: false,
@@ -576,6 +736,7 @@ mod tests {
             warmup_timeout: 60,
             warmup_retries: 5,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
+            retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
         };
 
         let pool = DbPool::with_config(config)
@@ -647,10 +808,12 @@ mod tests {
 
         let config = DbConfig {
             url: db_url,
-            max_connections: 2,
-            min_connections: 1,
-            idle_timeout: 300,
-            acquire_timeout: 30000,
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 2,
+                min_connections: 1,
+                idle_timeout: 300,
+                acquire_timeout: 30000,
+            },
             permissions_path: Some(perm_path.to_string_lossy().to_string()),
             migrations_dir: None,
             auto_migrate: false,
@@ -659,6 +822,7 @@ mod tests {
             warmup_timeout: 60,
             warmup_retries: 5,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
+            retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
         };
 
         let pool = DbPool::with_config(config)
@@ -951,5 +1115,117 @@ mod tests {
         assert!(validate_table_name("123logs").is_err());
         // Contains dot (schema.table)
         assert!(validate_table_name("public.logs").is_err());
+    }
+
+    // ============================================================================
+    // T009: escape_sql_string 单元测试
+    // ============================================================================
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_escape_sql_string_empty() {
+        assert_eq!(escape_sql_string(""), "");
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_escape_sql_string_no_special_chars() {
+        assert_eq!(escape_sql_string("hello world"), "hello world");
+        assert_eq!(escape_sql_string("abc123"), "abc123");
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_escape_sql_string_single_quote() {
+        assert_eq!(escape_sql_string("it's"), "it''s");
+        assert_eq!(escape_sql_string("'"), "''");
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_escape_sql_string_multiple_quotes() {
+        assert_eq!(escape_sql_string("a'b'c'd"), "a''b''c''d");
+        assert_eq!(escape_sql_string("''''"), "''''''''");
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_escape_sql_string_unicode() {
+        assert_eq!(escape_sql_string("こんにちは"), "こんにちは");
+        assert_eq!(escape_sql_string("世界'it's"), "世界''it''s");
+    }
+
+    // ============================================================================
+    // T010: generate_create_table_sql 测试
+    // ============================================================================
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_generate_create_table_sql_sqlite() {
+        let ddl = generate_create_table_sql("logs", &DatabaseDriver::SQLite);
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS logs"));
+        assert!(ddl.contains("INTEGER PRIMARY KEY AUTOINCREMENT"));
+        assert!(ddl.contains("TEXT NOT NULL"));
+        assert!(ddl.contains("line INTEGER"));
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_generate_create_table_sql_postgres() {
+        let ddl = generate_create_table_sql("logs", &DatabaseDriver::PostgreSQL);
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS logs"));
+        assert!(ddl.contains("BIGSERIAL PRIMARY KEY"));
+        assert!(ddl.contains("TIMESTAMPTZ NOT NULL"));
+        assert!(ddl.contains("TEXT NOT NULL"));
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[test]
+    fn test_generate_create_table_sql_mysql() {
+        let ddl = generate_create_table_sql("logs", &DatabaseDriver::MySQL);
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS logs"));
+        assert!(ddl.contains("BIGINT AUTO_INCREMENT PRIMARY KEY"));
+        assert!(ddl.contains("TIMESTAMP NOT NULL"));
+        assert!(ddl.contains("TEXT NOT NULL"));
+    }
+
+    // ============================================================================
+    // T011: 自定义 admin_role 构造测试
+    // ============================================================================
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_dbnexus_adapter_custom_admin_role() {
+        let temp_dir = std::env::temp_dir();
+
+        // 创建权限配置文件，允许 superadmin 角色
+        let perm_path = temp_dir.join("inklog_custom_role_perm.yaml");
+        let perm_content = r#"roles:
+  superadmin:
+    tables:
+      - name: "*"
+        operations: ["select", "insert", "update", "delete"]
+"#;
+        std::fs::write(&perm_path, perm_content).expect("Failed to write permissions file");
+
+        let db_path = temp_dir.join("inklog_custom_role.db");
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
+
+        let adapter = DbNexusAdapter::with_full_config(
+            &db_url,
+            1,
+            "logs",
+            Some(perm_path.to_string_lossy().to_string()),
+            "superadmin",
+        )
+        .await
+        .expect("with_full_config should succeed");
+
+        // Verify the adapter stores the custom role
+        assert_eq!(adapter.admin_role, "superadmin");
+        assert_eq!(adapter.table_name(), "logs");
+
+        let _ = std::fs::remove_file(&perm_path);
+        let _ = std::fs::remove_file(&db_path);
     }
 }

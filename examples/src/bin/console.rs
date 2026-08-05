@@ -39,6 +39,7 @@ async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
         colored: false,
         stderr_levels: vec![],
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
@@ -85,6 +86,7 @@ async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
         colored: true,
         stderr_levels: vec![],
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
@@ -140,6 +142,7 @@ async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
         colored: true,
         stderr_levels: vec!["error".to_string(), "warn".to_string()],
         masking_enabled: false,
+        output_format: Default::default(),
     };
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 

@@ -28,7 +28,7 @@ tempfile = { version = "3.27", default-features = false }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.12", default-features = false, features = ["std", "perf", "unicode"] }
-dbnexus = { version = "0.5", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"] }
+dbnexus = { version = "0.5", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "health-check", "retry"] }
 
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "compression", "parquet"]
@@ -74,7 +74,7 @@ regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.4", default-features = false, features = ["async", "lifecycle", "health"], optional = true }
+trait-kit = { version = "0.4", default-features = false, features = ["async", "lifecycle", "health", "observability", "scope"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -85,7 +85,7 @@ is-terminal = { version = "0.4", default-features = false }
 bytes = { version = "1.12", default-features = false, features = ["std"] }
 dirs = { version = "6.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
-oxcache = { version = "0.4", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
+oxcache = { version = "0.4", default-features = false, features = ["macros", "memory", "serialization", "tracing", "metrics"] }
 zstd = { version = "0.13", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }

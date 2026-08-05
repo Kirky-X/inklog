@@ -204,6 +204,13 @@ pub struct DatabaseSinkConfig {
     pub archive_format: ArchiveFormat,
     #[serde(default)]
     pub parquet_config: ParquetConfig,
+    /// Path to the RBAC permissions configuration file.
+    /// When `None`, permission checking is disabled.
+    #[serde(default)]
+    pub permissions_path: Option<String>,
+    /// Admin role name used for DDL and write operations.
+    #[serde(default = "default_admin_role")]
+    pub admin_role: String,
 }
 
 fn default_db_sink_name() -> String {
@@ -224,6 +231,9 @@ fn default_db_flush_interval_ms() -> u64 {
 fn default_db_table_name() -> String {
     "logs".to_string()
 }
+fn default_admin_role() -> String {
+    "admin".to_string()
+}
 // ArchiveFormat default is Json via #[default] derive
 
 impl Default for DatabaseSinkConfig {
@@ -240,6 +250,8 @@ impl Default for DatabaseSinkConfig {
             table_name: default_db_table_name(),
             archive_format: ArchiveFormat::default(),
             parquet_config: ParquetConfig::default(),
+            permissions_path: None,
+            admin_role: default_admin_role(),
         }
     }
 }
@@ -422,5 +434,56 @@ mod tests {
         config.parquet_config.compression_level = 0;
         config.validate();
         assert_eq!(config.parquet_config.compression_level, 3);
+    }
+
+    // ============================================================================
+    // T012: DatabaseSinkConfig 序列化/反序列化含新字段测试
+    // ============================================================================
+
+    #[test]
+    fn test_config_default_has_new_fields() {
+        let config = DatabaseSinkConfig::default();
+        assert_eq!(config.admin_role, "admin");
+        assert!(config.permissions_path.is_none());
+    }
+
+    #[test]
+    fn test_config_serialize_with_new_fields() {
+        let mut config = DatabaseSinkConfig::default();
+        config.permissions_path = Some("/etc/inklog/perms.yaml".to_string());
+        config.admin_role = "superadmin".to_string();
+
+        let toml_str = toml::to_string(&config).expect("serialize should succeed");
+        assert!(toml_str.contains("permissions_path"));
+        assert!(toml_str.contains("superadmin"));
+    }
+
+    #[test]
+    fn test_config_deserialize_default_values() {
+        // TOML without new fields should use defaults
+        let toml_str = r#"
+            name = "test"
+            enabled = true
+            url = "sqlite::memory:"
+        "#;
+        let config: DatabaseSinkConfig =
+            toml::from_str(toml_str).expect("deserialize should succeed");
+        assert_eq!(config.admin_role, "admin");
+        assert!(config.permissions_path.is_none());
+    }
+
+    #[test]
+    fn test_config_deserialize_custom_values() {
+        let toml_str = r#"
+            name = "test"
+            enabled = true
+            url = "sqlite::memory:"
+            permissions_path = "/etc/perms.yaml"
+            admin_role = "dba"
+        "#;
+        let config: DatabaseSinkConfig =
+            toml::from_str(toml_str).expect("deserialize should succeed");
+        assert_eq!(config.admin_role, "dba");
+        assert_eq!(config.permissions_path, Some("/etc/perms.yaml".to_string()));
     }
 }

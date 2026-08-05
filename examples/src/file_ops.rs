@@ -38,6 +38,7 @@ pub fn create_file_config(path: &str, max_size: &str, compress: bool) -> FileSin
         batch_size: 100,
         flush_interval_ms: 1000,
         masking_enabled: false,
+        output_format: Default::default(),
     }
 }
 
