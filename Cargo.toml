@@ -46,7 +46,7 @@ mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
 # DuckDB 数据库后端（通过 dbnexus 连接池，使用原生 SQL 执行）
 # Sea-ORM 需要至少一个 sqlx-* 后端才能编译 derive macro；
 # DuckDB 实际连接由 dbnexus 处理，此处启用 sqlx-sqlite 仅满足 Sea-ORM 编译要求。
-duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb", "sea-orm/sqlx-sqlite"]
+duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb", "sea-orm/sqlx-sqlite", "sea-orm/macros"]
 http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob"]
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]

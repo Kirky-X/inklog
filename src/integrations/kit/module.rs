@@ -70,9 +70,11 @@ impl AsyncAutoBuilder for InklogModule {
     ) -> Pin<Box<dyn Future<Output = Result<Self::Capability, Self::Error>> + Send + 'a>> {
         Box::pin(async move {
             // 1. Require DbNexusModule capability (Arc<dyn ConnectionPool + Send + Sync>).
-            let pool = kit
-                .require::<DbNexusModule>()
-                .map_err(|e| InklogError::database_error(format!("require DbNexusModule: {e}")))?;
+            let pool = kit.require::<DbNexusModule>().map_err(|e| {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("err", e.to_string());
+                InklogError::database_error(crate::i18n::tr_args("config-require_dbnexus", args))
+            })?;
 
             // 2. Wrap in DbNexusAdapter — adapts ConnectionPool to Database.
             let adapter = DbNexusAdapter::from_connection_pool(
@@ -94,9 +96,9 @@ impl AsyncLifecycle for InklogModule {
             // Verify DbNexusModule capability is accessible after all modules are built.
             // This catches missing or failed database dependencies early.
             kit.require::<DbNexusModule>().map_err(|e| {
-                InklogError::database_error(format!(
-                    "InklogModule on_ready: DbNexusModule not available: {e}"
-                ))
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("err", e.to_string());
+                InklogError::database_error(crate::i18n::tr_args("config-db_not_available", args))
             })?;
             tracing::debug!("InklogModule: on_ready — database dependency verified");
             Ok(())
