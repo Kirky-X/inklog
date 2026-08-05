@@ -36,6 +36,7 @@ fn main() {
 }
 
 /// 展示 OutputFormat 枚举变体
+#[allow(clippy::eq_op)] // 示例代码故意展示相同变体比较
 fn show_output_format_variants() {
     print_section("1. OutputFormat 枚举变体");
 
@@ -50,10 +51,8 @@ fn show_output_format_variants() {
     assert_eq!(default, OutputFormat::Text);
 
     println!("\n等价比较：");
-    println!(
-        "  Text == Text → {}",
-        OutputFormat::Text == OutputFormat::Text
-    );
+    let is_text_equal = OutputFormat::Text == OutputFormat::Text;
+    println!("  Text == Text → {}", is_text_equal);
     println!(
         "  Text == Json → {}",
         OutputFormat::Text == OutputFormat::Json

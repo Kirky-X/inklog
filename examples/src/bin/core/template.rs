@@ -116,7 +116,7 @@ fn full_placeholders() {
         ("{fields}", "结构化字段（JSON 格式）"),
     ];
 
-    println!("{:<15} {:<30} {}", "占位符", "说明", "渲染结果");
+    println!("{:<15} {:<30} 渲染结果", "占位符", "说明");
     println!("{}", "-".repeat(75));
 
     for (placeholder, desc) in placeholders {
@@ -184,7 +184,7 @@ fn multiple_formats_comparison() {
         ("带边框", "│ {level:<5} │ {target} │ {message}"),
     ];
 
-    println!("{:<12} {}", "格式名称", "渲染结果");
+    println!("{:<12} 渲染结果", "格式名称");
     println!("{}", "-".repeat(80));
     for (name, format) in formats {
         let tpl = LogTemplate::new(format);
