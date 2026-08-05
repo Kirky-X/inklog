@@ -804,7 +804,6 @@ impl Default for FallbackConfig {
 /// |----------|----------|
 /// | Database 故障 | FileSink (db_fallback.log) |
 /// | FileSink 故障（磁盘满） | ConsoleSink |
-/// | S3 不可达 | 本地保留，网络恢复后重试 |
 /// | 加密密钥错误 | 明文写入 + 警告日志 |
 ///
 /// ## 使用示例

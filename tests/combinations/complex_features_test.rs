@@ -6,7 +6,6 @@
 #[cfg(test)]
 mod complex_features_test {
     use inklog::{DatabaseSinkConfig, FileSinkConfig, InklogConfig, LoggerManager};
-    use inklog::archive::CompressionType;
     use inklog::config::DatabaseDriver;
     use serial_test::serial;
     use std::env;
@@ -16,7 +15,7 @@ mod complex_features_test {
 
     #[tokio::test]
     #[serial]
-    async fn test_encrypted_compressed_s3_database() {
+    async fn test_encrypted_compressed_database() {
         let temp_dir = TempDir::new().unwrap();
         let log_path = temp_dir.path().join("complex_test.log.enc");
         let db_path = temp_dir.path().join("complex_test.db");
@@ -43,14 +42,6 @@ mod complex_features_test {
                 batch_size: 50,
                 flush_interval_ms: 1000,
                 table_name: "logs".to_string(),
-                ..Default::default()
-            }),
-            #[cfg(feature = "aws")]
-            s3_archive: Some(inklog::S3ArchiveConfig {
-                enabled: true,
-                bucket: "test-bucket".to_string(),
-                region: "us-east-1".to_string(),
-                compression: CompressionType::Zstd,
                 ..Default::default()
             }),
             ..Default::default()

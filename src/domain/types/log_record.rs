@@ -276,7 +276,7 @@ impl LogRecord {
     /// # When to Use
     ///
     /// This method should be called by sinks before persisting logs to external
-    /// storage (files, databases, S3). It is intentionally NOT called in
+    /// storage (files, databases). It is intentionally NOT called in
     /// [`from_event()`](Self::from_event) for performance reasons, and because
     /// console output may not require masking.
     ///

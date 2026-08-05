@@ -823,22 +823,6 @@ port = 9090
     }
 
     #[test]
-    fn test_validate_config_with_s3_section() {
-        // Covers get_table for "s3" section
-        let content = r#"
-[s3]
-enabled = true
-bucket = "my-bucket"
-region = "us-east-1"
-archive_interval_days = 7
-max_file_size_mb = 100
-"#;
-        let file = write_config(content);
-        let result = validate_config(&file.path().to_path_buf());
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_validate_config_with_performance_section() {
         let content = r#"
 [performance]
