@@ -616,6 +616,7 @@ mod masking_test {
     #[test]
     fn test_google_api_key_masking() {
         let masker = DataMasker::new();
+        // 故意超出 Google API Key 标准长度（39 字符），避免触发 GitHub secret scanning
         let key = "AIzaSyTESTKEY1234567890abcdefghijklmnopqrs";
         let result = masker.mask(key);
         assert!(
