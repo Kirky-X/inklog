@@ -6,7 +6,7 @@
 use inklog::{
     config::{ConsoleSinkConfig, DatabaseSinkConfig, FileSinkConfig, GlobalConfig, HttpServerConfig},
     InklogConfig, LoggerManager,
-    archive::CompressionType, config::DatabaseDriver,
+    config::DatabaseDriver,
 };
 use serial_test::serial;
 use std::env;
@@ -64,18 +64,6 @@ async fn test_comprehensive_real_data_writing() {
         console_sink: Some(ConsoleSinkConfig {
             enabled: true,
             colored: true,
-            ..Default::default()
-        }),
-        #[cfg(feature = "aws")]
-        s3_archive: Some(inklog::S3ArchiveConfig {
-            enabled: false, // 暂时禁用，先测试本地功能
-            bucket: "test-bucket".to_string(),
-            region: "us-east-1".to_string(),
-            archive_interval_days: 1,
-            local_retention_days: 3,
-            prefix: "comprehensive-test/".to_string(),
-            compression: CompressionType::Zstd,
-            encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
             ..Default::default()
         }),
         #[cfg(feature = "http")]

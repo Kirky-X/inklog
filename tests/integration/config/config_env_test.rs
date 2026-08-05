@@ -38,36 +38,6 @@ fn test_config_from_env_overrides() {
 
 #[test]
 #[serial]
-fn test_config_env_override_s3_encryption() {
-    clear_all_inklog_env_vars();
-
-    // 设置 S3 加密环境变量
-    std::env::set_var("INKLOG_S3_ENABLED", "true");
-    std::env::set_var("INKLOG_S3_BUCKET", "test-bucket");
-    std::env::set_var("INKLOG_S3_REGION", "us-west-2");
-    std::env::set_var("INKLOG_S3_ENCRYPTION_ALGORITHM", "awskms");
-    std::env::set_var("INKLOG_S3_ENCRYPTION_KMS_KEY_ID", "test-key-id");
-    std::env::set_var("INKLOG_ARCHIVE_FORMAT", "parquet");
-
-    let mut config = InklogConfig::default();
-    config.apply_env_overrides();
-
-    // 验证 S3 归档配置
-    assert!(config.s3_archive.is_some());
-    let s3 = config.s3_archive.unwrap();
-    assert!(s3.enabled);
-    assert_eq!(s3.bucket, "test-bucket");
-    assert_eq!(s3.region, "us-west-2");
-    assert!(s3.encryption.is_some());
-    match &s3.encryption.unwrap().algorithm {
-        inklog::archive::EncryptionAlgorithm::AwsKms => {} // 正确
-        _ => panic!("Expected AwsKms encryption"),
-    }
-    assert_eq!(s3.archive_format, "parquet");
-}
-
-#[test]
-#[serial]
 fn test_config_env_override_http_server() {
     clear_all_inklog_env_vars();
 

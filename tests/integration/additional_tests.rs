@@ -809,41 +809,6 @@ async fn test_fallback_trigger_recovery() {
     assert!(result.is_ok());
 }
 
-// === 归档服务测试 ===
-
-#[tokio::test]
-async fn test_archive_service_disabled() {
-    #[cfg(feature = "aws")]
-    {
-        let config = inklog::S3ArchiveConfig {
-            enabled: false,
-            ..Default::default()
-        };
-        let service = inklog::ArchiveService::new(config, None).await;
-        assert!(service.is_ok() || service.is_err());
-    }
-    #[cfg(not(feature = "aws"))]
-    {
-        // Without AWS feature, service creation may fail or succeed
-        let result = inklog::ArchiveService::new(inklog::S3ArchiveConfig::default(), None).await;
-        assert!(result.is_ok() || result.is_err());
-    }
-}
-
-#[tokio::test]
-async fn test_archive_service_name() {
-    #[cfg(feature = "aws")]
-    {
-        let config = inklog::S3ArchiveConfig::default();
-        let service = inklog::ArchiveService::new(config, None).await.unwrap();
-        assert!(service.name().contains("archive"));
-    }
-    #[cfg(not(feature = "aws"))]
-    {
-        assert!(true);
-    }
-}
-
 // === 配置解析测试 ===
 
 #[test]

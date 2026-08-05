@@ -157,14 +157,6 @@ health_path = "/health"
 # flush_interval_ms = 500
 # table_name = "logs"
 
-# S3 archive configuration (optional)
-# [s3]
-# enabled = false
-# bucket = "my-log-archive"
-# region = "us-east-1"
-# archive_interval_days = 1
-# max_file_size_mb = 100
-# compression = "zstd"
 "#,
         default_global_section(),
         default_console_section(),
@@ -203,11 +195,6 @@ table_name = "logs"
 # url = "sqlite://logs.db"
 # pool_size = 5
 
-# S3 archive (optional)
-# [s3]
-# enabled = false
-# bucket = "my-log-archive"
-# region = "us-east-1"
 "#,
         default_global_section(),
         default_console_section(),
