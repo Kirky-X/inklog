@@ -162,7 +162,10 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 
     // 展示轮转后的文件列表
     print_section("轮转文件列表");
-    let log_dir = PathBuf::from(&log_path).parent().unwrap().to_path_buf();
+    let log_dir = PathBuf::from(&log_path)
+        .parent()
+        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .to_path_buf();
 
     println!("目录: {}", log_dir.display());
     println!("\n文件列表:");
@@ -176,7 +179,7 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut rotation_count = 0;
     for file in &all_files {
-        let file_name = file.file_name().to_str().unwrap().to_string();
+        let file_name = file.file_name().to_string_lossy().to_string();
         if file_name.contains("inklog_example_rotation") {
             let metadata = file.metadata()?;
             let size = metadata.len();
@@ -258,11 +261,14 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 
     // 等待压缩完成
     print_section("等待压缩完成");
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // 展示压缩文件列表
     print_section("压缩文件列表");
-    let log_dir = PathBuf::from(&log_path).parent().unwrap().to_path_buf();
+    let log_dir = PathBuf::from(&log_path)
+        .parent()
+        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .to_path_buf();
 
     println!("目录: {}", log_dir.display());
     println!("\n文件列表:");
@@ -276,7 +282,7 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut compression_count = 0;
     for file in &all_files {
-        let file_name = file.file_name().to_str().unwrap().to_string();
+        let file_name = file.file_name().to_string_lossy().to_string();
         if file_name.contains("inklog_example_compression") {
             let metadata = file.metadata()?;
             let size = metadata.len();
@@ -307,13 +313,16 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
     print_section("清理临时文件");
 
-    let log_dir = PathBuf::from(log_path).parent().unwrap().to_path_buf();
+    let log_dir = PathBuf::from(log_path)
+        .parent()
+        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .to_path_buf();
 
     let mut deleted_count = 0;
 
     for entry in fs::read_dir(&log_dir)? {
         let entry = entry?;
-        let file_name = entry.file_name().to_str().unwrap().to_string();
+        let file_name = entry.file_name().to_string_lossy().to_string();
 
         // 只删除当前示例相关的文件
         if file_name.contains(prefix) {

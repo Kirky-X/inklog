@@ -35,8 +35,6 @@ fn main() {
 
 /// 演示多语言格式化器创建
 fn show_locale_creation() {
-    use std::cmp::Ordering;
-
     print_section("示例 1：创建多语言格式化器");
 
     println!("创建 en-US 格式化器：");
@@ -44,7 +42,7 @@ fn show_locale_creation() {
     println!("  ✓ LogI18nFormatter::new(\"en-US\") 创建成功");
 
     println!("\n创建 zh-CN 格式化器：");
-    let fmt_zh = LogI18nFormatter::new("zh-CN").expect("zh-CN locale");
+    let _fmt_zh = LogI18nFormatter::new("zh-CN").expect("zh-CN locale");
     println!("  ✓ LogI18nFormatter::new(\"zh-CN\") 创建成功");
 
     println!("\n支持 BCP-47 语言标签：");
@@ -53,10 +51,12 @@ fn show_locale_creation() {
     println!("  ja-JP: 日语（日本）");
     println!("  de-DE: 德语（德国）");
 
-    // 使用格式化器避免编译警告
-    let _ = fmt_en.compare_fields("a", "b").ok();
-    let _ = fmt_zh.compare_fields("a", "b").ok();
-    let _ = Ordering::Equal;
+    // 使用格式化器演示字段比较
+    match fmt_en.compare_fields("a", "b") {
+        Ok(std::cmp::Ordering::Less) => println!("\n字段比较示例: \"a\" < \"b\""),
+        Ok(other) => println!("\n字段比较示例: {:?}", other),
+        Err(e) => println!("\n字段比较失败: {}", e),
+    }
 }
 
 /// 演示数字格式化
@@ -96,8 +96,12 @@ fn show_event_count_plural() {
     println!("{}", "-".repeat(40));
 
     for &count in &counts {
-        let en_plural = fmt_en.format_event_count(count).unwrap_or_default();
-        let zh_plural = fmt_zh.format_event_count(count).unwrap_or_default();
+        let en_plural = fmt_en
+            .format_event_count(count)
+            .unwrap_or_else(|e| format!("error: {e}"));
+        let zh_plural = fmt_zh
+            .format_event_count(count)
+            .unwrap_or_else(|e| format!("error: {e}"));
         println!("{:<10} {:<15} {:<15}", count, en_plural, zh_plural);
     }
 
@@ -146,7 +150,9 @@ fn show_log_level_normalization() {
     println!("日志级别规范化（统一大写）：");
     println!("{}", "-".repeat(40));
     for level in &levels {
-        let normalized = fmt.format_log_level(level).unwrap_or_default();
+        let normalized = fmt
+            .format_log_level(level)
+            .unwrap_or_else(|e| format!("error: {e}"));
         println!("  {:<10} → {}", level, normalized);
     }
 

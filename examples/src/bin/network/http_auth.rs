@@ -82,6 +82,7 @@ fn show_ip_whitelist() {
         ip_whitelist: Some(vec![
             "10.0.0.0/8".to_string(),
             "192.168.0.0/16".to_string(),
+            "192.168.*.*".to_string(), // 通配符格式
             "127.0.0.1".to_string(),
         ]),
         ..Default::default()
@@ -205,7 +206,7 @@ token_env = "INKLOG_HTTP_AUTH_TOKEN""#
     );
 
     println!("\n启动前需设置环境变量：");
-    println!("  export INKLOG_HTTP_AUTH_TOKEN=\"your-secret-token-here\"");
+    println!("  export INKLOG_HTTP_AUTH_TOKEN=\"<your-secret-token>\"");
 }
 
 /// 演示环境变量覆盖

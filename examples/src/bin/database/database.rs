@@ -98,13 +98,15 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         enabled: true,
         driver: DatabaseDriver::SQLite,
         url: "sqlite::memory:".to_string(),
-        pool_size: 5,           // 连接池大小
+        pool_size: 1,           // 内存数据库必须用 1，避免多连接隔离
         batch_size: 10,         // 批次大小
         flush_interval_ms: 100, // 刷新间隔 100ms
         partition: inklog::config::PartitionStrategy::Monthly,
         table_name: "logs".to_string(),
         archive_format: inklog::ArchiveFormat::default(),
         parquet_config: Default::default(),
+        permissions_path: Some(perm_path.to_string()),
+        admin_role: "admin".to_string(),
     };
 
     println!("数据库配置:");
@@ -238,13 +240,15 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         enabled: true,
         driver: DatabaseDriver::SQLite,
         url: "sqlite::memory:".to_string(),
-        pool_size: 3,
+        pool_size: 1,          // 内存数据库必须用 1
         batch_size: 5,         // 小批次大小
         flush_interval_ms: 50, // 快速刷新
         partition: inklog::config::PartitionStrategy::Monthly,
         table_name: "logs".to_string(),
         archive_format: inklog::ArchiveFormat::default(),
         parquet_config: Default::default(),
+        permissions_path: Some(perm_path.to_string()),
+        admin_role: "admin".to_string(),
     };
 
     println!("批次配置:");
@@ -454,7 +458,10 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
                 target,
                 message
             );
-            let _: dbnexus::foundation::error::DbResult<_> = session.execute_raw(&sql).await;
+            match session.execute_raw(&sql).await {
+                Ok(_) => {}
+                Err(e) => println!("  ⚠ INSERT 失败: {:?}", e),
+            }
         }
         println!("✓ 已写入 {} 条测试数据\n", test_data.len());
 
