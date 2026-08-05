@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! `InklogModule` — trait-kit 0.2.2 `AsyncKit` integration for inklog.
+//! `InklogModule` — trait-kit 0.4 `AsyncKit` integration for inklog.
 //!
 //! Wires inklog's `Database` abstraction into the `AsyncKit` dependency
 //! injection framework, depending on `DbNexusModule` for the database
@@ -17,6 +17,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
+use trait_kit::AsyncReady;
 use trait_kit::prelude::*;
 
 use dbnexus::DbNexusModule;
@@ -36,6 +37,18 @@ use crate::integrations::infra::database::DbNexusAdapter;
 /// that proxies `insert_batch` / `is_healthy` through the dbnexus
 /// `ConnectionPool`. This capability can be injected directly into
 /// `LoggerBuilder::with_database(...)`.
+///
+/// # Lifecycle
+///
+/// Implements `AsyncLifecycle`:
+/// - `on_ready`: verifies `DbNexusModule` capability is accessible in the built kit.
+/// - `on_shutdown`: logs inklog module shutdown (connection pool is owned by dbnexus).
+///
+/// # Health
+///
+/// Implements `AsyncHealthCheck`:
+/// - `check`: returns `Healthy` when the database capability is present in the kit.
+///   For detailed async runtime connectivity checks, use `Database::is_healthy()` directly.
 pub struct InklogModule;
 
 impl ModuleMeta for InklogModule {
@@ -70,6 +83,45 @@ impl AsyncAutoBuilder for InklogModule {
             // 3. Return as Arc<dyn Database + Send + Sync>.
             Ok(Arc::new(adapter) as Arc<dyn Database + Send + Sync>)
         })
+    }
+}
+
+impl AsyncLifecycle for InklogModule {
+    fn on_ready<'a>(
+        kit: &'a AsyncKit<AsyncReady>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            // Verify DbNexusModule capability is accessible after all modules are built.
+            // This catches missing or failed database dependencies early.
+            kit.require::<DbNexusModule>().map_err(|e| {
+                InklogError::database_error(format!(
+                    "InklogModule on_ready: DbNexusModule not available: {e}"
+                ))
+            })?;
+            tracing::debug!("InklogModule: on_ready — database dependency verified");
+            Ok(())
+        })
+    }
+
+    fn on_shutdown<'a>(
+        _cap: &'a Self::Capability,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {
+            // Connection pool lifecycle is managed by DbNexusModule.
+            // InklogModule only releases its adapter wrapper here.
+            tracing::debug!("InklogModule: on_shutdown — releasing database adapter");
+        })
+    }
+}
+
+impl AsyncHealthCheck for InklogModule {
+    fn check(_cap: &Self::Capability) -> HealthStatus {
+        // Capability presence confirms the database adapter was successfully built
+        // and the underlying connection pool was established during build().
+        //
+        // Detailed async runtime connectivity checks should use
+        // `Database::is_healthy()` directly (e.g. from the HTTP health endpoint).
+        HealthStatus::Healthy
     }
 }
 
@@ -120,8 +172,11 @@ mod tests {
         kit.set_config(OxcacheConfig::default());
         kit.set_config(DbConfig {
             url: "sqlite::memory:".to_string(),
-            max_connections: 5,
-            min_connections: 1,
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 5,
+                min_connections: 1,
+                ..Default::default()
+            },
             ..Default::default()
         });
         kit.register::<OxcacheModule>()
@@ -153,5 +208,144 @@ mod tests {
             msg.contains("dbnexus"),
             "error should mention dbnexus dependency, got: {msg}"
         );
+    }
+
+    // ========================================================================
+    // AsyncHealthCheck tests
+    // ========================================================================
+
+    /// AsyncHealthCheck::check returns Healthy for a valid database capability.
+    #[tokio::test]
+    async fn inklog_module_health_check_returns_healthy() {
+        use dbnexus::foundation::config::DbConfig;
+        use oxcache::integrations::kit::{OxcacheConfig, OxcacheModule};
+
+        let mut kit = AsyncKit::new();
+        kit.set_config(OxcacheConfig::default());
+        kit.set_config(DbConfig {
+            url: "sqlite::memory:".to_string(),
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 5,
+                min_connections: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        kit.register::<OxcacheModule>()
+            .expect("register OxcacheModule");
+        kit.register::<DbNexusModule>()
+            .expect("register DbNexusModule");
+        kit.register::<InklogModule>()
+            .expect("register InklogModule");
+        let built = kit.build().await.expect("AsyncKit::build");
+
+        let db: Arc<dyn Database + Send + Sync> = built
+            .require::<InklogModule>()
+            .expect("require InklogModule");
+        let status = InklogModule::check(&db);
+        assert_eq!(status, HealthStatus::Healthy);
+    }
+
+    // ========================================================================
+    // AsyncLifecycle tests
+    // ========================================================================
+
+    /// on_ready succeeds when DbNexusModule is registered and accessible.
+    #[tokio::test]
+    async fn inklog_module_lifecycle_on_ready_succeeds() {
+        use dbnexus::foundation::config::DbConfig;
+        use oxcache::integrations::kit::{OxcacheConfig, OxcacheModule};
+
+        let mut kit = AsyncKit::new();
+        kit.set_config(OxcacheConfig::default());
+        kit.set_config(DbConfig {
+            url: "sqlite::memory:".to_string(),
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 5,
+                min_connections: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        kit.register::<OxcacheModule>()
+            .expect("register OxcacheModule");
+        kit.register::<DbNexusModule>()
+            .expect("register DbNexusModule");
+        kit.register::<InklogModule>()
+            .expect("register InklogModule");
+        // register_lifecycle enables on_ready/on_shutdown hooks
+        kit.register_lifecycle::<InklogModule>();
+        // build() invokes on_ready internally — should not error
+        let built = kit
+            .build()
+            .await
+            .expect("build with lifecycle should succeed");
+        drop(built);
+    }
+
+    /// on_shutdown completes without panic after a successful build.
+    #[tokio::test]
+    async fn inklog_module_lifecycle_shutdown_completes() {
+        use dbnexus::foundation::config::DbConfig;
+        use oxcache::integrations::kit::{OxcacheConfig, OxcacheModule};
+
+        let mut kit = AsyncKit::new();
+        kit.set_config(OxcacheConfig::default());
+        kit.set_config(DbConfig {
+            url: "sqlite::memory:".to_string(),
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 5,
+                min_connections: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        kit.register::<OxcacheModule>()
+            .expect("register OxcacheModule");
+        kit.register::<DbNexusModule>()
+            .expect("register DbNexusModule");
+        kit.register::<InklogModule>()
+            .expect("register InklogModule");
+        kit.register_lifecycle::<InklogModule>();
+        let built = kit.build().await.expect("build");
+        // shutdown() invokes on_shutdown for each lifecycle-registered module
+        built.shutdown();
+    }
+
+    /// Full integration: lifecycle + health check working together.
+    #[tokio::test]
+    async fn inklog_module_lifecycle_and_health_full_integration() {
+        use dbnexus::foundation::config::DbConfig;
+        use oxcache::integrations::kit::{OxcacheConfig, OxcacheModule};
+
+        let mut kit = AsyncKit::new();
+        kit.set_config(OxcacheConfig::default());
+        kit.set_config(DbConfig {
+            url: "sqlite::memory:".to_string(),
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 5,
+                min_connections: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        kit.register::<OxcacheModule>()
+            .expect("register OxcacheModule");
+        kit.register::<DbNexusModule>()
+            .expect("register DbNexusModule");
+        kit.register::<InklogModule>()
+            .expect("register InklogModule");
+        kit.register_lifecycle::<InklogModule>();
+        kit.register_health_check::<InklogModule>();
+        let built = kit.build().await.expect("build");
+
+        // Health check via kit
+        let status = built
+            .health_check::<InklogModule>()
+            .expect("health_check should succeed");
+        assert_eq!(status, HealthStatus::Healthy);
+
+        // Shutdown
+        built.shutdown();
     }
 }
