@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -72,7 +73,7 @@ jobs:
         # `--workspace` compiles all integration tests + examples + benchmarks,
         # producing a linker command with hundreds of rlibs that triggers
         # `collect2: fatal error: ld terminated with signal 7 [Bus error]`.
-        run: cargo tarpaulin --verbose --all-features --lib --timeout 120 --out xml --fail-under-lines 80
+        run: cargo tarpaulin --verbose --all-features --lib --timeout 120 --out xml --fail-under 80
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v7
         with:

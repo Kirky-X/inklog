@@ -16,7 +16,7 @@
 //! cargo run --bin runtime_ops
 //! ```
 
-use inklog::{InklogConfig, LoggerManager};
+use inklog::InklogConfig;
 use inklog_examples::common::{print_section, print_separator};
 
 #[tokio::main]

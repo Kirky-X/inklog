@@ -229,7 +229,7 @@ fn show_path_validation() {
         ("/etc/shadow", false, "系统敏感文件"),
     ];
 
-    println!("{:<25} {:<10} {:<10} {}", "路径", "期望", "实际", "说明");
+    println!("{:<25} {:<10} {:<10} 说明", "路径", "期望", "实际");
     println!("{}", "-".repeat(65));
 
     for (path, expected_valid, desc) in test_cases {

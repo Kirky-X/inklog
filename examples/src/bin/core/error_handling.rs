@@ -84,7 +84,7 @@ fn show_error_variants() {
         ("Unknown", InklogError::Unknown("unexpected state".into())),
     ];
 
-    println!("{:<20} {}", "变体", "Display 输出");
+    println!("{:<20} Display 输出", "变体");
     println!("{}", "-".repeat(70));
     for (name, err) in &errors {
         println!("{:<20} {}", name, err);
@@ -174,7 +174,7 @@ fn show_localized_message() {
         InklogError::Unknown("something".into()),
     ];
 
-    println!("{:<25} {}", "错误类型", "localized_message()");
+    println!("{:<25} localized_message()", "错误类型");
     println!("{}", "-".repeat(70));
     for err in &errors {
         println!(

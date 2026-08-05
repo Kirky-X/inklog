@@ -96,7 +96,7 @@ fn show_closed_to_open() {
     print_separator("2. Closed → Open：失败计数触发熔断");
 
     print_section("2.1 配置 failure_threshold = 3");
-    let mut cb = CircuitBreaker::new(3, Duration::from_secs(60), 2);
+    let cb = CircuitBreaker::new(3, Duration::from_secs(60), 2);
     println!("初始 state = {:?}", cb.state());
 
     print_section("2.2 第 1 次失败（未达阈值）");
@@ -131,7 +131,7 @@ fn show_open_to_half_open() {
     print_separator("3. Open → HalfOpen：超时后自动进入半开");
 
     print_section("3.1 配置 timeout = 100ms");
-    let mut cb = CircuitBreaker::new(2, Duration::from_millis(100), 3);
+    let cb = CircuitBreaker::new(2, Duration::from_millis(100), 3);
     // 触发熔断
     cb.record_failure();
     cb.record_failure();
@@ -161,7 +161,7 @@ fn show_half_open_to_closed() {
     print_separator("4. HalfOpen → Closed：累计成功恢复");
 
     print_section("4.1 配置 success_threshold = 3");
-    let mut cb = CircuitBreaker::new(2, Duration::from_millis(100), 3);
+    let cb = CircuitBreaker::new(2, Duration::from_millis(100), 3);
     cb.record_failure();
     cb.record_failure();
     assert_eq!(cb.state(), CircuitState::Open);
@@ -193,7 +193,7 @@ fn show_half_open_to_open() {
     print_separator("5. HalfOpen → Open：半开状态下失败立即回退");
 
     print_section("5.1 进入 HalfOpen 状态");
-    let mut cb = CircuitBreaker::new(2, Duration::from_millis(100), 3);
+    let cb = CircuitBreaker::new(2, Duration::from_millis(100), 3);
     cb.record_failure();
     cb.record_failure();
     assert_eq!(cb.state(), CircuitState::Open);
@@ -262,7 +262,7 @@ fn show_with_config() {
     assert_eq!(default_config.timeout, Duration::from_secs(30));
 
     print_section("6.4 Closed 状态下成功重置失败计数");
-    let mut cb = CircuitBreaker::with_config(CircuitBreakerConfig {
+    let cb = CircuitBreaker::with_config(CircuitBreakerConfig {
         failure_threshold: 3,
         success_threshold: 2,
         timeout: Duration::from_secs(60),
@@ -282,7 +282,7 @@ fn show_reset() {
     print_separator("7. reset() 手动重置");
 
     print_section("7.1 触发熔断进入 Open");
-    let mut cb = CircuitBreaker::new(2, Duration::from_secs(60), 3);
+    let cb = CircuitBreaker::new(2, Duration::from_secs(60), 3);
     cb.record_failure();
     cb.record_failure();
     assert_eq!(cb.state(), CircuitState::Open);
@@ -304,7 +304,7 @@ async fn show_realistic_usage() {
     print_separator("8. 真实场景模拟：can_execute() 守护操作");
 
     print_section("8.1 模拟 Sink 写入（失败阈值 = 3，超时 = 200ms）");
-    let mut cb = CircuitBreaker::new(3, Duration::from_millis(200), 2);
+    let cb = CircuitBreaker::new(3, Duration::from_millis(200), 2);
 
     // 定义一个模拟的写操作：根据传入参数返回成功或失败
     let write_op = |succeed: bool| -> Result<(), &'static str> {
