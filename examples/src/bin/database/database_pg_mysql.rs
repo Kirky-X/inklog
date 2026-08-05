@@ -79,7 +79,7 @@ fn show_from_str_display() {
         let result: Result<DatabaseDriver, String> = input.parse();
         match result {
             Ok(d) => println!("  {:>10}.parse() → Ok({:?})", input, d),
-            Err(_) => println!("  {:>10}.parse() → Err(())", input),
+            Err(e) => println!("  {:>10}.parse() → Err(\"{}\")", input, e),
         }
     }
 

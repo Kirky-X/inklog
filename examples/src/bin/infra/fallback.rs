@@ -46,8 +46,6 @@ use std::sync::Arc;
 struct FallbackState {
     /// 当前激活的 Sink 类型
     active_sink: String,
-    /// 备用 Sink 是否就绪
-    backup_ready: bool,
     /// 降级事件计数
     fallback_count: u32,
     /// 最后降级时间
@@ -58,7 +56,6 @@ impl FallbackState {
     fn new(primary_name: &str) -> Self {
         Self {
             active_sink: primary_name.to_string(),
-            backup_ready: true,
             fallback_count: 0,
             last_fallback_time: None,
         }
@@ -103,16 +100,19 @@ impl FailingSink {
 #[async_trait]
 impl LogSink for FailingSink {
     async fn write(&self, record: &LogRecord) -> Result<(), inklog::InklogError> {
+        // 原子地检查计数并获取 inner sink，避免 TOCTOU 竞态
         let mut count = self.write_count.lock().await;
         *count += 1;
+        let current_count = *count;
 
-        // 在达到故障点之前正常工作
-        if *count <= self.fail_after {
+        if current_count <= self.fail_after {
+            // 在同一个临界区内完成计数检查和 sink 获取
             let inner = self.inner.lock().await;
             if let Some(ref sink) = *inner {
                 return sink.write(record).await;
             }
         }
+        drop(count); // 释放计数锁后再触发故障
 
         // 触发故障
         Err(inklog::InklogError::IoError(std::io::Error::other(
@@ -124,6 +124,8 @@ impl LogSink for FailingSink {
     }
 
     async fn flush(&self) -> Result<(), inklog::InklogError> {
+        // 注意：示例代码中 flush 在锁内执行异步 I/O，
+        // 生产环境应通过 Arc 共享 sink 引用来避免持锁 await
         let inner = self.inner.lock().await;
         if let Some(ref sink) = *inner {
             sink.flush().await
@@ -375,7 +377,6 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|| "无".to_string())
     );
     println!("当前活跃 Sink: {}", state.active_sink);
-    println!("备用 Sink 就绪: {}", state.backup_ready);
 
     // 7. 验证备用文件内容
     print_section("验证备用文件");
@@ -622,12 +623,15 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 删除指定路径相关的所有文件
 fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let log_dir = PathBuf::from(log_path).parent().unwrap().to_path_buf();
+    let log_dir = PathBuf::from(log_path)
+        .parent()
+        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .to_path_buf();
     let mut deleted_count = 0;
 
     for entry in fs::read_dir(&log_dir)? {
         let entry = entry?;
-        let file_name = entry.file_name().to_str().unwrap().to_string();
+        let file_name = entry.file_name().to_string_lossy().to_string();
 
         if file_name.contains(prefix) {
             fs::remove_file(entry.path())?;

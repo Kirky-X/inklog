@@ -32,151 +32,168 @@ tempfile = { workspace = true }
 log = { workspace = true }
 crossbeam-channel = { workspace = true }
 regex = { workspace = true }
+toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 
 [[bin]]
 name = "console"
-path = "src/bin/console.rs"
+path = "src/bin/sinks/console.rs"
 
 [[bin]]
 name = "file"
-path = "src/bin/file.rs"
+path = "src/bin/sinks/file.rs"
 
 [[bin]]
 name = "encryption"
-path = "src/bin/encryption.rs"
+path = "src/bin/security/encryption.rs"
 
 [[bin]]
 name = "performance"
-path = "src/bin/performance.rs"
+path = "src/bin/infra/performance.rs"
 
 [[bin]]
 name = "database"
-path = "src/bin/database.rs"
+path = "src/bin/database/database.rs"
 
 [[bin]]
 name = "http"
-path = "src/bin/http.rs"
+path = "src/bin/network/http.rs"
 
 [[bin]]
 name = "fallback"
-path = "src/bin/fallback.rs"
+path = "src/bin/infra/fallback.rs"
 
 # 现有 binary（保留）
 [[bin]]
 name = "basic"
-path = "src/bin/basic.rs"
+path = "src/bin/core/basic.rs"
 
 [[bin]]
 name = "production"
-path = "src/bin/production.rs"
+path = "src/bin/core/production.rs"
 
 [[bin]]
 name = "all_features"
-path = "src/bin/all_features.rs"
+path = "src/bin/core/all_features.rs"
 
 # Layer 0 零依赖示例
 [[bin]]
 name = "builder"
-path = "src/bin/builder.rs"
+path = "src/bin/core/builder.rs"
 
 [[bin]]
 name = "template"
-path = "src/bin/template.rs"
+path = "src/bin/core/template.rs"
 
 [[bin]]
 name = "masking"
-path = "src/bin/masking.rs"
+path = "src/bin/security/masking.rs"
 
 [[bin]]
 name = "di_example"
-path = "src/bin/di_example.rs"
+path = "src/bin/database/di_example.rs"
 required-features = ["sqlite"]
 
 [[bin]]
 name = "object_pool"
-path = "src/bin/object_pool.rs"
+path = "src/bin/infra/object_pool.rs"
 
 [[bin]]
 name = "path_validator"
-path = "src/bin/path_validator.rs"
+path = "src/bin/security/path_validator.rs"
 
 [[bin]]
 name = "log_sanitizer"
-path = "src/bin/log_sanitizer.rs"
+path = "src/bin/security/log_sanitizer.rs"
 
 [[bin]]
 name = "log_adapter"
-path = "src/bin/log_adapter.rs"
+path = "src/bin/infra/log_adapter.rs"
 
 # Layer 1 本地资源示例
 [[bin]]
 name = "compression"
-path = "src/bin/compression.rs"
+path = "src/bin/sinks/compression.rs"
 required-features = ["compression"]
 
 [[bin]]
 name = "rotation"
-path = "src/bin/rotation.rs"
+path = "src/bin/sinks/rotation.rs"
 
 [[bin]]
 name = "ring_buffered_file"
-path = "src/bin/ring_buffered_file.rs"
+path = "src/bin/sinks/ring_buffered_file.rs"
 
 [[bin]]
 name = "config_file"
-path = "src/bin/config_file.rs"
+path = "src/bin/config/config_file.rs"
 
 # Layer 2 外部服务示例
 [[bin]]
 name = "metrics"
-path = "src/bin/metrics.rs"
+path = "src/bin/infra/metrics.rs"
 
 [[bin]]
 name = "circuit_breaker"
-path = "src/bin/circuit_breaker.rs"
+path = "src/bin/infra/circuit_breaker.rs"
 
 # Layer 2 公共 API 补全示例
 [[bin]]
 name = "log_level"
-path = "src/bin/log_level.rs"
+path = "src/bin/infra/log_level.rs"
 
 [[bin]]
 name = "channel_strategy"
-path = "src/bin/channel_strategy.rs"
+path = "src/bin/infra/channel_strategy.rs"
 
 [[bin]]
 name = "http_auth"
-path = "src/bin/http_auth.rs"
+path = "src/bin/network/http_auth.rs"
 
 [[bin]]
 name = "env_overrides"
-path = "src/bin/env_overrides.rs"
+path = "src/bin/config/env_overrides.rs"
 
 [[bin]]
 name = "config_inspect"
-path = "src/bin/config_inspect.rs"
+path = "src/bin/config/config_inspect.rs"
 
 [[bin]]
 name = "parquet_archive"
-path = "src/bin/parquet_archive.rs"
+path = "src/bin/sinks/parquet_archive.rs"
 
 [[bin]]
 name = "database_pg_mysql"
-path = "src/bin/database_pg_mysql.rs"
+path = "src/bin/database/database_pg_mysql.rs"
 
 # Layer 3 补全示例
 [[bin]]
 name = "tls_config"
-path = "src/bin/tls_config.rs"
+path = "src/bin/network/tls_config.rs"
 
 [[bin]]
 name = "partition_strategy"
-path = "src/bin/partition_strategy.rs"
+path = "src/bin/sinks/partition_strategy.rs"
 
 [[bin]]
 name = "i18n"
-path = "src/bin/i18n.rs"
+path = "src/bin/core/i18n.rs"
 
 [[bin]]
 name = "runtime_ops"
-path = "src/bin/runtime_ops.rs"
+path = "src/bin/infra/runtime_ops.rs"
+
+[[bin]]
+name = "rate_limiter"
+path = "src/bin/infra/rate_limiter.rs"
+
+[[bin]]
+name = "output_format"
+path = "src/bin/infra/output_format.rs"
+
+[[bin]]
+name = "error_handling"
+path = "src/bin/core/error_handling.rs"
+
+[[bin]]
+name = "archive_format"
+path = "src/bin/sinks/archive_format.rs"

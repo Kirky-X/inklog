@@ -18,11 +18,15 @@
 //! cargo run --bin basic
 //! ```
 
-use inklog::{InklogConfig, LoggerManager};
+use inklog::LoggerManager;
+use std::mem;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog 基础用法示例 ===\n");
+
+    // 在 main 中创建并持有 logger，确保所有示例的 tracing 调用都有活跃 subscriber
+    let _logger = LoggerManager::new().await?;
 
     show_default_initialization().await?;
     show_log_levels();
@@ -40,13 +44,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 使用 `LoggerManager::new()` 以默认配置启动日志系统。
 /// 默认配置仅启用 Console Sink，日志级别为 info。
+///
+/// 注意：本示例的 logger 在 main() 中创建并保持存活，
+/// 确保后续示例的 tracing 调用有活跃的 subscriber。
 async fn show_default_initialization() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- 示例 1：默认初始化 ---\n");
 
-    let _logger = LoggerManager::new().await?;
-    println!("✓ LoggerManager::new() 初始化成功");
-
-    // 验证初始化成功：记录一条日志确认系统工作
+    // logger 已在 main() 中创建，此处展示初始化模式
+    println!("✓ LoggerManager::new() 初始化成功（logger 在 main 中创建）");
     tracing::info!("日志系统已启动");
     println!("✓ 日志记录正常\n");
 
@@ -144,22 +149,22 @@ fn show_health_verification() {
 /// 示例 5：自定义配置初始化
 ///
 /// 演示使用 `InklogConfig` 自定义配置初始化日志系统。
+///
+/// 注意：由于 tracing 全局 subscriber 已在 main() 中设置，
+/// 此处展示配置模式代码，不再创建新的 LoggerManager。
 async fn show_config_initialization() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- 示例 5：自定义配置初始化 ---\n");
 
-    // 方式 1：修改默认配置
-    let mut config = InklogConfig::default();
-    config.global.level = "debug".to_string();
-    println!("自定义配置：global.level = \"debug\"");
-
-    let _logger = LoggerManager::with_config(config).await?;
-    println!("✓ LoggerManager::with_config() 初始化成功");
-
-    tracing::debug!("这条 DEBUG 日志现在可见了（因为 level 设为 debug）");
-    println!("✓ DEBUG 级别日志已输出\n");
+    // 方式 1：修改默认配置（代码展示）
+    println!("方式 1：修改默认配置");
+    println!(
+        r#"  let mut config = InklogConfig::default();
+  config.global.level = "debug".to_string();
+  let _logger = LoggerManager::with_config(config).await?;"#
+    );
 
     // 方式 2：Builder 模式（代码展示）
-    println!("Builder 模式（另一种初始化方式）：");
+    println!("\n方式 2：Builder 模式");
     println!(
         r#"  let _logger = LoggerManager::builder()
       .level("info")
@@ -179,12 +184,16 @@ async fn show_config_initialization() -> Result<(), Box<dyn std::error::Error>> 
 async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- 示例 6：优雅关闭 ---\n");
 
+    // 创建独立 logger 演示关闭流程
     let logger = LoggerManager::new().await?;
     tracing::info!("应用启动");
     tracing::info!("处理业务逻辑...");
 
     // 应用退出前优雅关闭
     logger.shutdown()?;
+    // shutdown 已显式调用，用 mem::forget 阻止 Drop 再次关闭
+    mem::forget(logger);
+
     println!("✓ LoggerManager::shutdown() 完成");
     println!("  - Channel 中剩余日志已全部写入 Sink");
     println!("  - 所有 Sink 已关闭");
