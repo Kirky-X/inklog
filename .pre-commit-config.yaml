@@ -1,6 +1,7 @@
 # Pre-commit hooks for Inklog Rust Project
 # Install: pip install pre-commit && pre-commit install
 # Docs: https://pre-commit.com/
+# 与 lefthook.yml 功能等价，二选一即可（切换前先卸载旧的）。
 
 repos:
   # 1. Basic file checks
@@ -18,8 +19,7 @@ repos:
       - id: check-merge-conflict
         args: ['--assume-in-merge']
       - id: no-commit-to-branch
-        args: ['--branch', 'master']
-        # Only protect master branch, allow main for development
+        args: ['--branch', 'master', '--branch', 'main']
 
   # 2. Detect secrets
   - repo: https://github.com/Yelp/detect-secrets
@@ -29,31 +29,37 @@ repos:
         args: [--exclude-files, tests/]
         exclude: '^Cargo\.lock$'
 
-  # 3. Rust formatting and checks
+  # 3. 拼写检查
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.28.0
+    hooks:
+      - id: typos
+
+  # 4. Rust formatting and checks
   - repo: local
     hooks:
       - id: cargo-fmt
-        name: Format Rust code
+        name: cargo fmt --check
         description: Run rustfmt on Rust files
-        entry: cargo fmt
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-      - id: cargo-check
-        name: cargo check
-        entry: cargo check --lib
+        entry: bash -c 'cargo fmt --all -- --check'
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-clippy
-        name: cargo clippy
-        entry: cargo clippy --lib
+        name: cargo clippy (-D warnings)
+        entry: bash -c 'cargo clippy --all-targets --all-features -- -D warnings'
         language: system
         types: [rust]
         pass_filenames: false
-        args: ['--', '-A', 'clippy::unnested-or-lower', '-D', 'warnings']
+
+      - id: cargo-deny
+        name: cargo deny check (license/advisory/ban)
+        entry: >-
+          bash -c 'cargo deny check 2>/dev/null || { echo "→ 先运行: cargo install cargo-deny && cargo deny init"; exit 1; }'
+        language: system
+        files: 'Cargo\.(toml|lock)'
+        pass_filenames: false
 
 ci:
   autoupdate_commit_msg: "chore: update pre-commit hooks"

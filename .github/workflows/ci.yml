@@ -1,3 +1,4 @@
+# Rust CI 质量门禁：fmt / clippy / test / coverage(≥80%) / audit / deny
 name: CI
 
 on:
@@ -6,32 +7,30 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  format:
-    name: Format Check
+  quality:
+    name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+          components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features --workspace -- -D warnings
 
   test:
@@ -46,16 +45,19 @@ jobs:
       - run: cargo test --all-features --workspace
 
   security:
-    name: Security Audit
+    name: cargo-audit + cargo-deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install --locked cargo-deny
-      - run: cargo deny check
+      - name: cargo-audit (RustSec 漏洞库)
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: cargo-deny (license / ban / advisory)
+        uses: EmbarkStudios/cargo-deny-action@v2
 
   coverage:
-    name: Code Coverage
+    name: Coverage (≥80% lines)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -70,12 +72,12 @@ jobs:
         # `--workspace` compiles all integration tests + examples + benchmarks,
         # producing a linker command with hundreds of rlibs that triggers
         # `collect2: fatal error: ld terminated with signal 7 [Bus error]`.
-        run: cargo tarpaulin --verbose --all-features --lib --timeout 120 --out xml
+        run: cargo tarpaulin --verbose --all-features --lib --timeout 120 --out xml --fail-under-lines 80
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   build-check:
     name: Build Check
