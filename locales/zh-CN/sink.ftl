@@ -42,3 +42,17 @@ cache-exists_failed = 缓存键 '{ $key }' 存在性检查失败: { $err }
 cache-check_failed = 检查缓存键 '{ $key }' 是否存在失败: { $err }
 cache-build_failed = 构建 oxcache 失败: { $err }
 cache-capacity_zero = OxCacheAdapterBuilder: capacity 必须 > 0
+
+# 配置验证警告
+warn-db_batch_size_zero = database_sink.batch_size 为 0，重置为默认值 100
+warn-db_flush_interval_zero = database_sink.flush_interval_ms 为 0，重置为默认值 500
+warn-db_compression_level_clamp = parquet_config.compression_level 超出范围 1-22，已调整为 3
+warn-fallback_retries_zero = fallback_max_retries 为 0，重置为 1
+warn-rate_limit_zero = rate_limit = 0 无效，重置为 None（无限制）
+warn-threshold_reset = shrink_threshold >= expand_threshold，已重置为默认值
+warn-delay_clamp = fallback_initial_delay_ms > fallback_max_delay_ms，已调整
+warn-weak_password = 加密密码较弱（< 16 字符）。建议使用更长的密码或随机的 32 字节密钥
+warn-db_health_check_failed = 数据库健康检查失败: { $err }
+warn-fallback_write_failed = 降级 sink 写入失败: { $err }
+info-db_shutdown_complete = 数据库 sink 关闭完成
+warn-cache_ttl_zero = OxCacheAdapterBuilder: TTL 为零，使用默认 TTL

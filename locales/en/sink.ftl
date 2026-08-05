@@ -42,3 +42,17 @@ cache-exists_failed = exists check failed for '{ $key }': { $err }
 cache-check_failed = Failed to check existence of cache key '{ $key }': { $err }
 cache-build_failed = Failed to build oxcache: { $err }
 cache-capacity_zero = OxCacheAdapterBuilder: capacity must be > 0
+
+# Config validation warnings
+warn-db_batch_size_zero = database_sink.batch_size is 0, resetting to default 100
+warn-db_flush_interval_zero = database_sink.flush_interval_ms is 0, resetting to default 500
+warn-db_compression_level_clamp = parquet_config.compression_level out of range 1-22, clamping to 3
+warn-fallback_retries_zero = fallback_max_retries is 0, resetting to 1
+warn-rate_limit_zero = rate_limit = 0 is invalid, resetting to None (unlimited)
+warn-threshold_reset = shrink_threshold >= expand_threshold, resetting to defaults
+warn-delay_clamp = fallback_initial_delay_ms > fallback_max_delay_ms, clamping
+warn-weak_password = Weak encryption password (< 16 chars). Consider using a longer passphrase or a random 32-byte key
+warn-db_health_check_failed = Database health check failed: { $err }
+warn-fallback_write_failed = Fallback sink write failed: { $err }
+info-db_shutdown_complete = Database sink shutdown complete
+warn-cache_ttl_zero = OxCacheAdapterBuilder: TTL is zero, using default TTL

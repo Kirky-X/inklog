@@ -6,7 +6,12 @@ pub mod log_adapter;
 pub mod sink;
 
 pub use log_adapter::{LogAdapter, LogLogger};
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 pub use sink::DatabaseSink;
 pub use sink::{
     CircuitBreaker, CircuitBreakerConfig, CircuitState, ConsoleSink, DiskCheckable, FileSink,

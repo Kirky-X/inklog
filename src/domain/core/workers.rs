@@ -27,7 +27,12 @@ pub(crate) struct WorkerParams {
     pub(crate) error_sink: Arc<Mutex<Option<FileSink>>>,
     pub(crate) effective_capacity: Arc<AtomicUsize>,
     /// 注入的数据库依赖（DI 模式）
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     pub(crate) database: Option<Arc<dyn crate::integrations::Database>>,
 }
 
@@ -143,15 +148,30 @@ impl LoggerManager {
             console_sink,
             error_sink,
             effective_capacity,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database,
         } = params;
         let file_config = config.file_sink.clone();
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let db_config = config.database_sink.clone();
 
         // 确保 database 始终有效：如果配置了数据库但没有提供 DI 依赖，则创建默认实现
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let database = {
             match database {
                 Some(db) => Some(db),
@@ -516,19 +536,54 @@ impl LoggerManager {
         };
 
         // Thread 2: DB Sink
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let rx_db = receiver.clone();
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let (shutdown_tx_db, shutdown_db) = bounded(1);
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let metrics_db = metrics.clone();
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let console_sink_db = console_sink.clone();
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let error_sink_db = error_sink.clone();
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let control_rx_db = control_rx.clone();
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let handle_db = {
             let runtime_handle = runtime_handle.clone();
             tokio::task::spawn_blocking(
@@ -791,7 +846,12 @@ impl LoggerManager {
             )
         };
 
-        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+        #[cfg(not(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        )))]
         let _handle_db = tokio::task::spawn_blocking(|| {});
 
         // Health Check Thread
@@ -884,20 +944,40 @@ impl LoggerManager {
             }
         });
 
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let handles = vec![handle_console, handle_file, handle_db, handle_health];
-        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+        #[cfg(not(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        )))]
         let handles = vec![handle_console, handle_file, handle_health];
 
         // shutdown_txs 与 handles 一一对应，保持 cfg 一致性
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let shutdown_txs = vec![
             shutdown_tx_console,
             shutdown_tx_file,
             shutdown_tx_db,
             shutdown_tx_health,
         ];
-        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+        #[cfg(not(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        )))]
         let shutdown_txs = vec![shutdown_tx_console, shutdown_tx_file, shutdown_tx_health];
 
         Ok((handles, shutdown_txs))

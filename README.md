@@ -144,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 |:----:|------|------|
 | 🔍 | **压缩** | ZSTD、GZIP 支持 |
 | 🔒 | **加密** | AES-256-GCM 文件加密 |
-| 🗄️ | **数据库 Sink** | PostgreSQL、MySQL、SQLite (Sea-ORM) |
+| 🗄️ | **数据库 Sink** | PostgreSQL、MySQL、SQLite、DuckDB (dbnexus) |
 | 📊 | **Parquet 导出** | 分析就绪的日志格式 |
 | 🌐 | **HTTP 端点** | Axum 健康检查服务器 |
 | 🔧 | **命令行工具** | 日志管理实用命令 |
@@ -375,7 +375,7 @@ inklog = { version = "0.2", features = [
 | **sqlite** | dbnexus, sea-orm | SQLite 数据库 Sink |
 | **postgres** | dbnexus, sea-orm | PostgreSQL 数据库 Sink |
 | **mysql** | dbnexus, sea-orm | MySQL 数据库 Sink |
-| **duckdb** | dbnexus | DuckDB 后端（仅用于 `--all-features` 测试场景；DatabaseSink 不直接支持 duckdb 驱动） |
+| **duckdb** | dbnexus | DuckDB 数据库 Sink |
 | **compression** | zstd | ZSTD 压缩支持（轮转日志文件） |
 | **parquet** | parquet, arrow-array, arrow-schema | Parquet 导出支持（分析场景） |
 | **fast-masking** | aho-corasick | Aho-Corasick 多模式加速脱敏 |
@@ -649,7 +649,7 @@ flowchart TD
     Sink["Sink 抽象层<br/>- ConsoleSink<br/>- FileSink (轮转、压缩)<br/>- DatabaseSink (批量写入)<br/>- AsyncFileSink<br/>- RingBufferedFileSink"]
     Core["核心处理层<br/>- 日志格式化和模板<br/>- 数据脱敏 (PII)<br/>- 加密 (AES-256-GCM)<br/>- 压缩 (ZSTD, GZIP)"]
     IO["并发与 I/O<br/>- Tokio 异步运行时<br/>- Crossbeam 通道<br/>- Rayon 并行处理"]
-    Store["存储与外部服务<br/>- 文件系统<br/>- 数据库 (PostgreSQL, MySQL, SQLite)<br/>- Parquet (分析)"]
+    Store["存储与外部服务<br/>- 文件系统<br/>- 数据库 (PostgreSQL, MySQL, SQLite, DuckDB)<br/>- Parquet (分析)"]
 
     App --> API --> Sink --> Core --> IO --> Store
 ```
@@ -669,7 +669,7 @@ flowchart TD
 - 多种 Sink 实现对应不同的输出目标
 - 开发环境的控制台输出
 - 带轮转、压缩和加密的文件输出
-- 批量写入的数据库输出 (PostgreSQL, MySQL, SQLite)
+- 批量写入的数据库输出 (PostgreSQL, MySQL, SQLite, DuckDB)
 - 高吞吐量场景的异步和缓冲文件 Sink
 
 **核心处理层**

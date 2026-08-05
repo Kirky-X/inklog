@@ -191,7 +191,12 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
             if let Some(sink) = fallback
                 && let Err(e) = sink.write(record).await
             {
-                tracing::warn!("Fallback sink write failed (circuit open): {}", e);
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("err", e.to_string());
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("warn-fallback_write_failed", args)
+                );
             }
             return Ok(());
         }
@@ -230,7 +235,12 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
                     if let Some(sink) = fallback
                         && let Err(e) = sink.write(record).await
                     {
-                        tracing::warn!("Fallback sink write failed (flush error): {}", e);
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("err", e.to_string());
+                        tracing::warn!(
+                            "{}",
+                            crate::i18n::tr_args("warn-fallback_write_failed", args)
+                        );
                     }
                     return Err(e);
                 }
@@ -280,7 +290,7 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
         // Lock released
 
         let _ = self.finish_flush(records_to_flush, metrics_clone).await;
-        tracing::info!("Database sink shutdown complete");
+        tracing::info!("{}", crate::i18n::tr("info-db_shutdown_complete"));
         Ok(())
     }
 }

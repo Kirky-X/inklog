@@ -32,10 +32,9 @@ use zeroize::Zeroizing;
 pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
     // 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
     let env_value = Zeroizing::new(std::env::var(env_var).map_err(|_| {
-        InklogError::ConfigError(
-            "Encryption key environment variable not set. Please configure INKLOG_ENCRYPTION_KEY."
-                .to_string(),
-        )
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("env", env_var);
+        InklogError::ConfigError(crate::i18n::tr_args("config-encryption_key_not_set", args))
     })?);
 
     let raw_bytes = env_value.as_bytes();
@@ -55,10 +54,11 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
             return Ok(result);
         }
         // Base64 解码成功但长度不对，拒绝使用
-        return Err(InklogError::ConfigError(format!(
-            "Encryption key from Base64 must be exactly 32 bytes (256 bits), got {} bytes. \
-             Please provide a valid 32-byte key encoded in Base64.",
-            decoded.len()
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("got", decoded.len());
+        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+            "config-encryption_base64_wrong_length",
+            args,
         )));
     }
 
@@ -69,10 +69,11 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
     }
 
     // 密钥长度无效
-    Err(InklogError::ConfigError(format!(
-        "Encryption key must be exactly 32 bytes (256 bits) for raw keys, or a password string (1-127 chars) for key derivation. Got {} bytes. \
-         Please provide a valid 32-byte key in raw or Base64 format, or use a password string.",
-        raw_bytes.len()
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("got", raw_bytes.len());
+    Err(InklogError::ConfigError(crate::i18n::tr_args(
+        "config-encryption_key_wrong_length",
+        args,
     )))
 }
 
@@ -92,18 +93,17 @@ pub fn derive_key_from_password(
 ) -> Result<([u8; 32], Vec<u8>), InklogError> {
     // Security: enforce minimum password length
     if password.len() < 12 {
-        return Err(InklogError::ConfigError(format!(
-            "Encryption password must be at least 12 characters, got {}",
-            password.len()
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("got", password.len());
+        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+            "config-encryption_password_too_short",
+            args,
         )));
     }
 
     // Warn about weak passwords
     if password.len() < 16 {
-        tracing::warn!(
-            password_length = password.len(),
-            "Weak encryption password (< 16 chars). Consider using a longer passphrase or a random 32-byte key."
-        );
+        tracing::warn!("{}", crate::i18n::tr("warn-weak_password"));
     }
 
     let mut key = [0u8; 32];

@@ -28,7 +28,13 @@ impl std::str::FromStr for ChannelStrategy {
         } else if s.eq_ignore_ascii_case("adaptive") {
             Ok(ChannelStrategy::Adaptive)
         } else {
-            Err(format!("Unknown channel strategy: {}", s))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("strategy", s);
+            args.set("valid", "fixed, adaptive");
+            Err(crate::i18n::tr_args(
+                "config-unknown_channel_strategy",
+                args,
+            ))
         }
     }
 }
@@ -128,11 +134,7 @@ impl PerformanceConfig {
             std::mem::swap(&mut self.min_capacity, &mut self.max_capacity);
         }
         if self.shrink_threshold_percent >= self.expand_threshold_percent {
-            tracing::warn!(
-                shrink = self.shrink_threshold_percent,
-                expand = self.expand_threshold_percent,
-                "shrink_threshold >= expand_threshold, resetting to defaults"
-            );
+            tracing::warn!("{}", crate::i18n::tr("warn-threshold_reset"));
             self.shrink_threshold_percent = default_shrink_threshold();
             self.expand_threshold_percent = default_expand_threshold();
         }
@@ -141,7 +143,7 @@ impl PerformanceConfig {
         if let Some(rate) = self.rate_limit
             && rate == 0
         {
-            tracing::warn!("rate_limit = 0 is invalid, resetting to None (unlimited)");
+            tracing::warn!("{}", crate::i18n::tr("warn-rate_limit_zero"));
             self.rate_limit = None;
         }
     }
