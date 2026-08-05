@@ -4291,11 +4291,11 @@ mod tests {
         let mut any_content = false;
         for entry in std::fs::read_dir(temp_dir.path()).unwrap() {
             let entry = entry.unwrap();
-            if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                if content.contains("batch rotation message") {
-                    any_content = true;
-                    break;
-                }
+            if let Ok(content) = std::fs::read_to_string(entry.path())
+                && content.contains("batch rotation message")
+            {
+                any_content = true;
+                break;
             }
         }
         assert!(
