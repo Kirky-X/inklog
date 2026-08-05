@@ -1489,7 +1489,7 @@ println!("Channel 使用率: {:.2}%", health.channel_usage * 100.0);
 - **示例代码**：[examples/](./examples/)
 - **架构文档**：[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 - **安全文档**：[docs/SECURITY.md](./docs/SECURITY.md)
-- **贡献指南**：[docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md)
+- **贡献指南**：[CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ### 生态系统
 

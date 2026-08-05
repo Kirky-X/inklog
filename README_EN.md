@@ -6,7 +6,7 @@
   <a href="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml"><img src="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg" alt="CI Status" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/v/inklog.svg" alt="Version" style="display:inline;margin:0 4px;"></a><a href="https://docs.rs/inklog"><img src="https://docs.rs/inklog/badge.svg" alt="Documentation" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/d/inklog.svg" alt="Downloads" style="display:inline;margin:0 4px;"></a><a href="https://github.com/Kirky-X/inklog/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/inklog.svg" alt="License" style="display:inline;margin:0 4px;"></a><a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.94+-orange.svg" alt="Rust 1.94+" style="display:inline;margin:0 4px;"></a>
 </p>
 
-[中文](./README.md)
+[中文](./README.md) | English
 
 <p align="center">
   <strong>Enterprise-grade Rust Logging Infrastructure</strong>
@@ -825,7 +825,7 @@ docker-compose down
 
 <div align="center" style="margin: 24px 0;">
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md)
+Contributions are welcome! See [CONTRIBUTING.md](docs/CONTRIBUTING.md)
 
 </div>
 
