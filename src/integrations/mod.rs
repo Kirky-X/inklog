@@ -5,7 +5,12 @@
 pub mod infra;
 #[cfg(all(
     feature = "kit",
-    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+    any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    )
 ))]
 pub mod kit;
 
@@ -15,11 +20,21 @@ pub use infra::{
     OxCacheAdapter, OxCacheAdapterBuilder,
 };
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 pub use infra::DbNexusAdapter;
 
 #[cfg(all(
     feature = "kit",
-    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+    any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    )
 ))]
 pub use kit::{InklogBuildObserver, InklogModule, create_inklog_scope, populate_inklog_scope};

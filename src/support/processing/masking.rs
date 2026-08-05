@@ -986,10 +986,18 @@ impl MaskRuleBuilder {
     /// Returns `Err(InklogError)` if the pattern is missing or an invalid regex.
     pub fn build(self) -> Result<MaskRule, InklogError> {
         let pattern_str = self.pattern.ok_or_else(|| {
-            InklogError::ConfigError(format!("MaskRule '{}' requires a pattern", self.name))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("name", &self.name);
+            InklogError::ConfigError(crate::i18n::tr_args(
+                "config-mask_rule_requires_pattern",
+                args,
+            ))
         })?;
         let regex = Regex::new(&pattern_str).map_err(|e| {
-            InklogError::ConfigError(format!("Invalid regex in rule '{}': {}", self.name, e))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("name", &self.name);
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-invalid_regex_in_rule", args))
         })?;
         Ok(MaskRule {
             name: self.name,
@@ -1071,29 +1079,6 @@ pub fn mask_phone(phone: &str) -> String {
     PHONE_REGEX.replace(phone, "***-****-****").to_string()
 }
 
-#[allow(dead_code)]
-fn mask_id_card(id_card: &str) -> String {
-    // 身份证号掩码：只保留后4位，如果是X结尾则保留最后3位+X
-    ID_CARD_REGEX
-        .replace(id_card, |caps: &regex::Captures| {
-            // Defensive: ensure the capture group exists
-            let suffix = caps.get(3).map(|m| m.as_str()).unwrap_or("");
-            format!("******{}", suffix)
-        })
-        .to_string()
-}
-
-#[allow(dead_code)]
-fn mask_bank_card(bank_card: &str) -> String {
-    // 银行卡号掩码：只保留后4位，支持16位和19位卡号
-    if bank_card.len() > 4 {
-        let last_four = &bank_card[bank_card.len() - 4..];
-        format!("****-****-****-{}", last_four)
-    } else {
-        bank_card.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1124,41 +1109,6 @@ mod tests {
             let result = mask_phone(input);
             assert_eq!(result, expected, "Failed for: {}", input);
         }
-    }
-
-    #[test]
-    fn test_mask_id_card() {
-        let test_cases = vec![
-            ("110101199001011234", "******1234"),
-            ("31011519880530218X", "******218X"),
-        ];
-
-        for (input, expected) in test_cases {
-            let result = mask_id_card(input);
-            assert_eq!(result, expected, "Failed for: {}", input);
-        }
-    }
-
-    #[test]
-    fn test_mask_bank_card() {
-        let test_cases = vec![
-            ("6222021234567890123", "****-****-****-0123"),
-            ("4567890123456789", "****-****-****-6789"),
-        ];
-
-        for (input, expected) in test_cases {
-            let result = mask_bank_card(input);
-            assert_eq!(result, expected, "Failed for: {}", input);
-        }
-    }
-
-    #[test]
-    fn test_mask_bank_card_short_input() {
-        // Test the else branch when bank_card.len() <= 4
-        assert_eq!(mask_bank_card("123"), "123");
-        assert_eq!(mask_bank_card("1234"), "1234");
-        assert_eq!(mask_bank_card("ab"), "ab");
-        assert_eq!(mask_bank_card(""), "");
     }
 
     #[test]

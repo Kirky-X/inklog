@@ -122,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 |:----:|------|------|
 | 🔍 | **Compression** | ZSTD, GZIP support |
 | 🔒 | **Encryption** | AES-256-GCM file encryption |
-| 🗄️ | **Database Sink** | PostgreSQL, MySQL, SQLite via Sea-ORM |
+| 🗄️ | **Database Sink** | PostgreSQL, MySQL, SQLite, DuckDB via dbnexus |
 | 📊 | **Parquet Export** | Analytics-ready log format |
 | 🌐 | **HTTP Endpoint** | Axum-based health check server (`http` feature) |
 | 🔧 | **CLI Tools** | Log management utility commands (`cli` feature) |
@@ -353,7 +353,7 @@ inklog = { version = "0.2", features = [
 | **sqlite** | dbnexus, sea-orm | SQLite database sink |
 | **postgres** | dbnexus, sea-orm | PostgreSQL database sink |
 | **mysql** | dbnexus, sea-orm | MySQL database sink |
-| **duckdb** | dbnexus, sea-orm | DuckDB backend (only for `--all-features` tests; DatabaseSink does not directly support duckdb driver) |
+| **duckdb** | dbnexus, sea-orm | DuckDB database Sink |
 | **compression** | zstd | ZSTD compression for rotated log files |
 | **parquet** | parquet, arrow-array, arrow-schema | Parquet export support (analytics) |
 | **fast-masking** | aho-corasick | Aho-Corasick accelerated multi-pattern masking |
@@ -629,7 +629,7 @@ flowchart TD
     Sink["Sink Abstraction Layer<br/>- ConsoleSink<br/>- FileSink (rotation, compression)<br/>- DatabaseSink (batch writes)<br/>- AsyncFileSink<br/>- RingBufferedFileSink"]
     Core["Core Processing Layer<br/>- Log formatting & templates<br/>- Data masking (PII redaction)<br/>- Encryption (AES-256-GCM)<br/>- Compression (ZSTD, GZIP)"]
     IO["Concurrency & I/O<br/>- Tokio async runtime<br/>- Crossbeam channels<br/>- Rayon parallel processing"]
-    Store["Storage & External Services<br/>- Filesystem<br/>- Database (PostgreSQL, MySQL, SQLite)<br/>- Parquet (analytics)"]
+    Store["Storage & External Services<br/>- Filesystem<br/>- Database (PostgreSQL, MySQL, SQLite, DuckDB)<br/>- Parquet (analytics)"]
 
     App --> API --> Sink --> Core --> IO --> Store
 ```
@@ -649,7 +649,7 @@ flowchart TD
 - Multiple Sink implementations for different output targets
 - Console output for development environments
 - File output with rotation, compression, and encryption
-- Database output with batch writes (PostgreSQL, MySQL, SQLite)
+- Database output with batch writes (PostgreSQL, MySQL, SQLite, DuckDB)
 - Async and buffered file sinks for high-throughput scenarios
 
 **Core Processing Layer**

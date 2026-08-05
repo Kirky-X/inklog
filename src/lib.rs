@@ -144,7 +144,12 @@ static _LOCALE_INIT: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
 // one of sqlite / postgres / mysql to function.
 #[cfg(all(
     feature = "kit",
-    not(any(feature = "sqlite", feature = "postgres", feature = "mysql"))
+    not(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))
 ))]
 compile_error!(
     "The 'kit' feature requires at least one database driver feature: \
@@ -195,11 +200,21 @@ pub use domain::config::{
 pub use domain::types::log_record::LogRecord;
 pub use error::InklogError;
 pub use error::InklogResult;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 pub use integrations::DbNexusAdapter;
 #[cfg(all(
     feature = "kit",
-    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+    any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    )
 ))]
 pub use integrations::InklogModule;
 
@@ -210,7 +225,12 @@ pub use integrations::{
 };
 #[cfg(all(
     feature = "kit",
-    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+    any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    )
 ))]
 pub use integrations::{InklogBuildObserver, create_inklog_scope, populate_inklog_scope};
 

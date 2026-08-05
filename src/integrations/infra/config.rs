@@ -147,8 +147,11 @@ impl InklogConfigAdapter {
     ///
     /// - `InklogError::ConfigError` - 配置加载或验证失败
     pub fn new() -> Result<Self, InklogError> {
-        let config = InklogConfig::load_sync()
-            .map_err(|e| InklogError::ConfigError(format!("Failed to load config: {}", e)))?;
+        let config = InklogConfig::load_sync().map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-failed_load_config", args))
+        })?;
         Ok(Self { config })
     }
 

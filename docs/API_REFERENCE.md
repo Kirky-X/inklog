@@ -1113,7 +1113,7 @@ pub struct DatabaseConfig {
 | `flush_interval_ms` | `u64` | `500` | 批量刷新间隔（毫秒） |
 | `pool_size` | `u32` | `10` | 数据库连接池大小 |
 
-**注意**: `DatabaseConfig` 需要 `sqlite`/`postgres`/`mysql` 功能标志才能启用。
+**注意**: `DatabaseConfig` 需要 `sqlite`/`postgres`/`mysql`/`duckdb` 功能标志才能启用。
 
 #### 示例
 ```rust
@@ -1849,7 +1849,7 @@ pub struct LoggerDependencies {
 |------|------|----------|------|
 | `cache` | `Option<Arc<dyn Cache>>` | `None` | 缓存实现（可选） |
 | `config` | `Option<Arc<dyn Config>>` | `None` | 配置实现（可选） |
-| `database` | `Option<Arc<dyn Database>>` | `None` | 数据库实现（可选，需要 `sqlite`/`postgres`/`mysql` feature） |
+| `database` | `Option<Arc<dyn Database>>` | `None` | 数据库实现（可选，需要 `sqlite`/`postgres`/`mysql`/`duckdb` feature） |
 
 **示例**
 ```rust
@@ -2202,11 +2202,11 @@ InklogConfig 配置适配器（基于 `InklogConfig` 的内置配置访问）。
 
 DbNexus 数据库适配器。
 
-**需要**: `sqlite`/`postgres`/`mysql` feature（任选其一）
+**需要**: `sqlite`/`postgres`/`mysql`/`duckdb` feature（任选其一）
 
 **特性**:
 - 连接池管理
-- 支持 PostgreSQL、MySQL、SQLite
+- 支持 PostgreSQL、MySQL、SQLite、DuckDB
 - 自动重连
 
 ---

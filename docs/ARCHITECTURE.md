@@ -1188,7 +1188,7 @@ pub struct InklogConfig {
 | axum   | HTTP 服务器      |
 | serde  | JSON 响应       |
 
-**数据库特性** (`sqlite`/`postgres`/`mysql`):
+**数据库特性** (`sqlite`/`postgres`/`mysql`/`duckdb`):
 | 依赖      | 用途                    |
 |----------|------------------------|
 | sea-orm  | ORM 层               |

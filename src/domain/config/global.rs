@@ -182,15 +182,11 @@ impl GlobalConfig {
     /// - `fallback_max_retries > 0`
     pub fn validate(&mut self) {
         if self.fallback_initial_delay_ms > self.fallback_max_delay_ms {
-            tracing::warn!(
-                initial = self.fallback_initial_delay_ms,
-                max = self.fallback_max_delay_ms,
-                "fallback_initial_delay_ms > fallback_max_delay_ms, clamping"
-            );
+            tracing::warn!("{}", crate::i18n::tr("warn-delay_clamp"));
             self.fallback_initial_delay_ms = self.fallback_max_delay_ms;
         }
         if self.fallback_max_retries == 0 {
-            tracing::warn!("fallback_max_retries is 0, resetting to 1");
+            tracing::warn!("{}", crate::i18n::tr("warn-fallback_retries_zero"));
             self.fallback_max_retries = 1;
         }
     }

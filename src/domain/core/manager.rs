@@ -14,7 +14,12 @@ use crate::LogRecord;
 use crate::LogTemplate;
 use crate::domain::core::LoggerSubscriber;
 use crate::integrations::Cache;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 use crate::integrations::Database;
 use crate::support::io::ConsoleSink;
 use crate::support::io::FileSink;
@@ -74,7 +79,12 @@ pub struct LoggerManager {
     /// 注入的缓存依赖
     cache: Option<Arc<dyn Cache>>,
     /// 注入的数据库依赖（需要 dbnexus feature）
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     database: Option<Arc<dyn Database>>,
 }
 
@@ -206,13 +216,23 @@ impl LoggerManager {
         // 注意：cache 和 database 依赖传递给 LoggerManager 内部使用
         // 它们可以通过 LoggerManager 传递给需要的服务（如 DatabaseSink）
         let cache = deps.cache;
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         let database = deps.database;
 
         // 使用解析后的配置调用现有的构建逻辑
         let (mut manager, _subscriber, _filter) = Self::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database.clone(),
         )
         .await?;
@@ -221,7 +241,12 @@ impl LoggerManager {
         manager.cache = cache;
 
         // database 已经在 build_detached 中使用，同时也存储在 manager 中
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         {
             manager.database = database;
         }
@@ -263,7 +288,12 @@ impl LoggerManager {
 
         let (manager, subscriber, filter) = Self::build_detached(
             config.clone(),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await?;
@@ -333,9 +363,13 @@ impl LoggerManager {
     /// 这主要用于测试和基准测试。
     pub async fn build_detached(
         config: InklogConfig,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))] database: Option<
-            Arc<dyn Database>,
-        >,
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
+        database: Option<Arc<dyn Database>>,
     ) -> Result<
         (
             Self,
@@ -415,7 +449,12 @@ impl LoggerManager {
             console_sink: console_sink.clone(),
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database,
         })?;
 
@@ -432,7 +471,12 @@ impl LoggerManager {
             #[cfg(feature = "http")]
             http_server_handle: Mutex::new(None),
             cache: None,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
 
@@ -462,10 +506,16 @@ impl LoggerManager {
     /// }
     /// ```
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
-        let content = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| InklogError::ConfigError(format!("Failed to read config file: {}", e)))?;
-        let config: InklogConfig = toml::from_str(&content)
-            .map_err(|e| InklogError::ConfigError(format!("Failed to parse config file: {}", e)))?;
+        let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-failed_read_config", args))
+        })?;
+        let config: InklogConfig = toml::from_str(&content).map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-failed_parse_config", args))
+        })?;
         Self::with_config(config).await
     }
 
@@ -491,8 +541,11 @@ impl LoggerManager {
     /// }
     /// ```
     pub async fn load() -> Result<Self, InklogError> {
-        let config = InklogConfig::load_sync()
-            .map_err(|e| InklogError::ConfigError(format!("Failed to load config: {}", e)))?;
+        let config = InklogConfig::load_sync().map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-failed_load_config", args))
+        })?;
         Self::with_config(config).await
     }
 
@@ -506,7 +559,9 @@ impl LoggerManager {
         self.control_tx
             .send(SinkControlMessage::RecoverSink(sink_name.to_string()))
             .map_err(|e| {
-                InklogError::ChannelError(format!("Failed to send recovery command: {}", e))
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("err", e.to_string());
+                InklogError::ChannelError(crate::i18n::tr_args("config-failed_send_recovery", args))
             })
     }
 
@@ -877,7 +932,12 @@ mod tests {
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: None,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -893,7 +953,12 @@ mod tests {
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -1136,7 +1201,12 @@ mod tests {
     // LoggerBuilder 特性门控方法测试
     // ============================================================================
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     #[test]
     fn test_builder_database_sets_config() {
         let builder = LoggerBuilder::new().database("postgres://localhost/logs");
@@ -1150,7 +1220,12 @@ mod tests {
         assert_eq!(db.name, "default");
     }
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     #[test]
     fn test_builder_with_database_injects_dep() {
         use crate::integrations::MockDatabaseAdapter;
@@ -2177,7 +2252,12 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
 
@@ -2216,7 +2296,12 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
 
@@ -2278,7 +2363,12 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
 
@@ -2311,7 +2401,12 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
 
@@ -2338,7 +2433,12 @@ worker_threads = 1
     // 需要 dbnexus feature
     // ============================================================================
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_database() {
         // 验证通过 LoggerDependencies.database 注入的 Database 实现不会导致创建失败
@@ -2383,7 +2483,12 @@ worker_threads = 1
 
         let (manager, _subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await
@@ -2430,7 +2535,12 @@ worker_threads = 1
 
         let (manager, _subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await
@@ -2627,7 +2737,12 @@ worker_threads = 1
 
         let (manager, _subscriber, _filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await
@@ -2646,7 +2761,12 @@ worker_threads = 1
     // （database 字段仅在 dbnexus feature 下存在）
     // ============================================================================
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     #[test]
     fn test_logger_dependencies_debug_includes_database_field() {
         use crate::integrations::{MockCache, MockDatabaseAdapter};
@@ -2684,7 +2804,12 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             database: None,
         };
 
@@ -2700,7 +2825,12 @@ worker_threads = 1
     // build_with_deps 同时注入 cache/config/database 测试 (lines 332-345, dbnexus)
     // ============================================================================
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_all_three_deps() {
         use crate::integrations::{InklogConfigAdapter, MockCache, MockDatabaseAdapter};

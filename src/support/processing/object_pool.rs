@@ -47,13 +47,13 @@ use std::time::Duration;
 #[serde(default)]
 pub struct ObjectPoolConfig {
     /// Maximum capacity of the pool
-    #[serde(default = "default_max_capacity")]
+    #[serde(default = "default_object_pool_max_capacity")]
     pub max_capacity: usize,
     /// Default TTL for pooled items (None = no TTL)
     pub ttl_secs: Option<u64>,
 }
 
-fn default_max_capacity() -> usize {
+fn default_object_pool_max_capacity() -> usize {
     1024
 }
 
@@ -115,10 +115,11 @@ where
         if let Some(ttl_secs) = config.ttl_secs {
             builder = builder.ttl(Duration::from_secs(ttl_secs));
         }
-        let cache = builder
-            .build()
-            .await
-            .map_err(|e| InklogError::CacheError(format!("Failed to build cache: {}", e)))?;
+        let cache = builder.build().await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-build_failed", args))
+        })?;
         Ok(Self {
             cache: Arc::new(cache),
             stats: Arc::new(PoolStats::default()),
@@ -130,11 +131,11 @@ where
     where
         K: Clone,
     {
-        let result = self
-            .cache
-            .get(key)
-            .await
-            .map_err(|e| InklogError::CacheError(format!("Failed to get from cache: {}", e)))?;
+        let result = self.cache.get(key).await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-get_failed", args))
+        })?;
         if result.is_some() {
             self.stats.hits.fetch_add(1, Ordering::Relaxed);
             self.stats.items_reused.fetch_add(1, Ordering::Relaxed);
@@ -150,10 +151,11 @@ where
         K: Clone,
         V: Clone,
     {
-        self.cache
-            .set(key, &value)
-            .await
-            .map_err(|e| InklogError::CacheError(format!("Failed to set cache: {}", e)))?;
+        self.cache.set(key, &value).await.map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::CacheError(crate::i18n::tr_args("cache-set_failed", args))
+        })?;
         self.stats.total_items.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }

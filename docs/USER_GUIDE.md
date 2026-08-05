@@ -93,7 +93,7 @@ Sink 抽象层 (Console, File, Database)
 |------|------|
 | **压缩** | ZSTD、GZIP 支持 |
 | **加密** | AES-256-GCM 文件加密 |
-| **数据库 Sink** | PostgreSQL、MySQL、SQLite (Sea-ORM) |
+| **数据库 Sink** | PostgreSQL、MySQL、SQLite、DuckDB (dbnexus) |
 | **Parquet 导出** | 分析就绪的日志格式 |
 | **HTTP 端点** | Axum 健康检查服务器 |
 
@@ -344,7 +344,7 @@ app.log.gz        # 压缩后的轮转文件（如果启用压缩）
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|----------|------|
 | `enabled` | `bool` | `false` | 是否启用数据库 Sink |
-| `driver` | `DatabaseDriver` | `PostgreSQL` | 数据库驱动：`PostgreSQL`、`MySQL`、`SQLite` |
+| `driver` | `DatabaseDriver` | `PostgreSQL` | 数据库驱动：`PostgreSQL`、`MySQL`、`SQLite`、`DuckDB` |
 | `url` | `String` | `"postgres://localhost/logs"` | 数据库连接 URL |
 | `pool_size` | `u32` | `10` | 连接池大小 |
 | `batch_size` | `usize` | `100` | 批量写入的日志数量 |
@@ -818,7 +818,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `metrics` | 健康指标采集与 Prometheus 格式导出 | `cargo run --example metrics` |
 | `circuit_breaker` | Sink 断路器与故障自动恢复 | `cargo run --example circuit_breaker` |
 
-> 提示：部分示例（如数据库相关示例）需要启用对应 feature（`sqlite`/`postgres`/`mysql`）。运行前请参考 `examples/Cargo.toml` 中的 feature 配置。
+> 提示：部分示例（如数据库相关示例）需要启用对应 feature（`sqlite`/`postgres`/`mysql`/`duckdb`）。运行前请参考 `examples/Cargo.toml` 中的 feature 配置。
 
 ---
 

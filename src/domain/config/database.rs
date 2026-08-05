@@ -19,6 +19,8 @@ pub enum DatabaseDriver {
     MySQL,
     #[serde(rename = "sqlite")]
     SQLite,
+    #[serde(rename = "duckdb")]
+    DuckDB,
 }
 
 impl std::str::FromStr for DatabaseDriver {
@@ -30,11 +32,13 @@ impl std::str::FromStr for DatabaseDriver {
             Ok(DatabaseDriver::MySQL)
         } else if s.eq_ignore_ascii_case("sqlite") || s.eq_ignore_ascii_case("sqlite3") {
             Ok(DatabaseDriver::SQLite)
+        } else if s.eq_ignore_ascii_case("duckdb") {
+            Ok(DatabaseDriver::DuckDB)
         } else {
-            Err(format!(
-                "Unknown database driver '{}'. Valid drivers: postgres, mysql, sqlite",
-                s
-            ))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("driver", s);
+            args.set("valid", "postgres, mysql, sqlite, duckdb");
+            Err(crate::i18n::tr_args("config-unknown_db_driver", args))
         }
     }
 }
@@ -45,6 +49,7 @@ impl std::fmt::Display for DatabaseDriver {
             DatabaseDriver::PostgreSQL => write!(f, "postgres"),
             DatabaseDriver::MySQL => write!(f, "mysql"),
             DatabaseDriver::SQLite => write!(f, "sqlite"),
+            DatabaseDriver::DuckDB => write!(f, "duckdb"),
         }
     }
 }
@@ -72,7 +77,12 @@ impl std::str::FromStr for PartitionStrategy {
         } else if s.eq_ignore_ascii_case("yearly") || s.eq_ignore_ascii_case("year") {
             Ok(PartitionStrategy::Yearly)
         } else {
-            Err(format!("Unknown partition strategy: {}", s))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("strategy", s);
+            Err(crate::i18n::tr_args(
+                "config-unknown_partition_strategy",
+                args,
+            ))
         }
     }
 }
@@ -156,10 +166,10 @@ impl std::str::FromStr for ArchiveFormat {
         } else if s.eq_ignore_ascii_case("csv") {
             Ok(ArchiveFormat::Csv)
         } else {
-            Err(format!(
-                "Unknown archive format: '{}'. Valid: json, parquet, csv",
-                s
-            ))
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("format", s);
+            args.set("valid", "json, parquet, csv");
+            Err(crate::i18n::tr_args("config-unknown_archive_format", args))
         }
     }
 }
@@ -269,19 +279,16 @@ impl DatabaseSinkConfig {
             self.pool_size = 1;
         }
         if self.batch_size == 0 {
-            tracing::warn!("database_sink.batch_size is 0, resetting to default 100");
+            tracing::warn!("{}", crate::i18n::tr("warn-db_batch_size_zero"));
             self.batch_size = 100;
         }
         if self.flush_interval_ms == 0 {
-            tracing::warn!("database_sink.flush_interval_ms is 0, resetting to default 500");
+            tracing::warn!("{}", crate::i18n::tr("warn-db_flush_interval_zero"));
             self.flush_interval_ms = 500;
         }
         // Clamp Parquet compression level to valid zstd range 1–22
         if !(1..=22).contains(&self.parquet_config.compression_level) {
-            tracing::warn!(
-                level = self.parquet_config.compression_level,
-                "parquet_config.compression_level out of range 1-22, clamping to 3"
-            );
+            tracing::warn!("{}", crate::i18n::tr("warn-db_compression_level_clamp"));
             self.parquet_config.compression_level = 3;
         }
     }
@@ -342,6 +349,14 @@ mod tests {
             "sqlite3".parse::<DatabaseDriver>().unwrap(),
             DatabaseDriver::SQLite
         );
+        assert_eq!(
+            "duckdb".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::DuckDB
+        );
+        assert_eq!(
+            "DuckDB".parse::<DatabaseDriver>().unwrap(),
+            DatabaseDriver::DuckDB
+        );
         assert!("oracle".parse::<DatabaseDriver>().is_err());
     }
 
@@ -350,6 +365,7 @@ mod tests {
         assert_eq!(DatabaseDriver::PostgreSQL.to_string(), "postgres");
         assert_eq!(DatabaseDriver::MySQL.to_string(), "mysql");
         assert_eq!(DatabaseDriver::SQLite.to_string(), "sqlite");
+        assert_eq!(DatabaseDriver::DuckDB.to_string(), "duckdb");
     }
 
     #[test]
