@@ -36,19 +36,19 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\", \"fast-masking\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\", \"fast-masking\"))"] }
 
 [features]
 default = []
-sqlite = ["dep:dbnexus", "dep:sea-orm", "dbnexus/sqlite", "sea-orm/sqlx-sqlite"]
-postgres = ["dep:dbnexus", "dep:sea-orm", "dbnexus/postgres", "sea-orm/sqlx-postgres"]
-mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
-# DuckDB 数据库后端（通过 dbnexus 连接池，使用原生 SQL 执行）
-# Sea-ORM 需要至少一个 sqlx-* 后端才能编译 derive macro；
-# DuckDB 实际连接由 dbnexus 处理，此处启用 sqlx-sqlite 仅满足 Sea-ORM 编译要求。
-duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb", "sea-orm/sqlx-sqlite", "sea-orm/macros"]
+sqlite = ["dep:dbnexus", "dbnexus/sqlite", "dbnexus/runtime-tokio-rustls"]
+postgres = ["dep:dbnexus", "dbnexus/postgres", "dbnexus/runtime-tokio-rustls"]
+mysql = ["dep:dbnexus", "dbnexus/mysql", "dbnexus/runtime-tokio-rustls"]
+# DuckDB 数据库后端（通过 dbnexus 连接池）
+duckdb = ["dep:dbnexus", "dbnexus/duckdb", "dbnexus/runtime-tokio-rustls"]
 http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob"]
+# trait-kit lifecycle/observability integration for DbNexusAdapter and InklogModule.
+# Requires at least one database backend feature (sqlite/postgres/mysql/duckdb).
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
 # Zstd compression support for rotated log files (optional to avoid zstd-sys
 # symbol conflicts with downstream projects that bundle their own zstd).
@@ -91,7 +91,6 @@ parquet = { version = "59.0", default-features = false, features = ["async", "ar
 arrow-array = { version = "59.0", default-features = false, optional = true }
 arrow-schema = { version = "59.0", default-features = false, optional = true }
 dbnexus = { workspace = true, optional = true }
-sea-orm = { version = "2.0", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false }
