@@ -12,13 +12,31 @@ repository = "https://github.com/Kirky-X/inklog"
 resolver = "2"
 members = [".", "examples"]
 
+[workspace.dependencies]
+# Shared across workspace crates — all use default-features = false
+async-trait = { version = "0.1", default-features = false }
+tokio = { version = "1.52", default-features = false, features = ["full"] }
+tracing = { version = "0.1", default-features = false }
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
+base64 = { version = "0.23", default-features = false, features = ["std"] }
+rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
+tempfile = { version = "3.27", default-features = false }
+log = { version = "0.4", default-features = false, features = ["std"] }
+crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
+regex = { version = "1.12", default-features = false, features = ["std", "perf", "unicode"] }
+dbnexus = { version = "0.5", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"] }
+
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "compression", "parquet"]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"permission\", \"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\", \"fast-masking\"))"] }
 
 [features]
 default = []
@@ -44,69 +62,69 @@ parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 fast-masking = ["dep:aho-corasick"]
 
 [dependencies]
-log = "0.4"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["std", "fmt", "registry", "env-filter"] }
-crossbeam-channel = "0.5"
-tokio = { version = "1.52", features = ["full"] }
-rayon = "1.12"
-futures = { version = "0.3", features = ["executor"] }
-owo-colors = { version = "4.3", features = ["supports-colors"] }
-regex = "1.12"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = { version = "1.1" }
-trait-kit = { version = "0.3", features = ["async"], optional = true, default-features = false }
-thiserror = "2.0"
-anyhow = "1.0"
-async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-axum = { version = "0.8", optional = true }
-axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
-is-terminal = "0.4"
-bytes = "1.12"
-dirs = "6.0"
-parking_lot = "0.12"
-oxcache = { version = "0.3", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
-zstd = { version = "0.13", optional = true }
-aes-gcm = "0.11"
-rand = "0.10"
-base64 = "0.22"
-parquet = { version = "59.0", features = ["async"], optional = true }
-arrow-array = { version = "59.0", optional = true }
-arrow-schema = { version = "59.0", optional = true }
-dbnexus = { version = "0.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission"], optional = true }
+log = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "registry", "env-filter"] }
+crossbeam-channel = { workspace = true }
+tokio = { workspace = true }
+rayon = { version = "1.12", default-features = false }
+futures = { version = "0.3", default-features = false, features = ["executor"] }
+owo-colors = { version = "4.3", default-features = false, features = ["supports-colors"] }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
+trait-kit = { version = "0.4", default-features = false, features = ["async", "lifecycle", "health"], optional = true }
+thiserror = { version = "2.0", default-features = false }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+axum = { version = "0.8", default-features = false, features = ["json", "tokio", "http1"], optional = true }
+axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
+is-terminal = { version = "0.4", default-features = false }
+bytes = { version = "1.12", default-features = false, features = ["std"] }
+dirs = { version = "6.0", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
+oxcache = { version = "0.4", default-features = false, features = ["macros", "memory", "serialization", "tracing"] }
+zstd = { version = "0.13", default-features = false, optional = true }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+parquet = { version = "59.0", default-features = false, features = ["async", "arrow"], optional = true }
+arrow-array = { version = "59.0", default-features = false, optional = true }
+arrow-schema = { version = "59.0", default-features = false, optional = true }
+dbnexus = { workspace = true, optional = true }
 sea-orm = { version = "2.0", default-features = false, features = ["runtime-tokio-rustls", "with-chrono"], optional = true }
-flate2 = "1.1"
-zeroize = "1.9"
-sha2 = "0.11"
-pbkdf2 = "0.13"
-clap = { version = "4.6", features = ["derive", "env"], optional = true }
-glob = { version = "0.3", optional = true }
-ipnet = "2.12"
-subtle = "2.6"
-icu = "2.2"
-writeable = "0.6"
-fluent-bundle = "0.15"
-unic-langid = "0.9"
-intl-memoizer = "0.5"
-sys-locale = "0.3"
-aho-corasick = { version = "1.0", optional = true }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.11", default-features = false }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+clap = { version = "4.6", default-features = false, features = ["derive", "env", "std", "help", "usage", "error-context", "suggestions"], optional = true }
+glob = { version = "0.3", default-features = false, optional = true }
+ipnet = { version = "2.12", default-features = false, features = ["std"] }
+subtle = { version = "2.6", default-features = false }
+icu = { version = "2.2", default-features = false }
+writeable = { version = "0.6", default-features = false }
+fluent-bundle = { version = "0.16", default-features = false }
+unic-langid = { version = "0.9", default-features = false }
+intl-memoizer = { version = "0.5", default-features = false }
+sys-locale = { version = "0.3", default-features = false }
+aho-corasick = { version = "1.0", default-features = false, features = ["std", "perf-literal"], optional = true }
 
 [dev-dependencies]
-tempfile = "3.27"
-criterion = { version = "0.8", features = ["async_tokio"] }
-serial_test = "3.5"
-axum = "0.8"
-log = "0.4"
-reqwest = { version = "0.13", features = ["json"] }
-filetime = "0.2"
-bytes = "1.12"
-assert_cmd = "2.2"
-predicates = "3.1"
+tempfile = { workspace = true }
+criterion = { version = "0.8", default-features = false, features = ["async_tokio"] }
+serial_test = { version = "4.0", default-features = false }
+axum = { version = "0.8", default-features = false }
+log = { workspace = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+filetime = { version = "0.2", default-features = false }
+bytes = { version = "1.12", default-features = false, features = ["std"] }
+assert_cmd = { version = "2.2", default-features = false }
+predicates = { version = "3.1", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", features = ["fs"] }
+nix = { version = "0.31", default-features = false, features = ["fs"] }
 
 [[bench]]
 name = "inklog_bench"
