@@ -735,7 +735,7 @@ mod tests {
         // First ERROR passes (counter=0, 0%100==0), rest are sampled at 1/100
         // So we expect ~1-2 ERRORs through (the first sampled one)
         assert!(
-            error_count >= 1 && error_count <= 5,
+            (1..=5).contains(&error_count),
             "expected ~1 sampled ERROR through rate limiter, got {}",
             error_count
         );
