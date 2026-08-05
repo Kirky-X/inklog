@@ -601,6 +601,7 @@ mod masking_test {
     #[test]
     fn test_stripe_key_masking() {
         let masker = DataMasker::new();
+        // 使用 sk_test_ 前缀（而非 sk_live_）以避免触发 GitHub secret scanning
         let key = "sk_test_abcdefghijklmnopqrstuvwxyz1234";
         let result = masker.mask(key);
         assert!(
