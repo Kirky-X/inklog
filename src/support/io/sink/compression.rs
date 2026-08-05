@@ -203,7 +203,12 @@ impl CompressionStrategy for GzipCompression {
         })?;
 
         if let Err(e) = std::fs::remove_file(path) {
-            tracing::warn!("Failed to remove original file after compression: {}", e);
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            tracing::warn!(
+                "{}",
+                crate::i18n::tr_args("config-compression_remove_failed", args)
+            );
         }
 
         Ok(compressed_path)
@@ -250,7 +255,12 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
     })?;
 
     if let Err(e) = std::fs::remove_file(path) {
-        tracing::warn!("Failed to remove original file after compression: {}", e);
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("err", e.to_string());
+        tracing::warn!(
+            "{}",
+            crate::i18n::tr_args("config-compression_remove_failed", args)
+        );
     }
 
     Ok(compressed_path)

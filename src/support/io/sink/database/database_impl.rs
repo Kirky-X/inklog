@@ -376,9 +376,13 @@ pub fn convert_logs_to_parquet(
         .iter()
         .map(|l| {
             serde_json::to_string(&l.fields)
-                .map_err(|e| {
-                    tracing::warn!("Failed to serialize log fields to JSON: {}", e);
-                    e
+                .inspect_err(|e| {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("err", e.to_string());
+                    tracing::warn!(
+                        "{}",
+                        crate::i18n::tr_args("config-json_serialize_failed", args)
+                    );
                 })
                 .ok()
         })

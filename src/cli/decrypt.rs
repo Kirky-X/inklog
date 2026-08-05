@@ -219,29 +219,45 @@ const MAGIC_HEADER: &[u8] = b"ENCLOG1\0";
 /// Supports the original header-less encryption format.
 #[cfg(test)]
 pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) -> Result<()> {
-    let mut file = File::open(input_path)
-        .with_context(|| format!("Failed to open input file: {}", input_path.display()))?;
+    let mut file = File::open(input_path).with_context(|| {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", input_path.display().to_string());
+        inklog::i18n::tr_args("config-open_input_failed", args)
+    })?;
 
     let mut header = [0u8; 24];
     file.read_exact(&mut header)
-        .with_context(|| "Failed to read file header")?;
+        .with_context(|| inklog::i18n::tr("config-read_header_failed"))?;
 
     if &header[..8] != MAGIC_HEADER {
-        return Err(anyhow!("Invalid file header: not an encrypted inklog file"));
+        return Err(anyhow!("{}", inklog::i18n::tr("config-invalid_header")));
     }
 
     let version = u16::from_le_bytes([header[8], header[9]]);
     if version != 1 {
-        return Err(anyhow!("Unsupported file version: {}", version));
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("version", version.to_string());
+        return Err(anyhow!(
+            "{}",
+            inklog::i18n::tr_args("config-unsupported_version", args)
+        ));
     }
 
     let algo = u16::from_le_bytes([header[10], header[11]]);
     if algo != 1 {
-        return Err(anyhow!("Unsupported encryption algorithm: {}", algo));
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("algo", algo.to_string());
+        return Err(anyhow!(
+            "{}",
+            inklog::i18n::tr_args("config-unsupported_algorithm", args)
+        ));
     }
 
-    let key = get_encryption_key_cli(key_env)
-        .with_context(|| format!("Failed to get encryption key from env var: {}", key_env))?;
+    let key = get_encryption_key_cli(key_env).with_context(|| {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("env", key_env);
+        inklog::i18n::tr_args("config-get_key_failed", args)
+    })?;
 
     let nonce_arr: [u8; 12] = header[12..24]
         .try_into()
@@ -250,20 +266,28 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
 
     let mut ciphertext = Vec::new();
     file.read_to_end(&mut ciphertext)
-        .with_context(|| "Failed to read ciphertext")?;
+        .with_context(|| inklog::i18n::tr("config-read_ciphertext_failed"))?;
 
     let cipher = Aes256Gcm::new((&key).into());
 
-    let plaintext = cipher
-        .decrypt(&nonce, ciphertext.as_ref())
-        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
+    let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("err", e.to_string());
+        anyhow!(
+            "{}",
+            inklog::i18n::tr_args("config-decryption_failed", args)
+        )
+    })?;
 
-    let mut output_file = File::create(output_path)
-        .with_context(|| format!("Failed to create output file: {}", output_path.display()))?;
+    let mut output_file = File::create(output_path).with_context(|| {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", output_path.display().to_string());
+        inklog::i18n::tr_args("config-create_output_failed", args)
+    })?;
 
     output_file
         .write_all(&plaintext)
-        .with_context(|| "Failed to write decrypted data")?;
+        .with_context(|| inklog::i18n::tr("config-write_decrypted_failed"))?;
 
     Ok(())
 }
@@ -653,9 +677,11 @@ mod tests {
 
         let cipher = Aes256Gcm::new(key.into());
         let nonce = aes_gcm::Nonce::from(nonce_bytes);
-        let ciphertext = cipher
-            .encrypt(&nonce, plaintext)
-            .map_err(|e| anyhow!("Encryption error: {}", e))?;
+        let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            anyhow!("{}", inklog::i18n::tr_args("config-encryption_error", args))
+        })?;
 
         file.write_all(&ciphertext)?;
 
@@ -679,9 +705,11 @@ mod tests {
 
         let cipher = Aes256Gcm::new(key.into());
         let nonce = aes_gcm::Nonce::from(nonce_bytes);
-        let ciphertext = cipher
-            .encrypt(&nonce, plaintext)
-            .map_err(|e| anyhow!("Encryption error: {}", e))?;
+        let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            anyhow!("{}", inklog::i18n::tr_args("config-encryption_error", args))
+        })?;
 
         file.write_all(&ciphertext)?;
 

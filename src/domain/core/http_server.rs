@@ -177,7 +177,12 @@ impl LoggerManager {
                     match serde_json::to_value(&status) {
                         Ok(v) => axum::Json(v),
                         Err(e) => {
-                            tracing::error!("Failed to serialize health status: {}", e);
+                            let mut args = fluent_bundle::FluentArgs::new();
+                            args.set("err", e.to_string());
+                            tracing::error!(
+                                "{}",
+                                crate::i18n::tr_args("config-http_serialize_failed", args)
+                            );
                             axum::Json(serde_json::json!({"error": "serialization failed"}))
                         }
                     }
@@ -218,11 +223,11 @@ impl LoggerManager {
                     match RustlsConfig::from_pem_file(&tls.cert_path, &tls.key_path).await {
                         Ok(c) => c,
                         Err(e) => {
+                            let mut args = fluent_bundle::FluentArgs::new();
+                            args.set("err", e.to_string());
                             tracing::error!(
-                                "Failed to load TLS cert/key ({}, {}): {}",
-                                tls.cert_path,
-                                tls.key_path,
-                                e
+                                "{}",
+                                crate::i18n::tr_args("config-https_server_error", args)
                             );
                             return;
                         }
@@ -235,14 +240,25 @@ impl LoggerManager {
                     .serve(make_svc)
                     .await
                 {
-                    tracing::error!("HTTPS server error: {}", e);
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("err", e.to_string());
+                    tracing::error!(
+                        "{}",
+                        crate::i18n::tr_args("config-https_server_error", args)
+                    );
                 }
             } else {
                 // Plain TCP mode
                 let listener = match tokio::net::TcpListener::bind(addr).await {
                     Ok(l) => l,
                     Err(e) => {
-                        tracing::error!("Failed to bind HTTP server to {}: {}", addr, e);
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("addr", addr.to_string());
+                        args.set("err", e.to_string());
+                        tracing::error!(
+                            "{}",
+                            crate::i18n::tr_args("config-http_bind_failed", args)
+                        );
                         return;
                     }
                 };
@@ -252,7 +268,14 @@ impl LoggerManager {
                 );
                 match axum::serve(listener, make_svc).await {
                     Ok(_) => info!("HTTP server stopped"),
-                    Err(e) => tracing::error!("HTTP server error: {}", e),
+                    Err(e) => {
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("err", e.to_string());
+                        tracing::error!(
+                            "{}",
+                            crate::i18n::tr_args("config-http_server_error", args)
+                        );
+                    }
                 }
             }
         });
@@ -260,7 +283,12 @@ impl LoggerManager {
         match http_server_handle.lock() {
             Ok(mut guard) => *guard = Some(handle),
             Err(e) => {
-                tracing::error!("HTTP server handle lock poisoned: {}", e);
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("err", e.to_string());
+                tracing::error!(
+                    "{}",
+                    crate::i18n::tr_args("config-http_lock_poisoned", args)
+                );
             }
         }
 
