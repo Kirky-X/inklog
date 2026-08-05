@@ -23,6 +23,7 @@ use crate::integrations::Cache;
 use crate::integrations::Database;
 use crate::support::io::ConsoleSink;
 use crate::support::io::FileSink;
+use crate::support::io::LogSink;
 use crate::support::processing::RateLimiter;
 use crate::validation::sanitize::LogSanitizer;
 use crate::{FileSinkConfig, InklogConfig};
@@ -69,7 +70,7 @@ pub struct LoggerManager {
     console_sender: Sender<Arc<LogRecord>>,
     shutdown_txs: Vec<Sender<()>>,
     #[allow(dead_code)]
-    console_sink: Arc<Mutex<ConsoleSink>>,
+    console_sink: Arc<Mutex<dyn LogSink>>,
     metrics: Arc<Metrics>,
     worker_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     control_tx: Sender<SinkControlMessage>,
@@ -348,7 +349,12 @@ impl LoggerManager {
         {
             match http_cfg.error_mode {
                 crate::HttpErrorMode::Warn => {
-                    tracing::warn!("HTTP server startup failed (continuing): {}", e);
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("err", e.to_string());
+                    tracing::warn!(
+                        "{}",
+                        crate::i18n::tr_args("config-http_startup_failed", args)
+                    );
                 }
                 crate::HttpErrorMode::Strict => {
                     return Err(e);
@@ -384,7 +390,7 @@ impl LoggerManager {
         let (control_tx, control_rx) = bounded(10); // Control channel for recovery commands
         let effective_capacity = Arc::new(AtomicUsize::new(config.performance.channel_capacity));
 
-        let console_sink = Arc::new(Mutex::new(ConsoleSink::new(
+        let console_sink: Arc<Mutex<dyn LogSink>> = Arc::new(Mutex::new(ConsoleSink::new(
             config.console_sink.clone().unwrap_or_default(),
             LogTemplate::new(&config.global.format),
         )));
@@ -431,14 +437,16 @@ impl LoggerManager {
             path: PathBuf::from("logs/error.log"),
             ..Default::default()
         };
-        let error_sink = Arc::new(Mutex::new(match FileSink::new(error_sink_config) {
-            Ok(sink) => Some(sink),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to create error sink");
-                None
-            }
-        }));
+        let error_sink: Arc<Mutex<Option<Box<dyn LogSink>>>> =
+            Arc::new(Mutex::new(match FileSink::new(error_sink_config) {
+                Ok(sink) => Some(Box::new(sink) as Box<dyn LogSink>),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to create error sink");
+                    None
+                }
+            }));
 
+        let file_sink_cfg = config.file_sink.clone().unwrap_or_default();
         let (handles, shutdown_txs) = Self::start_workers(WorkerParams {
             config: config.clone(),
             receiver,
@@ -449,6 +457,23 @@ impl LoggerManager {
             console_sink: console_sink.clone(),
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
+            file_sink_factory: Box::new(move || {
+                FileSink::new(file_sink_cfg.clone()).map(|s| Box::new(s) as Box<dyn LogSink>)
+            }),
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            db_sink_factory: Box::new(
+                |db: Arc<dyn crate::integrations::Database>, metrics: Arc<Metrics>| {
+                    let sink = crate::support::io::DatabaseSink::new(db)?;
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(async { sink.set_metrics(metrics).await });
+                    Ok(Box::new(sink) as Box<dyn LogSink>)
+                },
+            ),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -593,7 +618,7 @@ impl LoggerManager {
         // 其余 worker 进入死循环，导致进程无法退出（PID 20848 等挂起问题）。
         for tx in &self.shutdown_txs {
             if tx.send(()).is_err() {
-                tracing::warn!("Shutdown signal lost: worker channel already disconnected");
+                tracing::warn!("{}", crate::i18n::tr("config-shutdown_signal_lost"));
             }
         }
 

@@ -83,11 +83,14 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
         }
     };
 
-    let mut file = File::create(&output_file)
-        .with_context(|| format!("Failed to create config file: {}", output_file.display()))?;
+    let mut file = File::create(&output_file).with_context(|| {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", output_file.display().to_string());
+        inklog::i18n::tr_args("config-create_config_failed", args)
+    })?;
 
     file.write_all(config_content.as_bytes())
-        .with_context(|| "Failed to write config content")?;
+        .with_context(|| inklog::i18n::tr("config-write_config_failed"))?;
 
     let mut args = fluent_bundle::FluentArgs::new();
     args.set("path", output_file.display().to_string());
@@ -296,14 +299,13 @@ INKLOG_DECRYPT_KEY=your-decryption-key-here
     };
 
     let mut file = File::create(&output_file).with_context(|| {
-        format!(
-            "Failed to create env example file: {}",
-            output_file.display()
-        )
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", output_file.display().to_string());
+        inklog::i18n::tr_args("config-create_env_failed", args)
     })?;
 
     file.write_all(env_content.as_bytes())
-        .with_context(|| "Failed to write env example content")?;
+        .with_context(|| inklog::i18n::tr("config-write_env_failed"))?;
 
     let mut args = fluent_bundle::FluentArgs::new();
     args.set("path", output_file.display().to_string());

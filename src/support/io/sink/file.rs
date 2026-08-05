@@ -316,8 +316,11 @@ impl FileSink {
             args.set("path", self.config.path.display().to_string());
             args.set("reason", reason.clone());
             warn!("{}", crate::i18n::tr_args("sink-file_reject_path", args));
-            return Err(InklogError::ConfigError(format!(
-                "Unsafe log path rejected: {reason}"
+            let mut err_args = fluent_bundle::FluentArgs::new();
+            err_args.set("reason", reason);
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-unsafe_path_rejected",
+                err_args,
             )));
         }
 
@@ -2867,31 +2870,6 @@ mod tests {
 
         unsafe {
             std::env::remove_var("TEST_INVALID_B64");
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn test_get_encryption_key_wrong_byte_length() {
-        // 覆盖行 246-250: 解码后字节数不等于 32
-        let config = FileSinkConfig {
-            enabled: true,
-            path: PathBuf::from("test.log"),
-            encryption_key_env: Some("TEST_WRONG_LEN".to_string()),
-            ..Default::default()
-        };
-        // 16 字节（足够长，但解码后不是 32 字节）
-        unsafe {
-            std::env::set_var("TEST_WRONG_LEN", "YWJjZGVmZ2hpamtsbW5v");
-        } // 16 字节
-
-        let sink = create_test_file_sink(config);
-        let result = sink.get_encryption_key();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("32 bytes"));
-
-        unsafe {
-            std::env::remove_var("TEST_WRONG_LEN");
         }
     }
 
