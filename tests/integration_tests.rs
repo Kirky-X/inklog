@@ -244,6 +244,8 @@ async fn test_database_batch_write_dbnexus() {
         table_name: "logs".to_string(),
         archive_format: inklog::ArchiveFormat::default(),
         parquet_config: inklog::config::ParquetConfig::default(),
+        permissions_path: None,
+        admin_role: "admin".to_string(),
     };
 
     // 使用 MockDatabaseAdapter 进行测试
@@ -313,6 +315,8 @@ async fn test_database_timeout_flush_dbnexus() {
         table_name: "logs".to_string(),
         archive_format: inklog::ArchiveFormat::default(),
         parquet_config: inklog::config::ParquetConfig::default(),
+        permissions_path: None,
+        admin_role: "admin".to_string(),
     };
 
     // 使用 MockDatabaseAdapter 进行测试

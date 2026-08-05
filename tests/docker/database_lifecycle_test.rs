@@ -44,6 +44,8 @@ async fn setup_sink(url: &str, batch_size: usize) -> DatabaseSink {
         table_name: "logs".to_string(),
         archive_format: inklog::ArchiveFormat::default(),
         parquet_config: inklog::config::ParquetConfig::default(),
+        permissions_path: None,
+        admin_role: "admin".to_string(),
     };
     DatabaseSink::new_with_config(db, Some(config)).expect("Failed to create DatabaseSink")
 }
