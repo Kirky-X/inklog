@@ -248,8 +248,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         }
 
         // Early return if encryption is not enabled
-        // (unwrap is safe: we already checked is_bool() above)
-        if !encrypt.as_bool().unwrap() {
+        if !encrypt.as_bool().unwrap_or(false) {
             return Ok(());
         }
 
@@ -331,6 +330,12 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
 }
 
 fn validate_database_sink(db: &toml::Table) -> Result<()> {
+    // Check if database is explicitly disabled — skip driver/URL validation
+    let is_disabled = db
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .is_some_and(|b| !b);
+
     if let Some(enabled) = db.get("enabled") {
         if !enabled.is_bool() {
             return Err(anyhow::anyhow!(
@@ -344,6 +349,11 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
             "  {}",
             inklog::i18n::tr_args("cli-validate-db-enabled", args)
         );
+    }
+
+    // Skip driver/URL validation when database is disabled
+    if is_disabled {
+        return Ok(());
     }
 
     if let Some(driver) = db.get("driver") {
@@ -513,18 +523,29 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
     }
 
     // Check for dual sink configuration (both file and database)
+    // Check if *either* alias has enabled=true for each sink type
     let has_file = config.contains_key("file") || config.contains_key("file_sink");
     let has_database = config.contains_key("database") || config.contains_key("db_config");
 
-    if has_file
-        && has_database
-        && let Some(file) = config
-            .get("file")
-            .or(config.get("file_sink"))
+    let file_enabled = config
+        .get("file")
+        .or(config.get("file_sink"))
+        .and_then(|t| t.as_table())
+        .and_then(|t| t.get("enabled"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Also check the other alias in case the first one is disabled
+    let file_enabled = file_enabled
+        || config
+            .get("file_sink")
+            .or(config.get("file"))
             .and_then(|t| t.as_table())
-        && let Some(enabled) = file.get("enabled").and_then(|v| v.as_bool())
-        && enabled
-    {
+            .and_then(|t| t.get("enabled"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+    if has_file && has_database && file_enabled {
         eprintln!("{}", inklog::i18n::tr("cli-warn-dual-sink"));
     }
 
@@ -571,13 +592,21 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     }
 
     println!("\n  {}", inklog::i18n::tr("cli-prereq-optional"));
-    if Command::new("openssl").arg("version").output().is_ok() {
+    let openssl_ok = Command::new("openssl")
+        .arg("version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if openssl_ok {
         println!("    {}", inklog::i18n::tr("cli-prereq-openssl-ok"));
     } else {
         eprintln!("    {}", inklog::i18n::tr("cli-prereq-openssl-miss"));
     }
 
-    if Command::new("zstd").arg("--version").output().is_ok() {
+    let zstd_ok = Command::new("zstd")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if zstd_ok {
         println!("    {}", inklog::i18n::tr("cli-prereq-zstd-ok"));
     } else {
         eprintln!("    {}", inklog::i18n::tr("cli-prereq-zstd-miss"));

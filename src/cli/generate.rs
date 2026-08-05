@@ -8,6 +8,38 @@ use std::path::Path;
 /// Default log format string shared across all config templates.
 const DEFAULT_FORMAT: &str = "{timestamp} [{level}] {target} - {message}";
 
+/// Validate that an output path is safe (no traversal, no null bytes).
+fn validate_output_path_safety(path: &Path) -> Result<()> {
+    let path_str = path.to_string_lossy();
+
+    // Reject null bytes and Unicode dot variants
+    let suspicious = ['\0', '\u{2024}', '\u{2025}', '\u{FE52}'];
+    for c in path_str.chars() {
+        if suspicious.contains(&c) {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("path", path.display().to_string());
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr_args("cli-generate-err-path-traversal", args)
+            ));
+        }
+    }
+
+    // Reject path traversal patterns (.. components)
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("path", path.display().to_string());
+            return Err(anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr_args("cli-generate-err-path-traversal", args)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Default global section preamble shared across config templates.
 fn default_global_section() -> String {
     format!(
@@ -26,6 +58,9 @@ fn default_console_section() -> &'static str {
 /// Generates configuration templates with four levels: minimal, full, database, and file.
 /// Templates are hardcoded TOML strings.
 pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
+    // Validate output path safety
+    validate_output_path_safety(output_path)?;
+
     // Determine output path
     let output_file = if output_path.is_dir() {
         output_path.join("inklog_config.toml")
@@ -210,6 +245,9 @@ worker_threads = 2
 }
 
 pub fn generate_env_example(output_path: &Path) -> Result<()> {
+    // Validate output path safety
+    validate_output_path_safety(output_path)?;
+
     let env_content = r#"# inklog environment variables example
 # Copy this file to .env and customize values
 
@@ -332,5 +370,32 @@ mod tests {
         let expected = dir.path().join(".env.example");
         let content = std::fs::read_to_string(&expected).unwrap();
         assert!(content.contains("inklog environment variables"));
+    }
+
+    #[test]
+    fn test_generate_config_rejects_path_traversal() {
+        let result = generate_config(&Path::new("../etc/config.toml"), "minimal");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("traversal"));
+    }
+
+    #[test]
+    fn test_generate_env_example_rejects_path_traversal() {
+        let result = generate_env_example(&Path::new("../../etc/.env.example"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("traversal"));
+    }
+
+    #[test]
+    fn test_validate_output_path_safety_rejects_null_bytes() {
+        let result = validate_output_path_safety(&Path::new("file\0.toml"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_output_path_safety_accepts_normal_paths() {
+        assert!(validate_output_path_safety(&Path::new("config.toml")).is_ok());
+        assert!(validate_output_path_safety(&Path::new("/tmp/config.toml")).is_ok());
+        assert!(validate_output_path_safety(&Path::new("subdir/config.toml")).is_ok());
     }
 }
