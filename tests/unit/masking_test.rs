@@ -4,12 +4,12 @@
 // 测试 PII 自动检测与脱敏功能，确保合规性
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod masking_test {
     use inklog::masking::DataMasker;
-    use inklog::{DataMaskerBuilder, MaskRule, MaskRuleBuilder, MaskRuleRegistry};
+    use inklog::{MaskRule, MaskRuleRegistry};
     use serde_json::json;
     use std::collections::HashMap;
-    use std::iter::FromIterator;
 
     // === 邮箱脱敏测试 ===
 
@@ -152,7 +152,7 @@ mod masking_test {
         ];
 
         for message in messages {
-            let result = masker.mask(&message);
+            let result = masker.mask(message);
             assert!(result.contains("***REDACTED***"), "Failed for: {}", message);
         }
     }
@@ -803,7 +803,7 @@ pattern = "\\bTEST\\b"
 
     #[test]
     fn test_builder_with_registry_plus_extra() {
-        let mut registry = MaskRuleRegistry::with_builtins();
+        let registry = MaskRuleRegistry::with_builtins();
         let initial_active = registry.active_rules().len();
 
         let masker = DataMasker::builder()

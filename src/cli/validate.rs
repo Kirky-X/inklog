@@ -1650,7 +1650,7 @@ level = "INFO"
         // 该函数无返回值，仅打印；验证其不 panic 即可。
         // 注意：openssl/zstd/config 文件的存在性取决于运行环境，
         // 两个分支（存在/不存在）都会被执行到其中之一。
-        check_prerequisites();
+        let _ = check_prerequisites();
     }
 
     // ==================== validate_file_sink encrypt 分支测试 ====================

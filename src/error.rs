@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn test_inklog_result_type_alias() {
         let ok: InklogResult<i32> = Ok(42);
-        assert_eq!(ok.unwrap(), 42);
+        assert_eq!(ok.ok().unwrap(), 42);
         let err: InklogResult<i32> = Err(InklogError::Unknown("test".into()));
         assert!(err.is_err());
     }
@@ -768,7 +768,7 @@ mod tests {
             serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
         let variants: Vec<InklogError> = vec![
             InklogError::ConfigError("x".into()),
-            InklogError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "x")),
+            InklogError::IoError(std::io::Error::other("x")),
             InklogError::SerializationError(json_err),
             InklogError::database_error("x"),
             InklogError::CacheError("x".into()),
