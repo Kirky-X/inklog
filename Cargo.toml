@@ -48,10 +48,7 @@ mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
 # DatabaseSink 仅支持 sea-orm 后端（sqlite/postgres/mysql），不直接支持 duckdb 驱动。
 duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb"]
 http = ["dep:axum", "dep:axum-server"]
-test-local = []
 cli = ["dep:clap", "dep:glob"]
-debug = []
-metrics = []
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
 # Zstd compression support for rotated log files (optional to avoid zstd-sys
 # symbol conflicts with downstream projects that bundle their own zstd).
