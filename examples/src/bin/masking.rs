@@ -21,7 +21,7 @@
 //! cargo run --bin masking
 //! ```
 
-use inklog::support::processing::DataMasker;
+use inklog::DataMasker;
 use inklog::{MaskRule, MaskRuleRegistry};
 use inklog_examples::common::{print_section, print_separator};
 use serde_json::json;

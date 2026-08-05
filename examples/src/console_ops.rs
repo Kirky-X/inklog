@@ -9,9 +9,9 @@
 
 use anyhow::Result;
 use inklog::chrono::Utc;
-use inklog::domain::config::ConsoleSinkConfig;
-use inklog::support::io::sink::LogSink;
+use inklog::config::ConsoleSinkConfig;
 use inklog::LogRecord;
+use inklog::LogSink;
 
 /// 构造 ConsoleSink 配置。
 ///
@@ -55,7 +55,7 @@ pub async fn write_test_cases(sink: &dyn LogSink, cases: &[(&str, &str)]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use inklog::support::io::sink::console::ConsoleSink;
+    use inklog::sink::console::ConsoleSink;
     use inklog::LogTemplate;
 
     #[test]

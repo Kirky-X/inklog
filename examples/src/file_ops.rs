@@ -11,9 +11,9 @@
 
 use anyhow::Result;
 use inklog::chrono::Utc;
-use inklog::domain::config::FileSinkConfig;
-use inklog::support::io::sink::LogSink;
+use inklog::config::FileSinkConfig;
 use inklog::LogRecord;
+use inklog::LogSink;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -101,7 +101,7 @@ pub fn cleanup_files(log_path: &str, prefix: &str) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use inklog::support::io::sink::file::FileSink;
+    use inklog::sink::file::FileSink;
     use tempfile::tempdir;
 
     #[test]
