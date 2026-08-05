@@ -872,7 +872,7 @@ cargo fmt --all
 
 ## <span id="changelog">📋 Changelog</span>
 
-See [CHANGELOG.md](CHANGELOG.md)
+See [CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
 
