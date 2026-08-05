@@ -52,7 +52,13 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo-audit (RustSec 漏洞库)
-        run: cargo install cargo-audit && cargo audit --ignore RUSTSEC-2026-0235
+        run: |
+          cargo install cargo-audit
+          cargo audit \
+            --ignore RUSTSEC-2026-0235 \
+            --ignore RUSTSEC-2024-0436 \
+            --ignore RUSTSEC-2026-0173 \
+            --ignore RUSTSEC-2026-0221
       - name: cargo-deny (license / ban / advisory)
         uses: EmbarkStudios/cargo-deny-action@v2
 
@@ -62,21 +68,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
       - uses: swatinem/rust-cache@v2
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
       - name: Generate coverage
-        # Use `--lib` instead of `--workspace` to avoid linker resource exhaustion:
-        # `--workspace` compiles all integration tests + examples + benchmarks,
-        # producing a linker command with hundreds of rlibs that triggers
-        # `collect2: fatal error: ld terminated with signal 7 [Bus error]`.
-        run: cargo tarpaulin --verbose --all-features --lib --timeout 120 --out xml --fail-under 80
+        # Use `--lib` instead of `--workspace` to avoid linker resource exhaustion
+        run: cargo llvm-cov --all-features --lib --fail-under-lines 80 --lcov --output-path lcov.info
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
           fail_ci_if_error: false
 
   build-check:

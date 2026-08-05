@@ -1,4 +1,0 @@
-[advisories]
-ignore = [
-    "RUSTSEC-2026-0235", # rkyv 0.7.46 — transitive dep via duckdb → rust_decimal → rkyv，无法升级（rust_decimal 要求 ^0.7）
-]
