@@ -864,11 +864,14 @@ impl FileSink {
 
         // 获取密钥
         let key_bytes = self.get_encryption_key()?;
-        let cipher =
-            Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| InklogError::EncryptionError {
-                message: format!("Invalid key: {}", e),
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            InklogError::EncryptionError {
+                message: crate::i18n::tr_args("config-invalid_encryption_key", args),
                 source: Some(Box::new(e)),
-            })?;
+            }
+        })?;
 
         // 生成加密安全的随机 nonce
         // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 SysRng 定期种子化
