@@ -3,7 +3,7 @@
 <img src="docs/image/inklog.png" alt="Inklog Logo" width="200" style="margin-bottom: 16px;">
 
 <p>
-  <a href="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml"><img src="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg" alt="CI Status" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/v/inklog.svg" alt="Version" style="display:inline;margin:0 4px;"></a><a href="https://docs.rs/inklog"><img src="https://docs.rs/inklog/badge.svg" alt="Documentation" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/d/inklog.svg" alt="Downloads" style="display:inline;margin:0 4px;"></a><a href="https://github.com/Kirky-X/inklog/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/inklog.svg" alt="License" style="display:inline;margin:0 4px;"></a><a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.85+-orange.svg" alt="Rust 1.85+" style="display:inline;margin:0 4px;"></a>
+  <a href="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml"><img src="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg" alt="CI Status" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/v/inklog.svg" alt="Version" style="display:inline;margin:0 4px;"></a><a href="https://docs.rs/inklog"><img src="https://docs.rs/inklog/badge.svg" alt="Documentation" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/d/inklog.svg" alt="Downloads" style="display:inline;margin:0 4px;"></a><a href="https://github.com/Kirky-X/inklog/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/inklog.svg" alt="License" style="display:inline;margin:0 4px;"></a><a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.94+-orange.svg" alt="Rust 1.94+" style="display:inline;margin:0 4px;"></a>
 </p>
 
 [中文](./README.md)
@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | ✅ | **File Rotation** | Size-based and time-based rotation |
 | ✅ | **Data Masking** | Regex-based PII redaction |
 | ✅ | **Health Monitoring** | Sink status and metrics tracking |
-| ✅ | **CLI Tools** | decrypt, generate, validate commands |
+| ✅ | **CLI Tools** | decrypt, generate, validate commands (`cli` feature) |
 
 </td>
 <td width="50%" style="vertical-align:top; padding: 16px; border-radius:8px; border:1px solid #E2E8F0;">
@@ -120,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | Status | Feature | Description |
 |:----:|------|------|
-| 🔍 | **Compression** | ZSTD, GZIP, Brotli, LZ4 support |
+| 🔍 | **Compression** | ZSTD, GZIP support |
 | 🔒 | **Encryption** | AES-256-GCM file encryption |
 | 🗄️ | **Database Sink** | PostgreSQL, MySQL, SQLite via Sea-ORM |
 | 📊 | **Parquet Export** | Analytics-ready log format |
@@ -149,14 +149,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-inklog = "0.1"
+inklog = "0.2"
 ```
 
 Full feature set:
 
 ```toml
 [dependencies]
-inklog = { version = "0.1", features = ["default"] }
+inklog = { version = "0.2", default-features = false, features = ["http", "cli", "sqlite"] }
 ```
 
 ### <span id="basic-usage">💡 Basic Usage</span>
@@ -313,33 +313,34 @@ let _logger = LoggerManager::with_config(config).await?;
 ### Default Features
 
 ```toml
-inklog = "0.1"  # Includes: http, cli
+inklog = "0.2"  # default = [] (no optional features)
 ```
 
 ### Optional Features
 
 ```toml
 # HTTP Server
-inklog = { version = "0.1", features = [
+inklog = { version = "0.2", features = [
     "http",       # Axum HTTP health endpoint
 ] }
 
 # CLI Tools
-inklog = { version = "0.1", features = [
+inklog = { version = "0.2", features = [
     "cli",        # decrypt, generate, validate commands
 ] }
 
 # Database Sinks (pick one or more)
-inklog = { version = "0.1", features = [
+inklog = { version = "0.2", features = [
     "sqlite",     # SQLite database sink
     "postgres",   # PostgreSQL database sink
     "mysql",      # MySQL database sink
 ] }
 
-# Development
-inklog = { version = "0.1", features = [
-    "test-local", # Local testing mode
-    "debug",     # Additional security audit logging
+# Compression & Performance
+inklog = { version = "0.2", features = [
+    "compression",  # ZSTD compression support
+    "parquet",      # Parquet export support
+    "fast-masking", # Aho-Corasick accelerated masking
 ] }
 ```
 
@@ -353,9 +354,9 @@ inklog = { version = "0.1", features = [
 | **postgres** | dbnexus, sea-orm | PostgreSQL database sink |
 | **mysql** | dbnexus, sea-orm | MySQL database sink |
 | **duckdb** | dbnexus, sea-orm | DuckDB backend (only for `--all-features` tests; DatabaseSink does not directly support duckdb driver) |
-| **test-local** | - | Local testing mode |
-| **debug** | - | Security audit logging |
-| **metrics** | - | Health metrics collection |
+| **compression** | zstd | ZSTD compression for rotated log files |
+| **parquet** | parquet, arrow-array, arrow-schema | Parquet export support (analytics) |
+| **fast-masking** | aho-corasick | Aho-Corasick accelerated multi-pattern masking |
 | **kit** | trait-kit, dbnexus, oxcache | DI toolkit integration |
 
 ---
@@ -596,7 +597,7 @@ The `examples/` crate provides 10 specialized examples demonstrating specific fe
 | `path_validator` | Path validation ensuring file sink target safety | `cargo run --example path_validator` |
 | `log_sanitizer` | Log input sanitization preventing log injection | `cargo run --example log_sanitizer` |
 | `log_adapter` | Bridge between `log` and `tracing` ecosystems | `cargo run --example log_adapter` |
-| `compression` | File sink compression (ZSTD/GZIP/Brotli/LZ4) | `cargo run --example compression` |
+| `compression` | File sink compression (ZSTD/GZIP) | `cargo run --example compression` |
 | `rotation` | Size-based and time-based file rotation | `cargo run --example rotation` |
 | `ring_buffered_file` | Ring-buffered file sink for high-throughput scenarios | `cargo run --example ring_buffered_file` |
 | `config_file` | TOML configuration file loading | `cargo run --example config_file` |
@@ -626,7 +627,7 @@ flowchart TD
     App["Application Layer<br/>(Your code using log! macros)"]
     API["Inklog API Layer<br/>- LoggerManager, LoggerBuilder<br/>- Configuration management<br/>- Health monitoring"]
     Sink["Sink Abstraction Layer<br/>- ConsoleSink<br/>- FileSink (rotation, compression)<br/>- DatabaseSink (batch writes)<br/>- AsyncFileSink<br/>- RingBufferedFileSink"]
-    Core["Core Processing Layer<br/>- Log formatting & templates<br/>- Data masking (PII redaction)<br/>- Encryption (AES-256-GCM)<br/>- Compression (ZSTD, GZIP, Brotli)"]
+    Core["Core Processing Layer<br/>- Log formatting & templates<br/>- Data masking (PII redaction)<br/>- Encryption (AES-256-GCM)<br/>- Compression (ZSTD, GZIP)"]
     IO["Concurrency & I/O<br/>- Tokio async runtime<br/>- Crossbeam channels<br/>- Rayon parallel processing"]
     Store["Storage & External Services<br/>- Filesystem<br/>- Database (PostgreSQL, MySQL, SQLite)<br/>- Parquet (analytics)"]
 
@@ -655,7 +656,7 @@ flowchart TD
 - Template-based log formatting
 - Regex-based PII data masking (email, SSN, credit cards)
 - AES-256-GCM encryption for sensitive logs
-- Multiple compression algorithms (ZSTD, GZIP, Brotli, LZ4)
+- Multiple compression algorithms (ZSTD, GZIP)
 
 **Concurrency & I/O Layer**
 - Tokio async runtime for non-blocking I/O
@@ -775,7 +776,7 @@ Inklog provides Mock implementations for unit testing without external dependenc
 
 ```rust
 use inklog::{LoggerManager, LoggerDependencies};
-use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -784,7 +785,9 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
     let deps = LoggerDependencies {
         cache: Some(Arc::new(MockCache::new())),
         config: Some(Arc::new(MockConfig::new())),
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         database: Some(Arc::new(MockDatabaseAdapter::new())),
+        ..Default::default()
     };
 
     // Inject dependencies to create logger

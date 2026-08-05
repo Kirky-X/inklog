@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | ✅ | **文件轮转** | 基于大小和时间的轮转 |
 | ✅ | **数据脱敏** | 基于正则的 PII 数据脱敏 |
 | ✅ | **健康监控** | Sink 状态和指标追踪 |
-| ✅ | **命令行工具** | decrypt、generate、validate 命令 |
+| ✅ | **命令行工具** | decrypt、generate、validate 命令（需 `cli` feature） |
 
 </td>
 <td width="50%" style="vertical-align:top; padding: 16px; border-radius:8px; border:1px solid #E2E8F0;">
@@ -142,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | 状态 | 功能 | 描述 |
 |:----:|------|------|
-| 🔍 | **压缩** | ZSTD、GZIP、Brotli、LZ4 支持 |
+| 🔍 | **压缩** | ZSTD、GZIP 支持 |
 | 🔒 | **加密** | AES-256-GCM 文件加密 |
 | 🗄️ | **数据库 Sink** | PostgreSQL、MySQL、SQLite (Sea-ORM) |
 | 📊 | **Parquet 导出** | 分析就绪的日志格式 |
@@ -171,14 +171,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-inklog = "0.1"
+inklog = "0.2"
 ```
 
 完整功能集（显式启用）：
 
 ```toml
 [dependencies]
-inklog = { version = "0.1", default-features = false, features = ["http", "cli", "sqlite"] }
+inklog = { version = "0.2", default-features = false, features = ["http", "cli", "sqlite"] }
 ```
 
 ### <span id="基础使用">💡 基础使用</span>
@@ -261,15 +261,16 @@ let _logger = LoggerManager::with_config(config).await?;
 **第四步：数据库日志**
 
 ```rust
-use inklog::{DatabaseConfig, InklogConfig};
+use inklog::{DatabaseSinkConfig, InklogConfig};
 
 let config = InklogConfig {
-    db_config: Some(DatabaseConfig {
+    database_sink: Some(DatabaseSinkConfig {
         enabled: true,
         url: "sqlite://logs/app.db".to_string(),
         pool_size: 5,
         batch_size: 100,
         flush_interval_ms: 1000,
+        ..Default::default()
     }),
     ..Default::default()
 };
@@ -334,33 +335,34 @@ let _logger = LoggerManager::with_config(config).await?;
 ### 默认功能
 
 ```toml
-inklog = "0.1"  # 默认不包含可选 feature (default = [])
+inklog = "0.2"  # 默认不包含可选 feature (default = [])
 ```
 
 ### 可选功能
 
 ```toml
 # HTTP 服务器
-inklog = { version = "0.1", features = [
+inklog = { version = "0.2", features = [
     "http",       # Axum HTTP 健康端点
 ] }
 
 # 命令行工具
-inklog = { version = "0.1", features = [
+inklog = { version = "0.2", features = [
     "cli",        # decrypt, generate, validate 命令
 ] }
 
 # 数据库 Sink (可选一个或多个)
-inklog = { version = "0.1", features = [
+inklog = { version = "0.2", features = [
     "sqlite",     # SQLite 数据库 Sink
     "postgres",   # PostgreSQL 数据库 Sink
     "mysql",      # MySQL 数据库 Sink
 ] }
 
-# 开发
-inklog = { version = "0.1", features = [
-    "test-local", # 本地测试模式
-    "debug",      # 额外安全审计日志
+# 压缩与性能
+inklog = { version = "0.2", features = [
+    "compression",  # ZSTD 压缩支持
+    "parquet",      # Parquet 导出支持
+    "fast-masking", # Aho-Corasick 多模式加速脱敏
 ] }
 ```
 
@@ -374,11 +376,10 @@ inklog = { version = "0.1", features = [
 | **postgres** | dbnexus, sea-orm | PostgreSQL 数据库 Sink |
 | **mysql** | dbnexus, sea-orm | MySQL 数据库 Sink |
 | **duckdb** | dbnexus | DuckDB 后端（仅用于 `--all-features` 测试场景；DatabaseSink 不直接支持 duckdb 驱动） |
-| **test-local** | - | 本地测试模式 |
-| **debug** | - | 安全审计日志 |
-| **metrics** | - | Metrics collection support |
-| **kit** | trait-kit, dbnexus, oxcache | trait-kit AsyncKit integration (InklogModule) |
-| **i18n** | icu, writeable | Internationalization support |
+| **compression** | zstd | ZSTD 压缩支持（轮转日志文件） |
+| **parquet** | parquet, arrow-array, arrow-schema | Parquet 导出支持（分析场景） |
+| **fast-masking** | aho-corasick | Aho-Corasick 多模式加速脱敏 |
+| **kit** | trait-kit, dbnexus, oxcache | trait-kit AsyncKit 集成 (InklogModule) |
 
 ---
 
@@ -618,7 +619,7 @@ log::info!("用户邮箱: user@example.com");
 | `path_validator` | 路径校验，确保文件 Sink 目标安全 | `cargo run --example path_validator` |
 | `log_sanitizer` | 日志输入净化，防止日志注入攻击 | `cargo run --example log_sanitizer` |
 | `log_adapter` | `log` 与 `tracing` 生态桥接适配器 | `cargo run --example log_adapter` |
-| `compression` | 文件 Sink 压缩（ZSTD/GZIP/Brotli/LZ4） | `cargo run --example compression` |
+| `compression` | 文件 Sink 压缩（ZSTD/GZIP） | `cargo run --example compression` |
 | `rotation` | 基于大小和时间的文件轮转 | `cargo run --example rotation` |
 | `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
 | `config_file` | TOML 配置文件加载 | `cargo run --example config_file` |
@@ -646,7 +647,7 @@ flowchart TD
     App["应用层<br/>(使用 log! 宏的代码)"]
     API["Inklog API 层<br/>- LoggerManager, LoggerBuilder<br/>- 配置管理<br/>- 健康监控"]
     Sink["Sink 抽象层<br/>- ConsoleSink<br/>- FileSink (轮转、压缩)<br/>- DatabaseSink (批量写入)<br/>- AsyncFileSink<br/>- RingBufferedFileSink"]
-    Core["核心处理层<br/>- 日志格式化和模板<br/>- 数据脱敏 (PII)<br/>- 加密 (AES-256-GCM)<br/>- 压缩 (ZSTD, GZIP, Brotli)"]
+    Core["核心处理层<br/>- 日志格式化和模板<br/>- 数据脱敏 (PII)<br/>- 加密 (AES-256-GCM)<br/>- 压缩 (ZSTD, GZIP)"]
     IO["并发与 I/O<br/>- Tokio 异步运行时<br/>- Crossbeam 通道<br/>- Rayon 并行处理"]
     Store["存储与外部服务<br/>- 文件系统<br/>- 数据库 (PostgreSQL, MySQL, SQLite)<br/>- Parquet (分析)"]
 
@@ -675,7 +676,7 @@ flowchart TD
 - 基于模板的日志格式化
 - 基于正则的 PII 数据脱敏 (邮箱、身份证、信用卡等)
 - 敏感日志的 AES-256-GCM 加密
-- 多种压缩算法 (ZSTD, GZIP, Brotli, LZ4)
+- 多种压缩算法 (ZSTD, GZIP)
 
 **并发与 I/O 层**
 - Tokio 异步运行时用于非阻塞 I/O
@@ -795,7 +796,7 @@ Inklog 提供 Mock 实现，支持无外部依赖的单元测试：
 
 ```rust
 use inklog::{LoggerManager, LoggerDependencies};
-use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -804,7 +805,9 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
     let deps = LoggerDependencies {
         cache: Some(Arc::new(MockCache::new())),
         config: Some(Arc::new(MockConfig::new())),
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         database: Some(Arc::new(MockDatabaseAdapter::new())),
+        ..Default::default()
     };
 
     // 注入依赖创建 logger
@@ -891,10 +894,9 @@ cargo fmt --all
 
 <div align="center" style="margin: 24px 0;">
 
-本项目采用 **MIT / Apache-2.0** 双重许可证：
+本项目采用 **MIT** 许可证：
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE-MIT)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE-APACHE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 

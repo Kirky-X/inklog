@@ -712,9 +712,8 @@ impl SecretString {
         self.0.as_deref()
     }
 
-    /// 带审计日志的安全获取 (仅调试模式)
+    /// 带审计日志的安全获取
     pub fn take_audited(&mut self, event: &str) -> Option<String> {
-        #[cfg(feature = "debug")]
         tracing::debug!(
             event = event,
             "Sensitive data accessed via SecretString::take_audited()"
@@ -1205,10 +1204,9 @@ log::info!("Patient admitted: patient_id=123456, diagnosis=condition_X");
 ```rust
 // Cargo.toml
 [dependencies]
-inklog = { version = "0.1", features = ["debug"] }
+inklog = { version = "0.2" }
 
 // 记录敏感操作
-#[cfg(feature = "debug")]
 tracing::debug!(
     event = "data_export",
     user_id = user_id,
@@ -1282,12 +1280,12 @@ log::info!("Payment: card_number=6222021234567890123, cvv=123");
 - [ ] 配置数据保留期限 (`retention_days`)
 - [ ] 实施加密日志 (`encrypt=true`)
 - [ ] 定期清理过期日志 (`cargo run --example cleanup`)
-- [ ] 记录数据访问审计日志 (启用 `debug` feature)
+- [ ] 记录数据访问审计日志 (启用 `tracing` debug 级别)
 
 #### HIPAA 合规性
 
 - [ ] 限制数据库访问权限 (专用用户)
-- [ ] 启用审计日志 (features=["debug"])
+- [ ] 启用审计日志 (tracing debug 级别)
 - [ ] 实施 PHI 字段脱敏 (自定义规则)
 - [ ] 配置网络隔离
 
@@ -1464,7 +1462,7 @@ cargo deny check sources
 ```toml
 # Cargo.toml
 [dependencies]
-inklog = "0.1"  # 使用 ^0.1.x 范围
+inklog = "0.2"  # 使用 ^0.2.x 范围
 ```
 
 ```bash
@@ -1497,8 +1495,7 @@ tokio::spawn(async move {
 #### 审计敏感操作
 
 ```rust
-// 启用 debug feature
-#[cfg(feature = "debug")]
+// 审计敏感操作
 {
     tracing::debug!(
         event = "encryption_key_used",
@@ -1850,8 +1847,8 @@ chown $(whoami):$(whoami) logs/*.enc
 
 ---
 
-**文档版本**: 1.1
-**最后更新**: 2026-08-02  
+**文档版本**: 2.0
+**最后更新**: 2026-08-05  
 **维护者**: Inklog Security Team  
 
 **联系我们**: security@inklog.dev

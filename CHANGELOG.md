@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-05
+
+### ⚠️ BREAKING CHANGES
+
+- **版本号升级**: 0.1.12 → 0.2.0，反映项目成熟度和 API 稳定性提升
+- **依赖升级**: dbnexus 0.4 → 0.5, sea-orm 保持 2.0, oxcache 0.3 → 0.4, thiserror 1.x → 2.0, axum 0.6 → 0.8, trait-kit 0.3 → 0.4
+
+### Added
+
+- **compression feature**: 可选 ZSTD 压缩支持（避免 zstd-sys 符号冲突）
+- **parquet feature**: Parquet/Arrow 导出支持（数据库 Sink 归档）
+- **fast-masking feature**: Aho-Corasick 多模式加速脱敏
+- **i18n 核心模块**: fluent-bundle + ICU 国际化支持（始终编译，非 feature flag）
+- **通道缓冲文件 Sink**: ChannelBufferedFileSink 与背压策略
+- **断路器保护**: CircuitBreaker 机制保护 Sink 故障恢复
+- **环形缓冲**: RingBufferedFileSink 高吞吐场景
+
+### Changed
+
+- **模块重构**: `infrastructure` 模块重命名为 `integrations`
+- **公共 API 统一**: 所有集成类型通过根级别 re-export 访问
+- **edition 升级**: Rust edition 2024, MSRV 1.94
+- **依赖特性化**: 所有依赖显式声明 `default-features = false`
+
+### Removed
+
+- **不存在的 feature 清理**: 文档中移除 `test-local`、`debug`、`metrics`、`i18n` 等从未定义的 feature flag
+- **压缩算法简化**: 文档中移除 Brotli/LZ4 引用（实际仅支持 ZSTD 和 GZIP）
+
+### Fixed
+
+- 文档版本号、功能标志表、模块路径与实际代码同步
+- README.md 许可证信息修正为 MIT（与 Cargo.toml 一致）
+- README_EN.md Rust 版本徽章修正为 1.94+
+
 ## [0.1.12] - 2026-07-22
 
 ### 测试
@@ -248,7 +283,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Kirky-X/inklog/compare/v0.1.12...v0.2.0
 [0.1.12]: https://github.com/Kirky-X/inklog/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/Kirky-X/inklog/compare/v0.1.7...v0.1.11
 [0.1.7]: https://github.com/Kirky-X/inklog/compare/v0.1.6...v0.1.7
