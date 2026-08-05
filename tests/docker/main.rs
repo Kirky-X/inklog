@@ -8,7 +8,7 @@
 //! # 启动 Docker 数据库
 //!
 //! ```bash
-//! docker compose -f docker-compose.test.yml up -d
+//! docker compose -f docker/docker-compose.test.yml up -d
 //! export INKLOG_TEST_DB_URL="sqlite:///tmp/inklog_test.db"
 //! cargo test --test docker --features sqlite
 //! ```
