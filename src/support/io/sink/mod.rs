@@ -13,7 +13,7 @@ pub mod registry;
 pub mod ring_buffered_file;
 pub mod rotation;
 
-pub use circuit_breaker::CircuitBreaker;
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 #[cfg(feature = "compression")]
 pub use compression::ZstdCompression;
 pub use compression::{CompressionStrategy, GzipCompression, NoCompression};

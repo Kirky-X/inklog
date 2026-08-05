@@ -8,4 +8,7 @@ pub mod sink;
 pub use log_adapter::{LogAdapter, LogLogger};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 pub use sink::DatabaseSink;
-pub use sink::{CircuitBreaker, ConsoleSink, FileSink, LogSink};
+pub use sink::{
+    CircuitBreaker, CircuitBreakerConfig, CircuitState, ConsoleSink, DiskCheckable, FileSink,
+    LogSink, Rotatable,
+};

@@ -12,7 +12,7 @@ pub mod kit;
 // Re-export infra types at module level for two-level import paths
 pub use infra::{
     Cache, Config, Database, InklogConfigAdapter, MockCache, MockConfig, MockDatabaseAdapter,
-    OxCacheAdapter,
+    OxCacheAdapter, OxCacheAdapterBuilder,
 };
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -22,4 +22,4 @@ pub use infra::DbNexusAdapter;
     feature = "kit",
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
-pub use kit::InklogModule;
+pub use kit::{InklogBuildObserver, InklogModule, create_inklog_scope, populate_inklog_scope};

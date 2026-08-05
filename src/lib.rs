@@ -164,6 +164,22 @@ pub mod domain;
 // Support layer
 pub mod support;
 
+// Sink trait and type re-exports for public API completeness
+#[cfg(feature = "compression")]
+pub use support::io::sink::ZstdCompression;
+#[cfg(feature = "compression")]
+pub use support::io::sink::compression::{compress_data, compress_file, compress_string};
+pub use support::io::sink::encryption::{derive_key_from_password, get_encryption_key};
+pub use support::io::sink::ring_buffered_file::{
+    BackpressureStrategy, ChannelBufferedConfig, ChannelBufferedFileSink, ChannelBufferedMetrics,
+};
+pub use support::io::sink::{
+    CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation, CompressionStrategy,
+    DiskCheckable, FileSinkFactory, GzipCompression, LogSink, NoCompression, Rotatable,
+    RotationContext, RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry,
+    SizeBasedRotation, TimeBasedRotation,
+};
+
 // Re-export masking for benchmarks
 pub use support::processing::masking;
 
@@ -187,6 +203,17 @@ pub use integrations::DbNexusAdapter;
 ))]
 pub use integrations::InklogModule;
 
+// Infrastructure trait and adapter re-exports for dependency injection
+pub use integrations::{
+    Cache, Config, Database, InklogConfigAdapter, MockCache, MockConfig, MockDatabaseAdapter,
+    OxCacheAdapter, OxCacheAdapterBuilder,
+};
+#[cfg(all(
+    feature = "kit",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
+pub use integrations::{InklogBuildObserver, create_inklog_scope, populate_inklog_scope};
+
 pub use domain::core::{
     InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,
 };
@@ -194,12 +221,13 @@ pub use domain::core::{
 pub use log_level::{LogLevel, LogLevelParseError};
 pub use support::io::{LogAdapter, LogLogger};
 pub use support::observability::{
-    FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealthMonitor, SinkStatus,
+    FallbackAction, FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealth,
+    SinkHealthMonitor, SinkStatus,
 };
 pub use support::processing::{
     DataMasker, DataMaskerBuilder, LogTemplate, MaskRule, MaskRuleBuilder, MaskRuleRegistry,
-    ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record,
-    put_string_buffer,
+    ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, get_log_record, get_string_buffer,
+    put_log_record, put_string_buffer,
 };
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,
