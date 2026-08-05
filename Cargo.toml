@@ -43,10 +43,10 @@ default = []
 sqlite = ["dep:dbnexus", "dep:sea-orm", "dbnexus/sqlite", "sea-orm/sqlx-sqlite"]
 postgres = ["dep:dbnexus", "dep:sea-orm", "dbnexus/postgres", "sea-orm/sqlx-postgres"]
 mysql = ["dep:dbnexus", "dep:sea-orm", "dbnexus/mysql", "sea-orm/sqlx-mysql"]
-# duckdb feature 仅用于绕过 dbnexus 0.4.0+ 的 compile_error 规则 2 例外：
-# 当 sqlite+duckdb+postgres+mysql 全部 4 个后端都启用时允许共存（用于 --all-features 测试）。
-# DatabaseSink 仅支持 sea-orm 后端（sqlite/postgres/mysql），不直接支持 duckdb 驱动。
-duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb"]
+# DuckDB 数据库后端（通过 dbnexus 连接池，使用原生 SQL 执行）
+# Sea-ORM 需要至少一个 sqlx-* 后端才能编译 derive macro；
+# DuckDB 实际连接由 dbnexus 处理，此处启用 sqlx-sqlite 仅满足 Sea-ORM 编译要求。
+duckdb = ["dep:dbnexus", "dep:sea-orm", "dbnexus/duckdb", "sea-orm/sqlx-sqlite"]
 http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob"]
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]

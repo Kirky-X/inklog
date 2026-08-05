@@ -171,7 +171,7 @@ use std::sync::Arc;
 let deps = LoggerDependencies {
     cache: Some(Arc::new(MockCache::new())),
     config: Some(Arc::new(MockConfig::new())),
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
     database: Some(Arc::new(MockDatabaseAdapter::new())),
 };
 
@@ -957,7 +957,7 @@ let builder = LoggerBuilder::new()
 
 **签名**
 ```rust
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
 pub fn with_database(mut self, database: Arc<dyn Database>) -> Self
 ```
 
@@ -1093,7 +1093,7 @@ config.apply_env_overrides();
 #### 定义
 
 ```rust
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
 pub struct DatabaseConfig {
     pub enabled: bool,
     pub url: String,
@@ -1838,7 +1838,7 @@ let driver_str = driver.to_string(); // "postgres"
 pub struct LoggerDependencies {
     pub cache: Option<Arc<dyn Cache>>,
     pub config: Option<Arc<dyn Config>>,
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
     pub database: Option<Arc<dyn Database>>,
 }
 ```
@@ -1860,7 +1860,7 @@ use std::sync::Arc;
 let deps = LoggerDependencies {
     cache: Some(Arc::new(MockCache::new())),
     config: Some(Arc::new(MockConfig::new().with_value("level", "debug"))),
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
     database: Some(Arc::new(MockDatabaseAdapter::new())),
 };
 ```

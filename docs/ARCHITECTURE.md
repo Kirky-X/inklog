@@ -235,7 +235,7 @@ pub trait Database: Send + Sync {
 pub struct LoggerDependencies {
     pub cache: Option<Arc<dyn Cache>>,
     pub config: Option<Arc<dyn Config>>,
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
     pub database: Option<Arc<dyn Database>>,
 }
 ```
