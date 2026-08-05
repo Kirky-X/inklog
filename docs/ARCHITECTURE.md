@@ -363,13 +363,16 @@ impl DatabaseSink {
 InklogConfigAdapter 支持完整的配置键映射：
 
 **全局配置**:
-- `global.level`、`global.format`、`global.masking_enabled`
+- `global.level`、`global.format`、`global.masking_enabled`、`global.auto_fallback`
 - `global.fallback_initial_delay_ms`、`global.fallback_max_delay_ms`、`global.fallback_max_retries`
+- `global.output_format`
 
 **文件 Sink**:
 - `file_sink.enabled`、`file_sink.path`、`file_sink.max_size`
-- `file_sink.keep_files`、`file_sink.retention_days`、`file_sink.compression_level`
-- `file_sink.encryption_key_env`
+- `file_sink.rotation_time`、`file_sink.keep_files`、`file_sink.compress`、`file_sink.compression_level`
+- `file_sink.encrypt`、`file_sink.encryption_key_env`
+- `file_sink.retention_days`、`file_sink.max_total_size`、`file_sink.cleanup_interval_minutes`
+- `file_sink.batch_size`、`file_sink.flush_interval_ms`、`file_sink.masking_enabled`、`file_sink.output_format`
 
 **控制台 Sink**:
 - `console_sink.enabled`、`console_sink.colored`
