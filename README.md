@@ -845,7 +845,7 @@ docker-compose down
 
 <div align="center" style="margin: 24px 0;">
 
-欢迎贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解指南。
+欢迎贡献！请查看 [CONTRIBUTING.md](docs/CONTRIBUTING.md) 了解指南。
 
 </div>
 
