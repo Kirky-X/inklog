@@ -21,8 +21,8 @@
 //! cargo run --bin metrics
 //! ```
 
-use inklog::support::observability::metrics::FallbackAction;
-use inklog::support::observability::{
+use inklog::FallbackAction;
+use inklog::{
     FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealth, SinkHealthMonitor,
     SinkStatus,
 };

@@ -59,10 +59,10 @@
 
 use anyhow::Result;
 use inklog::serde::Serialize;
-use inklog::support::observability::{Metrics, SinkStatus};
 use inklog::tokio::io::{AsyncReadExt, AsyncWriteExt};
 use inklog::tokio::net::{TcpListener, TcpStream};
 use inklog::tokio::time::sleep;
+use inklog::{Metrics, SinkStatus};
 use inklog_examples::common::{print_section, print_separator};
 use std::collections::HashMap;
 use std::time::Duration;
