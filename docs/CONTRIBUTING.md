@@ -104,9 +104,9 @@ git push origin feature/your-feature
 
 | 要求 | 最低版本 | 推荐版本 |
 |------|---------|---------|
-| Rust | 1.85.0 | 最新稳定版 |
+| Rust | 1.94 | 最新稳定版 |
 | Git | 2.0 | 最新版 |
-| Cargo | 1.85.0 | 最新稳定版 |
+| Cargo | 1.94 | 最新稳定版 |
 | 内存 | 4GB | 8GB+ |
 | 磁盘 | 2GB | 5GB+ |
 
@@ -121,10 +121,10 @@ cargo --version
 rustup update stable
 
 # 安装特定版本
-rustup install 1.85.0
+rustup install 1.94
 
 # 设置默认版本
-rustup default 1.85.0
+rustup default 1.94
 
 # 查看已安装版本
 rustup toolchain list
@@ -535,7 +535,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 ///
 /// 提供:
 /// - 自动日志轮转 (基于大小或时间)
-/// - 压缩支持 (ZSTD, GZIP, Brotli, LZ4)
+/// - 压缩支持 (ZSTD, GZIP)
 /// - AES-256-GCM 加密
 /// - 断路器保护
 pub struct FileSink {
@@ -634,11 +634,11 @@ cargo fmt --all
 git add src/support/io/sink/file.rs tests/integration_file_sink.rs
 
 # 提交 (遵循 Conventional Commits)
-git commit -m "feat(file): add LZ4 compression support
+git commit -m "feat(file): add ZSTD compression support
 
-- Add LZ4 codec to compression options
-- Update benchmark results for LZ4
-- Add integration tests for LZ4 compression
+- Add ZSTD codec to compression options
+- Update benchmark results for ZSTD
+- Add integration tests for ZSTD compression
 
 Closes #123"
 ```

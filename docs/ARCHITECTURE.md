@@ -430,7 +430,7 @@ stderr           stdout
    - **时间轮转**: `hourly`/`daily`/`weekly` 定期触发
    - **文件命名**: `app_YYYYMMDD_HHMMSS.log.zst.enc`
 
-2. **压缩** (ZSTD, GZIP, Brotli, LZ4):
+2. **压缩** (ZSTD, GZIP):
    ```rust
    fn compress_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
        let compressed_path = path.with_extension("zst");
@@ -849,8 +849,6 @@ logs/
 |--------|---------------------|--------|----------|
 | ZSTD   | 最佳压缩比, 解压快   | ~3.5x  | 快      |
 | GZIP   | 最广泛的兼容性        | ~2.5x  | 中等    |
-| Brotli | 良好的 Web 兼容性     | ~3.0x  | 慢      |
-| LZ4    | 最快的压缩/解压       | ~2.0x  | 最快    |
 
 ### 数据库存储
 
@@ -1177,9 +1175,9 @@ pub struct InklogConfig {
 | tracing-subscriber| 0.3.x    | 实现 Subscriber                  |
 | serde             | 1.x     | 序列化                         |
 | chrono            | 0.4.x    | 时间戳                         |
-| crossbeam         | 0.8      | 高性能通道和同步原语         |
+| crossbeam-channel | 0.5      | 高性能通道和同步原语         |
 | regex             | 1.10     | 数据脱敏                       |
-| thiserror          | 1.x     | 错误类型                       |
+| thiserror          | 2.0     | 错误类型                       |
 | anyhow            | 1.x     | 错误上下文                     |
 
 ### 可选依赖 (特性门控)
@@ -1201,8 +1199,6 @@ pub struct InklogConfig {
 |---------|-------------|
 | zstd    | ZSTD 压缩   |
 | flate2  | GZIP 压缩    |
-| brotli  | Brotli 压缩  |
-| lz4     | LZ4 压缩     |
 
 **安全特性**:
 | 依赖      | 用途          |
@@ -1221,6 +1217,6 @@ pub struct InklogConfig {
 
 ---
 
-**文档版本**: 1.2（对应 inklog 0.1.2）  
-**最后更新**: 2026-07-05  
-**代码基准**: v0.1.2
+**文档版本**: 2.0（对应 inklog 0.2.0）  
+**最后更新**: 2026-08-05  
+**代码基准**: v0.2.0
