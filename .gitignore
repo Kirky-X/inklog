@@ -37,6 +37,7 @@ coverage/
 .env
 .env.local
 .env.*.local
+.env.test
 *.env
 secrets/
 
@@ -100,6 +101,7 @@ pnpm-lock.yaml
 
 # Docker
 .dockerignore.local
+docker-compose.test.yml
 
 # OpenSpec
 openspec/
