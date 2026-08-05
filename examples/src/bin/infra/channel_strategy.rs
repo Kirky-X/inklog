@@ -250,7 +250,7 @@ fn show_performance_profiles() {
 
 /// 演示配置兼容性和序列化
 fn show_config_compatibility() {
-    print_section("示例 5：配置兼容性（serde 序列化）");
+    print_section("示例 5：配置格式化展示");
 
     let config = PerformanceConfig {
         channel_strategy: ChannelStrategy::Adaptive,
