@@ -122,7 +122,10 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         // 创建 DbConfig（带权限配置）
         let db_config = dbnexus::foundation::config::DbConfig {
             url: config.url.clone(),
-            max_connections: config.pool_size,
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: config.pool_size,
+                ..Default::default()
+            },
             permissions_path: Some(perm_path.to_string()),
             admin_role: "admin".to_string(),
             ..Default::default()
@@ -253,7 +256,10 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         // 创建 DbConfig（带权限配置）
         let db_config = dbnexus::foundation::config::DbConfig {
             url: config.url.clone(),
-            max_connections: config.pool_size,
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: config.pool_size,
+                ..Default::default()
+            },
             permissions_path: Some(perm_path.to_string()),
             admin_role: "admin".to_string(),
             ..Default::default()
@@ -379,7 +385,10 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         // 创建 DbConfig（带权限配置）
         let db_config = dbnexus::foundation::config::DbConfig {
             url: "sqlite::memory:".to_string(),
-            max_connections: 2,
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 2,
+                ..Default::default()
+            },
             permissions_path: Some(perm_path.to_string()),
             admin_role: "admin".to_string(),
             ..Default::default()

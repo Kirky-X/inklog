@@ -281,6 +281,8 @@ impl LoggerBuilder {
             table_name: "logs".to_string(),
             archive_format: crate::ArchiveFormat::default(),
             parquet_config: crate::ParquetConfig::default(),
+            permissions_path: None,
+            admin_role: "admin".to_string(),
         };
         self.config.database_sink = Some(config);
         self

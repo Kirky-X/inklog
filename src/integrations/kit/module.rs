@@ -348,4 +348,80 @@ mod tests {
         // Shutdown
         built.shutdown();
     }
+
+    // ========================================================================
+    // BuildObserver integration tests
+    // ========================================================================
+
+    /// Build with InklogBuildObserver — observer receives build events.
+    #[tokio::test]
+    async fn inklog_module_build_with_observer() {
+        use dbnexus::foundation::config::DbConfig;
+        use oxcache::integrations::kit::{OxcacheConfig, OxcacheModule};
+
+        use super::super::InklogBuildObserver;
+
+        let mut kit = AsyncKit::new();
+        kit.with_observer(Arc::new(InklogBuildObserver));
+        kit.set_config(OxcacheConfig::default());
+        kit.set_config(DbConfig {
+            url: "sqlite::memory:".to_string(),
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 5,
+                min_connections: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        kit.register::<OxcacheModule>()
+            .expect("register OxcacheModule");
+        kit.register::<DbNexusModule>()
+            .expect("register DbNexusModule");
+        kit.register::<InklogModule>()
+            .expect("register InklogModule");
+        let built = kit.build().await.expect("build with observer");
+        let db: Arc<dyn Database + Send + Sync> =
+            built.require::<InklogModule>().expect("require db");
+        assert!(db.is_healthy().await);
+    }
+
+    // ========================================================================
+    // AsyncScope integration tests
+    // ========================================================================
+
+    /// create_inklog_scope + populate + require round-trip.
+    #[tokio::test]
+    async fn inklog_scope_insert_require_roundtrip() {
+        use dbnexus::foundation::config::DbConfig;
+        use oxcache::integrations::kit::{OxcacheConfig, OxcacheModule};
+
+        use super::super::{create_inklog_scope, populate_inklog_scope};
+
+        // Build with main kit first
+        let mut kit = AsyncKit::new();
+        kit.set_config(OxcacheConfig::default());
+        kit.set_config(DbConfig {
+            url: "sqlite::memory:".to_string(),
+            pool_config: dbnexus::foundation::config::PoolConfig {
+                max_connections: 2,
+                min_connections: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        kit.register::<OxcacheModule>()
+            .expect("register OxcacheModule");
+        kit.register::<DbNexusModule>()
+            .expect("register DbNexusModule");
+        kit.register::<InklogModule>()
+            .expect("register InklogModule");
+        let built = kit.build().await.expect("build");
+        let db = built.require::<InklogModule>().expect("require from kit");
+
+        // Insert into scope and retrieve
+        let scope = create_inklog_scope();
+        populate_inklog_scope(&scope, db);
+        let retrieved = scope.require::<InklogModule>().expect("require from scope");
+        assert!(retrieved.is_healthy().await);
+    }
 }

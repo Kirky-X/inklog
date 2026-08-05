@@ -32,6 +32,7 @@ db-batch_insert_failed = Batch insert failed: { $err }
 db-table_empty = Table name must not be empty
 db-table_invalid_start = Invalid table name '{ $name }': must start with a letter or underscore
 db-table_invalid_char = Invalid table name '{ $name }': contains forbidden character '{ $char }'
+db-ensure_table_failed = Failed to ensure table exists: { $err }
 
 # Cache adapter messages
 cache-get_failed = Failed to get cache key '{ $key }': { $err }
