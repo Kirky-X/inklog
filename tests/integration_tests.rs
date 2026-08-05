@@ -571,8 +571,8 @@ async fn test_http_server_error_mode_strict() {
     }
 }
 
-#[http_serial]
 #[tokio::test]
+#[http_serial]
 async fn test_http_server_with_logger_manager() {
     clear_inklog_env();
 
@@ -616,8 +616,8 @@ async fn test_http_server_with_logger_manager() {
     }
 }
 
-#[http_serial]
 #[tokio::test]
+#[http_serial]
 async fn test_http_metrics_path_configuration() {
     clear_inklog_env();
 
