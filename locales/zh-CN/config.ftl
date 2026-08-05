@@ -93,3 +93,5 @@ config-create_config_failed = 创建配置文件失败: { $path }
 config-write_config_failed = 写入配置内容失败
 config-create_env_failed = 创建环境变量示例文件失败: { $path }
 config-write_env_failed = 写入环境变量示例内容失败
+config-unknown_log_level = 未知的日志级别: { $level }
+config-invalid_encryption_key = 无效的密钥: { $err }

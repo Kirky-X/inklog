@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use thiserror::Error;
 
 /// 日志级别枚举
 ///
@@ -120,11 +119,28 @@ impl FromStr for LogLevel {
 }
 
 /// 解析日志级别字符串的错误
-#[derive(Error, Debug)]
+#[derive(Debug)]
 pub enum LogLevelParseError {
-    #[error("Unknown log level: {0}")]
     Unknown(String),
 }
+
+impl std::fmt::Display for LogLevelParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogLevelParseError::Unknown(level) => {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("level", level);
+                write!(
+                    f,
+                    "{}",
+                    crate::i18n::tr_args("config-unknown_log_level", args)
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for LogLevelParseError {}
 
 #[cfg(test)]
 mod tests {
