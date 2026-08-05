@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-#![doc(html_root_url = "https://docs.rs/inklog/0.1.12")]
+#![doc(html_root_url = "https://docs.rs/inklog/0.2.0")]
 #![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 
 //! # inklog - 企业级 Rust 日志基础设施
@@ -80,7 +80,7 @@
 //! ```rust,ignore
 //! use std::sync::Arc;
 //! use inklog::{LoggerManager, LoggerDependencies, InklogContainer};
-//! use inklog::infrastructure::{OxCacheAdapter, InklogConfigAdapter};
+//! use inklog::integrations::{OxCacheAdapter, InklogConfigAdapter};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {

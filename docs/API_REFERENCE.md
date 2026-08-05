@@ -40,7 +40,7 @@ Inklog 提供了以下公共 API 类型：
 
 ### 导入公共 API
 
-``rust
+```rust
 use inklog::{
     // 核心类型
     LoggerManager,
@@ -165,7 +165,7 @@ pub async fn with_dependencies(deps: LoggerDependencies) -> Result<Self, InklogE
 **示例**
 ```rust
 use inklog::{LoggerManager, LoggerDependencies};
-use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
 use std::sync::Arc;
 
 let deps = LoggerDependencies {
@@ -916,7 +916,7 @@ pub fn cache(mut self, cache: Arc<dyn Cache>) -> Self
 
 **示例**
 ```rust
-use inklog::infrastructure::MockCache;
+use inklog::MockCache;
 use std::sync::Arc;
 
 let builder = LoggerBuilder::new()
@@ -942,7 +942,7 @@ pub fn config(mut self, config: Arc<dyn Config>) -> Self
 
 **示例**
 ```rust
-use inklog::infrastructure::MockConfig;
+use inklog::MockConfig;
 use std::sync::Arc;
 
 let builder = LoggerBuilder::new()
@@ -969,7 +969,7 @@ pub fn with_database(mut self, database: Arc<dyn Database>) -> Self
 
 **示例**
 ```rust
-use inklog::infrastructure::MockDatabaseAdapter;
+use inklog::MockDatabaseAdapter;
 use std::sync::Arc;
 
 let builder = LoggerBuilder::new()
@@ -1854,7 +1854,7 @@ pub struct LoggerDependencies {
 **示例**
 ```rust
 use inklog::LoggerDependencies;
-use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
 use std::sync::Arc;
 
 let deps = LoggerDependencies {
@@ -1898,7 +1898,7 @@ pub trait Cache: Send + Sync {
 
 **示例实现**
 ```rust
-use inklog::infrastructure::Cache;
+use inklog::Cache;
 use inklog::InklogError;
 use async_trait::async_trait;
 
@@ -1981,7 +1981,7 @@ pub trait Config: Send + Sync {
 
 **示例实现**
 ```rust
-use inklog::infrastructure::Config;
+use inklog::Config;
 
 struct MyConfig {
     // 自定义实现
@@ -2040,7 +2040,7 @@ pub trait Database: Send + Sync {
 
 **示例实现**
 ```rust
-use inklog::infrastructure::Database;
+use inklog::Database;
 use inklog::LogRecord;
 use inklog::InklogError;
 use async_trait::async_trait;
@@ -2091,7 +2091,7 @@ pub struct MockCache {
 
 **示例**
 ```rust
-use inklog::infrastructure::MockCache;
+use inklog::MockCache;
 
 let cache = MockCache::new();
 cache.set("key", "value".to_string()).await?;
@@ -2122,7 +2122,7 @@ pub struct MockConfig {
 
 **示例**
 ```rust
-use inklog::infrastructure::MockConfig;
+use inklog::MockConfig;
 
 let config = MockConfig::new()
     .with_value("level", "debug")
@@ -2158,7 +2158,7 @@ pub struct MockDatabaseAdapter {
 
 **示例**
 ```rust
-use inklog::infrastructure::MockDatabaseAdapter;
+use inklog::MockDatabaseAdapter;
 
 let db = MockDatabaseAdapter::new();
 db.set_healthy(false); // 模拟数据库故障

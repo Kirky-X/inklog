@@ -91,7 +91,7 @@ Sink 抽象层 (Console, File, Database)
 
 | 功能 | 描述 |
 |------|------|
-| **压缩** | ZSTD、GZIP、Brotli、LZ4 支持 |
+| **压缩** | ZSTD、GZIP 支持 |
 | **加密** | AES-256-GCM 文件加密 |
 | **数据库 Sink** | PostgreSQL、MySQL、SQLite (Sea-ORM) |
 | **Parquet 导出** | 分析就绪的日志格式 |
@@ -107,33 +107,38 @@ Sink 抽象层 (Console, File, Database)
 
 ```toml
 [dependencies]
-inklog = "0.1"
+inklog = "0.2"
 ```
 
 ### 功能标志
 
-默认包含 `http`、`cli` 功能：
+默认不包含可选 feature（`default = []`）：
 
 ```toml
-inklog = { version = "0.1", features = ["default"] }
+inklog = { version = "0.2", features = ["http", "cli"] }
 ```
 
 ### 可选功能
 
 ```toml
 # HTTP 服务器
-inklog = { version = "0.1", features = ["http"] }
+inklog = { version = "0.2", features = ["http"] }
 
 # 命令行工具
-inklog = { version = "0.1", features = ["cli"] }
+inklog = { version = "0.2", features = ["cli"] }
 
 # 数据库支持（按需选择驱动）
-inklog = { version = "0.1", features = ["sqlite"] }
-inklog = { version = "0.1", features = ["postgres"] }
-inklog = { version = "0.1", features = ["mysql"] }
+inklog = { version = "0.2", features = ["sqlite"] }
+inklog = { version = "0.2", features = ["postgres"] }
+inklog = { version = "0.2", features = ["mysql"] }
+
+# 压缩与性能
+inklog = { version = "0.2", features = ["compression"] }
+inklog = { version = "0.2", features = ["parquet"] }
+inklog = { version = "0.2", features = ["fast-masking"] }
 
 # 完整功能
-inklog = { version = "0.1", features = ["http", "cli", "sqlite", "postgres", "mysql"] }
+inklog = { version = "0.2", features = ["http", "cli", "sqlite", "postgres", "mysql", "compression", "parquet", "fast-masking"] }
 ```
 
 > 注：TOML 配置文件加载（`from_file` / `load`）已内建，无需额外 feature。
@@ -806,7 +811,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `path_validator` | 文件 Sink 路径校验，防止越权写入 | `cargo run --example path_validator` |
 | `log_sanitizer` | 日志输入净化，防止日志注入与控制字符污染 | `cargo run --example log_sanitizer` |
 | `log_adapter` | `log` 与 `tracing` 生态桥接适配器 | `cargo run --example log_adapter` |
-| `compression` | 文件 Sink 压缩（ZSTD/GZIP/Brotli/LZ4）对比 | `cargo run --example compression` |
+| `compression` | 文件 Sink 压缩（ZSTD/GZIP）对比 | `cargo run --example compression` |
 | `rotation` | 基于大小和时间的文件轮转策略 | `cargo run --example rotation` |
 | `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
 | `config_file` | TOML 配置文件加载（内建支持） | `cargo run --example config_file` |
@@ -934,7 +939,7 @@ Inklog 提供了完整的 Mock 实现，用于单元测试和集成测试，无�
 
 ```rust
 use inklog::{LoggerManager, LoggerDependencies};
-use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -971,7 +976,7 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
 #### MockCache 使用示例
 
 ```rust
-use inklog::infrastructure::MockCache;
+use inklog::MockCache;
 
 #[tokio::test]
 async fn test_cache_operations() -> Result<(), inklog::InklogError> {
@@ -1001,7 +1006,7 @@ async fn test_cache_operations() -> Result<(), inklog::InklogError> {
 #### MockConfig 使用示例
 
 ```rust
-use inklog::infrastructure::MockConfig;
+use inklog::MockConfig;
 
 #[test]
 fn test_config_operations() {
@@ -1029,7 +1034,7 @@ fn test_config_operations() {
 #### MockDatabaseAdapter 使用示例
 
 ```rust
-use inklog::infrastructure::MockDatabaseAdapter;
+use inklog::MockDatabaseAdapter;
 use inklog::LogRecord;
 use chrono::Utc;
 
@@ -1070,7 +1075,7 @@ async fn test_database_operations() {
 
 ```rust
 use inklog::{LoggerManager, LoggerDependencies};
-use inklog::infrastructure::MockDatabaseAdapter;
+use inklog::MockDatabaseAdapter;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -1090,7 +1095,7 @@ async fn test_mixed_mode() {
 #### 测试隔离最佳实践
 
 ```rust
-use inklog::infrastructure::{MockCache, MockConfig, MockDatabaseAdapter};
+use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
 
 struct TestContext {
     cache: Arc<MockCache>,
