@@ -133,3 +133,11 @@ cli-decrypt-err-read-dir = 读取输入目录失败: { $path }
 cli-decrypt-err-no-filename = 路径没有文件名: { $path }
 cli-decrypt-err-glob = 无效的 glob 模式: { $err }
 cli-decrypt-err-input-utf8 = 输入路径不是有效的 UTF-8: { $path }
+cli-decrypt-err-output-symlink = 输出路径是符号链接: { $path }
+cli-decrypt-err-input-dir-symlink = 输入目录是符号链接: { $path }
+cli-decrypt-err-subdir-symlink = 子目录条目是符号链接（已跳过）: { $path }
+
+# CLI generate 路径验证
+
+cli-generate-err-path-traversal = 输出路径包含遍历模式: { $path }
+cli-generate-err-path-absolute = 输出路径必须是相对路径: { $path }

@@ -106,6 +106,17 @@ impl ConsoleSinkConfig {
             );
         }
     }
+
+    /// Return invalid `stderr_levels` entries without mutating.
+    ///
+    /// Useful for strict validation before normalization auto-corrects them.
+    pub fn invalid_stderr_levels(&self) -> Vec<&str> {
+        self.stderr_levels
+            .iter()
+            .filter(|level| !crate::LogLevel::is_valid_level(level))
+            .map(|s| s.as_str())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -156,5 +167,29 @@ mod tests {
         let original_len = cfg.stderr_levels.len();
         cfg.validate();
         assert_eq!(cfg.stderr_levels.len(), original_len);
+    }
+
+    #[test]
+    fn test_invalid_stderr_levels_returns_invalid() {
+        let cfg = ConsoleSinkConfig {
+            stderr_levels: vec![
+                "error".into(),
+                "bogus".into(),
+                "warn".into(),
+                "typo_err".into(),
+            ],
+            ..Default::default()
+        };
+        let invalid = cfg.invalid_stderr_levels();
+        assert_eq!(invalid, vec!["bogus", "typo_err"]);
+    }
+
+    #[test]
+    fn test_invalid_stderr_levels_empty_when_all_valid() {
+        let cfg = ConsoleSinkConfig {
+            stderr_levels: vec!["error".into(), "warn".into()],
+            ..Default::default()
+        };
+        assert!(cfg.invalid_stderr_levels().is_empty());
     }
 }
