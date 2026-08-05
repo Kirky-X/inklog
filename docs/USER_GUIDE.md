@@ -438,15 +438,14 @@ log::info!("用户邮箱: user@example.com");
 | `port` | `u16` | `9090` | 监听端口 |
 | `metrics_path` | `String` | `"/metrics"` | Prometheus 指标端点路径 |
 | `health_path` | `String` | `"/health"` | 健康检查端点路径 |
-| `error_mode` | `HttpErrorMode` | `Panic` | 启动失败时的错误处理模式 |
+| `error_mode` | `HttpErrorMode` | `Strict` | 错误处理模式 |
 
 #### 错误处理模式（HttpErrorMode）
 
 | 模式 | 描述 |
 |------|------|
-| `Panic` | 启动失败时 panic（默认，向后兼容） |
-| `Warn` | 启动失败时记录警告，系统继续运行 |
-| `Strict` | 启动失败时返回错误，阻止系统启动 |
+| `Strict` | 返回错误响应给调用者（默认） |
+| `Warn` | 将错误记录为警告并继续运行 |
 
 #### HTTP 服务器示例
 
@@ -460,7 +459,7 @@ let config = InklogConfig {
         port: 8080,
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
-        error_mode: inklog::config::HttpErrorMode::Panic,
+        error_mode: inklog::config::HttpErrorMode::Strict,
     }),
     ..Default::default()
 };
@@ -1148,68 +1147,46 @@ Inklog 支持通过环境变量覆盖配置。
 
 | 环境变量 | 描述 | 示例 |
 |----------|------|--------|
-| `INKLOG_LEVEL` | 日志级别 | `INKLOG_LEVEL=debug` |
-| `INKLOG_FORMAT` | 日志格式 | `INKLOG_FORMAT="{timestamp} {message}"` |
-| `INKLOG_MASKING_ENABLED` | 启用数据脱敏 | `INKLOG_MASKING_ENABLED=true` |
-
-### 控制台 Sink 配置变量
-
-| 环境变量 | 描述 | 示例 |
-|----------|------|--------|
-| `INKLOG_CONSOLE_ENABLED` | 启用控制台 Sink | `INKLOG_CONSOLE_ENABLED=true` |
-| `INKLOG_CONSOLE_COLORED` | 启用彩色输出 | `INKLOG_CONSOLE_COLORED=true` |
-| `INKLOG_CONSOLE_STDERR_LEVELS` | 输出到 stderr 的日志级别 | `INKLOG_CONSOLE_STDERR_LEVELS=error,warn` |
+| `INKLOG_GLOBAL_LEVEL` | 日志级别 | `INKLOG_GLOBAL_LEVEL=debug` |
+| `INKLOG_GLOBAL_FORMAT` | 日志格式 | `INKLOG_GLOBAL_FORMAT="{timestamp} {message}"` |
+| `INKLOG_GLOBAL_MASKING_ENABLED` | 启用数据脱敏 | `INKLOG_GLOBAL_MASKING_ENABLED=true` |
+| `INKLOG_GLOBAL_AUTO_FALLBACK` | 启用自动降级 | `INKLOG_GLOBAL_AUTO_FALLBACK=true` |
 
 ### 文件 Sink 配置变量
 
 | 环境变量 | 描述 | 示例 |
 |----------|------|--------|
-| `INKLOG_FILE_ENABLED` | 启用文件 Sink | `INKLOG_FILE_ENABLED=true` |
-| `INKLOG_FILE_PATH` | 日志文件路径 | `INKLOG_FILE_PATH=logs/app.log` |
-| `INKLOG_FILE_MAX_SIZE` | 最大文件大小 | `INKLOG_FILE_MAX_SIZE=100MB` |
-| `INKLOG_FILE_ROTATION_TIME` | 轮转时间策略 | `INKLOG_FILE_ROTATION_TIME=daily` |
-| `INKLOG_FILE_KEEP_FILES` | 保留文件数 | `INKLOG_FILE_KEEP_FILES=30` |
-| `INKLOG_FILE_COMPRESS` | 启用压缩 | `INKLOG_FILE_COMPRESS=true` |
-| `INKLOG_FILE_COMPRESSION_LEVEL` | 压缩级别 | `INKLOG_FILE_COMPRESSION_LEVEL=5` |
-| `INKLOG_FILE_ENCRYPT` | 启用加密 | `INKLOG_FILE_ENCRYPT=true` |
-| `INKLOG_FILE_ENCRYPTION_KEY_ENV` | 加密密钥环境变量名 | `INKLOG_FILE_ENCRYPTION_KEY_ENV=LOG_KEY` |
-| `INKLOG_FILE_RETENTION_DAYS` | 保留天数 | `INKLOG_FILE_RETENTION_DAYS=30` |
-| `INKLOG_FILE_MAX_TOTAL_SIZE` | 最大总大小 | `INKLOG_FILE_MAX_TOTAL_SIZE=1GB` |
-| `INKLOG_FILE_CLEANUP_INTERVAL_MINUTES` | 清理间隔 | `INKLOG_FILE_CLEANUP_INTERVAL_MINUTES=60` |
+| `INKLOG_FILE_SINK_ENABLED` | 启用文件 Sink | `INKLOG_FILE_SINK_ENABLED=true` |
+| `INKLOG_FILE_SINK_PATH` | 日志文件路径 | `INKLOG_FILE_SINK_PATH=logs/app.log` |
+| `INKLOG_FILE_SINK_MAX_SIZE` | 最大文件大小 | `INKLOG_FILE_SINK_MAX_SIZE=100MB` |
 
 ### 数据库 Sink 配置变量
 
 | 环境变量 | 描述 | 示例 |
 |----------|------|--------|
-| `INKLOG_DB_ENABLED` | 启用数据库 Sink | `INKLOG_DB_ENABLED=true` |
-| `INKLOG_DB_DRIVER` | 数据库驱动 | `INKLOG_DB_DRIVER=postgres` |
-| `INKLOG_DB_URL` | 数据库连接 URL | `INKLOG_DB_URL=postgres://localhost/logs` |
-| `INKLOG_DB_POOL_SIZE` | 连接池大小 | `INKLOG_DB_POOL_SIZE=10` |
-| `INKLOG_DB_TABLE_NAME` | 日志表名 | `INKLOG_DB_TABLE_NAME=logs` |
-| `INKLOG_DB_BATCH_SIZE` | 批量大小 | `INKLOG_DB_BATCH_SIZE=100` |
-| `INKLOG_DB_FLUSH_INTERVAL_MS` | 刷新间隔 | `INKLOG_DB_FLUSH_INTERVAL_MS=1000` |
-| `INKLOG_DB_PARQUET_COMPRESSION_LEVEL` | Parquet 压缩级别 | `INKLOG_DB_PARQUET_COMPRESSION_LEVEL=3` |
-| `INKLOG_DB_PARQUET_ENCODING` | Parquet 编码方式 | `INKLOG_DB_PARQUET_ENCODING=PLAIN` |
-| `INKLOG_DB_PARQUET_MAX_ROW_GROUP_SIZE` | Parquet Row Group 大小 | `INKLOG_DB_PARQUET_MAX_ROW_GROUP_SIZE=10000` |
-| `INKLOG_DB_PARQUET_MAX_PAGE_SIZE` | Parquet 页面大小 | `INKLOG_DB_PARQUET_MAX_PAGE_SIZE=1048576` |
+| `INKLOG_DATABASE_SINK_URL` | 数据库连接 URL | `INKLOG_DATABASE_SINK_URL=postgres://localhost/logs` |
+| `INKLOG_DATABASE_SINK_POOL_SIZE` | 连接池大小 | `INKLOG_DATABASE_SINK_POOL_SIZE=10` |
+| `INKLOG_DATABASE_SINK_BATCH_SIZE` | 批量大小 | `INKLOG_DATABASE_SINK_BATCH_SIZE=100` |
+| `INKLOG_DATABASE_SINK_FLUSH_INTERVAL_MS` | 刷新间隔 | `INKLOG_DATABASE_SINK_FLUSH_INTERVAL_MS=1000` |
+| `INKLOG_DATABASE_SINK_TABLE_NAME` | 日志表名 | `INKLOG_DATABASE_SINK_TABLE_NAME=logs` |
 
 ### HTTP 服务器配置变量
 
 | 环境变量 | 描述 | 示例 |
 |----------|------|--------|
-| `INKLOG_HTTP_ENABLED` | 启用 HTTP 服务器 | `INKLOG_HTTP_ENABLED=true` |
-| `INKLOG_HTTP_HOST` | 监听主机 | `INKLOG_HTTP_HOST=0.0.0.0` |
-| `INKLOG_HTTP_PORT` | 监听端口 | `INKLOG_HTTP_PORT=8080` |
-| `INKLOG_HTTP_METRICS_PATH` | 指标端点路径 | `INKLOG_HTTP_METRICS_PATH=/metrics` |
-| `INKLOG_HTTP_HEALTH_PATH` | 健康检查路径 | `INKLOG_HTTP_HEALTH_PATH=/health` |
-| `INKLOG_HTTP_ERROR_MODE` | 错误处理模式 | `INKLOG_HTTP_ERROR_MODE=panic` |
+| `INKLOG_HTTP_SERVER_ENABLED` | 启用 HTTP 服务器 | `INKLOG_HTTP_SERVER_ENABLED=true` |
+| `INKLOG_HTTP_SERVER_HOST` | 监听主机 | `INKLOG_HTTP_SERVER_HOST=0.0.0.0` |
+| `INKLOG_HTTP_SERVER_PORT` | 监听端口 | `INKLOG_HTTP_SERVER_PORT=8080` |
+| `INKLOG_HTTP_SERVER_METRICS_PATH` | 指标端点路径 | `INKLOG_HTTP_SERVER_METRICS_PATH=/metrics` |
+| `INKLOG_HTTP_SERVER_HEALTH_PATH` | 健康检查路径 | `INKLOG_HTTP_SERVER_HEALTH_PATH=/health` |
+| `INKLOG_HTTP_SERVER_ERROR_MODE` | 错误处理模式 | `INKLOG_HTTP_SERVER_ERROR_MODE=strict` |
 
 ### 性能配置变量
 
 | 环境变量 | 描述 | 示例 |
 |----------|------|--------|
-| `INKLOG_CHANNEL_CAPACITY` | 通道容量 | `INKLOG_CHANNEL_CAPACITY=10000` |
-| `INKLOG_WORKER_THREADS` | 工作线程数 | `INKLOG_WORKER_THREADS=3` |
+| `INKLOG_PERFORMANCE_CHANNEL_CAPACITY` | 通道容量 | `INKLOG_PERFORMANCE_CHANNEL_CAPACITY=10000` |
+| `INKLOG_PERFORMANCE_WORKER_THREADS` | 工作线程数 | `INKLOG_PERFORMANCE_WORKER_THREADS=3` |
 
 ---
 

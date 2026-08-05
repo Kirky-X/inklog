@@ -66,8 +66,8 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
     let raw_bytes = env_value.as_bytes();
     if raw_bytes.len() >= 32 {
         let mut result = [0u8; 32];
-        result.copy_bytes[..32]);
-_from_slice(&raw        return Ok(result);
+        result.copy_from_slice(&raw_bytes[..32]);
+        return Ok(result);
     }
 
     Err(InklogError::ConfigError(
@@ -622,7 +622,7 @@ masking_enabled = true  # 启用数据脱敏 (默认: true)
 **环境变量**:
 
 ```bash
-export INKLOG_MASKING_ENABLED=true
+export INKLOG_GLOBAL_MASKING_ENABLED=true
 ```
 
 ### 使用示例
@@ -1276,7 +1276,7 @@ log::info!("Payment: card_number=6222021234567890123, cvv=123");
 
 #### GDPR 合规性
 
-- [ ] 启用数据脱敏 (`INKLOG_MASKING_ENABLED=true`)
+- [ ] 启用数据脱敏 (`INKLOG_GLOBAL_MASKING_ENABLED=true`)
 - [ ] 配置数据保留期限 (`retention_days`)
 - [ ] 实施加密日志 (`encrypt=true`)
 - [ ] 定期清理过期日志 (`cargo run --example cleanup`)
@@ -1724,16 +1724,15 @@ table_name = "logs"
 
 ```bash
 # 全局配置
-INKLOG_LEVEL=info
-INKLOG_MASKING_ENABLED=true
+INKLOG_GLOBAL_LEVEL=info
+INKLOG_GLOBAL_MASKING_ENABLED=true
 
 # 文件加密
 INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 
 # 数据库连接
-INKLOG_DB_DRIVER=postgres
-INKLOG_DB_URL=postgres://inklog_writer:${DB_PASSWORD}@localhost/logs?sslmode=require
-INKLOG_DB_POOL_SIZE=10
+INKLOG_DATABASE_SINK_URL=postgres://inklog_writer:${DB_PASSWORD}@localhost/logs?sslmode=require
+INKLOG_DATABASE_SINK_POOL_SIZE=10
 
 # 解密密钥
 INKLOG_DECRYPT_KEY=$INKLOG_ENCRYPTION_KEY

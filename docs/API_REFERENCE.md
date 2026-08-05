@@ -394,10 +394,11 @@ pub async fn load() -> Result<Self, InklogError>
 - `Ok(LoggerManager)` - 加载配置并初始化的管理器
 - `Err(InklogError)` - 加载失败
 
-**默认查找位置**
-- `/etc/inklog/config.toml`
-- `./inklog_config.toml`
-- `./config/inklog.toml`
+**默认查找位置**（按优先级从高到低）
+1. `$INKLOG_CONFIG_PATH` 环境变量指定的路径
+2. `./inklog_config.toml`（当前目录）
+3. `~/.config/inklog/config.toml`（用户配置目录）
+4. 系统配置路径（Unix: `/etc/inklog/config.toml`，Windows: `%ProgramData%\inklog\config.toml`）
 
 **示例**
 ```rust
@@ -886,7 +887,7 @@ pub fn http_error_mode(mut self, mode: impl Into<String>) -> Self
 ```
 
 **参数**
-- `mode` - 错误模式（`"panic"`、`"warn"`、`"strict"`）
+- `mode` - 错误模式（`"warn"`、`"strict"`）
 
 **返回值**
 - `Self` - 构建器链
@@ -1020,13 +1021,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct InklogConfig {
+    #[serde(default)]
     pub global: GlobalConfig,
+    #[serde(default = "default_console_sink")]
     pub console_sink: Option<ConsoleSinkConfig>,
+    #[serde(default)]
     pub file_sink: Option<FileSinkConfig>,
+    #[serde(default)]
     pub database_sink: Option<DatabaseSinkConfig>,
+    #[serde(default)]
     pub performance: PerformanceConfig,
+    #[serde(default)]
     pub http_server: Option<HttpServerConfig>,
 }
 ```
@@ -1073,7 +1079,8 @@ config.validate()?;
 
 **签名**
 ```rust
-pub fn apply_env_overrides(&mut self)
+// 注意：这是私有方法，通过公共 API load_with_env_overrides() 调用
+fn apply_env_overrides(config: &mut Self)
 ```
 
 **示例**
@@ -1088,18 +1095,27 @@ config.apply_env_overrides();
 
 ### DatabaseSinkConfig
 
-数据库配置结构体，用于配置数据库日志后端。
+数据库 Sink 配置，用于持久化日志存储。
 
 #### 定义
 
 ```rust
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
-pub struct DatabaseConfig {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatabaseSinkConfig {
+    pub name: String,
     pub enabled: bool,
+    pub driver: DatabaseDriver,
     pub url: String,
+    pub pool_size: u32,
     pub batch_size: usize,
     pub flush_interval_ms: u64,
-    pub pool_size: u32,
+    pub partition: PartitionStrategy,
+    pub table_name: String,
+    pub archive_format: ArchiveFormat,
+    pub parquet_config: ParquetConfig,
+    pub permissions_path: Option<String>,
+    pub admin_role: String,
 }
 ```
 
@@ -1107,24 +1123,33 @@ pub struct DatabaseConfig {
 
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|----------|------|
+| `name` | `String` | `"default"` | Sink 名称 |
 | `enabled` | `bool` | `false` | 是否启用数据库日志输出 |
-| `url` | `String` | `""` | 数据库连接 URL |
+| `driver` | `DatabaseDriver` | `SQLite` | 数据库驱动：`postgres`、`mysql`、`sqlite`、`duckdb` |
+| `url` | `String` | `"sqlite::memory:"` | 数据库连接 URL |
+| `pool_size` | `u32` | `10` | 数据库连接池大小（SQLite 自动设为 1） |
 | `batch_size` | `usize` | `100` | 批量写入大小 |
 | `flush_interval_ms` | `u64` | `500` | 批量刷新间隔（毫秒） |
-| `pool_size` | `u32` | `10` | 数据库连接池大小 |
+| `partition` | `PartitionStrategy` | `Monthly` | 表分区策略：`Monthly`、`Yearly` |
+| `table_name` | `String` | `"logs"` | 日志表名 |
+| `archive_format` | `ArchiveFormat` | `Json` | 归档导出格式：`Json`、`Parquet`、`Csv` |
+| `parquet_config` | `ParquetConfig` | `default()` | Parquet 导出配置 |
+| `permissions_path` | `Option<String>` | `None` | RBAC 权限配置文件路径 |
+| `admin_role` | `String` | `"admin"` | DDL 和写操作的管理角色名 |
 
-**注意**: `DatabaseConfig` 需要 `sqlite`/`postgres`/`mysql`/`duckdb` 功能标志才能启用。
+**注意**: `DatabaseSinkConfig` 不需要功能标志即可配置，但实际数据库操作需要 `sqlite`/`postgres`/`mysql`/`duckdb` 功能标志。
 
 #### 示例
 ```rust
 use inklog::config::DatabaseSinkConfig;
 
-let database_sink = DatabaseSinkConfig {
+let db_config = DatabaseSinkConfig {
     enabled: true,
-    url: "sqlite://logs.db".to_string(),
+    url: "postgres://user:pass@localhost/logs".to_string(),
     batch_size: 100,
     flush_interval_ms: 500,
-    pool_size: 5,
+    pool_size: 10,
+    ..Default::default()
 };
 ```
 
@@ -1137,11 +1162,16 @@ let database_sink = DatabaseSinkConfig {
 #### 定义
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GlobalConfig {
     pub level: String,
     pub format: String,
     pub masking_enabled: bool,
+    pub auto_fallback: bool,
+    pub fallback_initial_delay_ms: u64,
+    pub fallback_max_delay_ms: u64,
+    pub fallback_max_retries: u32,
+    pub output_format: OutputFormat,
 }
 ```
 
@@ -1149,9 +1179,14 @@ pub struct GlobalConfig {
 
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|----------|------|
-| `level` | `String` | `"info"` | 日志级别：`trace`、`debug`、`info`、`warn`、`error` |
+| `level` | `String` | `"info"` | 日志级别：`trace`、`debug`、`info`、`warn`、`error`、`fatal` |
 | `format` | `String` | `"{timestamp} [{level}] {target} - {message}"` | 日志格式模板 |
 | `masking_enabled` | `bool` | `true` | 是否启用数据脱敏 |
+| `auto_fallback` | `bool` | `true` | 是否启用自动降级（Sink 失败时切换到备用 Sink） |
+| `fallback_initial_delay_ms` | `u64` | `1000` | 首次重试前的等待时间（毫秒） |
+| `fallback_max_delay_ms` | `u64` | `60000` | 重试最大延迟上限（毫秒） |
+| `fallback_max_retries` | `u32` | `10` | 最大重试次数 |
+| `output_format` | `OutputFormat` | `Text` | 输出格式：`Text`（模板）或 `Json`（NDJSON） |
 
 #### 格式变量
 
@@ -1164,6 +1199,7 @@ pub struct GlobalConfig {
 | `{file}` | 源代码文件名 |
 | `{line}` | 源代码行号 |
 | `{thread_id}` | 线程标识符 |
+| `{fields}` | 附加结构化字段（JSON） |
 
 **示例**
 ```rust
@@ -1173,6 +1209,11 @@ let global = GlobalConfig {
     level: "debug".to_string(),
     format: "[{timestamp}] [{level}] {target} - {message}".to_string(),
     masking_enabled: true,
+    auto_fallback: true,
+    fallback_initial_delay_ms: 1000,
+    fallback_max_delay_ms: 60000,
+    fallback_max_retries: 10,
+    ..Default::default()
 };
 ```
 
@@ -1186,11 +1227,12 @@ let global = GlobalConfig {
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ConsoleSinkConfig {
     pub enabled: bool,
     pub colored: bool,
     pub stderr_levels: Vec<String>,
+    pub masking_enabled: bool,
+    pub output_format: OutputFormat,
 }
 ```
 
@@ -1201,6 +1243,8 @@ pub struct ConsoleSinkConfig {
 | `enabled` | `bool` | `true` | 是否启用控制台 Sink |
 | `colored` | `bool` | `true` | 是否使用彩色输出 |
 | `stderr_levels` | `Vec<String>` | `["error", "warn"]` | 输出到 stderr 的日志级别 |
+| `masking_enabled` | `bool` | `true` | 是否启用控制台输出数据脱敏 |
+| `output_format` | `OutputFormat` | `Text` | 输出格式：`Text` 或 `Json`（Json 时自动禁用彩色） |
 
 **示例**
 ```rust
@@ -1210,6 +1254,8 @@ let console = ConsoleSinkConfig {
     enabled: true,
     colored: true,
     stderr_levels: vec!["error".to_string(), "warn".to_string()],
+    masking_enabled: true,
+    ..Default::default()
 };
 ```
 
@@ -1236,6 +1282,10 @@ pub struct FileSinkConfig {
     pub retention_days: u32,
     pub max_total_size: String,
     pub cleanup_interval_minutes: u64,
+    pub batch_size: usize,
+    pub flush_interval_ms: u64,
+    pub masking_enabled: bool,
+    pub output_format: OutputFormat,
 }
 ```
 
@@ -1249,12 +1299,16 @@ pub struct FileSinkConfig {
 | `rotation_time` | `String` | `"daily"` | 时间轮转策略：`hourly`、`daily`、`weekly` |
 | `keep_files` | `u32` | `30` | 保留的轮转文件数量 |
 | `compress` | `bool` | `true` | 是否压缩轮转文件 |
-| `compression_level` | `i32` | `3` | 压缩级别（0-22） |
+| `compression_level` | `i32` | `3` | 压缩级别（1-22） |
 | `encrypt` | `bool` | `false` | 是否加密日志文件 |
 | `encryption_key_env` | `Option<String>` | `None` | 加密密钥的环境变量名 |
 | `retention_days` | `u32` | `30` | 日志保留天数 |
 | `max_total_size` | `String` | `"1GB"` | 日志目录最大总大小 |
 | `cleanup_interval_minutes` | `u64` | `60` | 清理旧日志的间隔（分钟） |
+| `batch_size` | `usize` | `100` | 写入前缓冲的日志记录数 |
+| `flush_interval_ms` | `u64` | `100` | 最大刷新间隔（毫秒） |
+| `masking_enabled` | `bool` | `true` | 是否启用文件输出数据脱敏 |
+| `output_format` | `OutputFormat` | `Text` | 输出格式：`Text` 或 `Json` |
 
 **示例**
 ```rust
@@ -1274,6 +1328,10 @@ let file_config = FileSinkConfig {
     retention_days: 30,
     max_total_size: "2GB".to_string(),
     cleanup_interval_minutes: 60,
+    batch_size: 100,
+    flush_interval_ms: 100,
+    masking_enabled: true,
+    ..Default::default()
 };
 ```
 
@@ -1296,6 +1354,9 @@ pub struct HttpServerConfig {
     pub metrics_path: String,
     pub health_path: String,
     pub error_mode: HttpErrorMode,
+    pub auth: Option<HttpAuthConfig>,
+    pub ip_whitelist: Option<Vec<String>>,
+    pub tls: Option<TlsConfig>,
 }
 ```
 
@@ -1308,15 +1369,17 @@ pub struct HttpServerConfig {
 | `port` | `u16` | `9090` | 监听端口 |
 | `metrics_path` | `String` | `"/metrics"` | Prometheus 指标端点路径 |
 | `health_path` | `String` | `"/health"` | 健康检查端点路径 |
-| `error_mode` | `HttpErrorMode` | `Panic` | 启动失败时的错误处理模式 |
+| `error_mode` | `HttpErrorMode` | `Strict` | 错误处理模式 |
+| `auth` | `Option<HttpAuthConfig>` | `None` | HTTP 认证配置 |
+| `ip_whitelist` | `Option<Vec<String>>` | `None` | IP 白名单 |
+| `tls` | `Option<TlsConfig>` | `None` | TLS 配置（设置后启用 HTTPS） |
 
 #### HttpErrorMode 枚举
 
 | 变体 | 描述 |
 |------|------|
-| `Panic` | 启动失败时 panic（默认） |
-| `Warn` | 启动失败时记录警告，系统继续运行 |
-| `Strict` | 启动失败时返回错误，阻止系统启动 |
+| `Strict` | 返回错误响应给调用者（默认） |
+| `Warn` | 将错误记录为警告并继续运行 |
 
 **示例**
 ```rust
@@ -1341,10 +1404,17 @@ let http_config = HttpServerConfig {
 #### 定义
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PerformanceConfig {
     pub channel_capacity: usize,
     pub worker_threads: usize,
+    pub channel_strategy: ChannelStrategy,
+    pub expand_threshold_percent: u8,
+    pub shrink_threshold_percent: u8,
+    pub shrink_wait_seconds: u64,
+    pub min_capacity: usize,
+    pub max_capacity: usize,
+    pub rate_limit: Option<u64>,
 }
 ```
 
@@ -1354,6 +1424,13 @@ pub struct PerformanceConfig {
 |------|------|----------|------|
 | `channel_capacity` | `usize` | `10000` | 日志通道容量 |
 | `worker_threads` | `usize` | `3` | 工作线程数 |
+| `channel_strategy` | `ChannelStrategy` | `Fixed` | 通道大小策略：`Fixed`、`Adaptive` |
+| `expand_threshold_percent` | `u8` | `80` | 扩容触发百分比（0–100） |
+| `shrink_threshold_percent` | `u8` | `20` | 缩容触发百分比（0–100） |
+| `shrink_wait_seconds` | `u64` | `30` | 缩容前等待时间（秒） |
+| `min_capacity` | `usize` | `1000` | 最小通道容量 |
+| `max_capacity` | `usize` | `50000` | 最大通道容量 |
+| `rate_limit` | `Option<u64>` | `None` | 最大日志速率（条/秒），`None` = 无限制 |
 
 **示例**
 ```rust
@@ -1362,6 +1439,7 @@ use inklog::config::PerformanceConfig;
 let performance = PerformanceConfig {
     channel_capacity: 20000,
     worker_threads: 4,
+    ..Default::default()
 };
 ```
 
