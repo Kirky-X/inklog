@@ -3054,7 +3054,13 @@ dependencies = [
 
 [[package]]
 name = "oxcache"
+<<<<<<< HEAD
 version = "0.4.3"
+=======
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de40b77e8d24ff8be6c04ef221b03f459105bb02d621236b4db82867ef079cf9"
+>>>>>>> 416b4de (chore(deps): bump oxcache from 0.4.1 to 0.4.2)
 dependencies = [
  "async-trait",
  "chrono",
