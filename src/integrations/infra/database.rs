@@ -233,6 +233,7 @@ impl DbNexusAdapter {
             warmup_retries: 3,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
+            failover_config: None,
         };
 
         // 使用 DbPool::with_config 创建连接池
@@ -824,6 +825,7 @@ mod tests {
             warmup_retries: 5,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
+            failover_config: None,
         };
 
         let pool = DbPool::with_config(config)
@@ -910,6 +912,7 @@ mod tests {
             warmup_retries: 5,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
+            failover_config: None,
         };
 
         let pool = DbPool::with_config(config)

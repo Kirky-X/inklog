@@ -1161,9 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "dbnexus"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85e2d013efaf75da1225641b725e968cb1656a8ac0155e5288797f401c51489d"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1196,9 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "dbnexus-macros"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58b96826dd1c76e429a1f44776394728230fa8e5b75bfa6a84d6ee9b9ff1a66c"
+version = "0.5.1"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
@@ -3019,9 +3015,7 @@ dependencies = [
 
 [[package]]
 name = "oxcache"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9071770a567c6708c7fe414174985a8c3880cea1bd0219ac82f5881543303e7a"
+version = "0.4.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3042,9 +3036,7 @@ dependencies = [
 
 [[package]]
 name = "oxcache_macros"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c79ceb89ff7df21cc6bdfc7d39b1b94bfae858055023d848a727fbc75a43ddb"
+version = "0.4.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4909,15 +4901,7 @@ dependencies = [
 
 [[package]]
 name = "trait-kit"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34e344b85cd31d8a395c69c6d0bd6cd32f586778466345149ad4692208e77007"
-dependencies = [
- "icu",
- "sys-locale",
- "thiserror",
- "writeable",
-]
+version = "0.4.2"
 
 [[package]]
 name = "try-lock"

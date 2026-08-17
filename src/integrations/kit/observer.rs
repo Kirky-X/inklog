@@ -86,7 +86,9 @@ mod tests {
     #[test]
     fn on_build_error_does_not_panic() {
         let obs = InklogBuildObserver;
-        let err = trait_kit::TraitKitError::MissingCapability { key: "test" };
+        let err = trait_kit::TraitKitError::MissingCapability {
+            key: "test".to_string(),
+        };
         obs.on_build_error("test-module", &err);
     }
 
