@@ -165,6 +165,7 @@ mod tests {
     /// R-inklog-module-003 #4: Full integration — register OxcacheModule +
     /// DbNexusModule + InklogModule, set configs, build, require
     /// InklogModule → get a working `Arc<dyn Database + Send + Sync>`.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_module_build_returns_database() {
         use dbnexus::foundation::config::DbConfig;
@@ -198,6 +199,7 @@ mod tests {
 
     /// R-inklog-module-003 #5: build fails with a clear error if
     /// DbNexusModule is not registered (dependency missing).
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_module_build_fails_without_dbnexus() {
         let mut kit = AsyncKit::new();
@@ -217,6 +219,7 @@ mod tests {
     // ========================================================================
 
     /// AsyncHealthCheck::check returns Healthy for a valid database capability.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_module_health_check_returns_healthy() {
         use dbnexus::foundation::config::DbConfig;
@@ -253,6 +256,7 @@ mod tests {
     // ========================================================================
 
     /// on_ready succeeds when DbNexusModule is registered and accessible.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_module_lifecycle_on_ready_succeeds() {
         use dbnexus::foundation::config::DbConfig;
@@ -286,6 +290,7 @@ mod tests {
     }
 
     /// on_shutdown completes without panic after a successful build.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_module_lifecycle_shutdown_completes() {
         use dbnexus::foundation::config::DbConfig;
@@ -315,6 +320,7 @@ mod tests {
     }
 
     /// Full integration: lifecycle + health check working together.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_module_lifecycle_and_health_full_integration() {
         use dbnexus::foundation::config::DbConfig;
@@ -356,6 +362,7 @@ mod tests {
     // ========================================================================
 
     /// Build with InklogBuildObserver — observer receives build events.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_module_build_with_observer() {
         use dbnexus::foundation::config::DbConfig;
@@ -392,6 +399,7 @@ mod tests {
     // ========================================================================
 
     /// create_inklog_scope + populate + require round-trip.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn inklog_scope_insert_require_roundtrip() {
         use dbnexus::foundation::config::DbConfig;

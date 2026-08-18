@@ -61,6 +61,7 @@ mod tests {
     }
 
     /// Insert + require round-trip works for InklogModule.
+    #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn scope_insert_require_roundtrip() {
         use dbnexus::foundation::config::DbConfig;

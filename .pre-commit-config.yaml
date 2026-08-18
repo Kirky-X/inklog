@@ -48,7 +48,9 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy (-D warnings)
-        entry: bash -c 'cargo clippy --all-targets --all-features -- -D warnings'
+        # dbnexus 驱动严格互斥（embedded vs server-side），--all-features 不适用多后端 crate，
+        # 按 sqlite/postgres 分组验证 + 无 DB 后端的基础组合
+        entry: bash -c 'cargo clippy --all-targets --features "sqlite,kit,compression,fast-masking" -- -D warnings && cargo clippy --all-targets --features "postgres,kit,compression,fast-masking" -- -D warnings'
         language: system
         types: [rust]
         pass_filenames: false
