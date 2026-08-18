@@ -28,7 +28,7 @@ tempfile = { version = "3.27", default-features = false }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.12", default-features = false, features = ["std", "perf", "unicode"] }
-dbnexus = { path = "../dbnexus", version = "0.5", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover"] }
+dbnexus = { path = "../dbnexus", version = "0.5", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "compression", "parquet"]
