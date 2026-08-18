@@ -128,7 +128,7 @@ echo ""
 # 2. Clippy Linting
 print_header "2. Clippy Linting"
 run_check "Clippy Check" \
-    "cargo clippy --all-features -- -D warnings" \
+    "cargo clippy --features 'sqlite,kit,compression,fast-masking' -- -D warnings && cargo clippy --features 'postgres,kit,compression,fast-masking' -- -D warnings" \
     "Clippy found issues. Review the output above."
 
 echo ""
@@ -136,7 +136,7 @@ echo ""
 # 3. Compilation Check
 print_header "3. Compilation Check"
 run_check "Build Check" \
-    "cargo check --all-features" \
+    "cargo check --features 'sqlite,kit,compression,fast-masking' && cargo check --features 'postgres,kit,compression,fast-masking'" \
     "Compilation failed. Check the errors above."
 
 echo ""
@@ -144,7 +144,7 @@ echo ""
 # 4. Unit Tests (fast subset)
 print_header "4. Unit Tests"
 run_check "Unit Tests" \
-    "cargo test --lib --all-features -- --test-threads=4" \
+    "cargo test --lib --features 'sqlite,kit,compression,fast-masking' -- --test-threads=4 && cargo test --lib --features 'postgres,kit,compression,fast-masking' -- --test-threads=4" \
     "Unit tests failed. Check the test output above."
 
 echo ""
