@@ -47,7 +47,12 @@ async fn setup_file_logger(log_path: &Path, channel_capacity: usize) -> (LoggerM
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         None,
     )
     .await
@@ -73,7 +78,12 @@ async fn setup_console_logger() -> (LoggerManager, impl Drop) {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         None,
     )
     .await
@@ -95,7 +105,12 @@ async fn setup_noop_logger() -> (LoggerManager, impl Drop) {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         None,
     )
     .await

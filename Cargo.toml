@@ -85,7 +85,7 @@ is-terminal = { version = "0.4", default-features = false }
 bytes = { version = "1.12", default-features = false, features = ["std"] }
 dirs = { version = "6.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
-oxcache = { path = "../oxcache", default-features = false, features = ["macros", "memory", "serialization", "metrics", "batch"] }
+oxcache = { path = "../oxcache", version = "0.4", default-features = false, features = ["macros", "memory", "serialization", "metrics", "batch"] }
 zstd = { version = "0.13", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }

@@ -140,3 +140,4 @@ CODEIUM.md
 .codeium/
 .github/copilot/
 cobertura.xml
+lcov.info
