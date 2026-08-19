@@ -141,3 +141,6 @@ CODEIUM.md
 .github/copilot/
 cobertura.xml
 lcov.info
+
+# Reviews (security/quality scan artifacts)
+reviews/
