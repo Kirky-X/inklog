@@ -61,6 +61,14 @@ pub(crate) struct WorkerParams {
         feature = "duckdb"
     ))]
     pub(crate) database: Option<Arc<dyn crate::integrations::Database>>,
+    /// 数据库 sink 专用数据 channel 接收端（独立于 file worker 的 receiver）
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub(crate) db_receiver: Option<Receiver<Arc<LogRecord>>>,
 }
 
 /// `start_workers` 返回值类型别名，避免 clippy `type_complexity` 警告。
@@ -190,6 +198,13 @@ impl LoggerManager {
                 feature = "duckdb"
             ))]
             database,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            db_receiver,
         } = params;
         let file_config = config.file_sink.clone();
         #[cfg(any(
@@ -568,13 +583,6 @@ impl LoggerManager {
             feature = "mysql",
             feature = "duckdb"
         ))]
-        let rx_db = receiver.clone();
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
         let (shutdown_tx_db, shutdown_db) = bounded(1);
         #[cfg(any(
             feature = "sqlite",
@@ -619,6 +627,7 @@ impl LoggerManager {
                     if let Some(cfg) = db_config
                         && cfg.enabled
                         && let Some(ref db) = database
+                        && let Some(rx_db) = db_receiver
                     {
                         // Clone once before the loop for recovery use
                         let db_for_recovery = db.clone();

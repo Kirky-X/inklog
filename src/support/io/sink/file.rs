@@ -437,75 +437,105 @@ impl FileSink {
     ///
     /// 返回文件系统操作可能产生的错误
     fn perform_cleanup(config: &FileSinkConfig, log_path: &Path) -> Result<(), InklogError> {
-        if let Some(parent) = log_path.parent() {
-            // Collect entries, logging error if read_dir fails
-            let entries: Vec<_> = match fs::read_dir(parent) {
-                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
-                Err(e) => {
-                    warn!(
-                        "Failed to read directory '{}' for cleanup: {}",
-                        parent.display(),
-                        e
-                    );
-                    return Ok(());
-                }
-            };
+        let parent = match log_path.parent() {
+            Some(p) => p,
+            None => return Ok(()),
+        };
 
-            // 计算截止日期
-            let cutoff_date = Utc::now()
-                .checked_sub_signed(chrono::Duration::days(config.retention_days as i64))
-                .unwrap_or_else(Utc::now);
+        // 只清理属于当前日志集的轮转文件（{stem}_<timestamp>.log[.zst][.enc]），
+        // 绝不触碰目录中无关文件，也绝不删除当前活动文件 log_path 本身。
+        let stem = log_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let prefix = format!("{}_", stem);
 
-            let mut expired_count = 0;
-            let mut total_size = 0u64;
-
-            for entry in &entries {
-                // Single metadata() syscall for both size and modified time
-                if let Ok(metadata) = entry.path().metadata() {
-                    total_size += metadata.len();
-
-                    if let Ok(modified) = metadata.modified() {
-                        let modified_utc: DateTime<Utc> = modified.into();
-                        if modified_utc < cutoff_date {
-                            expired_count += 1;
-                        }
+        // (path, modified) 列表，按修改时间升序（最旧在前）
+        let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+        match fs::read_dir(parent) {
+            Ok(rd) => {
+                for entry in rd.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if !path.is_file() || path == log_path {
+                        continue;
+                    }
+                    let name = match path.file_name().and_then(|n| n.to_str()) {
+                        Some(n) => n,
+                        None => continue,
+                    };
+                    if !name.starts_with(&prefix) {
+                        continue;
+                    }
+                    if let Ok(metadata) = path.metadata()
+                        && let Ok(modified) = metadata.modified()
+                    {
+                        candidates.push((path, modified));
                     }
                 }
             }
+            Err(e) => {
+                warn!(
+                    "Failed to read directory '{}' for cleanup: {}",
+                    parent.display(),
+                    e
+                );
+                return Ok(());
+            }
+        }
 
-            if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size) {
-                if total_size > max_total_size_bytes {
-                    let excess_size = total_size.saturating_sub(max_total_size_bytes);
-                    let mut deleted_size: u64 = 0;
+        // 最旧在前，保证删除时优先删最旧的日志
+        candidates.sort_by_key(|(_, modified)| *modified);
 
-                    for entry in entries {
-                        if deleted_size >= excess_size {
-                            break;
-                        }
+        // 计算截止日期
+        let cutoff_date = Utc::now()
+            .checked_sub_signed(chrono::Duration::days(config.retention_days as i64))
+            .unwrap_or_else(Utc::now);
 
-                        if let Ok(metadata) = entry.path().metadata() {
-                            deleted_size += metadata.len();
-                        }
+        let total_size: u64 = candidates
+            .iter()
+            .filter_map(|(path, _)| path.metadata().ok())
+            .map(|metadata| metadata.len())
+            .sum();
 
-                        if let Err(e) = fs::remove_file(entry.path()) {
-                            warn!(
-                                "Failed to remove {} during size cleanup: {}",
-                                entry.path().display(),
-                                e
-                            );
-                        }
+        if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size) {
+            if total_size > max_total_size_bytes {
+                let excess_size = total_size.saturating_sub(max_total_size_bytes);
+                let mut deleted_size: u64 = 0;
+
+                for (path, _) in &candidates {
+                    if deleted_size >= excess_size {
+                        break;
                     }
-                } else if expired_count > 0 {
-                    let to_delete =
-                        (entries.len() as i32 - config.keep_files as i32).max(0) as usize;
-                    for entry in entries.into_iter().take(to_delete) {
-                        if let Err(e) = fs::remove_file(entry.path()) {
-                            warn!(
-                                "Failed to remove {} during expiry cleanup: {}",
-                                entry.path().display(),
-                                e
-                            );
-                        }
+
+                    if let Ok(metadata) = path.metadata() {
+                        deleted_size += metadata.len();
+                    }
+
+                    if let Err(e) = fs::remove_file(path) {
+                        warn!(
+                            "Failed to remove {} during size cleanup: {}",
+                            path.display(),
+                            e
+                        );
+                    }
+                }
+            } else {
+                // 只删除已过期的文件，且始终保留最新的 keep_files 个轮转文件
+                let keep_newest = config.keep_files as usize;
+                for (index, (path, modified)) in candidates.iter().enumerate() {
+                    if index >= candidates.len().saturating_sub(keep_newest) {
+                        break;
+                    }
+                    let modified_utc: DateTime<Utc> = (*modified).into();
+                    if modified_utc < cutoff_date
+                        && let Err(e) = fs::remove_file(path)
+                    {
+                        warn!(
+                            "Failed to remove {} during expiry cleanup: {}",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
@@ -858,7 +888,7 @@ impl FileSink {
     }
 
     /// 同步加密文件（可在后台线程调用）
-    fn encrypt_file(&self, input_path: &Path, output_path: &Path) -> Result<(), InklogError> {
+    pub fn encrypt_file(&self, input_path: &Path, output_path: &Path) -> Result<(), InklogError> {
         use aes_gcm::{Aes256Gcm, Nonce};
         use rand::Rng;
 
@@ -901,7 +931,11 @@ impl FileSink {
             InklogError::IoError(e)
         })?;
 
-        // 写入格式：nonce (12 bytes) + ciphertext
+        // 写入格式（与 CLI 解密工具及 docs/SECURITY.md 一致）：
+        // magic header (8) + version (2) + algo (2) + nonce (12) + ciphertext
+        output.write_all(b"ENCLOG1\0")?;
+        output.write_all(&1u16.to_le_bytes())?;
+        output.write_all(&1u16.to_le_bytes())?;
         output.write_all(&nonce_bytes)?;
         output.write_all(&ciphertext)?;
 
@@ -2229,14 +2263,23 @@ mod tests {
         assert_eq!(encrypted_path.extension().unwrap(), "enc");
         assert!(encrypted_path.exists());
 
-        // 解密：前 12 字节是 nonce，其余是 ciphertext
+        // 解密：24 字节头（magic 8 + version 2 + algo 2 + nonce 12）+ ciphertext
         let encrypted_data = std::fs::read(&encrypted_path).unwrap();
-        assert!(encrypted_data.len() > 12);
+        assert!(encrypted_data.len() > 24);
+        assert_eq!(&encrypted_data[..8], b"ENCLOG1\0");
+        assert_eq!(
+            u16::from_le_bytes([encrypted_data[8], encrypted_data[9]]),
+            1
+        );
+        assert_eq!(
+            u16::from_le_bytes([encrypted_data[10], encrypted_data[11]]),
+            1
+        );
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce_arr: [u8; 12] = encrypted_data[..12].try_into().unwrap();
+        let nonce_arr: [u8; 12] = encrypted_data[12..24].try_into().unwrap();
         let nonce = Nonce::from(nonce_arr);
-        let ciphertext = &encrypted_data[12..];
+        let ciphertext = &encrypted_data[24..];
         let decrypted_compressed = cipher.decrypt(&nonce, ciphertext).unwrap();
 
         // 解压
@@ -2288,14 +2331,23 @@ mod tests {
         assert_eq!(encrypted_path.extension().unwrap(), "enc");
         assert!(encrypted_path.exists());
 
-        // 解密：前 12 字节是 nonce，其余是 ciphertext
+        // 解密：24 字节头（magic 8 + version 2 + algo 2 + nonce 12）+ ciphertext
         let encrypted_data = std::fs::read(&encrypted_path).unwrap();
-        assert!(encrypted_data.len() > 12);
+        assert!(encrypted_data.len() > 24);
+        assert_eq!(&encrypted_data[..8], b"ENCLOG1\0");
+        assert_eq!(
+            u16::from_le_bytes([encrypted_data[8], encrypted_data[9]]),
+            1
+        );
+        assert_eq!(
+            u16::from_le_bytes([encrypted_data[10], encrypted_data[11]]),
+            1
+        );
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce_arr: [u8; 12] = encrypted_data[..12].try_into().unwrap();
+        let nonce_arr: [u8; 12] = encrypted_data[12..24].try_into().unwrap();
         let nonce = Nonce::from(nonce_arr);
-        let ciphertext = &encrypted_data[12..];
+        let ciphertext = &encrypted_data[24..];
         let decrypted_compressed = cipher.decrypt(&nonce, ciphertext).unwrap();
 
         // gzip 解压
@@ -2345,14 +2397,23 @@ mod tests {
         assert!(result.is_ok(), "encrypt_file failed: {:?}", result.err());
         assert!(output_path.exists());
 
-        // 解密验证
+        // 解密：24 字节头（magic 8 + version 2 + algo 2 + nonce 12）+ ciphertext
         let encrypted_data = std::fs::read(&output_path).unwrap();
-        assert!(encrypted_data.len() > 12);
+        assert!(encrypted_data.len() > 24);
+        assert_eq!(&encrypted_data[..8], b"ENCLOG1\0");
+        assert_eq!(
+            u16::from_le_bytes([encrypted_data[8], encrypted_data[9]]),
+            1
+        );
+        assert_eq!(
+            u16::from_le_bytes([encrypted_data[10], encrypted_data[11]]),
+            1
+        );
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce_arr: [u8; 12] = encrypted_data[..12].try_into().unwrap();
+        let nonce_arr: [u8; 12] = encrypted_data[12..24].try_into().unwrap();
         let nonce = Nonce::from(nonce_arr);
-        let ciphertext = &encrypted_data[12..];
+        let ciphertext = &encrypted_data[24..];
         let decrypted = cipher.decrypt(&nonce, ciphertext).unwrap();
         assert_eq!(decrypted, original_content);
 
@@ -3676,11 +3737,11 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("keep_test.log");
 
-        // 创建 4 个过期文件
+        // 创建 4 个过期文件（使用 keep_test_ 前缀以匹配当前日志集的轮转命名）
         let old_time =
             std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 24 * 60 * 60);
         for i in 0..4 {
-            let p = temp_dir.path().join(format!("keep_{}.log", i));
+            let p = temp_dir.path().join(format!("keep_test_{}.log", i));
             std::fs::write(&p, "old content").unwrap();
             let _ = filetime::set_file_mtime(&p, filetime::FileTime::from_system_time(old_time));
         }
@@ -3696,18 +3757,58 @@ mod tests {
         let result = FileSink::perform_cleanup(&config, &temp_dir.path().join("keep_test.log"));
         assert!(result.is_ok());
 
-        // 验证：4 个过期文件，keep_files=2，应保留 2 个（entries.len() - keep_files = 2 个被删）
+        // 验证：4 个过期文件，keep_files=2，应保留最新的 2 个（删除 2 个最旧的）
         let remaining: Vec<_> = std::fs::read_dir(temp_dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
             .collect();
-        // 至少应保留 2 个文件（keep_files 限制）
-        assert!(
-            remaining.len() >= 2,
-            "keep_files should preserve at least 2 files, got {}",
+        assert_eq!(
+            remaining.len(),
+            2,
+            "keep_files should preserve exactly 2 files, got {}",
             remaining.len()
         );
+    }
+
+    #[test]
+    fn test_perform_cleanup_never_touches_unrelated_files() {
+        // 回归测试：cleanup 只允许删除当前日志集的轮转文件，目录中的无关文件不得被删除
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("app.log");
+        std::fs::write(&log_path, "active log").unwrap();
+
+        // 当前日志集的过期轮转文件（2KB，足以触发 size 分支）
+        let rotated = temp_dir.path().join("app_20250101_000000.log");
+        std::fs::write(&rotated, "x".repeat(2048)).unwrap();
+        let old_time =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 24 * 60 * 60);
+        let _ = filetime::set_file_mtime(&rotated, filetime::FileTime::from_system_time(old_time));
+
+        // 无关文件（不属于 app 日志集），即便很小也应保留
+        let unrelated = temp_dir.path().join("user_data.txt");
+        std::fs::write(&unrelated, "must not be deleted").unwrap();
+        let unrelated2 = temp_dir.path().join("otherapp.log");
+        std::fs::write(&unrelated2, "other logger, must survive").unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            retention_days: 7,
+            keep_files: 0,
+            max_total_size: "1KB".to_string(), // 触发 size 分支，迫使 cleanup 尝试删除
+            ..Default::default()
+        };
+        let result = FileSink::perform_cleanup(&config, &log_path);
+        assert!(result.is_ok());
+
+        assert!(!rotated.exists(), "expired rotated log should be removed");
+        assert!(unrelated.exists(), "unrelated file must never be deleted");
+        assert!(
+            unrelated2.exists(),
+            "other logger's file must never be deleted"
+        );
+        assert!(log_path.exists(), "active log file must never be deleted");
     }
 
     // ==================== parse_size 大数边界测试 ====================

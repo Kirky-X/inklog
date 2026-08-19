@@ -31,6 +31,10 @@ pub struct LoggerSubscriber {
     console_sender: Sender<Arc<LogRecord>>,
     /// Channel sender for async sinks (file, database, etc.)
     async_sender: Sender<Arc<LogRecord>>,
+    /// Additional async sink channels. Each enabled async sink gets its own
+    /// channel, otherwise a single shared MPMC channel would deliver each
+    /// record to only one of the sink workers (data loss for the others).
+    extra_async_senders: Vec<Sender<Arc<LogRecord>>>,
     /// Metrics for monitoring
     metrics: Arc<Metrics>,
     /// Timeout for async channel send (milliseconds)
@@ -54,6 +58,7 @@ impl LoggerSubscriber {
         Self {
             console_sender,
             async_sender,
+            extra_async_senders: Vec::new(),
             metrics,
             send_timeout_ms: DEFAULT_SEND_TIMEOUT_MS,
             fallback_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(FALLBACK_BUFFER_SIZE))),
@@ -61,6 +66,29 @@ impl LoggerSubscriber {
             rate_limiter: None,
             error_sample_counter: AtomicU64::new(0),
         }
+    }
+
+    /// Add an additional async sink channel. Each enabled async sink must have
+    /// its own channel; sharing a single channel between workers means every
+    /// record is consumed by only one worker.
+    pub fn with_extra_async_sender(mut self, sender: Sender<Arc<LogRecord>>) -> Self {
+        self.extra_async_senders.push(sender);
+        self
+    }
+
+    /// Send a record to every configured async sink channel. Returns `true`
+    /// only when all sends succeed.
+    fn send_to_async_sinks(&self, record: &Arc<LogRecord>, timeout: Duration) -> bool {
+        let mut all_ok = self
+            .async_sender
+            .send_timeout(Arc::clone(record), timeout)
+            .is_ok();
+        for sender in &self.extra_async_senders {
+            if sender.send_timeout(Arc::clone(record), timeout).is_err() {
+                all_ok = false;
+            }
+        }
+        all_ok
     }
 
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
@@ -100,12 +128,10 @@ impl LoggerSubscriber {
         let mut buffer = self.fallback_buffer.lock();
         while let Some(record) = buffer.front() {
             let timeout = Duration::from_millis(self.send_timeout_ms);
-            match self.async_sender.send_timeout(Arc::clone(record), timeout) {
-                Ok(_) => {
-                    buffer.pop_front();
-                }
-                Err(_) => break,
+            if !self.send_to_async_sinks(record, timeout) {
+                break;
             }
+            buffer.pop_front();
         }
     }
 }
@@ -176,25 +202,19 @@ where
 
         // Slow path: Async sinks - use timeout for backpressure handling
         let timeout = Duration::from_millis(self.send_timeout_ms);
-        match self.async_sender.send_timeout(Arc::clone(&record), timeout) {
-            Ok(_) => {}
-            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
-                // For critical logs, add to fallback buffer
-                if Self::is_critical_level(&record.level) {
-                    let mut buffer = self.fallback_buffer.lock();
-                    if buffer.len() >= FALLBACK_BUFFER_SIZE {
-                        buffer.pop_front();
-                    }
-                    buffer.push_back(record);
-                } else {
-                    // Timeout on non-critical log: message is lost (send_timeout returns
-                    // ownership but we have nowhere to buffer it). Only count as dropped,
-                    // not as channel_blocked, to keep metric semantics distinct:
-                    // channel_blocked = backpressure event, logs_dropped = data loss.
-                    self.metrics.inc_logs_dropped();
+        if !self.send_to_async_sinks(&record, timeout) {
+            // For critical logs, add to fallback buffer
+            if Self::is_critical_level(&record.level) {
+                let mut buffer = self.fallback_buffer.lock();
+                if buffer.len() >= FALLBACK_BUFFER_SIZE {
+                    buffer.pop_front();
                 }
-            }
-            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
+                buffer.push_back(record);
+            } else {
+                // Timeout on non-critical log: message is lost (send_timeout returns
+                // ownership but we have nowhere to buffer it). Only count as dropped,
+                // not as channel_blocked, to keep metric semantics distinct:
+                // channel_blocked = backpressure event, logs_dropped = data loss.
                 self.metrics.inc_logs_dropped();
             }
         }
