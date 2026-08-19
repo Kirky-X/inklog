@@ -146,8 +146,11 @@ impl LoggerManager {
                 let client_ip = addr.ip().to_string();
                 if !whitelist.iter().any(|allowed| {
                     if allowed.ends_with(".*") {
-                        let prefix = &allowed[..allowed.len() - 2];
-                        client_ip.starts_with(prefix)
+                        // 剥离 ".*" 后必须补回结尾点，否则 "192.168" 会
+                        // 前缀匹配 "192.1681.x" / "10.01.x" 等越界地址被放行
+                        // （diting MED-003 修复）
+                        let prefix = format!("{}.", &allowed[..allowed.len() - 2]);
+                        client_ip.starts_with(&prefix)
                     } else if allowed.contains('/') {
                         matches!(parse_cidr(allowed), Some(network) if network.contains(&addr.ip()))
                     } else {

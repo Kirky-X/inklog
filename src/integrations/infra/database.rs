@@ -139,6 +139,8 @@ pub struct DbNexusAdapter {
     pool: Arc<dyn ConnectionPool + Send + Sync>,
     table_name: String,
     admin_role: String,
+    /// 驱动类型，SQL 转义需要按后端区分（MySQL 默认将反斜杠视为转义符）
+    driver: DatabaseDriver,
 }
 
 #[cfg(any(
@@ -251,6 +253,7 @@ impl DbNexusAdapter {
             pool: Arc::new(pool),
             table_name: table_name.to_string(),
             admin_role: admin_role.to_string(),
+            driver: detect_driver_from_url(url),
         };
 
         // 自动建表
@@ -269,10 +272,13 @@ impl DbNexusAdapter {
     /// * `table_name` - 日志表名称
     pub fn from_pool(pool: DbPool, table_name: &str) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
+        // 无 URL 可解析驱动，沿用 detect_driver_from_url 的默认回退（PostgreSQL）；
+        // MySQL 连接池的用户请改用 with_full_config/with_table_name（可识别驱动）。
         Ok(Self {
             pool: Arc::new(pool),
             table_name: table_name.to_string(),
             admin_role: "admin".to_string(),
+            driver: DatabaseDriver::PostgreSQL,
         })
     }
 
@@ -290,10 +296,12 @@ impl DbNexusAdapter {
         table_name: &str,
     ) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
+        // 同上：无法从 trait 对象解析驱动，回退到 PostgreSQL 语义
         Ok(Self {
             pool,
             table_name: table_name.to_string(),
             admin_role: "admin".to_string(),
+            driver: DatabaseDriver::PostgreSQL,
         })
     }
 
@@ -389,9 +397,18 @@ fn validate_table_name(name: &str) -> Result<(), InklogError> {
     feature = "mysql",
     feature = "duckdb"
 ))]
+/// 转义 SQL 字符串字面量。
+///
+/// ANSI/标准后端（SQLite/PostgreSQL/DuckDB）只需将 `'` 双写即可；
+/// **MySQL 默认把反斜杠视为转义符**，若输入含 `\` 后跟 `'`（如 `\'; DROP ...`），
+/// 仅双写引号仍可逃逸字符串越权执行 SQL。因此 MySQL 需额外转义反斜杠。
+/// （diting MED-001 修复）
 #[inline]
-fn escape_sql_string(s: &str) -> String {
-    s.replace('\'', "''")
+fn escape_sql_string(s: &str, driver: &DatabaseDriver) -> String {
+    match driver {
+        DatabaseDriver::MySQL => s.replace('\\', "\\\\").replace('\'', "''"),
+        _ => s.replace('\'', "''"),
+    }
 }
 
 /// 根据数据库驱动生成 CREATE TABLE DDL 语句。
@@ -520,22 +537,23 @@ impl Database for DbNexusAdapter {
             .iter()
             .map(|record| {
                 let timestamp = record.timestamp.to_rfc3339();
-                let level = escape_sql_string(&record.level);
-                let target = escape_sql_string(&record.target);
-                let message = escape_sql_string(&record.message);
+                let driver = &self.driver;
+                let level = escape_sql_string(&record.level, driver);
+                let target = escape_sql_string(&record.target, driver);
+                let message = escape_sql_string(&record.message, driver);
                 let fields_json =
                     serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
-                let fields_escaped = escape_sql_string(&fields_json);
+                let fields_escaped = escape_sql_string(&fields_json, driver);
                 let file = record
                     .file
                     .as_ref()
-                    .map(|f| format!("'{}'", escape_sql_string(f)))
+                    .map(|f| format!("'{}'", escape_sql_string(f, driver)))
                     .unwrap_or_else(|| "NULL".to_string());
                 let line = record
                     .line
                     .map(|l| l.to_string())
                     .unwrap_or_else(|| "NULL".to_string());
-                let thread_id = escape_sql_string(&record.thread_id);
+                let thread_id = escape_sql_string(&record.thread_id, driver);
 
                 format!(
                     "INSERT INTO {} (timestamp, level, target, message, fields, file, line, thread_id) \
@@ -1237,7 +1255,7 @@ mod tests {
     ))]
     #[test]
     fn test_escape_sql_string_empty() {
-        assert_eq!(escape_sql_string(""), "");
+        assert_eq!(escape_sql_string("", &DatabaseDriver::SQLite), "");
     }
 
     #[cfg(any(
@@ -1248,8 +1266,14 @@ mod tests {
     ))]
     #[test]
     fn test_escape_sql_string_no_special_chars() {
-        assert_eq!(escape_sql_string("hello world"), "hello world");
-        assert_eq!(escape_sql_string("abc123"), "abc123");
+        assert_eq!(
+            escape_sql_string("hello world", &DatabaseDriver::SQLite),
+            "hello world"
+        );
+        assert_eq!(
+            escape_sql_string("abc123", &DatabaseDriver::SQLite),
+            "abc123"
+        );
     }
 
     #[cfg(any(
@@ -1260,8 +1284,8 @@ mod tests {
     ))]
     #[test]
     fn test_escape_sql_string_single_quote() {
-        assert_eq!(escape_sql_string("it's"), "it''s");
-        assert_eq!(escape_sql_string("'"), "''");
+        assert_eq!(escape_sql_string("it's", &DatabaseDriver::SQLite), "it''s");
+        assert_eq!(escape_sql_string("'", &DatabaseDriver::SQLite), "''");
     }
 
     #[cfg(any(
@@ -1272,8 +1296,14 @@ mod tests {
     ))]
     #[test]
     fn test_escape_sql_string_multiple_quotes() {
-        assert_eq!(escape_sql_string("a'b'c'd"), "a''b''c''d");
-        assert_eq!(escape_sql_string("''''"), "''''''''");
+        assert_eq!(
+            escape_sql_string("a'b'c'd", &DatabaseDriver::SQLite),
+            "a''b''c''d"
+        );
+        assert_eq!(
+            escape_sql_string("''''", &DatabaseDriver::SQLite),
+            "''''''''"
+        );
     }
 
     #[cfg(any(
@@ -1284,8 +1314,35 @@ mod tests {
     ))]
     #[test]
     fn test_escape_sql_string_unicode() {
-        assert_eq!(escape_sql_string("こんにちは"), "こんにちは");
-        assert_eq!(escape_sql_string("世界'it's"), "世界''it''s");
+        assert_eq!(
+            escape_sql_string("こんにちは", &DatabaseDriver::SQLite),
+            "こんにちは"
+        );
+        assert_eq!(
+            escape_sql_string("世界'it's", &DatabaseDriver::SQLite),
+            "世界''it''s"
+        );
+    }
+
+    /// diting MED-001 回归：MySQL 默认把反斜杠当转义符，
+    /// `\` 后跟 `'` 的载荷仅做引号双写仍可逃逸字符串。
+    #[cfg(feature = "mysql")]
+    #[test]
+    fn test_escape_sql_string_mysql_backslash_injection() {
+        // MySQL：反斜杠必须被转义，否则 `\'; DROP TABLE logs; --` 会逃逸字符串。
+        let payload = "\\'; DROP TABLE logs; --"; //  \'; DROP TABLE logs; --
+        // MySQL 转义：反斜杠双写 + 引号双写 → \\''; DROP ...
+        assert_eq!(
+            escape_sql_string(payload, &DatabaseDriver::MySQL),
+            "\\\\''; DROP TABLE logs; --"
+        );
+        // 单反斜杠+引号：必须精确转义为 `\\''`，不能以未转义的 `\'` 形式残留
+        assert_eq!(escape_sql_string("\\'", &DatabaseDriver::MySQL), "\\\\''");
+        // ANSI 后端不转义反斜杠（保持原样，避免数据损坏）
+        assert_eq!(
+            escape_sql_string("c:\\temp", &DatabaseDriver::PostgreSQL),
+            "c:\\temp"
+        );
     }
 
     // ============================================================================
