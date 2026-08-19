@@ -160,8 +160,18 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
             if !inner.circuit_breaker.can_execute() {
                 (Vec::new(), false, true)
             } else {
+                // diting MED-002：结构化字段（fields）同样需要脱敏——
+                // 序列化后统一过 masker，再反序列化还原，避免敏感字段明文落库。
+                let masked_fields_json =
+                    serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
+                let masked = self.masker.mask(&masked_fields_json);
+                let fields = serde_json::from_str::<
+                    std::collections::HashMap<String, serde_json::Value>,
+                >(&masked)
+                .unwrap_or_else(|_| record.fields.clone());
                 let masked_record = LogRecord {
                     message: self.masker.mask(&record.message),
+                    fields,
                     ..record.clone()
                 };
                 inner.buffer.push(masked_record);

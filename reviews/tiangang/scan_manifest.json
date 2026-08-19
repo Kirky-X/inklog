@@ -1,0 +1,50 @@
+{
+ "target": "/home/kirky/projects/base/inklog",
+ "out_dir": "/home/kirky/projects/base/inklog/reviews/tiangang",
+ "languages": [
+  "rust"
+ ],
+ "timestamp": "2026-08-19T17:15:53.114407+00:00",
+ "ran": [
+  {
+   "tool": "semgrep",
+   "command": "semgrep scan --config p/security-audit --config p/secrets --metrics=off --quiet --jobs 4 --timeout 20 --exclude=.security-audit --sarif --output /home/kirky/projects/base/inklog/reviews/tiangang/semgrep.sarif /home/kirky/projects/base/inklog",
+   "returncode": 0,
+   "log_tail": "manual rerun --config p/security-audit --config p/secrets"
+  },
+  {
+   "tool": "trivy-version",
+   "command": "trivy version --format json",
+   "returncode": 0,
+   "log_tail": "{\"Version\":\"0.72.0\",\"VulnerabilityDB\":{\"Version\":2,\"NextUpdate\":\"2026-08-20T13:00:00.616726098Z\",\"UpdatedAt\":\"2026-08-19T13:00:00.616726228Z\",\"DownloadedAt\":\"2026-08-19T17:04:51.798013357Z\"}}\n"
+  },
+  {
+   "tool": "trivy",
+   "command": "trivy fs --scanners vuln --offline-scan --format json --output /home/kirky/projects/base/inklog/reviews/tiangang/trivy.json /home/kirky/projects/base/inklog",
+   "returncode": 0,
+   "log_tail": "2026-08-20T01:10:01+08:00\tINFO\t[vuln] Vulnerability scanning is enabled\n2026-08-20T01:10:06+08:00\tINFO\tNumber of language-specific files\tnum=1\n2026-08-20T01:10:06+08:00\tINFO\t[cargo] Detecting vulnerabilities...\n\n\ud83d\udce3 \u001b[34mNotices:\u001b[0m\n  - Version 0.74.0 of Trivy is now available, current version is 0.72.0\n\nTo suppress version checks, run Trivy scans with the --skip-version-check flag\n\n"
+  },
+  {
+   "tool": "gitleaks",
+   "command": "gitleaks detect --source /home/kirky/projects/base/inklog --report-format json --report-path /home/kirky/projects/base/inklog/reviews/tiangang/gitleaks.json --no-banner",
+   "returncode": 0,
+   "log_tail": "\u001b[90m1:10AM\u001b[0m \u001b[32mINF\u001b[0m 367 commits scanned.\n\u001b[90m1:10AM\u001b[0m \u001b[32mINF\u001b[0m scan completed in 549ms\n\u001b[90m1:10AM\u001b[0m \u001b[31mWRN\u001b[0m leaks found: 101\n\n[gitleaks rc=1 normalized: secrets found, not a failure]"
+  },
+  {
+   "tool": "trufflehog",
+   "command": "trufflehog filesystem --no-update --json --no-verification /home/kirky/projects/base/inklog",
+   "returncode": 0,
+   "log_tail": "raData\":null,\"StructuredData\":null,\"SecretParts\":{\"host\":\"example.com\",\"password\":\"password\",\"username\":\"user\"}}\n{\"SourceMetadata\":{\"Data\":{\"Filesystem\":{\"file\":\"/home/kirky/projects/base/inklog/tests/combinations/multi_sink_fallback_test.rs\",\"line\":148}}},\"SourceID\":1,\"SourceType\":15,\"SourceName\":\"trufflehog - filesystem\",\"DetectorType\":968,\"DetectorName\":\"Postgres\",\"DetectorDescription\":\"Postgres connection string containing credentials\",\"DecoderName\":\"PLAIN\",\"Verified\":false,\"VerificationFromCache\":false,\"Raw\":\"postgres://invalid:invalid@nonexistent:5432\",\"RawV2\":\"postgres://invalid:invalid@nonexistent:5432\",\"Redacted\":\"\",\"ExtraData\":{\"database\":\"nonexistent\",\"host\":\"nonexistent:5432\",\"sslmode\":\"\\u003cunset\\u003e\",\"username\":\"invalid\"},\"StructuredData\":null,\"SecretParts\":{\"connection_string\":\"postgres://invalid:invalid@nonexistent:5432\"}}\n{\"SourceMetadata\":{\"Data\":{\"Filesystem\":{\"file\":\"/home/kirky/projects/base/inklog/tests/e2e_advanced.rs\",\"line\":1392}}},\"SourceID\":1,\"SourceType\":15,\"SourceName\":\"trufflehog - filesystem\",\"DetectorType\":968,\"DetectorName\":\"Postgres\",\"DetectorDescription\":\"Postgres connection string containing credentials\",\"DecoderName\":\"PLAIN\",\"Verified\":false,\"VerificationFromCache\":false,\"Raw\":\"postgres://user:pass@host:5432\",\"RawV2\":\"postgres://user:pass@host:5432\",\"Redacted\":\"\",\"ExtraData\":{\"host\":\"host:5432\",\"sslmode\":\"\\u003cunset\\u003e\",\"username\":\"user\"},\"StructuredData\":null,\"SecretParts\":{\"connection_string\":\"postgres://user:pass@host:5432\"}}\n{\"level\":\"info-0\",\"ts\":\"2026-08-20T01:10:03+08:00\",\"logger\":\"trufflehog\",\"msg\":\"running source\",\"source_manager_worker_id\":\"qSADl\",\"with_units\":true}\n{\"level\":\"info-0\",\"ts\":\"2026-08-20T01:15:53+08:00\",\"logger\":\"trufflehog\",\"msg\":\"finished scanning\",\"chunks\":4071033,\"bytes\":53298702767,\"verified_secrets\":0,\"unverified_secrets\":297,\"scan_duration\":\"5m49.870710354s\",\"trufflehog_version\":\"3.96.0\",\"verification_caching\":{\"Hits\":0,\"Misses\":0,\"HitsWasted\":0,\"AttemptsSaved\":0,\"VerificationTimeSpentMS\":0}}\n"
+  },
+  {
+   "tool": "cargo-audit",
+   "command": "cargo audit --json",
+   "returncode": 1,
+   "log_tail": "tml)  and `concat!`/`concat_idents!` macros\\n\\n[`pastey`]: https://crates.io/crates/pastey\\n[`with_builtin_macros`]: https://crates.io/crates/with_builtin_macros\",\"date\":\"2024-10-07\",\"aliases\":[],\"related\":[],\"collection\":\"crates\",\"categories\":[],\"keywords\":[],\"cvss\":null,\"informational\":\"unmaintained\",\"references\":[],\"source\":null,\"url\":\"https://github.com/dtolnay/paste\",\"withdrawn\":null,\"license\":\"CC0-1.0\",\"expect-deleted\":false},\"affected\":null,\"versions\":{\"patched\":[],\"unaffected\":[]}}],\"unsound\":[{\"kind\":\"unsound\",\"package\":{\"name\":\"event-listener\",\"version\":\"5.4.1\",\"source\":\"registry+https://github.com/rust-lang/crates.io-index\",\"checksum\":\"e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab\",\"dependencies\":[{\"name\":\"concurrent-queue\",\"version\":\"2.5.0\",\"source\":\"registry+https://github.com/rust-lang/crates.io-index\"},{\"name\":\"parking\",\"version\":\"2.2.1\",\"source\":\"registry+https://github.com/rust-lang/crates.io-index\"},{\"name\":\"pin-project-lite\",\"version\":\"0.2.17\",\"source\":\"registry+https://github.com/rust-lang/crates.io-index\"}],\"replace\":null},\"advisory\":{\"id\":\"RUSTSEC-2026-0221\",\"package\":\"event-listener\",\"title\":\"`event-listener` allows `!Send` tags to cross thread boundaries via `StackSlot`\",\"description\":\"Affected versions of `event-listener` unconditionally implement `Send` and\\n`Sync` for `StackSlot<'_, T>`, the stack-allocated listener type created\\nby the `listener!` macro.\\n\\nThis allows a `!Send` tag type set via `Event::with_tag` to be moved to\\nanother thread and accessed via `StackSlot::wait`, causing a data race in safe\\ncode.\",\"date\":\"2026-07-13\",\"aliases\":[],\"related\":[],\"collection\":\"crates\",\"categories\":[\"memory-corruption\",\"thread-safety\"],\"keywords\":[\"concurrency\"],\"cvss\":null,\"informational\":\"unsound\",\"references\":[],\"source\":null,\"url\":\"https://github.com/smol-rs/event-listener/pull/163\",\"withdrawn\":null,\"license\":\"CC0-1.0\",\"expect-deleted\":false},\"affected\":null,\"versions\":{\"patched\":[\">=5.4.2\"],\"unaffected\":[\"<5.1.0\"]}}]}}\n"
+  }
+ ],
+ "skipped": [],
+ "diff_mode": false,
+ "ci_mode": false,
+ "gate": null
+}
