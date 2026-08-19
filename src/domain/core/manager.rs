@@ -390,14 +390,39 @@ impl LoggerManager {
         let (control_tx, control_rx) = bounded(10); // Control channel for recovery commands
         let effective_capacity = Arc::new(AtomicUsize::new(config.performance.channel_capacity));
 
+        // 每个启用的异步 sink 拥有独立 channel，避免 MPMC 单接收者语义导致
+        // 记录只被一个 worker 消费（其余 sink 数据缺失）。
+        let file_enabled = config.file_sink.as_ref().is_none_or(|cfg| cfg.enabled);
+        let db_enabled = config.database_sink.as_ref().is_some_and(|cfg| cfg.enabled);
+        #[allow(unused_variables)] // db_receiver 仅在启用 db 后端 feature 时使用
+        let (db_sender, db_receiver) = if db_enabled {
+            let (s, r) = bounded(config.performance.channel_capacity);
+            (Some(s), Some(r))
+        } else {
+            (None, None)
+        };
+
         let console_sink: Arc<Mutex<dyn LogSink>> = Arc::new(Mutex::new(ConsoleSink::new(
             config.console_sink.clone().unwrap_or_default(),
             LogTemplate::new(&config.global.format),
         )));
 
         // Initialize tracing subscriber with console_sender channel
-        let mut subscriber =
-            LoggerSubscriber::new(console_sender.clone(), sender.clone(), metrics.clone());
+        let primary_async_sender = if file_enabled {
+            sender.clone()
+        } else {
+            db_sender
+                .clone()
+                .expect("db sink enabled when file sink disabled")
+        };
+        let mut subscriber = LoggerSubscriber::new(
+            console_sender.clone(),
+            primary_async_sender,
+            metrics.clone(),
+        );
+        if file_enabled && db_enabled {
+            subscriber = subscriber.with_extra_async_sender(db_sender.clone().expect("db sender"));
+        }
 
         // Wire sanitizer when security features are enabled (CWE-117 prevention)
         if config.global.masking_enabled {
@@ -474,6 +499,13 @@ impl LoggerManager {
                     Ok(Box::new(sink) as Box<dyn LogSink>)
                 },
             ),
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            db_receiver,
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",

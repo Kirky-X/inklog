@@ -852,6 +852,37 @@ mod tests {
     }
 
     #[test]
+    fn test_library_encrypted_file_decryptable_by_cli() {
+        // 回归测试：库内 FileSink::encrypt_file 产出的文件必须能被 CLI 解密工具读取
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input_path = temp_dir.path().join("lib_encrypted.log");
+        let encrypted_path = temp_dir.path().join("lib_encrypted.log.enc");
+        let output_path = temp_dir.path().join("lib_decrypted.log");
+        let plaintext = b"Library-encrypted content must roundtrip through the CLI";
+        std::fs::write(&input_path, plaintext).unwrap();
+
+        let test_key = generate_test_key();
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::set_var("TEST_LIB_ENC_KEY", &key_base64) };
+
+        let config = inklog::FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_LIB_ENC_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = inklog::support::io::sink::FileSink::new(config).unwrap();
+        sink.encrypt_file(&input_path, &encrypted_path).unwrap();
+
+        decrypt_file_compatible(&encrypted_path, &output_path, "TEST_LIB_ENC_KEY").unwrap();
+        assert_eq!(std::fs::read(&output_path).unwrap(), plaintext);
+
+        unsafe { std::env::remove_var("TEST_LIB_ENC_KEY") };
+    }
+
+    #[test]
     fn test_path_traversal_protection() {
         let temp_dir = tempfile::tempdir().unwrap();
         let base_dir = temp_dir.path();
