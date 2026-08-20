@@ -302,7 +302,11 @@ dependencies = [
  "arrow-buffer 59.2.0",
  "arrow-data 59.2.0",
  "arrow-schema 59.2.0",
+<<<<<<< HEAD
  "arrow-select 59.2.0",
+=======
+ "arrow-select 59.1.0",
+>>>>>>> 90156d1 (chore(deps): bump arrow-array from 59.1.0 to 59.2.0)
  "flatbuffers",
 ]
 
@@ -3103,14 +3107,23 @@ dependencies = [
  "arrow-data 59.2.0",
  "arrow-ipc",
  "arrow-schema 59.2.0",
+<<<<<<< HEAD
  "arrow-select 59.2.0",
  "base64 0.23.1",
+=======
+ "arrow-select 59.1.0",
+ "base64 0.22.1",
+>>>>>>> 90156d1 (chore(deps): bump arrow-array from 59.1.0 to 59.2.0)
  "bytes",
  "chrono",
  "futures",
  "half",
  "hashbrown 0.17.1",
+<<<<<<< HEAD
  "num-bigint 0.5.1",
+=======
+ "num-bigint 0.4.8",
+>>>>>>> 90156d1 (chore(deps): bump arrow-array from 59.1.0 to 59.2.0)
  "num-integer",
  "num-traits",
  "seq-macro",
