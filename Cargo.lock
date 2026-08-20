@@ -209,8 +209,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc9a4a4b2b5ecd0e04df03471661cb61f28bed3c7fd50994715129b01b2edb97"
 dependencies = [
  "ahash 0.8.12",
+<<<<<<< HEAD
  "arrow-buffer 59.2.0",
  "arrow-data 59.2.0",
+=======
+ "arrow-buffer 59.1.0",
+ "arrow-data 59.1.0",
+>>>>>>> cefb074 (chore(deps): bump arrow-schema from 59.1.0 to 59.2.0)
  "arrow-schema 59.2.0",
  "chrono",
  "half",
@@ -285,7 +290,11 @@ version = "59.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "723fe4aeed7604e00b9883a465af4ff0a0e6c44c03e41a68c3d1cbc403e0e44d"
 dependencies = [
+<<<<<<< HEAD
  "arrow-buffer 59.2.0",
+=======
+ "arrow-buffer 59.1.0",
+>>>>>>> cefb074 (chore(deps): bump arrow-schema from 59.1.0 to 59.2.0)
  "arrow-schema 59.2.0",
  "half",
  "num-integer",
@@ -298,6 +307,7 @@ version = "59.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "149437b14371f5b9ec60f5ddc751483ae99d7a7072653c0075e5e469156eea7b"
 dependencies = [
+<<<<<<< HEAD
  "arrow-array 59.2.0",
  "arrow-buffer 59.2.0",
  "arrow-data 59.2.0",
@@ -305,6 +315,12 @@ dependencies = [
 <<<<<<< HEAD
  "arrow-select 59.2.0",
 =======
+=======
+ "arrow-array 59.1.0",
+ "arrow-buffer 59.1.0",
+ "arrow-data 59.1.0",
+ "arrow-schema 59.2.0",
+>>>>>>> cefb074 (chore(deps): bump arrow-schema from 59.1.0 to 59.2.0)
  "arrow-select 59.1.0",
 >>>>>>> 90156d1 (chore(deps): bump arrow-array from 59.1.0 to 59.2.0)
  "flatbuffers",
@@ -372,9 +388,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "466b19cf75130b891dc1b23a84b343c714c62c64c9c62e365c76aa0ff90a53fb"
 dependencies = [
  "ahash 0.8.12",
+<<<<<<< HEAD
  "arrow-array 59.2.0",
  "arrow-buffer 59.2.0",
  "arrow-data 59.2.0",
+=======
+ "arrow-array 59.1.0",
+ "arrow-buffer 59.1.0",
+ "arrow-data 59.1.0",
+>>>>>>> cefb074 (chore(deps): bump arrow-schema from 59.1.0 to 59.2.0)
  "arrow-schema 59.2.0",
  "num-traits",
 ]
@@ -2439,7 +2461,11 @@ dependencies = [
  "aes-gcm",
  "aho-corasick",
  "anyhow",
+<<<<<<< HEAD
  "arrow-array 59.2.0",
+=======
+ "arrow-array 59.1.0",
+>>>>>>> cefb074 (chore(deps): bump arrow-schema from 59.1.0 to 59.2.0)
  "arrow-schema 59.2.0",
  "assert_cmd",
  "async-trait",
@@ -3108,9 +3134,12 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema 59.2.0",
 <<<<<<< HEAD
+<<<<<<< HEAD
  "arrow-select 59.2.0",
  "base64 0.23.1",
 =======
+=======
+>>>>>>> cefb074 (chore(deps): bump arrow-schema from 59.1.0 to 59.2.0)
  "arrow-select 59.1.0",
  "base64 0.22.1",
 >>>>>>> 90156d1 (chore(deps): bump arrow-array from 59.1.0 to 59.2.0)
