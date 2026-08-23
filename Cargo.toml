@@ -40,6 +40,10 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"sqlite\"
 
 [features]
 default = []
+# 测试面 mock 导出（MockCache/MockConfig/MockDatabaseAdapter）的门控 feature：
+# 不入 default 与任何生产组合；src 内联测试经 cfg(test) 直接可见，
+# 外部测试消费者需显式启用。
+test-utils = []
 # ⚠️ 数据库后端 features（sqlite/postgres/mysql/duckdb）互斥：dbnexus 严格禁止
 # embedded 与 server-side 驱动混合（含 --all-features 全开）。多后端 crate 不适用
 # --all-features 验证，按后端分组启用 features 验证。

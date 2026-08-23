@@ -88,7 +88,9 @@ pub trait Cache: Send + Sync {
 // ============================================================================
 
 use oxcache::Cache as OxCache;
+#[cfg(any(test, feature = "test-utils"))]
 use parking_lot::RwLock;
+#[cfg(any(test, feature = "test-utils"))]
 use std::collections::HashMap;
 
 /// oxcache 适配器
@@ -294,6 +296,7 @@ impl OxCacheAdapterBuilder {
 ///     Ok(())
 /// }
 /// ```
+#[cfg(any(test, feature = "test-utils"))]
 pub struct MockCache {
     /// 内部存储，使用 RwLock 保护并发访问
     storage: RwLock<HashMap<String, String>>,
@@ -301,6 +304,7 @@ pub struct MockCache {
     delay_ms: u64,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl MockCache {
     /// 创建新的 MockCache 实例
     ///
@@ -339,6 +343,7 @@ impl MockCache {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Default for MockCache {
     fn default() -> Self {
         Self::new()
@@ -346,6 +351,7 @@ impl Default for MockCache {
 }
 
 #[async_trait]
+#[cfg(any(test, feature = "test-utils"))]
 impl Cache for MockCache {
     async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
         if self.delay_ms > 0 {

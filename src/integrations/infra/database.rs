@@ -4,6 +4,16 @@
 //!
 //! 提供日志记录批量写入和健康检查的抽象接口。
 
+// Arc 被 db 后端实现（DbNexusAdapter 连接池）与测试 mock 使用；
+// 无 db feature 且非测试面时才未用，故整行条件导入
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb",
+    test,
+    feature = "test-utils"
+))]
 use std::sync::Arc;
 
 use crate::InklogError;
@@ -673,7 +683,9 @@ impl DbNexusAdapter {
 // MockDatabaseAdapter - 测试用 Mock 实现
 // ============================================================================
 
+#[cfg(any(test, feature = "test-utils"))]
 use std::sync::RwLock;
+#[cfg(any(test, feature = "test-utils"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Mock 数据库适配器，用于单元测试
@@ -714,6 +726,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 ///     assert!(!db.is_healthy().await);
 /// }
 /// ```
+#[cfg(any(test, feature = "test-utils"))]
 pub struct MockDatabaseAdapter {
     /// 存储的日志记录
     records: RwLock<Vec<LogRecord>>,
@@ -721,6 +734,7 @@ pub struct MockDatabaseAdapter {
     healthy: Arc<AtomicBool>,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl MockDatabaseAdapter {
     /// 创建新的 Mock 数据库适配器
     ///
@@ -765,6 +779,7 @@ impl MockDatabaseAdapter {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Default for MockDatabaseAdapter {
     fn default() -> Self {
         Self::new()
@@ -780,6 +795,7 @@ impl MockDatabaseAdapter {
 }
 
 #[async_trait]
+#[cfg(any(test, feature = "test-utils"))]
 impl Database for MockDatabaseAdapter {
     async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {
         if records.is_empty() {

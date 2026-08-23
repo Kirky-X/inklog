@@ -89,8 +89,12 @@ pub use database::DbNexusAdapter;
 pub use cache::OxCacheAdapterBuilder;
 
 // ============================================================================
-// Mock 实现导出（用于测试）
+// Mock 实现导出（仅测试面可见：src 内联测试经 cfg(test)；外部消费者显式
+// 启用 test-utils feature——生产 feature 组合均不携带，生产二进制不含 mock）
 // ============================================================================
+#[cfg(any(test, feature = "test-utils"))]
 pub use cache::MockCache;
+#[cfg(any(test, feature = "test-utils"))]
 pub use config::MockConfig;
+#[cfg(any(test, feature = "test-utils"))]
 pub use database::MockDatabaseAdapter;

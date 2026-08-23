@@ -407,7 +407,9 @@ impl Config for InklogConfigAdapter {
 // MockConfig - 单元测试用的 Mock 实现
 // ============================================================================
 
+#[cfg(any(test, feature = "test-utils"))]
 use parking_lot::RwLock;
+#[cfg(any(test, feature = "test-utils"))]
 use std::collections::HashMap;
 
 /// Mock 配置实现（用于单元测试）
@@ -434,10 +436,12 @@ use std::collections::HashMap;
 /// config.set("level", "info");
 /// assert_eq!(config.get_string("level"), Some("info".to_string()));
 /// ```
+#[cfg(any(test, feature = "test-utils"))]
 pub struct MockConfig {
     values: RwLock<HashMap<String, String>>,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl MockConfig {
     /// 创建空的 Mock 配置
     pub fn new() -> Self {
@@ -476,12 +480,14 @@ impl MockConfig {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Default for MockConfig {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Config for MockConfig {
     fn get_string(&self, key: &str) -> Option<String> {
         let values = self.values.read();

@@ -220,9 +220,11 @@ pub use integrations::InklogModule;
 
 // Infrastructure trait and adapter re-exports for dependency injection
 pub use integrations::{
-    Cache, Config, Database, InklogConfigAdapter, MockCache, MockConfig, MockDatabaseAdapter,
-    OxCacheAdapter, OxCacheAdapterBuilder,
+    Cache, Config, Database, InklogConfigAdapter, OxCacheAdapter, OxCacheAdapterBuilder,
 };
+// Mock 实现仅对测试面可见（src 内联测试经 cfg(test)，外部消费者需显式 test-utils）
+#[cfg(any(test, feature = "test-utils"))]
+pub use integrations::{MockCache, MockConfig, MockDatabaseAdapter};
 #[cfg(all(
     feature = "kit",
     any(

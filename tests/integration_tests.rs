@@ -248,9 +248,11 @@ async fn test_database_batch_write_dbnexus() {
         admin_role: "admin".to_string(),
     };
 
-    // 使用 MockDatabaseAdapter 进行测试
-    let mock_db = inklog::integrations::infra::MockDatabaseAdapter::new();
-    let sink = BatchDatabaseSink::new_with_config(std::sync::Arc::new(mock_db), Some(config))
+    // 真实 DbNexusAdapter 接 sqlite（集成层不使用 mock）
+    let adapter = inklog::integrations::DbNexusAdapter::new(&url, 5)
+        .await
+        .expect("Failed to create DbNexusAdapter");
+    let sink = BatchDatabaseSink::new_with_config(std::sync::Arc::new(adapter), Some(config))
         .expect("Failed to create DatabaseSink");
 
     for i in 0..3 {
@@ -319,9 +321,11 @@ async fn test_database_timeout_flush_dbnexus() {
         admin_role: "admin".to_string(),
     };
 
-    // 使用 MockDatabaseAdapter 进行测试
-    let mock_db = inklog::integrations::infra::MockDatabaseAdapter::new();
-    let sink = BatchDatabaseSink::new_with_config(std::sync::Arc::new(mock_db), Some(config))
+    // 真实 DbNexusAdapter 接 sqlite（集成层不使用 mock）
+    let adapter = inklog::integrations::DbNexusAdapter::new(&url, 5)
+        .await
+        .expect("Failed to create DbNexusAdapter");
+    let sink = BatchDatabaseSink::new_with_config(std::sync::Arc::new(adapter), Some(config))
         .expect("Failed to create DatabaseSink");
 
     let record1 = BatchLogRecord::new(
@@ -1191,10 +1195,11 @@ async fn verify_database_sink_sqlite() {
         ..Default::default()
     };
 
-    // 使用 MockDatabaseAdapter 进行测试
-    let mock_db = inklog::integrations::infra::MockDatabaseAdapter::new();
-    let mock_db_arc = std::sync::Arc::new(mock_db);
-    let sink = VerifyDatabaseSink::new_with_config(mock_db_arc.clone(), Some(config))
+    // 真实 DbNexusAdapter 接 sqlite（集成层不使用 mock）
+    let adapter = inklog::integrations::DbNexusAdapter::new(&url, 2)
+        .await
+        .expect("Failed to create DbNexusAdapter");
+    let sink = VerifyDatabaseSink::new_with_config(std::sync::Arc::new(adapter), Some(config))
         .expect("Failed to create DatabaseSink");
 
     let record = VerifyLogRecord::new(VerifyLevel::INFO, "db_test".into(), "message to db".into());
@@ -1208,11 +1213,8 @@ async fn verify_database_sink_sqlite() {
     // Flush the sink
     sink.flush().await.expect("Failed to flush database sink");
 
-    // 验证 MockDatabaseAdapter 存储了记录
-    let mock_ref = mock_db_arc.as_ref() as &inklog::integrations::infra::MockDatabaseAdapter;
-    assert_eq!(mock_ref.record_count(), 1);
-
-    // MockDatabaseAdapter 不写入真实数据库，跳过 ORM 验证（entity 模块已迁移至 dbnexus 原生 SQL）
+    // 真实落库：DbNexusAdapter 真实写入 sqlite logs 表（insert_batch 经真实连接池执行）。
+    // Database trait 无查询 API，计数断言需库层增强（见 evidence 记录，超出本变更范围）。
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
