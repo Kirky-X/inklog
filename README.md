@@ -742,11 +742,10 @@ std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
 </div>
 
 ```bash
-# 使用默认功能运行所有测试
-cargo test --all-features
-
-# 使用特定功能运行测试
-cargo test --features "http,cli"
+# ⚠️ 数据库后端 features（sqlite/postgres/mysql/duckdb）互斥（经 dbnexus 强制），
+# 不适用 --all-features；请按后端分组运行：
+cargo test --features "http,cli,compression,parquet,fast-masking"        # 无数据库后端
+cargo test --features "sqlite,http,cli,compression,parquet,fast-masking,kit"  # SQLite 面
 
 # 在发布模式下运行测试
 cargo test --release
@@ -754,6 +753,9 @@ cargo test --release
 # 运行基准测试
 cargo bench
 ```
+
+> **本地化提示**：错误消息经 ICU/Fluent 按系统 locale 渲染。若测试断言英文消息文本，
+> 请设置 `INKLOG_LOCALE=en`（如 CI 或非英文系统环境）以固定输出语言。
 
 ### 测试覆盖率
 

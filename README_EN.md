@@ -722,11 +722,11 @@ std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
 </div>
 
 ```bash
-# Run all tests with default features
-cargo test --all-features
-
-# Run tests with specific features
-cargo test --features "http,cli"
+# ⚠️ Database backend features (sqlite/postgres/mysql/duckdb) are mutually
+# exclusive (enforced via dbnexus); --all-features is NOT supported.
+# Run tests grouped by backend instead:
+cargo test --features "http,cli,compression,parquet,fast-masking"             # no DB backend
+cargo test --features "sqlite,http,cli,compression,parquet,fast-masking,kit"  # SQLite backend
 
 # Run tests in release mode
 cargo test --release
@@ -734,6 +734,10 @@ cargo test --release
 # Run benchmarks
 cargo bench
 ```
+
+> **Locale note**: error messages are localized via ICU/Fluent based on the system
+> locale. If tests assert English message text, set `INKLOG_LOCALE=en` (e.g. in CI
+> or non-English environments) to pin the output language.
 
 ### Test Coverage
 

@@ -677,8 +677,13 @@ mod security_e2e {
         let result = validator.validate(Path::new("logs/app.log"));
         assert!(result.valid);
 
-        // 绝对路径被拒绝（allow_absolute=false）
-        let result = validator.validate(Path::new("/var/log/app.log"));
+        // 绝对路径被拒绝（allow_absolute=false）；平台相关绝对路径
+        let abs = if cfg!(windows) {
+            r"C:\var\log\app.log"
+        } else {
+            "/var/log/app.log"
+        };
+        let result = validator.validate(Path::new(abs));
         assert!(
             !result.valid,
             "absolute path should be blocked when allow_absolute=false"
@@ -694,7 +699,12 @@ mod security_e2e {
             deny_components: vec![],
         };
         let validator = PathValidator::with_config(config);
-        let result = validator.validate(Path::new("/var/log/app.log"));
+        let abs = if cfg!(windows) {
+            r"C:\var\log\app.log"
+        } else {
+            "/var/log/app.log"
+        };
+        let result = validator.validate(Path::new(abs));
         assert!(
             result.valid,
             "absolute path should be allowed when allow_absolute=true"

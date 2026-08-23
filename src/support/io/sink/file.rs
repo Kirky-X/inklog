@@ -567,22 +567,36 @@ impl FileSink {
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
-            if let Some(parent) = self.config.path.parent() {
-                let mut wide_path: Vec<u16> = parent.as_os_str().encode_wide().collect();
-                wide_path.push(0);
-                let mut free_bytes_available: u64 = 0;
-                let mut total_bytes: u64 = 0;
-                let mut total_free_bytes: u64 = 0;
-                let result = unsafe {
-                    GetDiskFreeSpaceExW(
-                        wide_path.as_ptr(),
-                        &mut free_bytes_available,
-                        &mut total_bytes,
-                        &mut total_free_bytes,
-                    )
-                };
-                if result != 0 {
-                    return Ok((total_bytes, free_bytes_available));
+            // GetDiskFreeSpaceExW 只接受目录路径；若父路径是文件，则沿父级上溯到目录
+            //（与 unix statfs 容忍文件路径语义对齐）；若父路径不存在则保持 Err（与
+            // unix 的 metadata 存在性检查一致）。
+            if let Some(parent) = self.config.path.parent()
+                && parent.exists()
+            {
+                {
+                    let mut free_bytes_available: u64 = 0;
+                    let mut total_bytes: u64 = 0;
+                    let mut total_free_bytes: u64 = 0;
+                    let mut current = parent.to_path_buf();
+                    loop {
+                        let mut wide_path: Vec<u16> = current.as_os_str().encode_wide().collect();
+                        wide_path.push(0);
+                        let result = unsafe {
+                            GetDiskFreeSpaceExW(
+                                wide_path.as_ptr(),
+                                &mut free_bytes_available,
+                                &mut total_bytes,
+                                &mut total_free_bytes,
+                            )
+                        };
+                        if result != 0 {
+                            return Ok((total_bytes, free_bytes_available));
+                        }
+                        match current.parent() {
+                            Some(p) => current = p.to_path_buf(),
+                            None => break,
+                        }
+                    }
                 }
             }
         }

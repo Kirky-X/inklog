@@ -571,6 +571,11 @@ mod tests {
 
     #[test]
     fn test_from_search_paths_falls_back_to_default() {
+        // 与会临时设置 INKLOG_CONFIG_PATH 的测试互斥，避免并发读全局环境变量竞态
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
         // When no config files exist, should return default config
         let config = InklogConfig::from_search_paths().unwrap();
         assert_eq!(config.global.level, "info");

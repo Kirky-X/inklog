@@ -155,7 +155,30 @@ impl PathValidator {
             };
 
             if !canonical_path.starts_with(&canonical_base) {
-                return ValidationResult::invalid(&crate::i18n::tr("validation-outside_base"));
+                // Windows：canonicalize() 返回 `\\?\` verbatim 前缀，而 canonicalize 失败
+                // 时回退的原始路径没有此前缀，导致 starts_with 误判——比较前对齐两侧前缀
+                #[cfg(windows)]
+                {
+                    let base_plain = canonical_base
+                        .to_string_lossy()
+                        .strip_prefix(r"\\?\")
+                        .map(std::path::PathBuf::from);
+                    if let Some(base_plain) = base_plain {
+                        if !canonical_path.starts_with(&base_plain) {
+                            return ValidationResult::invalid(&crate::i18n::tr(
+                                "validation-outside_base",
+                            ));
+                        }
+                    } else {
+                        return ValidationResult::invalid(&crate::i18n::tr(
+                            "validation-outside_base",
+                        ));
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    return ValidationResult::invalid(&crate::i18n::tr("validation-outside_base"));
+                }
             }
         }
 
@@ -236,7 +259,13 @@ mod tests {
         };
         let validator = PathValidator::with_config(config);
 
-        assert!(!validator.validate(Path::new("/absolute/path")).valid);
+        // 平台相关绝对路径：Windows 用驱动盘符形式，其余平台用 POSIX 绝对路径
+        let abs = if cfg!(windows) {
+            Path::new("C:\\Windows\\system32")
+        } else {
+            Path::new("/absolute/path")
+        };
+        assert!(!validator.validate(abs).valid);
         assert!(validator.validate(Path::new("relative/path")).valid);
     }
 
@@ -256,14 +285,17 @@ mod tests {
     fn test_sanitize() {
         let validator = PathValidator::new();
 
+        // 路径分隔符中性断言：Windows 输出 `\`，其余平台输出 `/`
+        let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").to_string();
+
         let sanitized = validator.sanitize(Path::new("foo/../bar"));
-        assert_eq!(sanitized.to_string_lossy(), "bar");
+        assert_eq!(norm(&sanitized), "bar");
 
         let sanitized = validator.sanitize(Path::new("foo/./bar"));
-        assert_eq!(sanitized.to_string_lossy(), "foo/bar");
+        assert_eq!(norm(&sanitized), "foo/bar");
 
         let sanitized = validator.sanitize(Path::new("foo/../bar/../baz"));
-        assert_eq!(sanitized.to_string_lossy(), "baz");
+        assert_eq!(norm(&sanitized), "baz");
     }
 
     #[test]
@@ -402,20 +434,18 @@ mod tests {
         assert!(result.error.as_ref().unwrap().contains("base directory"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_symlink_detection_with_real_symlink() {
         // Fixed: std::fs::symlink_metadata() does NOT follow symlinks, so
         // metadata.file_type().is_symlink() correctly detects symlinks.
+        // 仅 unix 平台语义（Windows 无普通用户 symlink 权限）。
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let target_file = temp_dir.path().join("target.log");
         std::fs::write(&target_file, "test").expect("failed to write target");
         let symlink_path = temp_dir.path().join("link.log");
 
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&target_file, &symlink_path)
-                .expect("failed to create symlink");
-        }
+        std::os::unix::fs::symlink(&target_file, &symlink_path).expect("failed to create symlink");
 
         let config = PathValidatorConfig {
             allow_absolute: true,
@@ -425,20 +455,18 @@ mod tests {
         };
         let validator = PathValidator::with_config(config);
 
-        #[cfg(unix)]
-        {
-            let result = validator.validate(&symlink_path);
-            // Now symlinks ARE detected and rejected
-            assert!(!result.valid, "Symlink should be detected and rejected");
-            assert!(
-                result
-                    .error
-                    .as_ref()
-                    .is_some_and(|m| m.contains("Symlinks are not allowed"))
-            );
-        }
+        let result = validator.validate(&symlink_path);
+        // Now symlinks ARE detected and rejected
+        assert!(!result.valid, "Symlink should be detected and rejected");
+        assert!(
+            result
+                .error
+                .as_ref()
+                .is_some_and(|m| m.contains("Symlinks are not allowed"))
+        );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_symlink_allowed() {
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
@@ -446,11 +474,7 @@ mod tests {
         std::fs::write(&target_file, "test").expect("failed to write target");
         let symlink_path = temp_dir.path().join("link.log");
 
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&target_file, &symlink_path)
-                .expect("failed to create symlink");
-        }
+        std::os::unix::fs::symlink(&target_file, &symlink_path).expect("failed to create symlink");
 
         let config = PathValidatorConfig {
             allow_absolute: true,
@@ -460,11 +484,8 @@ mod tests {
         };
         let validator = PathValidator::with_config(config);
 
-        #[cfg(unix)]
-        {
-            let result = validator.validate(&symlink_path);
-            assert!(result.valid);
-        }
+        let result = validator.validate(&symlink_path);
+        assert!(result.valid);
     }
 
     #[test]

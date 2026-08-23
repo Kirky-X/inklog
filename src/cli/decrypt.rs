@@ -974,10 +974,12 @@ mod tests {
         unsafe { std::env::remove_var("TEST_LONG_KEY") };
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_symlink_detected_before_canonicalize() {
         // T005: symlink check must use symlink_metadata() to detect symlinks
         // on the original path before canonicalize resolves them.
+        // 仅 unix 平台语义（Windows 无普通用户 symlink 权限）。
         let temp_dir = tempfile::tempdir().unwrap();
         let base_dir = temp_dir.path();
 
@@ -985,20 +987,16 @@ mod tests {
         let real_file = base_dir.join("real.log");
         File::create(&real_file).unwrap();
         let symlink_path = base_dir.join("link.log");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&real_file, &symlink_path).unwrap();
 
-        #[cfg(unix)]
-        {
-            // The symlink should be rejected
-            let result = validate_file_path(&symlink_path, base_dir);
-            assert!(result.is_err(), "symlinks should be rejected");
-            let err_msg = result.unwrap_err().to_string();
-            assert!(
-                err_msg.contains("Symbolic links"),
-                "error should mention symbolic links, got: {}",
-                err_msg
-            );
-        }
+        // The symlink should be rejected
+        let result = validate_file_path(&symlink_path, base_dir);
+        assert!(result.is_err(), "symlinks should be rejected");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Symbolic links"),
+            "error should mention symbolic links, got: {}",
+            err_msg
+        );
     }
 }
