@@ -160,6 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | <span style="color:#166534; padding:4px 8px; border-radius:4px;">minimal</span> | 无可选特性 | 仅核心日志功能 |
 | <span style="color:#1E40AF; padding:4px 8px; border-radius:4px;">standard</span> | `http`, `cli` | 标准开发环境 |
 | <span style="color:#991B1B; padding:4px 8px; border-radius:4px;">full</span> | 所有默认功能 | 生产环境日志 |
+| <span style="color:#9333EA; padding:4px 8px; border-radius:4px;">test-utils</span> | `MockCache`/`MockConfig`/`MockDatabaseAdapter` | 外部测试消费者：默认公共 API 已移除三个 mock（BREAKING），集成测试已全部真实化（DbNexusAdapter + sqlite），仅外部测试代码需显式启用本 feature |
 
 ---
 
