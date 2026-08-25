@@ -15,6 +15,7 @@ env:
 jobs:
   # 更新版本号并提交
   update-version:
+    continue-on-error: true  # 版本回写自动化容错：版本已由 bump 提交维护，push 受 main 保护限制时不影响发布链
     name: Update Version
     runs-on: ubuntu-latest
     outputs:
