@@ -1162,6 +1162,8 @@ dependencies = [
 [[package]]
 name = "dbnexus"
 version = "0.6.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67e7ce8b8a61a3b7bcaac3a0fdbdf56dde30e63b1327af7640c8af1c4940ba6a"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1195,6 +1197,8 @@ dependencies = [
 [[package]]
 name = "dbnexus-macros"
 version = "0.6.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0daa3f1750f768ab0f7ff2ef4376ecfeb9ceab8a1f8c909caa9a034df88dd723"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1297,7 +1301,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1363,7 +1367,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2491,7 +2495,7 @@ dependencies = [
 
 [[package]]
 name = "inklog-examples"
-version = "0.1.12"
+version = "0.3.0-rc.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2555,7 +2559,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3025,6 +3029,8 @@ dependencies = [
 [[package]]
 name = "oxcache"
 version = "0.5.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3f59fdece16e0b8ccea2d88ce4f953591263870584e56af5ba0d17f43325473"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3046,6 +3052,8 @@ dependencies = [
 [[package]]
 name = "oxcache_macros"
 version = "0.5.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86a584f68cc647544459ef65fe459b3773fbeb805615437802de748fc5f1aee2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3328,7 +3336,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3687,7 +3695,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3745,7 +3753,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4561,7 +4569,7 @@ dependencies = [
  "fastrand",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4882,6 +4890,8 @@ dependencies = [
 [[package]]
 name = "trait-kit"
 version = "0.5.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d96cd88d570b452befb747951cb6a15abd88fe9b9348af1ab47d8975b91fea49"
 
 [[package]]
 name = "try-lock"
@@ -5207,7 +5217,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
