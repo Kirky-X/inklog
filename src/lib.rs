@@ -223,8 +223,6 @@ pub use integrations::{
     Cache, Config, Database, InklogConfigAdapter, OxCacheAdapter, OxCacheAdapterBuilder,
 };
 // Mock 实现仅对测试面可见（src 内联测试经 cfg(test)，外部消费者需显式 test-utils）
-#[cfg(any(test, feature = "test-utils"))]
-pub use integrations::{MockCache, MockConfig, MockDatabaseAdapter};
 #[cfg(all(
     feature = "kit",
     any(
@@ -235,6 +233,8 @@ pub use integrations::{MockCache, MockConfig, MockDatabaseAdapter};
     )
 ))]
 pub use integrations::{InklogBuildObserver, create_inklog_scope, populate_inklog_scope};
+#[cfg(any(test, feature = "test-utils"))]
+pub use integrations::{MockCache, MockConfig, MockDatabaseAdapter};
 
 pub use domain::core::{
     InklogContainer, InklogContainerBuilder, LoggerBuilder, LoggerDependencies, LoggerManager,
