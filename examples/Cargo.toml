@@ -14,7 +14,7 @@ compression = ["inklog/compression"]
 parquet = ["inklog/parquet"]
 
 [dependencies]
-inklog = { path = ".." }
+inklog = { path = "..", features = ["test-utils"] }
 async-trait = { workspace = true }
 dbnexus = { workspace = true, optional = true }
 tokio = { workspace = true }
