@@ -112,6 +112,14 @@ fn format_message(
 }
 
 fn resolve_locale() -> String {
+    // 0. 单元测试进程固定 en：与 CI（Linux，LANG 未设）行为一致。
+    // Windows 中文系统的 sys-locale 检测出 zh，会使断言英文错误消息
+    // 的测试失败；测试进程内固定 locale 是对环境差异的隔离。
+    #[cfg(test)]
+    if std::env::var("INKLOG_LOCALE").as_deref() != Ok("zh") {
+        return "en".to_string();
+    }
+
     // 1. Environment variable (highest priority)
     if let Ok(locale) = std::env::var("INKLOG_LOCALE") {
         let locale = locale.trim().to_string();

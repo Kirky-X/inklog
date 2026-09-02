@@ -19,6 +19,7 @@ use tempfile::TempDir;
 #[test]
 fn test_cli_validate_nonexistent_config() {
     let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en"); // 固定子进程 locale：断言匹配英文消息
     cmd.args(["validate", "-c", "/nonexistent/path/config.toml"])
         .assert()
         .failure()
@@ -60,6 +61,7 @@ level = "invalid_level"
     .expect("write config");
 
     let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en"); // 固定子进程 locale：断言匹配英文消息
     cmd.args(["validate", "-c", config_path.to_str().unwrap()])
         .assert()
         .failure()
@@ -133,6 +135,7 @@ fn test_cli_decrypt_nonexistent_input() {
     let dir = TempDir::new().expect("tempdir");
     let output = dir.path().join("output.log");
     let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en"); // 固定子进程 locale：断言匹配英文消息
     cmd.args([
         "decrypt",
         "-i",

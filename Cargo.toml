@@ -125,6 +125,7 @@ filetime = { version = "0.2", default-features = false }
 bytes = { version = "1.12", default-features = false, features = ["std"] }
 assert_cmd = { version = "2.2", default-features = false }
 predicates = { version = "3.1", default-features = false }
+ctor = "1.0.13"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["fs"] }

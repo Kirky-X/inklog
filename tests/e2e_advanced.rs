@@ -13,6 +13,18 @@
 use inklog::sink::circuit_breaker::{CircuitBreakerConfig, CircuitState};
 use inklog::sink::encryption::derive_key_from_password;
 use inklog::sink::rotation::parse_size;
+
+// 集成测试 bin 链接非 test 编译的 lib，lib 内 cfg(test) 的 locale 固定
+// 不生效；进程级设置文档化最高优先级 override，使错误消息断言与
+// CI（Linux，LANG 未设 → en）一致。
+#[ctor::ctor(unsafe)]
+fn init_test_locale() {
+    // 测试进程启动期单线程，set_var 无 UB 风险
+    unsafe {
+        std::env::set_var("INKLOG_LOCALE", "en");
+    }
+}
+
 use inklog::sink::{
     CircuitBreaker, CompositeRotation, FileSink, FileSinkFactory, LogSink, RotationContext,
     RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry, SizeBasedRotation,
