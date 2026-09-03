@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.2] - 2026-09-03
+
+### ⚠️ BREAKING CHANGES
+
+- **版本号升级**: 0.2.0 → 0.3.0-rc.2，反映 trait-kit 0.5.0-rc.2 集成与 i18n 重构
+
+### Changed
+
+- **依赖升级**: trait-kit 0.4 → 0.5.0-rc.2
+- **S3 归档功能移除**: 文档中清理 S3 归档相关描述（0.1.1 后已统一走本地/对象存储抽象层）
+
+### Documentation
+
+- 同步 docs/ 下版本号至 0.3.0-rc.2
+- 同步 src/lib.rs html_root_url 至 0.3.0-rc.2
+- 同步 ARCHITECTURE.md 文档版本至 3.0
+- uat.md: MSRV 1.70 → 1.94
+
 ## [0.2.0] - 2026-08-05
 
 ### ⚠️ BREAKING CHANGES

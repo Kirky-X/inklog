@@ -149,14 +149,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-inklog = "0.2"
+inklog = "0.3.0-rc.2"
 ```
 
 Full feature set:
 
 ```toml
 [dependencies]
-inklog = { version = "0.2", default-features = false, features = ["http", "cli", "sqlite"] }
+inklog = { version = "0.3.0-rc.2", default-features = false, features = ["http", "cli", "sqlite"] }
 ```
 
 ### <span id="basic-usage">💡 Basic Usage</span>
@@ -313,31 +313,31 @@ let _logger = LoggerManager::with_config(config).await?;
 ### Default Features
 
 ```toml
-inklog = "0.2"  # default = [] (no optional features)
+inklog = "0.3.0-rc.2"  # default = [] (no optional features)
 ```
 
 ### Optional Features
 
 ```toml
 # HTTP Server
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "http",       # Axum HTTP health endpoint
 ] }
 
 # CLI Tools
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "cli",        # decrypt, generate, validate commands
 ] }
 
 # Database Sinks (pick one or more)
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "sqlite",     # SQLite database sink
     "postgres",   # PostgreSQL database sink
     "mysql",      # MySQL database sink
 ] }
 
 # Compression & Performance
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "compression",  # ZSTD compression support
     "parquet",      # Parquet export support
     "fast-masking", # Aho-Corasick accelerated masking

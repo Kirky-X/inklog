@@ -1204,7 +1204,7 @@ log::info!("Patient admitted: patient_id=123456, diagnosis=condition_X");
 ```rust
 // Cargo.toml
 [dependencies]
-inklog = { version = "0.2" }
+inklog = { version = "0.3.0-rc.2" }
 
 // 记录敏感操作
 tracing::debug!(
@@ -1462,7 +1462,7 @@ cargo deny check sources
 ```toml
 # Cargo.toml
 [dependencies]
-inklog = "0.2"  # 使用 ^0.2.x 范围
+inklog = "0.3.0-rc.2"  # 使用 ^0.3.0-rc.x 范围
 ```
 
 ```bash

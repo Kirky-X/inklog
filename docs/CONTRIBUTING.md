@@ -825,7 +825,7 @@ inklog/
 
 ---
 
-**文档版本**: 2.0
+**文档版本**: 3.0
 **最后更新**: 2026-07-11
 **项目**: Inklog - Enterprise-grade Rust Logging Infrastructure
 

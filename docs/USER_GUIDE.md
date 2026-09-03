@@ -107,7 +107,7 @@ Sink 抽象层 (Console, File, Database)
 
 ```toml
 [dependencies]
-inklog = "0.2"
+inklog = "0.3.0-rc.2"
 ```
 
 ### 功能标志
@@ -115,30 +115,30 @@ inklog = "0.2"
 默认不包含可选 feature（`default = []`）：
 
 ```toml
-inklog = { version = "0.2", features = ["http", "cli"] }
+inklog = { version = "0.3.0-rc.2", features = ["http", "cli"] }
 ```
 
 ### 可选功能
 
 ```toml
 # HTTP 服务器
-inklog = { version = "0.2", features = ["http"] }
+inklog = { version = "0.3.0-rc.2", features = ["http"] }
 
 # 命令行工具
-inklog = { version = "0.2", features = ["cli"] }
+inklog = { version = "0.3.0-rc.2", features = ["cli"] }
 
 # 数据库支持（按需选择驱动）
-inklog = { version = "0.2", features = ["sqlite"] }
-inklog = { version = "0.2", features = ["postgres"] }
-inklog = { version = "0.2", features = ["mysql"] }
+inklog = { version = "0.3.0-rc.2", features = ["sqlite"] }
+inklog = { version = "0.3.0-rc.2", features = ["postgres"] }
+inklog = { version = "0.3.0-rc.2", features = ["mysql"] }
 
 # 压缩与性能
-inklog = { version = "0.2", features = ["compression"] }
-inklog = { version = "0.2", features = ["parquet"] }
-inklog = { version = "0.2", features = ["fast-masking"] }
+inklog = { version = "0.3.0-rc.2", features = ["compression"] }
+inklog = { version = "0.3.0-rc.2", features = ["parquet"] }
+inklog = { version = "0.3.0-rc.2", features = ["fast-masking"] }
 
 # 完整功能
-inklog = { version = "0.2", features = ["http", "cli", "sqlite", "postgres", "mysql", "compression", "parquet", "fast-masking"] }
+inklog = { version = "0.3.0-rc.2", features = ["http", "cli", "sqlite", "postgres", "mysql", "compression", "parquet", "fast-masking"] }
 ```
 
 > 注：TOML 配置文件加载（`from_file` / `load`）已内建，无需额外 feature。

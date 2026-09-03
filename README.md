@@ -172,14 +172,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-inklog = "0.2"
+inklog = "0.3.0-rc.2"
 ```
 
 完整功能集（显式启用）：
 
 ```toml
 [dependencies]
-inklog = { version = "0.2", default-features = false, features = ["http", "cli", "sqlite"] }
+inklog = { version = "0.3.0-rc.2", default-features = false, features = ["http", "cli", "sqlite"] }
 ```
 
 ### <span id="基础使用">💡 基础使用</span>
@@ -336,31 +336,31 @@ let _logger = LoggerManager::with_config(config).await?;
 ### 默认功能
 
 ```toml
-inklog = "0.2"  # 默认不包含可选 feature (default = [])
+inklog = "0.3.0-rc.2"  # 默认不包含可选 feature (default = [])
 ```
 
 ### 可选功能
 
 ```toml
 # HTTP 服务器
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "http",       # Axum HTTP 健康端点
 ] }
 
 # 命令行工具
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "cli",        # decrypt, generate, validate 命令
 ] }
 
 # 数据库 Sink (可选一个或多个)
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "sqlite",     # SQLite 数据库 Sink
     "postgres",   # PostgreSQL 数据库 Sink
     "mysql",      # MySQL 数据库 Sink
 ] }
 
 # 压缩与性能
-inklog = { version = "0.2", features = [
+inklog = { version = "0.3.0-rc.2", features = [
     "compression",  # ZSTD 压缩支持
     "parquet",      # Parquet 导出支持
     "fast-masking", # Aho-Corasick 多模式加速脱敏
