@@ -1,4 +1,4 @@
-# Rust CI 质量门禁：fmt / clippy / test / coverage(≥80%) / audit / deny
+# CI 质量门禁:fmt / clippy / check / test / cross-platform / doc / security / coverage(≥80%)
 name: CI
 
 on:
@@ -9,10 +9,9 @@ on:
 
 permissions:
   contents: read
-  checks: write
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -20,88 +19,71 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  quality:
-    name: fmt + clippy
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
-          components: rustfmt, clippy
-      - uses: swatinem/rust-cache@v2
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets --features "sqlite http cli kit compression parquet fast-masking" --workspace -- -D warnings
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --features "sqlite http cli kit compression parquet fast-masking" -- -D warnings
+
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Check all features
+        run: cargo check --workspace --features "sqlite http cli kit compression parquet fast-masking"
 
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - run: cargo test --features "sqlite http cli kit compression parquet fast-masking" --workspace
+      - name: Run tests
+        run: cargo test --workspace --features "sqlite http cli kit compression parquet fast-masking"
 
-  security:
-    name: cargo-audit + cargo-deny
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - name: cargo-audit (RustSec 漏洞库)
-        run: |
-          cargo install cargo-audit
-          cargo audit \
-            --ignore RUSTSEC-2026-0235 \
-            --ignore RUSTSEC-2024-0436 \
-            --ignore RUSTSEC-2026-0173 \
-            --ignore RUSTSEC-2026-0221
-      - name: cargo-deny (license / ban / advisory)
-        uses: EmbarkStudios/cargo-deny-action@v2
-
-  coverage:
-    name: Coverage (≥80% lines)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: swatinem/rust-cache@v2
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
-      - name: Generate coverage
-        # Use `--lib` instead of `--workspace` to avoid linker resource exhaustion
-        run: cargo llvm-cov --features "sqlite http cli kit compression parquet fast-masking" --lib --fail-under-lines 80 --lcov --output-path lcov.info
-      - name: Upload to codecov.io
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          fail_ci_if_error: false
-
-  build-check:
-    name: Build Check
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable, beta, nightly]
-        include:
-          - os: ubuntu-latest
-            rust: 1.94.0  # MSRV (sea-orm 2.0.0-rc + sqlx 0.9 require 1.94)
-    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.rust }}
-      - uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
       - name: Install protoc (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -111,4 +93,63 @@ jobs:
       - name: Install protoc (Windows)
         if: runner.os == 'Windows'
         run: choco install protoc -y
-      - run: cargo build --features "sqlite http cli kit compression parquet fast-masking" --workspace
+      - name: Build
+        run: cargo build --workspace --features "sqlite http cli kit compression parquet fast-masking"
+
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Build documentation
+        run: cargo doc --workspace --no-deps --features "sqlite http cli kit compression parquet fast-masking"
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+      - name: cargo deny
+        run: cargo deny check
+      - name: cargo audit
+        run: cargo audit
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Generate coverage (gate ≥80% lines)
+        # Use `--lib` instead of `--workspace` to avoid linker resource exhaustion
+        run: cargo llvm-cov --features "sqlite http cli kit compression parquet fast-masking" --lib --fail-under-lines 80 --lcov --output-path lcov.info
+      - name: Upload coverage
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: false

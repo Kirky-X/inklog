@@ -34,7 +34,7 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
 
       - name: Install cargo-edit
         run: cargo install cargo-edit
@@ -73,7 +73,7 @@ jobs:
           ref: main  # 使用更新后的版本
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: ${{ matrix.target }}
 
@@ -184,7 +184,7 @@ jobs:
           ref: main
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
 
       - name: Publish to crates.io
         run: |
