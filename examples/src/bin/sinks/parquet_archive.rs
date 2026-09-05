@@ -15,13 +15,13 @@
 //! ```
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use inklog::LogRecord;
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::{DatabaseSinkConfig, ParquetConfig};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::sink::database::convert_logs_to_parquet;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::tracing::Level;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use inklog::LogRecord;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog_examples::common::{print_section, print_separator};
 

@@ -59,11 +59,13 @@ fn show_dangerous_components() {
     let result = validator.validate(Path::new("/etc/passwd"));
     println!("valid = {}, error = {:?}", result.valid, result.error);
     assert!(!result.valid);
-    assert!(result
-        .error
-        .as_ref()
-        .unwrap()
-        .contains("Dangerous path component"));
+    assert!(
+        result
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Dangerous path component")
+    );
 
     print_section("2.2 \"~/.ssh/id_rsa\"");
     let result = validator.validate(Path::new("~/.ssh/id_rsa"));

@@ -13,13 +13,13 @@
 //! cargo run --bin ring_buffered_file
 //! ```
 
+use inklog::LogRecord;
 use inklog::config::FileSinkConfig;
+use inklog::sink::LogSink;
 use inklog::sink::ring_buffered_file::{
     BackpressureStrategy, ChannelBufferedConfig, ChannelBufferedFileSink,
 };
-use inklog::sink::LogSink;
 use inklog::tracing::Level;
-use inklog::LogRecord;
 use inklog_examples::common::{print_section, print_separator};
 use std::time::Duration;
 use tempfile::TempDir;

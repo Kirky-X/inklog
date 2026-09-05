@@ -15,8 +15,8 @@
 //! cargo run --bin archive_format
 //! ```
 
-use inklog::config::{DatabaseDriver, DatabaseSinkConfig, PartitionStrategy};
 use inklog::ArchiveFormat;
+use inklog::config::{DatabaseDriver, DatabaseSinkConfig, PartitionStrategy};
 use inklog_examples::common::{print_section, print_separator};
 use std::str::FromStr;
 

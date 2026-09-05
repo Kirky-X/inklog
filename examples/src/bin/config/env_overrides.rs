@@ -145,9 +145,12 @@ fn show_env_override_demo() {
     ];
     for (key, value) in env_vars {
         println!("  export {}={}", key, value);
-        std::env::set_var(env_vars[0].0, env_vars[0].1);
-        std::env::set_var(env_vars[1].0, env_vars[1].1);
-        std::env::set_var(env_vars[2].0, env_vars[2].1);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(env_vars[0].0, env_vars[0].1) };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(env_vars[1].0, env_vars[1].1) };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(env_vars[2].0, env_vars[2].1) };
     }
 
     // 3. 重新加载并验证覆盖生效
@@ -190,7 +193,8 @@ fn show_env_override_demo() {
 
     // 4. 清理环境变量
     for (key, _) in env_vars {
-        std::env::remove_var(key);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var(key) };
     }
     println!("\n（已清理测试环境变量）");
 }

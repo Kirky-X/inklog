@@ -14,8 +14,8 @@
 //! ```
 
 use inklog::sink::compression::{
-    compress_data, compress_file, CompressionStrategy, GzipCompression, NoCompression,
-    ZstdCompression,
+    CompressionStrategy, GzipCompression, NoCompression, ZstdCompression, compress_data,
+    compress_file,
 };
 use inklog_examples::common::{print_section, print_separator};
 use std::fs;

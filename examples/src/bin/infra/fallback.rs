@@ -25,14 +25,14 @@
 //! 3. **fallback_demo()**: 演示降级到 File Sink
 
 use async_trait::async_trait;
+use inklog::LogTemplate;
 use inklog::chrono::Utc;
 use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 use inklog::log_record::LogRecord;
+use inklog::sink::LogSink;
 use inklog::sink::console::ConsoleSink;
 use inklog::sink::file::FileSink;
-use inklog::sink::LogSink;
 use inklog::tokio::sync::Mutex;
-use inklog::LogTemplate;
 use inklog::{SinkHealth, SinkStatus};
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
 use std::fs;

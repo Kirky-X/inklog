@@ -90,7 +90,9 @@ fn custom_templates() {
         "[{timestamp}] [{level}] [{thread_id}] {target} - {message} ({file}:{line})",
     );
     let detailed_out = detailed.render(&record);
-    println!("\n详细格式: [{{timestamp}}] [{{level}}] [{{thread_id}}] {{target}} - {{message}} ({{file}}:{{line}})");
+    println!(
+        "\n详细格式: [{{timestamp}}] [{{level}}] [{{thread_id}}] {{target}} - {{message}} ({{file}}:{{line}})"
+    );
     println!("  输出: {}", detailed_out);
     assert!(detailed_out.contains("src/main.rs"), "应包含文件名");
     assert!(detailed_out.contains("42"), "应包含行号");
@@ -291,7 +293,9 @@ fn best_practices() {
     println!("   开发环境: [{{level}}] {{message}} — 简洁快速");
     println!("   生产环境: {{timestamp}} [{{level}}] {{target}} - {{message}} — 信息完整");
     println!("   调试场景: [{{timestamp}}] [{{level}}] {{file}}:{{line}} - {{message}} — 定位源码");
-    println!("   JSON 采集: {{\"ts\":\"{{timestamp}}\",\"lvl\":\"{{level}}\",\"msg\":\"{{message}}\"}} — 结构化采集");
+    println!(
+        "   JSON 采集: {{\"ts\":\"{{timestamp}}\",\"lvl\":\"{{level}}\",\"msg\":\"{{message}}\"}} — 结构化采集"
+    );
 
     println!("\n2. 性能考虑：");
     println!("   - LogTemplate::new() 在构造时解析占位符，render() 仅做字符串拼接");

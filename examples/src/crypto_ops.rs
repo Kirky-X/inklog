@@ -24,7 +24,7 @@
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rand::Rng;
 use std::io::Write;
 use std::path::Path;
@@ -71,7 +71,7 @@ impl EncryptionHeader {
 pub fn generate_temp_key() -> String {
     let mut key_bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut key_bytes);
-    use base64::{engine::general_purpose, Engine as _};
+    use base64::{Engine as _, engine::general_purpose};
     general_purpose::STANDARD.encode(key_bytes)
 }
 
@@ -210,7 +210,7 @@ mod tests {
         let key = generate_temp_key();
         assert_eq!(key.len(), 44, "Base64(32 bytes) 应为 44 字符");
         // 解码后必须是 32 字节
-        use base64::{engine::general_purpose, Engine as _};
+        use base64::{Engine as _, engine::general_purpose};
         let decoded = general_purpose::STANDARD
             .decode(&key)
             .expect("Base64 解码失败");
@@ -240,14 +240,16 @@ mod tests {
         write_plaintext(plain_path, content);
 
         let key = generate_temp_key();
-        std::env::set_var("LOG_ENCRYPTION_KEY", &key);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
 
         encrypt_log_file(plain_path, enc_path, "LOG_ENCRYPTION_KEY").expect("加密失败");
         let decrypted = decrypt_file(enc_path, "LOG_ENCRYPTION_KEY").expect("解密失败");
 
         assert_eq!(decrypted, content, "解密结果应与原文一致");
 
-        std::env::remove_var("LOG_ENCRYPTION_KEY");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 
     #[test]
@@ -260,7 +262,8 @@ mod tests {
 
         write_plaintext(plain.to_str().unwrap(), "hello world");
         let key = generate_temp_key();
-        std::env::set_var("LOG_ENCRYPTION_KEY", &key);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
         encrypt_log_file(
             plain.to_str().unwrap(),
             enc.to_str().unwrap(),
@@ -275,7 +278,8 @@ mod tests {
         // nonce 不应全零（极小概率）
         assert!(header.nonce.iter().any(|&b| b != 0), "nonce 不应全零");
 
-        std::env::remove_var("LOG_ENCRYPTION_KEY");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 
     #[test]
@@ -288,7 +292,8 @@ mod tests {
 
         write_plaintext(plain.to_str().unwrap(), "secret content");
         let key1 = generate_temp_key();
-        std::env::set_var("LOG_ENCRYPTION_KEY", &key1);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key1) };
         encrypt_log_file(
             plain.to_str().unwrap(),
             enc.to_str().unwrap(),
@@ -298,7 +303,8 @@ mod tests {
 
         // 用另一个密钥解密
         let key2 = generate_temp_key();
-        std::env::set_var("LOG_ENCRYPTION_KEY", &key2);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key2) };
         let result = decrypt_file(enc.to_str().unwrap(), "LOG_ENCRYPTION_KEY");
         assert!(result.is_err(), "用错误密钥解密应失败");
         // 错误信息应包含 "Decryption failed"
@@ -309,7 +315,8 @@ mod tests {
             err_msg
         );
 
-        std::env::remove_var("LOG_ENCRYPTION_KEY");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 
     #[test]
@@ -357,7 +364,8 @@ mod tests {
         let content = "包含 keyword1 和 keyword2 的明文";
         write_plaintext(plain.to_str().unwrap(), content);
         let key = generate_temp_key();
-        std::env::set_var("LOG_ENCRYPTION_KEY", &key);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
         encrypt_log_file(
             plain.to_str().unwrap(),
             enc.to_str().unwrap(),
@@ -381,6 +389,7 @@ mod tests {
         );
         assert!(missing.is_err(), "关键字缺失应失败");
 
-        std::env::remove_var("LOG_ENCRYPTION_KEY");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 }

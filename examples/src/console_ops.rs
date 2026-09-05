@@ -8,10 +8,10 @@
 //! - [`write_test_cases`]：把 `(level, message)` 列表写入 sink 并 flush。
 
 use anyhow::Result;
-use inklog::chrono::Utc;
-use inklog::config::ConsoleSinkConfig;
 use inklog::LogRecord;
 use inklog::LogSink;
+use inklog::chrono::Utc;
+use inklog::config::ConsoleSinkConfig;
 
 /// 构造 ConsoleSink 配置。
 ///
@@ -55,8 +55,8 @@ pub async fn write_test_cases(sink: &dyn LogSink, cases: &[(&str, &str)]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use inklog::sink::console::ConsoleSink;
     use inklog::LogTemplate;
+    use inklog::sink::console::ConsoleSink;
 
     #[test]
     fn test_create_console_config_basic() {

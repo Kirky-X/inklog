@@ -51,10 +51,10 @@
 //! cargo run --bin encryption
 //! ```
 
-use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes256Gcm;
-use inklog::sink::encryption::get_encryption_key;
+use aes_gcm::aead::{Aead, KeyInit};
 use inklog::sink::LogSink;
+use inklog::sink::encryption::get_encryption_key;
 use inklog::tracing::Level;
 use inklog::{FileSinkConfig, LogRecord};
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
@@ -85,7 +85,7 @@ fn generate_temp_key() -> String {
     key_bytes[16..].copy_from_slice(uuid2.as_bytes());
 
     // 使用 inklog 的 base64 编码
-    use base64::{engine::general_purpose, Engine as _};
+    use base64::{Engine as _, engine::general_purpose};
     general_purpose::STANDARD.encode(key_bytes)
 }
 
@@ -407,7 +407,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 设置环境变量
     let key_env = "LOG_ENCRYPTION_KEY";
-    std::env::set_var(key_env, &key);
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var(key_env, &key) };
     println!("✓ 已设置环境变量: {}", key_env);
 
     // 2. 生成临时文件路径
@@ -437,7 +438,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cleanup(&encrypted_path);
 
     // 移除环境变量
-    std::env::remove_var(key_env);
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var(key_env) };
     println!("✓ 已清除环境变量: {}", key_env);
 
     // 展示密钥管理最佳实践

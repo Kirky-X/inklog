@@ -1,40 +1,54 @@
-# cargo-deny 配置
+# cargo-deny 配置 — 7 仓库统一基线(见 base/CONFIG_BASELINE.md)
+# `cargo deny check` 校验 漏洞/许可证/禁用源/重复依赖。
+# 完整字段见: https://embarkstudios.github.io/cargo-deny/
+# 仓库特有豁免写在 [advisories].ignore 与 [[bans.skip]],须附原因注释。
+
 [advisories]
-db-urls = ["https://github.com/rustsec/advisory-db"]
-# 忽略非关键的安全警告（这些是 transitive 依赖的问题）
-ignore = [
-    "RUSTSEC-2026-0235", # rkyv 0.7.46 — transitive dep via duckdb → rust_decimal → rkyv，无法升级
-    "RUSTSEC-2024-0436", # paste — unmaintained，transitive dep
-    "RUSTSEC-2026-0173", # proc-macro-error2 — unmaintained，transitive dep
-    "RUSTSEC-2026-0221", # event-listener — unsound，transitive dep
-]
+db-urls = ["https://github.com/RustSec/advisory-db"]
+yanked = "warn"
+# 按仓库填:传递依赖 RUSTSEC 豁免(每项须注释原因)
+# 本仓历史豁免:RUSTSEC-2026-0235(rkyv,duckdb→rust_decimal 传递)、
+# RUSTSEC-2024-0436(paste)、RUSTSEC-2026-0173(proc-macro-error2)、
+# RUSTSEC-2026-0221(event-listener)。
+# 0.3.0-rc.2 依赖升级后这 4 个 crate 已整体退出依赖图
+# (cargo deny --all-features 复核无命中),保留条目会触发
+# advisory-not-detected 告警,故此处不列;未来若重新入图再补回。
 
 [licenses]
+# 允许的宽松许可证;新增非宽松许可证需在此放行
+# (按当前依赖图实际命中保留,未命中项已删除以保持零告警)
 allow = [
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
     "BSD-3-Clause",
-    "BSL-1.0",
-    "CDLA-Permissive-2.0",
     "ISC",
-    "MIT-0",
+    "Unicode-3.0", # icu* crates
+    "Zlib",        # foldhash (hashbrown dependency)
     "MPL-2.0",
-    "OpenSSL",
-    "Zlib",        # for foldhash (hashbrown dependency)
-    "CC0-1.0",     # for tiny-keccak (arrow/parquet transitive dependency)
-    "Unicode-3.0", # for icu* crates (url/reqwest dependency)
 ]
 confidence-threshold = 0.8
+unused-allowed-license = "warn"
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
-highlight = "all"
+
+# 已知且暂不可收敛的多版本传递依赖(等上游统一后移除)
+[[bans.skip]]
+crate = "getrandom" # 0.2/0.3/0.4 并存:ring 0.17、ahash 0.8 等仍锁 0.2,rand 0.10 用 0.3,新生态已至 0.4
+
+[[bans.skip]]
+crate = "supports-color" # 2.x/3.x 并存:owo-colors supports-colors 特性与其余消费者大版本错位
+
+[[bans.skip]]
+crate = "syn" # 2.x/3.x 并存:主流 derive 宏仍在 syn 2,新宏已迁 syn 3
+
+[[bans.deny]]
+name = "serde_yaml" # deprecated, use serde_yaml_ng
+wrappers = []
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []

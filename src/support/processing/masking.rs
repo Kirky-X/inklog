@@ -351,7 +351,7 @@ impl DataMaskerBuilder {
         self
     }
 
-    /// Use a custom [`MaskRuleRegistry`] as the rule source instead of builtins.
+    /// Use a custom [`MaskRuleRegistry`](super::masking_registry::MaskRuleRegistry) as the rule source instead of builtins.
     ///
     /// When set, the registry's rules replace the default built-in rules.
     /// `add_rule()` and `disable_builtin()` still apply on top.

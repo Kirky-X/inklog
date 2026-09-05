@@ -48,7 +48,9 @@ fn show_auth_config() {
     println!("  token_env = \"{}\"", enabled_auth.token_env);
 
     println!("\n工作流程：");
-    println!("  1. 客户端发送请求：curl -H \"Authorization: Bearer $TOKEN\" http://localhost:9090/metrics");
+    println!(
+        "  1. 客户端发送请求：curl -H \"Authorization: Bearer $TOKEN\" http://localhost:9090/metrics"
+    );
     println!(
         "  2. 服务端从环境变量 {} 读取期望的 token",
         enabled_auth.token_env

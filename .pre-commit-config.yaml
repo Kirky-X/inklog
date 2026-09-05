@@ -1,12 +1,8 @@
-# Pre-commit hooks for Inklog Rust Project
-# Install: pip install pre-commit && pre-commit install
-# Docs: https://pre-commit.com/
-# 与 lefthook.yml 功能等价，二选一即可（切换前先卸载旧的）。
-
+# pre-commit 配置 — 7 仓库统一基线(见 base/CONFIG_BASELINE.md)
+# 安装: pip install pre-commit && pre-commit install --install-hooks
 repos:
-  # 1. Basic file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
@@ -19,48 +15,42 @@ repos:
       - id: check-merge-conflict
         args: ['--assume-in-merge']
       - id: no-commit-to-branch
-        args: ['--branch', 'master', '--branch', 'main']
+        args: ['--branch', 'main', '--branch', 'master']
 
-  # 2. Detect secrets
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: [--exclude-files, tests/]
+        args: [--exclude-files, tests/, --exclude-files, examples/]
         exclude: '^Cargo\.lock$'
 
-  # 3. 拼写检查
   - repo: https://github.com/crate-ci/typos
     rev: v1.28.0
     hooks:
       - id: typos
 
-  # 4. Rust formatting and checks
   - repo: local
     hooks:
       - id: cargo-fmt
-        name: cargo fmt --check
+        name: Format Rust code
         description: Run rustfmt on Rust files
-        entry: bash -c 'cargo fmt --all -- --check'
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check --no-default-features --features sqlite,http,cli,kit,compression,parquet,fast-masking
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-clippy
-        name: cargo clippy (-D warnings)
-        # dbnexus 驱动严格互斥（embedded vs server-side），--all-features 不适用多后端 crate，
-        # 按 sqlite/postgres 分组验证 + 无 DB 后端的基础组合
-        entry: bash -c 'cargo clippy --all-targets --features "sqlite,kit,compression,fast-masking" -- -D warnings && cargo clippy --all-targets --features "postgres,kit,compression,fast-masking" -- -D warnings'
+        name: cargo clippy
+        entry: cargo clippy --all-targets --no-default-features --features sqlite,http,cli,kit,compression,parquet,fast-masking -- -D warnings
         language: system
         types: [rust]
-        pass_filenames: false
-
-      - id: cargo-deny
-        name: cargo deny check (license/advisory/ban)
-        entry: >-
-          bash -c 'cargo deny check 2>/dev/null || { echo "→ 先运行: cargo install cargo-deny && cargo deny init"; exit 1; }'
-        language: system
-        files: 'Cargo\.(toml|lock)'
         pass_filenames: false
 
 ci:

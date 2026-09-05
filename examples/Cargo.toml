@@ -1,9 +1,13 @@
 [package]
 name = "inklog-examples"
-version = "0.1.12"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 publish = false
 description = "Examples for inklog - Enterprise-grade Rust logging infrastructure"
+
+[lints]
+workspace = true
 
 [features]
 sqlite = ["inklog/sqlite", "dep:dbnexus", "dbnexus/sqlite"]

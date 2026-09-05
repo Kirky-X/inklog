@@ -5,9 +5,9 @@
 //! 这些测试与单元测试的区别：单元测试覆盖单个函数，集成测试覆盖多个模块的协同
 //! （例如：file_ops 写入文件 → crypto_ops 加密 → crypto_ops 解密 → 验证内容）。
 
+use inklog::LogTemplate;
 use inklog::support::io::sink::console::ConsoleSink;
 use inklog::support::io::sink::file::FileSink;
-use inklog::LogTemplate;
 use inklog_examples::console_ops::{create_console_config, write_test_cases};
 use inklog_examples::crypto_ops::{
     decrypt_file, encrypt_log_file, generate_temp_key, parse_encrypted_format,
@@ -75,7 +75,8 @@ async fn integration_file_then_crypto_roundtrip() {
     // 2. 用 crypto_ops 加密（持有锁以保护环境变量）
     let _guard = ENV_LOCK.lock().unwrap();
     let key = generate_temp_key();
-    std::env::set_var("LOG_ENCRYPTION_KEY", &key);
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
     encrypt_log_file(plain_str, enc_str, "LOG_ENCRYPTION_KEY").expect("加密失败");
 
     // 3. 验证加密文件存在且文件头正确
@@ -97,7 +98,8 @@ async fn integration_file_then_crypto_roundtrip() {
         );
     }
 
-    std::env::remove_var("LOG_ENCRYPTION_KEY");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
 }
 
 /// 端到端：template_ops 构造记录 → render_formats 渲染 → 验证输出。
@@ -207,7 +209,8 @@ fn integration_crypto_tamper_detection() {
 
     std::fs::write(&plain, "敏感内容：用户密码 = hunter2").unwrap();
     let key = generate_temp_key();
-    std::env::set_var("LOG_ENCRYPTION_KEY", &key);
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
     encrypt_log_file(
         plain.to_str().unwrap(),
         enc.to_str().unwrap(),
@@ -225,5 +228,6 @@ fn integration_crypto_tamper_detection() {
     let result = decrypt_file(enc.to_str().unwrap(), "LOG_ENCRYPTION_KEY");
     assert!(result.is_err(), "篡改密文后解密应失败");
 
-    std::env::remove_var("LOG_ENCRYPTION_KEY");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
 }

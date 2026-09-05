@@ -1,56 +1,148 @@
-# IDE and Editor
-.claude/
-.trae/
-.idea/
-.vscode/
-.fleet/
-.jb/
-*.swp
-*.swo
-*.sublime-project
-*.sublime-workspace
+# =============================================================================
+# inklog — .gitignore
+# 结构:统一公共段(7 仓库同源,见 base/CONFIG_BASELINE.md)+ 仓库特有段
+# 注意:Cargo.lock 与 rust-toolchain.toml 纳入版本控制,不再忽略
+# =============================================================================
 
-# Build
-target/
-tarpaulin-report.html
+# =============================================================================
+# 统一公共段
+# =============================================================================
 
-# Logs
-logs/
-*.log
-*.log.*
+# --- Build artifacts (Rust) ---
+/target
+/debug
+/release
+**/*.rs.bk
 
-# Temp
-temp/
-tmp/
-*.tmp
-*.temp
+# Cargo 本地覆盖(.cargo/config.toml 等机器特定配置)
+.cargo/
 
-# Testing
+# --- Code coverage ---
+coverage/
 *.profraw
 *.profdata
-*.prof
-test_results/
-coverage/
-*.cover
+*.gcda
+*.gcno
+lcov.info
+*.lcov
+htmlcov/
+tarpaulin-report.html
 
-# Environment
+# --- IDE & Editors ---
+.idea/
+.vscode/
+.vscodeignore
+.idea_modules/
+*.code-workspace
+*.sublime-*
+.nvimrc
+*.swp
+*.swo
+*~
+.un~
+Session.vim
+.netrwhist
+
+# --- OS generated ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# --- Logs ---
+*.log
+logs/
+*.pid
+*.seed
+
+# --- Temporary files ---
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+tmp/
+temp/
+
+# --- Environment & secrets (never commit) ---
 .env
 .env.local
 .env.*.local
-.env.test
+.env.production
+.env.development
+*.pem
+*.key
+*.crt
+*.secret
+*.credentials
+.pre-commit-check.log
+
+# --- Local config / AI assistant files (kept local only) ---
+.local-registry/
+.claude/
+.qoder/
+.opencode/
+.cursor/
+.aider/
+.continue/
+.codeium/
+.iflow/
+.sisyphus/
+.github/copilot/
+CLAUDE.md
+IFLOW.md
+GEMINI.md
+CODEIUM.md
+AGENTS.md
+openspec/
+specmark/
+**/specmark/
+.codenexus/
+**/.codenexus/
+strix_runs/
+.worktrees/
+.gitnexus
+
+# --- Reviews / security scan artifacts (never tracked) ---
+reviews/
+.mimosa/
+
+# --- WorkBuddy AI local notes ---
+.workbuddy-ai/
+
+# =============================================================================
+# 仓库特有段(inklog)
+# =============================================================================
+
+# --- IDE / Editor 扩展 ---
+.fleet/
+.jb/
+*.sublime-project
+*.sublime-workspace
+
+# --- OS 扩展 ---
+._*
+.Spotlight-V100
+.Trashes
+desktop.ini
+
+# --- 日志轮转产物(inklog 自测产生的轮转日志文件) ---
+*.log.*
+
+# --- 测试产物 ---
+test_results/
+*.cover
+
+# --- 环境与密钥(扩展) ---
 *.env
+.env.test
 secrets/
 
-# Backup
-*.bak
+# --- 备份文件 ---
 *.backup
 *.old
-*~
 
-# Project docs and configs
-.sisyphus/
-CLAUDE.md
-di.md
+# --- 本仓内部文档草稿(定稿前不入库) ---
 docs/prd.md
 docs/task.md
 docs/tdd.md
@@ -58,94 +150,41 @@ docs/test.md
 docs/uat.md
 docs/archive/
 
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-
-# Rust specific
-**/*.rs.bk
+# --- Rust 构建副产物 ---
 *.pdb
-examples/Cargo.lock
 
-# Dependency directories
+# --- 覆盖率(扩展格式) ---
+cobertura.xml
+
+# --- 依赖目录 / 前端包管理器 ---
 vendor/
 node_modules/
 .npm/
 .yarn/
 bower_components/
-
-# Package manager
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
-# Archive and compression
+# --- 归档文件 ---
 *.tar.gz
 *.zip
 *.rar
 *.7z
 
-# Database
+# --- 本地数据库文件 ---
 *.db
 *.sqlite
 *.sqlite3
 
-# S3 and cloud storage
+# --- 云存储配置 ---
 .s3cfg
 .aws/
 
-# Docker
+# --- Docker 本地覆盖(docker-compose.test.yml 为 CI 基座,纳入版本控制) ---
 .dockerignore.local
 docker-compose.test.yml
 
-# OpenSpec
-openspec/
-.opencode/
-
-# Specmark
-specmark/
-
-# Misc
+# --- 缓存 / 进程文件 ---
 .cache/
-*.pid
-*.seed
 *.pid.lock
-
-# strix runs output
-strix_runs/
-
-#iflow and qoder
-.iflow/
-.qoder/
-.gitnexus
-
-# AI / Agent Tools (not for version control)
-AGENTS.md
-CLAUDE.md
-GEMINI.md
-CODEIUM.md
-.claude/
-.trae/
-.qoder/
-.opencode/
-.cursor/
-.aider/
-.continue/
-.codeium/
-.github/copilot/
-cobertura.xml
-lcov.info
-
-# Reviews (security/quality scan artifacts)
-reviews/
-.cargo/
-Cargo.lock
-
-# WorkBuddy AI local notes
-.workbuddy-ai/

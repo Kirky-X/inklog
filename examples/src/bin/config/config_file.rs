@@ -13,8 +13,8 @@
 //! cargo run --bin config_file
 //! ```
 
-use inklog::config::InklogConfig;
 use inklog::LoggerManager;
+use inklog::config::InklogConfig;
 use inklog_examples::common::{print_section, print_separator};
 use std::fs;
 use tempfile::TempDir;
@@ -148,7 +148,8 @@ async fn show_search_paths() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(&config_path, TOML_CONFIG)?;
 
     print_section("3.1 设置 INKLOG_CONFIG_PATH 环境变量");
-    std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap()) };
     println!("INKLOG_CONFIG_PATH = {}", config_path.display());
 
     print_section("3.2 from_search_paths 读取并解析");
@@ -160,7 +161,8 @@ async fn show_search_paths() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 清理环境变量
-    std::env::remove_var("INKLOG_CONFIG_PATH");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("INKLOG_CONFIG_PATH") };
     println!("已清理 INKLOG_CONFIG_PATH 环境变量");
 
     println!("\n说明: LoggerManager::load() 内部调用 InklogConfig::load_sync(),");

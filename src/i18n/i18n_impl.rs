@@ -33,7 +33,7 @@ impl LogI18nFormatter {
     /// Create a new formatter using the current system locale.
     ///
     /// Delegates to [`LogI18nFormatter::new`] with the locale
-    /// detected by the [`LocaleManager`](super::locale_manager).
+    /// detected by [`current_locale`](super::current_locale).
     ///
     /// # Errors
     /// Returns [`I18nError::InvalidLocale`] if the detected locale

@@ -20,8 +20,8 @@
 //! cargo run --bin all_features
 //! ```
 
-use inklog::tracing::Level;
 use inklog::LogRecord;
+use inklog::tracing::Level;
 use inklog::{
     DataMasker, LogTemplate, LoggerManager, ObjectPool, PathValidator, PathValidatorConfig,
 };

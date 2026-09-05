@@ -9,7 +9,7 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 2
 
-# Rust / Go 4 空格缩进
+# 语言缩进覆盖(按社区惯例)
 [*.{rs,go}]
 indent_size = 4
 
@@ -17,6 +17,12 @@ indent_size = 4
 indent_size = 4
 
 [*.{c,cc,cpp,cxx,h,hh,hpp,hxx}]
+indent_size = 4
+
+[*.{cs}]
+indent_size = 4
+
+[*.{php}]
 indent_size = 4
 
 [Makefile]

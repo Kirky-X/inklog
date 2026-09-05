@@ -10,10 +10,10 @@
 //! - [`cleanup_files`]：按前缀删除指定目录下的临时文件，返回删除数量。
 
 use anyhow::Result;
-use inklog::chrono::Utc;
-use inklog::config::FileSinkConfig;
 use inklog::LogRecord;
 use inklog::LogSink;
+use inklog::chrono::Utc;
+use inklog::config::FileSinkConfig;
 use std::fs;
 use std::path::{Path, PathBuf};
 

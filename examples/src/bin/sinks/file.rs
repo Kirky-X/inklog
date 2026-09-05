@@ -27,11 +27,11 @@
 //! - 轮转日志: `app.log.1`, `app.log.2`, ...
 //! - 压缩日志: `app.log.1.zst`, `app.log.2.zst`, ...
 
+use inklog::LogRecord;
 use inklog::chrono::Utc;
 use inklog::config::FileSinkConfig;
-use inklog::sink::file::FileSink;
 use inklog::sink::LogSink;
-use inklog::LogRecord;
+use inklog::sink::file::FileSink;
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
 use std::fs;
 use std::path::PathBuf;

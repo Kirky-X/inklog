@@ -1,16 +1,24 @@
 [package]
 name = "inklog"
-version = "0.3.0-rc.2"
-edition = "2024"
-rust-version = "1.94"
-authors = ["Kirky.X"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Enterprise-grade Rust logging infrastructure"
-license = "MIT"
-repository = "https://github.com/Kirky-X/inklog"
 
 [workspace]
 resolver = "2"
 members = [".", "examples"]
+
+[workspace.package]
+version = "0.3.0-rc.2"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Kirky.X"]
+license = "MIT"
+repository = "https://github.com/Kirky-X/inklog"
 
 [workspace.dependencies]
 # Shared across workspace crates — all use default-features = false
@@ -35,8 +43,11 @@ features = ["default", "http", "cli", "compression", "parquet"]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-[lints.rust]
+[workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\", \"fast-masking\"))"] }
+
+[lints]
+workspace = true
 
 [features]
 default = []
@@ -138,3 +149,12 @@ harness = false
 name = "inklog-cli"
 path = "src/cli/main.rs"
 required-features = ["cli"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[profile.bench]
+inherits = "release"

@@ -29,17 +29,17 @@ fn main() {
     println!("\n所有配置 inspect 示例展示完毕。");
 }
 
-/// 辅助函数：安全访问 Option<ConsoleSinkConfig>.enabled
+/// 辅助函数：安全访问 `Option<ConsoleSinkConfig>`.enabled
 fn console_enabled(c: &Option<ConsoleSinkConfig>) -> bool {
     c.as_ref().is_some_and(|c| c.enabled)
 }
 
-/// 辅助函数：安全访问 Option<FileSinkConfig>.enabled
+/// 辅助函数：安全访问 `Option<FileSinkConfig>`.enabled
 fn file_enabled(c: &Option<FileSinkConfig>) -> bool {
     c.as_ref().is_some_and(|c| c.enabled)
 }
 
-/// 辅助函数：安全访问 Option<DatabaseSinkConfig>.enabled
+/// 辅助函数：安全访问 `Option<DatabaseSinkConfig>`.enabled
 fn db_enabled(c: &Option<DatabaseSinkConfig>) -> bool {
     c.as_ref().is_some_and(|c| c.enabled)
 }

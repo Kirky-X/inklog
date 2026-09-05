@@ -20,11 +20,11 @@
 //! - **stderr 分流**：将 ERROR/WARN 级别的日志输出到 stderr
 //! - **数据脱敏**：可选的敏感信息脱敏功能
 
+use inklog::LogRecord;
 use inklog::chrono::Utc;
 use inklog::config::ConsoleSinkConfig;
-use inklog::sink::console::ConsoleSink;
 use inklog::sink::LogSink;
-use inklog::LogRecord;
+use inklog::sink::console::ConsoleSink;
 use inklog_examples::common::{print_section, print_separator};
 
 /// 示例1: 基础控制台输出（无颜色）

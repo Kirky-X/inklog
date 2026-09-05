@@ -55,7 +55,7 @@ pub struct ConsoleSinkConfig {
 
     /// Enable sensitive data masking for console output.
     ///
-    /// Defaults to `true` for security consistency with [`GlobalConfig`].
+    /// Defaults to `true` for security consistency with [`GlobalConfig`](super::GlobalConfig).
     /// When enabled, PII patterns (emails, phone numbers, etc.) are
     /// automatically redacted from console log output.
     #[serde(default = "default_true")]

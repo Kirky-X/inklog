@@ -22,8 +22,8 @@
 //! ```
 
 use inklog::{
-    get_log_record, get_string_buffer, put_log_record, put_string_buffer, LogRecord, ObjectPool,
-    ObjectPoolConfig,
+    LogRecord, ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record,
+    put_string_buffer,
 };
 use inklog_examples::common::{print_section, print_separator};
 
