@@ -186,13 +186,28 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.97.1
 
-      - name: Publish to crates.io
+      - name: Resolve version
+        id: ver
         run: |
-          # 等待 crates.io 索引更新（如果有依赖）
+          VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name=="inklog") | .version')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # 幂等守卫:crates.io 已存在该版本则跳过发布(本地 publish 后推 tag 的场景)
+      - name: Check already published
+        id: published
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" https://crates.io/api/v1/crates/inklog/${{ steps.ver.outputs.version }})
+          echo "crates.io: inklog=$CODE for ${{ steps.ver.outputs.version }}"
+          echo "exists=$([[ "$CODE" == "200" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - name: Publish to crates.io
+        if: steps.published.outputs.exists == 'false'
+        run: |
+          # 等待 crates.io 索引更新(如果有依赖)
           sleep 5
 
           # 发布 workspace 中的所有 crate
-          # 如果有多个 crate，按依赖顺序发布
+          # 如果有多个 crate,按依赖顺序发布
           cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
