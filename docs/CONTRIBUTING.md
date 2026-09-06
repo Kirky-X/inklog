@@ -104,9 +104,9 @@ git push origin feature/your-feature
 
 | 要求 | 最低版本 | 推荐版本 |
 |------|---------|---------|
-| Rust | 1.94 | 最新稳定版 |
+| Rust | 1.97.1 | 最新稳定版 |
 | Git | 2.0 | 最新版 |
-| Cargo | 1.94 | 最新稳定版 |
+| Cargo | 1.97.1 | 最新稳定版 |
 | 内存 | 4GB | 8GB+ |
 | 磁盘 | 2GB | 5GB+ |
 
@@ -121,10 +121,10 @@ cargo --version
 rustup update stable
 
 # 安装特定版本
-rustup install 1.94
+rustup install 1.97.1
 
 # 设置默认版本
-rustup default 1.94
+rustup default 1.97.1
 
 # 查看已安装版本
 rustup toolchain list

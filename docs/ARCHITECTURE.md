@@ -123,7 +123,9 @@ LoggerBuilder::new()
     .database("postgres://localhost/logs")
     .channel_capacity(5000)
     .worker_threads(4)
-    .http_server("0.0.0.0", 9090)
+    .enable_http_server(true)
+    .http_host("0.0.0.0")
+    .http_port(9090)
     .build()
     .await?
 ```

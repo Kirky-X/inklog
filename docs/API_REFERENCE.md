@@ -610,18 +610,17 @@ let builder = LoggerBuilder::new()
 
 ---
 
-##### `http_server`
+##### `enable_http_server`
 
-配置 HTTP 服务器。
+启用内置 HTTP 服务器（指标/健康检查端点）。
 
 **签名**
 ```rust
-pub fn http_server(mut self, host: impl Into<String>, port: u16) -> Self
+pub fn enable_http_server(mut self, enabled: bool) -> Self
 ```
 
 **参数**
-- `host` - 监听主机地址
-- `port` - 监听端口
+- `enabled` - 是否启用 HTTP 服务器
 
 **返回值**
 - `Self` - 构建器链
@@ -629,7 +628,9 @@ pub fn http_server(mut self, host: impl Into<String>, port: u16) -> Self
 **示例**
 ```rust
 let builder = LoggerBuilder::new()
-    .http_server("0.0.0.0", 8080);
+    .enable_http_server(true)
+    .http_host("0.0.0.0")
+    .http_port(8080);
 ```
 
 ---
