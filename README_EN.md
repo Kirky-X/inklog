@@ -954,9 +954,9 @@ See [CHANGELOG](docs/CHANGELOG.md) for the complete change record.
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the MIT + Commons Clause License. Commercial use requires separate authorization. See [LICENSE](LICENSE).
 
-MIT License, Copyright (c) 2026 Kirky.X
+MIT + Commons Clause License, Copyright (c) 2026 Kirky.X🌠
 
 ---
 

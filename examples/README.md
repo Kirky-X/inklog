@@ -84,4 +84,4 @@
 
 ## 许可证
 
-MIT License — 参见项目根目录 [LICENSE](../LICENSE) 文件。
+MIT + Commons Clause 许可证 — 商业使用需单独授权，参见项目根目录 [LICENSE](../LICENSE) 文件。
