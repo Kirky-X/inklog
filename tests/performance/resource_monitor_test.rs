@@ -16,7 +16,6 @@ mod tests {
                     .split(':')
                     .nth(1)
                     .unwrap_or("0")
-                    .trim()
                     .split_whitespace()
                     .next()
                     .unwrap_or("0")
@@ -67,7 +66,7 @@ mod tests {
             tracing::info!("CPU测试日志 #{}", log_count);
             log_count += 1;
 
-            if log_count % 50 == 0 {
+            if log_count.is_multiple_of(50) {
                 let cpu = get_cpu_usage_percent();
                 cpu_samples.push(cpu);
                 println!("CPU使用率: {:.2}%", cpu);
@@ -85,7 +84,10 @@ mod tests {
         println!("测试完成");
         println!("总日志数: {}", log_count);
         println!("平均CPU使用率: {:.2}%", avg_cpu);
-        println!("最大CPU使用率: {:.2}%", cpu_samples.iter().cloned().fold(0.0, f64::max));
+        println!(
+            "最大CPU使用率: {:.2}%",
+            cpu_samples.iter().cloned().fold(0.0, f64::max)
+        );
 
         assert!(
             avg_cpu < max_cpu_percent,
@@ -95,7 +97,12 @@ mod tests {
         );
     }
 
+    // 核正：进程级 RSS 阈值断言（VmRSS 为整个测试进程的常驻内存）在 cargo test
+    // 并发执行下不可靠——并发用例的内存占用均计入采样，与被测行为无关。与
+    // long_running_test.rs 的 ignored manual 口径一致，改为手动运行：
+    // cargo test -p inklog --test performance resource_monitor -- --ignored
     #[tokio::test]
+    #[ignore = "manual"]
     async fn test_memory_usage_under_normal_load() {
         let max_memory_mb: f64 = std::env::var("MAX_MEMORY_MB")
             .map(|m| m.parse().unwrap_or(30.0))
@@ -117,7 +124,7 @@ mod tests {
             tracing::info!("内存测试日志 #{} - 数据: {}", log_count, "x".repeat(100));
             log_count += 1;
 
-            if log_count % 50 == 0 {
+            if log_count.is_multiple_of(50) {
                 let mem = get_memory_usage_mb();
                 memory_samples.push(mem);
                 println!("内存使用: {:.2} MB", mem);

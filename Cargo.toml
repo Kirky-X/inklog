@@ -141,6 +141,41 @@ ctor = "1.0.13"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["fs"] }
 
+# ============================================================================
+# 测试目标显式注册（阶段 2 验收）
+# ============================================================================
+# tests/integration、tests/combinations、tests/performance 深目录聚合此前无
+# 编译入口（Cargo 仅自动发现顶层 *.rs 与 */main.rs），从未被 cargo test
+# 编译运行；此般注册复活。e2e_advanced 迁入 tests/e2e/ 目录承载
+# （e2e_* 不得裸放顶层），迁移后必须显式注册。
+[[test]]
+name = "e2e_advanced"
+path = "tests/e2e/e2e_advanced.rs"
+# 19 个模块中仅 compression_e2e 有 #[cfg(feature = "compression")] 门，
+# 其余用默认 feature API，无需 required-features，任意组合可编译运行
+
+[[test]]
+name = "integration"
+path = "tests/integration/mod.rs"
+# 子目录 API 需求：DatabaseSink 用例（batch/verification/comprehensive/additional）
+# 需 db 驱动；batch/verification/additional 经 MockDatabaseAdapter（DI）验证写入落库，
+# 需 test-utils；http/ 子目录需 http；cli/ 用 inklog-cli 二进制需 cli；
+# compression_ratio/ 需 compression；parquet/ 直用 arrow（仅 parquet feature
+# 启用时对测试目标可见，dev-deps 无 arrow）
+required-features = ["sqlite", "http", "cli", "compression", "parquet", "test-utils"]
+
+[[test]]
+name = "combinations"
+path = "tests/combinations/mod.rs"
+# complex_features/multi_sink_fallback 使用 DatabaseSink（db 后端需求）；
+# 加密/掩码为默认 feature API
+required-features = ["sqlite"]
+
+[[test]]
+name = "performance"
+path = "tests/performance/mod.rs"
+# 全部为默认 feature API；long_running_test 内 #[ignore = "manual"] 手动跑
+
 [[bench]]
 name = "inklog_bench"
 harness = false

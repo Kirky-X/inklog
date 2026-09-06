@@ -14,10 +14,12 @@ use std::time::Instant;
 // ============ Test Data Helper Functions ============
 
 /// Creates test log data with specified count
-fn create_test_logs(count: usize) -> Vec<inklog::sink::database::Model> {
+///
+/// 核正：convert_logs_to_parquet 现接收 `&[LogRecord]`（id 由转换器按序号生成），
+/// 原构造 sea_orm Model 的方式随 DI 重构一并淘汰。
+fn create_test_logs(count: usize) -> Vec<inklog::LogRecord> {
     (0..count)
-        .map(|i| inklog::sink::database::Model {
-            id: i as i64,
+        .map(|i| inklog::LogRecord {
             timestamp: chrono::Utc::now(),
             level: match i % 5 {
                 0 => "trace".to_string(),
@@ -28,13 +30,18 @@ fn create_test_logs(count: usize) -> Vec<inklog::sink::database::Model> {
             },
             target: format!("test_module::function_{}", i % 10),
             message: format!("Test log message number {}", i),
-            fields: Some(serde_json::json!({
-                "user_id": i,
-                "request_id": format!("req-{:010x}", i),
-                "duration_ms": i * 10,
-            })),
+            fields: {
+                let mut fields = std::collections::HashMap::new();
+                fields.insert("user_id".to_string(), serde_json::json!(i));
+                fields.insert(
+                    "request_id".to_string(),
+                    serde_json::json!(format!("req-{:010x}", i)),
+                );
+                fields.insert("duration_ms".to_string(), serde_json::json!(i * 10));
+                fields
+            },
             file: Some(format!("src/test_{}.rs", i % 5)),
-            line: Some((i % 100) as i32),
+            line: Some((i % 100) as u32),
             thread_id: format!("thread-{}", i % 4),
         })
         .collect()
@@ -56,16 +63,18 @@ const EXPECTED_FIELD_NAMES: &[&str] = &[
 ];
 
 /// Expected schema field types
+///
+/// 核正：timestamp 序列化为 Date64（毫秒）、line 为 Int32（与实现一致）
 const EXPECTED_FIELD_TYPES: &[DataType] = &[
-    DataType::Int64, // id
-    DataType::Utf8,  // timestamp
-    DataType::Utf8,  // level
-    DataType::Utf8,  // target
-    DataType::Utf8,  // message
-    DataType::Utf8,  // fields
-    DataType::Utf8,  // file
-    DataType::Int64, // line
-    DataType::Utf8,  // thread_id
+    DataType::Int64,  // id（转换器按序号生成）
+    DataType::Date64, // timestamp（毫秒）
+    DataType::Utf8,   // level
+    DataType::Utf8,   // target
+    DataType::Utf8,   // message
+    DataType::Utf8,   // fields（JSON 序列化）
+    DataType::Utf8,   // file
+    DataType::Int32,  // line
+    DataType::Utf8,   // thread_id
 ];
 
 /// Verifies Parquet file schema (names and types)
@@ -228,7 +237,7 @@ fn test_parquet_compression_ratio() {
 
 #[test]
 fn test_parquet_empty_dataset() {
-    let logs: Vec<inklog::sink::database::Model> = vec![];
+    let logs: Vec<inklog::LogRecord> = vec![];
     let result = convert_logs_to_parquet(&logs, &Default::default());
 
     let parquet_data = result.expect("Parquet conversion should succeed for empty dataset");

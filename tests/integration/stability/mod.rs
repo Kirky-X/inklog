@@ -4,4 +4,4 @@
 //!
 //! 测试系统长时间运行的稳定性
 
-mod stability;
+mod long_running;

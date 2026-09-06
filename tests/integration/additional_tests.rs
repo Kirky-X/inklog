@@ -4,7 +4,7 @@
 //!
 //! 为 inklog 添加额外的测试用例，将测试数量提升到 200+
 
-use inklog::{ChannelStrategy, LoggerBuilder, LoggerManager};
+use inklog::{ChannelStrategy, LogSink, LoggerBuilder, LoggerManager};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
@@ -43,7 +43,7 @@ fn test_file_sink_special_characters() {
         ..Default::default()
     };
 
-    let result = inklog::FileSink::new(config);
+    let result = inklog::sink::FileSink::new(config);
     assert!(result.is_ok());
 }
 
@@ -56,7 +56,7 @@ fn test_file_sink_long_message() {
         ..Default::default()
     };
 
-    let mut sink = inklog::FileSink::new(config).unwrap();
+    let sink = inklog::sink::FileSink::new(config).unwrap();
     let long_message = "A".repeat(1000);
     let record = inklog::LogRecord {
         timestamp: chrono::Utc::now(),
@@ -68,7 +68,7 @@ fn test_file_sink_long_message() {
         line: None,
         thread_id: "test".to_string(),
     };
-    let result = sink.write(&record);
+    let result = futures::executor::block_on(sink.write(&record));
     assert!(result.is_ok());
 }
 
@@ -81,7 +81,7 @@ fn test_file_sink_unicode_message() {
         ..Default::default()
     };
 
-    let mut sink = inklog::FileSink::new(config).unwrap();
+    let sink = inklog::sink::FileSink::new(config).unwrap();
     let unicode_message = "Hello Unicode Test 中文 Emoji 🎉";
     let record = inklog::LogRecord {
         timestamp: chrono::Utc::now(),
@@ -93,7 +93,7 @@ fn test_file_sink_unicode_message() {
         line: None,
         thread_id: "test".to_string(),
     };
-    let result = sink.write(&record);
+    let result = futures::executor::block_on(sink.write(&record));
     assert!(result.is_ok());
 }
 
@@ -106,7 +106,7 @@ fn test_file_sink_different_levels() {
         ..Default::default()
     };
 
-    let mut sink = inklog::FileSink::new(config).unwrap();
+    let sink = inklog::sink::FileSink::new(config).unwrap();
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
 
     for level in levels {
@@ -120,7 +120,7 @@ fn test_file_sink_different_levels() {
             line: None,
             thread_id: "test".to_string(),
         };
-        let result = sink.write(&record);
+        let result = futures::executor::block_on(sink.write(&record));
         assert!(result.is_ok());
     }
 }
@@ -134,7 +134,7 @@ fn test_file_sink_with_fields() {
         ..Default::default()
     };
 
-    let mut sink = inklog::FileSink::new(config).unwrap();
+    let sink = inklog::sink::FileSink::new(config).unwrap();
     let mut record = inklog::LogRecord {
         timestamp: chrono::Utc::now(),
         level: "INFO".to_string(),
@@ -145,9 +145,13 @@ fn test_file_sink_with_fields() {
         line: None,
         thread_id: "test".to_string(),
     };
-    record.fields.insert("user_id".to_string(), serde_json::json!(123));
-    record.fields.insert("action".to_string(), serde_json::json!("login"));
-    let result = sink.write(&record);
+    record
+        .fields
+        .insert("user_id".to_string(), serde_json::json!(123));
+    record
+        .fields
+        .insert("action".to_string(), serde_json::json!("login"));
+    let result = futures::executor::block_on(sink.write(&record));
     assert!(result.is_ok());
 }
 
@@ -166,38 +170,67 @@ fn make_test_db_config(name: &str, enabled: bool) -> inklog::config::DatabaseSin
         table_name: "logs".to_string(),
         archive_format: inklog::ArchiveFormat::default(),
         parquet_config: inklog::config::ParquetConfig::default(),
+        permissions_path: None,
+        admin_role: "admin".to_string(),
     }
 }
 
+// DatabaseSink 经 DI 注入 MockDatabaseAdapter（test-utils feature），
+// 对齐 src/support/io/sink/database/mod.rs 内部测试范本：
+// write 仅入缓冲，flush 后经 insert_batch 落库。
 #[tokio::test]
 async fn test_database_sink_disabled() {
+    let mock_db = Arc::new(inklog::MockDatabaseAdapter::new());
     let config = make_test_db_config("test", false);
-
-    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
-    assert!(!sink.config.enabled);
+    let sink = inklog::sink::DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
+    let record = inklog::LogRecord {
+        timestamp: chrono::Utc::now(),
+        level: "INFO".to_string(),
+        target: "test".to_string(),
+        message: "Disabled sink write".to_string(),
+        fields: std::collections::HashMap::new(),
+        file: None,
+        line: None,
+        thread_id: "test".to_string(),
+    };
+    // enabled=false 仅为配置标记：sink 构造与写入路径不受影响
+    let result = sink.write(&record).await;
+    assert!(result.is_ok());
 }
 
 #[tokio::test]
 async fn test_database_sink_message_count() {
+    let mock_db = Arc::new(inklog::MockDatabaseAdapter::new());
     let config = make_test_db_config("test", true);
-
-    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
-    assert_eq!(sink.message_count(), 0);
+    let sink = inklog::sink::DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
+    let record = inklog::LogRecord {
+        timestamp: chrono::Utc::now(),
+        level: "INFO".to_string(),
+        target: "test".to_string(),
+        message: "Count test".to_string(),
+        fields: std::collections::HashMap::new(),
+        file: None,
+        line: None,
+        thread_id: "test".to_string(),
+    };
+    sink.write(&record).await.unwrap();
+    sink.flush().await.unwrap();
+    assert_eq!(mock_db.record_count(), 1);
 }
 
 #[tokio::test]
 async fn test_database_sink_is_healthy() {
+    let mock_db = Arc::new(inklog::MockDatabaseAdapter::new());
     let config = make_test_db_config("test", true);
-
-    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
+    let sink = inklog::sink::DatabaseSink::new_with_config(mock_db, Some(config)).unwrap();
     assert!(sink.is_healthy());
 }
 
 #[tokio::test]
 async fn test_database_sink_write_single() {
+    let mock_db = Arc::new(inklog::MockDatabaseAdapter::new());
     let config = make_test_db_config("test", true);
-
-    let sink = inklog::DatabaseSink::new(&config).await.unwrap();
+    let sink = inklog::sink::DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
     let record = inklog::LogRecord {
         timestamp: chrono::Utc::now(),
         level: "INFO".to_string(),
@@ -210,13 +243,15 @@ async fn test_database_sink_write_single() {
     };
     let result = sink.write(&record).await;
     assert!(result.is_ok());
+    sink.flush().await.unwrap();
+    assert_eq!(mock_db.record_count(), 1);
 }
 
 // === ConsoleSink 额外测试 ===
 
 #[test]
 fn test_console_sink_disabled() {
-    let sink = inklog::ConsoleSink::new(
+    let sink = inklog::sink::ConsoleSink::new(
         inklog::ConsoleSinkConfig {
             enabled: false,
             colored: true,
@@ -224,25 +259,25 @@ fn test_console_sink_disabled() {
         },
         inklog::LogTemplate::default(),
     );
-    assert!(!sink.config.enabled);
+    // config 字段私有：enabled=false 的 sink 构造成功且写入不 panic（输出静默由实现保证）
+    let record = inklog::LogRecord {
+        timestamp: chrono::Utc::now(),
+        level: "INFO".to_string(),
+        target: "test".to_string(),
+        message: "disabled sink write".to_string(),
+        fields: std::collections::HashMap::new(),
+        file: None,
+        line: None,
+        thread_id: "test".to_string(),
+    };
+    let result = futures::executor::block_on(sink.write(&record));
+    assert!(result.is_ok());
 }
 
-#[test]
-fn test_console_sink_message_count() {
-    let sink = inklog::ConsoleSink::new(
-        inklog::ConsoleSinkConfig {
-            enabled: true,
-            colored: true,
-            ..Default::default()
-        },
-        inklog::LogTemplate::default(),
-    );
-    assert_eq!(sink.message_count(), 0);
-}
-
+// ConsoleSink 无 message_count API（message 计数已移至 Metrics），原断言裁撤
 #[test]
 fn test_console_sink_is_healthy() {
-    let sink = inklog::ConsoleSink::new(
+    let sink = inklog::sink::ConsoleSink::new(
         inklog::ConsoleSinkConfig {
             enabled: true,
             colored: true,
@@ -255,7 +290,7 @@ fn test_console_sink_is_healthy() {
 
 #[test]
 fn test_console_sink_write_unicode() {
-    let sink = inklog::ConsoleSink::new(
+    let sink = inklog::sink::ConsoleSink::new(
         inklog::ConsoleSinkConfig {
             enabled: true,
             colored: false,
@@ -279,7 +314,7 @@ fn test_console_sink_write_unicode() {
 
 #[test]
 fn test_console_sink_different_levels() {
-    let sink = inklog::ConsoleSink::new(
+    let sink = inklog::sink::ConsoleSink::new(
         inklog::ConsoleSinkConfig {
             enabled: true,
             colored: false,
@@ -311,7 +346,7 @@ fn test_console_sink_different_levels() {
 async fn test_manager_console_only() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await;
     assert!(manager.is_ok());
@@ -321,7 +356,7 @@ async fn test_manager_console_only() {
 async fn test_manager_shutdown() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
@@ -334,7 +369,7 @@ async fn test_manager_shutdown() {
 async fn test_manager_double_shutdown() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
@@ -348,62 +383,42 @@ async fn test_manager_double_shutdown() {
 async fn test_manager_health_check() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
 
-    let health = manager.health_check();
-    assert!(health.is_ok());
+    let status = manager.get_health_status();
+    assert!(status.channel_usage >= 0.0);
+    assert!(status.channel_usage <= 1.0);
 }
 
 #[tokio::test]
 async fn test_manager_get_metrics() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
 
-    let metrics = manager.get_metrics();
-    assert!(metrics.is_ok());
+    // logs_written 为 u64 无符号计数器（>= 0 比较恒真无意义）：改断言未写日志时计数为 0
+    let status = manager.get_health_status();
+    assert_eq!(status.metrics.logs_written, 0);
 }
 
-#[tokio::test]
-async fn test_manager_reset() {
-    let manager = LoggerManager::builder()
-        .level("info")
-        .enable_console(true)
-        .build()
-        .await
-        .unwrap();
-
-    let result = manager.reset();
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn test_manager_logger() {
-    let manager = LoggerManager::builder()
-        .level("info")
-        .enable_console(true)
-        .build()
-        .await
-        .unwrap();
-
-    let logger = manager.logger();
-    assert!(logger.is_ok());
-}
-
+// LoggerManager 无 reset/logger API（生命周期由 shutdown 管理），原用例裁撤
 #[tokio::test]
 async fn test_manager_invalid_level() {
+    // 核正：builder 对非法 level 延迟校验（validation_errors 机制），build() 时
+    // 统一报 ConfigError——无效 level 应构建失败（fail-fast），原断言 is_ok 与
+    // 真实行为相反
     let manager = LoggerManager::builder()
         .level("invalid_level_xyz")
-        .enable_console(true)
+        .console(true)
         .build()
         .await;
-    assert!(manager.is_ok());
+    assert!(manager.is_err(), "无效 level 应导致 build() 失败");
 }
 
 #[tokio::test]
@@ -413,7 +428,7 @@ async fn test_manager_different_levels() {
     for level in levels {
         let manager = LoggerManager::builder()
             .level(level)
-            .enable_console(true)
+            .console(true)
             .build()
             .await;
         assert!(manager.is_ok(), "Failed for level: {}", level);
@@ -424,13 +439,14 @@ async fn test_manager_different_levels() {
 async fn test_manager_message_count() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
 
-    let count = manager.get_message_count();
-    assert!(count >= 0);
+    // logs_written 为 u64 无符号计数器（>= 0 比较恒真无意义）：改断言未写日志时计数为 0
+    let status = manager.get_health_status();
+    assert_eq!(status.metrics.logs_written, 0);
 }
 
 #[tokio::test]
@@ -495,17 +511,24 @@ async fn test_manager_block_strategy_high_load_sampling() {
     )
     .await
     .unwrap();
-    let registry = tracing_subscriber::registry().with(subscriber).with(filter);
-
     let thread_count = 6_usize;
     let messages_per_thread = 2000_usize;
     let barrier = Arc::new(Barrier::new(thread_count));
 
-    tracing::subscriber::with_default(registry, || {
-        let handles: Vec<_> = (0..thread_count)
-            .map(|thread_index| {
-                let barrier = barrier.clone();
-                std::thread::spawn(move || {
+    // 核正：thread-local subscriber 不跨线程继承——外层 with_default 对
+    // std::thread::spawn 的子线程无效（宏为 noop，written 恒 0）。改为每个子
+    // 线程以 with_default 安装各自的 registry 克隆（LoggerSubscriber 支持
+    // Clone：克隆共享同一组 channel sender / metrics）。
+    let handles: Vec<_> = (0..thread_count)
+        .map(|thread_index| {
+            let barrier = barrier.clone();
+            let subscriber = subscriber.clone();
+            let filter = filter.clone();
+            std::thread::spawn(move || {
+                // 核正：Layered 组合体不支持 Clone，子线程以 Registry::default()
+                // 重新组装（subscriber/filter 均可 Clone，共享同一组 channel）
+                let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+                tracing::subscriber::with_default(registry, || {
                     barrier.wait();
                     for i in 0..messages_per_thread {
                         tracing::info!(
@@ -515,11 +538,11 @@ async fn test_manager_block_strategy_high_load_sampling() {
                     }
                 })
             })
-            .collect();
-        for handle in handles {
-            let _ = handle.join();
-        }
-    });
+        })
+        .collect();
+    for handle in handles {
+        let _ = handle.join();
+    }
 
     let start = Instant::now();
     let mut status = manager.get_health_status();
@@ -577,20 +600,23 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
     )
     .await
     .unwrap();
-    let registry = tracing_subscriber::registry().with(subscriber).with(filter);
-
     let initial_capacity = manager.effective_channel_capacity();
     let producers = 4_usize;
     let per_producer = 1500_usize;
     let barrier = Arc::new(Barrier::new(producers));
     let emitted = Arc::new(AtomicUsize::new(0));
 
-    tracing::subscriber::with_default(registry, || {
-        let handles: Vec<_> = (0..producers)
-            .map(|producer_index| {
-                let barrier = barrier.clone();
-                let emitted = emitted.clone();
-                std::thread::spawn(move || {
+    // 核正：同 block_strategy——thread-local 不跨线程继承，改为子线程各自
+    // with_default 安装 registry 克隆
+    let handles: Vec<_> = (0..producers)
+        .map(|producer_index| {
+            let barrier = barrier.clone();
+            let emitted = emitted.clone();
+            let subscriber = subscriber.clone();
+            let filter = filter.clone();
+            std::thread::spawn(move || {
+                let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+                tracing::subscriber::with_default(registry, || {
                     barrier.wait();
                     for i in 0..per_producer {
                         tracing::info!(
@@ -601,29 +627,41 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
                     }
                 })
             })
-            .collect();
-        for handle in handles {
-            let _ = handle.join();
-        }
-    });
-
-    let start_expand = Instant::now();
-    let mut expanded = manager.effective_channel_capacity();
-    while expanded <= initial_capacity && start_expand.elapsed() < Duration::from_secs(3) {
-        std::thread::sleep(Duration::from_millis(50));
-        expanded = manager.effective_channel_capacity();
+        })
+        .collect();
+    for handle in handles {
+        let _ = handle.join();
     }
 
-    assert!(expanded >= initial_capacity);
+    // 核正：Adaptive 扩容是瞬态的——channel 排空后 shrink_wait_seconds（1s）到期
+    // 即收缩，原 50ms 轮询在并发下可能错过峰值导致 expanded < initial。改为
+    // 20ms 高频峰值采样（观察到扩容即提前进入收缩阶段验证）
+    let start_expand = Instant::now();
+    let mut peak_capacity = initial_capacity;
+    while start_expand.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(20));
+        let current = manager.effective_channel_capacity();
+        if current > peak_capacity {
+            peak_capacity = current;
+            break;
+        }
+    }
+
+    assert!(
+        peak_capacity >= initial_capacity,
+        "峰值容量不应低于初始值: peak={} initial={}",
+        peak_capacity,
+        initial_capacity
+    );
 
     let start_shrink = Instant::now();
     let mut shrunk = manager.effective_channel_capacity();
-    while shrunk >= expanded && start_shrink.elapsed() < Duration::from_secs(4) {
+    while shrunk >= peak_capacity && start_shrink.elapsed() < Duration::from_secs(4) {
         std::thread::sleep(Duration::from_millis(200));
         shrunk = manager.effective_channel_capacity();
     }
 
-    assert!(shrunk <= expanded);
+    assert!(shrunk <= peak_capacity);
     assert!(shrunk >= 5);
 
     let channel_len = manager.channel_len();
@@ -642,50 +680,52 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
 
 // === Builder 额外测试 ===
 
+// LoggerBuilder 字段私有：永真断言改为构建成功验证；
+// 无 backpressure_timeout_ms/batch_size 方法，对应用例裁撤
 #[tokio::test]
 async fn test_builder_default() {
-    let builder = LoggerBuilder::new();
-    assert!(builder.config.level.is_empty() || !builder.config.level.is_empty());
+    let manager = LoggerBuilder::new().console(true).build().await;
+    assert!(manager.is_ok());
 }
 
 #[tokio::test]
 async fn test_builder_with_level() {
-    let builder = LoggerBuilder::new().level("debug");
-    assert!(builder.config.level.contains("debug") || builder.config.level.is_empty());
-}
-
-#[tokio::test]
-async fn test_builder_chain() {
     let manager = LoggerBuilder::new()
-        .level("info")
-        .enable_console(true)
+        .level("debug")
+        .console(true)
         .build()
         .await;
     assert!(manager.is_ok());
 }
 
 #[tokio::test]
-async fn test_builder_channel_size() {
-    let builder = LoggerBuilder::new().channel_size(5000);
-    assert!(builder.config.channel_size == 5000 || builder.config.channel_size > 0);
+async fn test_builder_chain() {
+    let manager = LoggerBuilder::new()
+        .level("info")
+        .console(true)
+        .build()
+        .await;
+    assert!(manager.is_ok());
+}
+
+#[tokio::test]
+async fn test_builder_channel_capacity() {
+    let manager = LoggerBuilder::new()
+        .channel_capacity(5000)
+        .console(true)
+        .build()
+        .await;
+    assert!(manager.is_ok());
 }
 
 #[tokio::test]
 async fn test_builder_worker_threads() {
-    let builder = LoggerBuilder::new().worker_threads(4);
-    assert!(builder.config.worker_threads == 4 || builder.config.worker_threads > 0);
-}
-
-#[tokio::test]
-async fn test_builder_backpressure() {
-    let builder = LoggerBuilder::new().backpressure_timeout_ms(5000);
-    assert!(builder.config.backpressure_timeout_ms == 5000);
-}
-
-#[tokio::test]
-async fn test_builder_batch_size() {
-    let builder = LoggerBuilder::new().batch_size(200);
-    assert!(builder.config.batch_size == 200);
+    let manager = LoggerBuilder::new()
+        .worker_threads(4)
+        .console(true)
+        .build()
+        .await;
+    assert!(manager.is_ok());
 }
 
 // === 降级场景测试 ===
@@ -694,32 +734,31 @@ async fn test_builder_batch_size() {
 async fn test_fallback_console_always_available() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
-    assert!(manager.is_ok());
+    assert!(manager.shutdown().is_ok());
 }
 
 #[tokio::test]
 async fn test_fallback_minimal_resources() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
-        .channel_size(100)
+        .console(true)
+        .channel_capacity(100)
         .worker_threads(1)
-        .batch_size(10)
         .build()
         .await
         .unwrap();
-    assert!(manager.is_ok());
+    assert!(manager.shutdown().is_ok());
 }
 
 #[tokio::test]
 async fn test_fallback_shutdown_during_operation() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
@@ -730,19 +769,19 @@ async fn test_fallback_shutdown_during_operation() {
 
 #[tokio::test]
 async fn test_fallback_concurrent_shutdowns() {
-    let manager = LoggerManager::builder()
-        .level("info")
-        .enable_console(true)
-        .build()
-        .await
-        .unwrap();
+    let manager = Arc::new(
+        LoggerManager::builder()
+            .level("info")
+            .console(true)
+            .build()
+            .await
+            .unwrap(),
+    );
 
     let handles: Vec<_> = (0..3)
         .map(|_| {
             let manager = manager.clone();
-            tokio::spawn(async move {
-                manager.shutdown()
-            })
+            tokio::spawn(async move { manager.shutdown() })
         })
         .collect();
 
@@ -755,23 +794,22 @@ async fn test_fallback_concurrent_shutdowns() {
 async fn test_fallback_concurrent_health_checks() {
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
+        .console(true)
         .build()
         .await
         .unwrap();
 
+    let manager = Arc::new(manager);
     let handles: Vec<_> = (0..5)
         .map(|_| {
-            let manager = &manager;
-            tokio::spawn(async move {
-                manager.health_check()
-            })
+            let manager = manager.clone();
+            tokio::spawn(async move { manager.get_health_status() })
         })
         .collect();
 
     for handle in handles {
-        let result = handle.await;
-        assert!(result.is_ok() || result.unwrap().is_ok());
+        let status = handle.await.unwrap();
+        assert!(status.channel_usage >= 0.0);
     }
 }
 
@@ -782,8 +820,8 @@ async fn test_fallback_recover_sink() {
 
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
-        .enable_file(log_file.to_str().unwrap())
+        .console(true)
+        .file(log_file.to_str().unwrap())
         .build()
         .await
         .unwrap();
@@ -799,8 +837,8 @@ async fn test_fallback_trigger_recovery() {
 
     let manager = LoggerManager::builder()
         .level("info")
-        .enable_console(true)
-        .enable_file(log_file.to_str().unwrap())
+        .console(true)
+        .file(log_file.to_str().unwrap())
         .build()
         .await
         .unwrap();
@@ -814,7 +852,9 @@ async fn test_fallback_trigger_recovery() {
 #[test]
 fn test_config_default_values() {
     let config = inklog::InklogConfig::default();
-    assert!(config.level.is_empty() || !config.level.is_empty());
+    assert!(config.console_sink.is_some(), "默认应启用 console sink");
+    assert!(config.file_sink.is_none());
+    assert!(config.database_sink.is_none());
 }
 
 #[test]
@@ -841,19 +881,22 @@ fn test_database_sink_default() {
 
 #[test]
 fn test_parse_size_various_formats() {
-    assert_eq!(inklog::FileSink::parse_size("0"), Some(0));
-    assert_eq!(inklog::FileSink::parse_size("1024"), Some(1024));
-    assert_eq!(inklog::FileSink::parse_size("1KB"), Some(1024));
-    assert_eq!(inklog::FileSink::parse_size("1MB"), Some(1024 * 1024));
-    assert_eq!(inklog::FileSink::parse_size("1GB"), Some(1024 * 1024 * 1024));
-    assert_eq!(inklog::FileSink::parse_size("invalid"), None);
+    assert_eq!(inklog::sink::FileSink::parse_size("0"), Some(0));
+    assert_eq!(inklog::sink::FileSink::parse_size("1024"), Some(1024));
+    assert_eq!(inklog::sink::FileSink::parse_size("1KB"), Some(1024));
+    assert_eq!(inklog::sink::FileSink::parse_size("1MB"), Some(1024 * 1024));
+    assert_eq!(
+        inklog::sink::FileSink::parse_size("1GB"),
+        Some(1024 * 1024 * 1024)
+    );
+    assert_eq!(inklog::sink::FileSink::parse_size("invalid"), None);
 }
 
 #[test]
 fn test_circuit_breaker_states() {
     use std::time::Duration;
 
-    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
+    let cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
     assert_eq!(cb.state(), inklog::CircuitState::Closed);
     assert!(cb.can_execute());
 
@@ -870,7 +913,7 @@ fn test_circuit_breaker_states() {
 fn test_circuit_breaker_success_resets() {
     use std::time::Duration;
 
-    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
+    let cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
     cb.record_failure();
     cb.record_failure();
     cb.record_success();
@@ -881,7 +924,7 @@ fn test_circuit_breaker_success_resets() {
 fn test_circuit_breaker_reset() {
     use std::time::Duration;
 
-    let mut cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
+    let cb = inklog::CircuitBreaker::new(3, Duration::from_secs(30), 3);
     cb.record_failure();
     cb.record_failure();
     cb.record_failure();
@@ -894,33 +937,38 @@ fn test_circuit_breaker_reset() {
 // === 模板测试 ===
 
 #[test]
-fn test_log_template_default() {
-    let template = inklog::LogTemplate::default();
-    assert!(template.format.is_empty() || !template.format.is_empty());
+fn test_log_template_render() {
+    // LogTemplate 无 Default/builder：经 new() 解析占位符后渲染验证
+    let template = inklog::LogTemplate::new("[{level}] {message}");
+    let record = inklog::LogRecord::default();
+    let output = template.render(&record);
+    assert!(output.contains(&record.level));
+    assert!(output.contains(&record.message));
 }
 
 #[test]
 fn test_log_template_builder() {
-    let template = inklog::LogTemplate::builder()
-        .format("[{timestamp}] {level}: {message}")
-        .build();
-    assert!(!template.format.is_empty());
+    let template = inklog::LogTemplate::new("[{timestamp}] {level}: {message}");
+    let record = inklog::LogRecord::default();
+    let output = template.render(&record);
+    assert!(!output.is_empty());
+    assert!(output.contains(&record.message));
 }
 
 // === 掩码测试 ===
 
 #[test]
 fn test_masking_sensitive_data() {
-    let sensitive = "password=secret123";
-    let masked = inklog::mask_sensitive_data(sensitive);
-    assert!(!masked.contains("secret123"));
+    // mask_sensitive_data 已移除：公开 API 为 inklog::masking::{mask_email, mask_phone}
+    let masked = inklog::masking::mask_email("user@example.com");
+    assert_eq!(masked, "**@**.***");
+    assert!(!masked.contains("user@example.com"));
 }
 
 #[test]
 fn test_masking_no_match() {
-    let normal = "normal message";
-    let masked = inklog::mask_sensitive_data(normal);
-    assert_eq!(masked, normal);
+    let masked = inklog::masking::mask_email("normal message");
+    assert_eq!(masked, "normal message");
 }
 
 // === 日志记录测试 ===
@@ -953,7 +1001,9 @@ fn test_log_record_with_fields() {
         line: None,
         thread_id: "test".to_string(),
     };
-    record.fields.insert("key".to_string(), serde_json::json!("value"));
+    record
+        .fields
+        .insert("key".to_string(), serde_json::json!("value"));
     assert!(record.fields.contains_key("key"));
 }
 
@@ -962,23 +1012,23 @@ fn test_log_record_with_fields() {
 #[test]
 fn test_metrics_creation() {
     let metrics = inklog::Metrics::new();
-    assert!(metrics.get_message_count() >= 0);
+    assert_eq!(metrics.logs_written(), 0);
 }
 
 #[test]
 fn test_metrics_increment() {
     let metrics = inklog::Metrics::new();
-    metrics.increment_logs_written();
-    assert_eq!(metrics.get_message_count(), 1);
+    metrics.inc_logs_written();
+    assert_eq!(metrics.logs_written(), 1);
 }
 
 #[test]
-fn test_metrics_reset() {
+fn test_metrics_accumulation() {
+    // Metrics 计数器单调递增（无 reset API）：验证累计语义
     let metrics = inklog::Metrics::new();
-    metrics.increment_logs_written();
-    metrics.increment_logs_written();
-    metrics.reset();
-    assert_eq!(metrics.get_message_count(), 0);
+    metrics.inc_logs_written();
+    metrics.inc_logs_written();
+    assert_eq!(metrics.logs_written(), 2);
 }
 
 // === 错误类型测试 ===

@@ -1,17 +1,21 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
 // 加密文件功能测试
-// 测试加密日志文件写入、AES-256-GCM 加密功能、密钥管理，
-// 确保生产环境中的敏感日志数据安全。
+// 测试加密日志文件写入、密钥管理，确保生产环境中的敏感日志数据安全。
+//
+// 核正：Encryptor/EncryptionKey（AES-256-GCM 原语）与 inklog::archive::SecretString
+// 已随 API 重构移除——现公开面为密钥派生（sink::encryption::{get_encryption_key,
+// derive_key_from_password}）与 FileSink 加密落盘（encrypt + encryption_key_env）。
+// 原 Encryptor 加解密原语用例裁撤，保留并强化文件 Sink 集成与密钥管理用例。
 
 #[cfg(test)]
-mod encryption_file_test {
-    use inklog::sink::encryption::{Encryptor, EncryptionKey};
+mod encryption_file {
     use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
-    use std::fs::{self, File};
-    use std::io::{Read, Write};
+    use serial_test::serial;
+    use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+    use tracing_subscriber::layer::SubscriberExt;
 
     /// 生成测试用的有效 256 位密钥（Base64 编码）
     fn generate_test_key() -> String {
@@ -26,155 +30,68 @@ mod encryption_file_test {
         (temp_dir, log_path)
     }
 
-    // === 基础加密功能测试 ===
+    // === 密钥管理测试 ===
 
-    #[tokio::test]
-    async fn test_encryptor_initialization() {
-        let key_base64 = generate_test_key();
-        let encryptor = Encryptor::new(&key_base64).unwrap();
-        
-        assert!(encryptor.is_initialized());
-    }
+    #[test]
+    #[serial]
+    fn test_encryption_key_from_env() {
+        unsafe {
+            std::env::set_var("INKLOG_TEST_ENCRYPTION_KEY", generate_test_key());
+        }
 
-    #[tokio::test]
-    async fn test_encryptor_invalid_key_length() {
-        // 测试无效密钥长度
-        let invalid_key = "short_key".to_string();
-        let result = Encryptor::new(&invalid_key);
-        
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e.to_string().contains("invalid") || e.to_string().contains("length"));
+        let key = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_ENCRYPTION_KEY")
+            .expect("Base64 32 字节密钥应能解析");
+        assert_eq!(key.len(), 32);
+
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_ENCRYPTION_KEY");
         }
     }
 
-    #[tokio::test]
-    async fn test_encryptor_invalid_base64() {
-        // 测试无效 Base64 编码
-        let invalid_base64 = "!!!invalid-base64!!!".to_string();
-        let result = Encryptor::new(&invalid_base64);
-        
-        assert!(result.is_err());
+    #[test]
+    #[serial]
+    fn test_encryption_key_missing_env() {
+        let result = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_MISSING_KEY_XYZ");
+        assert!(result.is_err(), "环境变量未设置应返回错误");
     }
 
-    #[tokio::test]
-    async fn test_encryptor_encrypt_decrypt() {
-        let key_base64 = generate_test_key();
-        let encryptor = Encryptor::new(&key_base64).unwrap();
-        
-        let plaintext = b"Test message for encryption";
-        let nonce = encryptor.generate_nonce();
-        let ciphertext = encryptor.encrypt(plaintext, &nonce).unwrap();
-        
-        // 验证解密
-        let decrypted = encryptor.decrypt(&ciphertext, &nonce).unwrap();
-        assert_eq!(plaintext.to_vec(), decrypted);
-    }
-
-    #[tokio::test]
-    async fn test_encryptor_empty_message() {
-        let key_base64 = generate_test_key();
-        let encryptor = Encryptor::new(&key_base64).unwrap();
-        
-        let plaintext = b"";
-        let nonce = encryptor.generate_nonce();
-        let ciphertext = encryptor.encrypt(plaintext, &nonce).unwrap();
-        
-        let decrypted = encryptor.decrypt(&ciphertext, &nonce).unwrap();
-        assert_eq!(plaintext.to_vec(), decrypted);
-    }
-
-    #[tokio::test]
-    async fn test_encryptor_large_message() {
-        let key_base64 = generate_test_key();
-        let encryptor = Encryptor::new(&key_base64).unwrap();
-        
-        // 测试大消息（1MB）
-        let plaintext = vec![0u8; 1024 * 1024];
-        let nonce = encryptor.generate_nonce();
-        let ciphertext = encryptor.encrypt(&plaintext, &nonce).unwrap();
-        
-        let decrypted = encryptor.decrypt(&ciphertext, &nonce).unwrap();
-        assert_eq!(plaintext, decrypted);
-    }
-
-    #[tokio::test]
-    async fn test_encryptor_tampered_ciphertext() {
-        let key_base64 = generate_test_key();
-        let encryptor = Encryptor::new(&key_base64).unwrap();
-        
-        let plaintext = b"Secret message";
-        let nonce = encryptor.generate_nonce();
-        let ciphertext = encryptor.encrypt(plaintext, &nonce).unwrap();
-        
-        // 篡改密文
-        let mut tampered = ciphertext.to_vec();
-        if tampered.len() > 10 {
-            tampered[10] ^= 0xFF;
+    #[test]
+    #[serial]
+    fn test_encryption_key_invalid_base64_length() {
+        // 核正：get_encryption_key 对非 Base64 内容按“密码”处理（1-127 字节经 PBKDF2
+        // 派生，encryption.rs 头注释设计如此）——并非直接报错；真正的错误分支为
+        // 密码过短（<12 字节，PBKDF2 下限校验）
+        unsafe {
+            std::env::set_var("INKLOG_TEST_BAD_KEY", "short");
         }
-        
-        // 解密应该失败
-        let result = encryptor.decrypt(&tampered, &nonce);
-        assert!(result.is_err());
-    }
 
-    #[tokio::test]
-    async fn test_encryptor_wrong_nonce() {
-        let key_base64 = generate_test_key();
-        let encryptor = Encryptor::new(&key_base64).unwrap();
-        
-        let plaintext = b"Secret message";
-        let nonce1 = encryptor.generate_nonce();
-        let nonce2 = encryptor.generate_nonce();
-        
-        let ciphertext = encryptor.encrypt(plaintext, &nonce1).unwrap();
-        
-        // 使用错误的 nonce 解密应该失败
-        let result = encryptor.decrypt(&ciphertext, &nonce2);
-        assert!(result.is_err());
-    }
+        // 非 Base64 且长度 < 12 字节 → 密码派生下限校验失败
+        let result = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_BAD_KEY");
+        assert!(result.is_err(), "过短密码应被 PBKDF2 下限校验拒绝");
 
-    // === 加密密钥管理测试 ===
+        // 非 Base64 但长度在密码范围内（12-127 字节）→ 按密码派生成功
+        unsafe {
+            std::env::set_var("INKLOG_TEST_BAD_KEY", "!!!invalid-base64!!!");
+        }
+        let result = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_BAD_KEY");
+        assert!(result.is_ok(), "12-127 字节非 Base64 内容应按密码派生处理");
 
-    #[tokio::test]
-    async fn test_encryption_key_from_env() {
-        std::env::set_var("INKLOG_TEST_ENCRYPTION_KEY", generate_test_key());
-        
-        let key_env = std::env::var("INKLOG_TEST_ENCRYPTION_KEY").unwrap();
-        let encryptor = Encryptor::new(&key_env).unwrap();
-        
-        assert!(encryptor.is_initialized());
-        
-        std::env::remove_var("INKLOG_TEST_ENCRYPTION_KEY");
-    }
-
-    #[tokio::test]
-    async fn test_encryption_key_memory_protection() {
-        use inklog::archive::SecretString;
-        
-        let secret = SecretString::new("sensitive_key_data".to_string());
-        let key = secret.as_str_safe().unwrap();
-        
-        // 验证密钥可以正确获取
-        assert_eq!(key, "sensitive_key_data");
-        
-        // 验证 SecretString 的安全特性
-        assert!(secret.is_some());
-        
-        // 获取并消耗后应该为空
-        let taken = secret.take();
-        assert_eq!(taken, Some("sensitive_key_data".to_string()));
-        assert!(secret.is_none());
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_BAD_KEY");
+        }
     }
 
     // === 加密文件 Sink 测试 ===
 
     #[tokio::test]
+    #[serial]
     async fn test_encrypted_file_sink_write() {
         let (_temp_dir, log_path) = create_test_dir();
-        
-        std::env::set_var("INKLOG_ENCRYPTION_KEY", generate_test_key());
-        
+
+        unsafe {
+            std::env::set_var("INKLOG_ENCRYPTION_KEY", generate_test_key());
+        }
+
         let file_config = FileSinkConfig {
             enabled: true,
             path: log_path.clone(),
@@ -186,7 +103,7 @@ mod encryption_file_test {
             encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
             ..Default::default()
         };
-        
+
         let config = InklogConfig {
             file_sink: Some(file_config),
             console_sink: Some(inklog::config::ConsoleSinkConfig {
@@ -195,52 +112,75 @@ mod encryption_file_test {
             }),
             ..Default::default()
         };
-        
-        let _logger = LoggerManager::with_config(config).await.unwrap();
-        
+
+        // 核正：build_detached + 线程级 set_default（对齐 additional_tests 范本）——
+        // with_config 的 set_global_default 为进程级单次语义，多用例下后装者的日志
+        // 会流向首个 logger（已 shutdown）导致文件为空
+        let (logger, subscriber, filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            None,
+        )
+        .await
+        .unwrap();
+        let _guard = tracing::subscriber::set_default(
+            tracing_subscriber::registry().with(subscriber).with(filter),
+        );
+
         // 写入日志消息
-        log::info!("Encrypted test message 1");
-        log::info!("Encrypted test message 2");
-        log::info!("Sensitive data: secret_value_12345");
-        
-        // 等待写入完成
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        
+        tracing::info!("Encrypted test message 1");
+        tracing::info!("Encrypted test message 2");
+        tracing::info!("Sensitive data: secret_value_12345");
+
+        // 核正：FileSink 异步 worker 按批缓冲落盘，固定 sleep 不保证 flush——
+        // 显式关闭以触发 worker 排空缓冲后再断言文件内容
+        logger.shutdown().expect("关闭日志服务失败");
+
         // 验证文件存在且非空
         assert!(log_path.exists());
         let metadata = fs::metadata(&log_path).unwrap();
         assert!(metadata.len() > 0);
-        
-        // 验证文件内容是加密的（不是明文）
-        let mut file = File::open(&log_path).unwrap();
-        let mut content = String::new();
-        file.read_to_string(&mut content).unwrap();
-        
-        // 加密后的内容不应包含明文消息
-        assert!(!content.contains("Encrypted test message"));
-        assert!(!content.contains("secret_value_12345"));
-        
-        std::env::remove_var("INKLOG_ENCRYPTION_KEY");
+
+        // 核正：encrypt: true 的加密作用于轮转归档产物（compress_file 内 encrypt_file
+        // → *.zst.enc/*.gz.enc），活跃写入文件为明文（设计如此）——原“活跃文件
+        // 不含明文”的断言与实现语义不符，改为验证明文写入成功
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("test message"), "记录应写入活跃文件");
+
+        unsafe {
+            std::env::remove_var("INKLOG_ENCRYPTION_KEY");
+        }
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_encrypted_file_sink_rotation() {
-        let (temp_dir, log_path) = create_test_dir();
-        
-        std::env::set_var("INKLOG_ENCRYPTION_KEY", generate_test_key());
-        
+        // 核正：encrypt: true 加密作用于轮转归档（compress_file → *.zst.enc），
+        // 活跃文件明文——本用例以 compress+encrypt 触发轮转，验证归档密文不含明文
+        let (_temp_dir, log_path) = create_test_dir();
+
+        unsafe {
+            std::env::set_var("INKLOG_ENCRYPTION_KEY", generate_test_key());
+        }
+
         let file_config = FileSinkConfig {
             enabled: true,
             path: log_path.clone(),
             max_size: "1KB".into(), // 小 size 便于触发轮转
             rotation_time: "daily".into(),
             keep_files: 3,
-            compress: false,
+            batch_size: 10, // 小批强制分段落盘，确保写入量跨越轮转阈值
+            compress: true,
             encrypt: true,
             encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
             ..Default::default()
         };
-        
+
         let config = InklogConfig {
             file_sink: Some(file_config),
             console_sink: Some(inklog::config::ConsoleSinkConfig {
@@ -249,44 +189,68 @@ mod encryption_file_test {
             }),
             ..Default::default()
         };
-        
-        let _logger = LoggerManager::with_config(config).await.unwrap();
-        
-        // 写入大量日志以触发轮转
+
+        // 核正：同 test_encrypted_file_sink_write——build_detached + 线程级 set_default
+        let (logger, subscriber, filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            None,
+        )
+        .await
+        .unwrap();
+        let _guard = tracing::subscriber::set_default(
+            tracing_subscriber::registry().with(subscriber).with(filter),
+        );
+
+        // 写入大量日志以触发轮转（含可检索的敏感明文片段）
         for i in 0..100 {
-            log::info!("Encrypted rotation test message #{}", i);
+            tracing::info!("Encrypted rotation test message #{}", i);
         }
-        
-        // 等待写入完成
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        
-        // 检查是否存在轮转文件
+        tracing::info!("Rotated secret payload: rot_secret_98765");
+
+        // 核正：固定 sleep 不保证 worker 排空与归档——显式关闭触发 flush
+        logger.shutdown().expect("关闭日志服务失败");
+
+        // 归档密文（*.zst.enc / *.gz.enc）不应包含任何明文片段
         let parent = log_path.parent().unwrap();
-        let entries = fs::read_dir(parent).unwrap();
-        let count = entries.filter(|e| {
-            if let Ok(e) = e {
-                let path = e.path();
-                path.extension().map(|e| e.to_string_lossy() == "enc").unwrap_or(false)
-                    || path.file_stem().map(|s| s.to_string_lossy().contains("encrypted_test"))
-                        .unwrap_or(false)
-            } else {
-                false
+        let mut encrypted_archives = 0;
+        for entry in fs::read_dir(parent).unwrap().filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".enc") {
+                encrypted_archives += 1;
+                let bytes = fs::read(entry.path()).unwrap();
+                assert!(
+                    !bytes.windows(17).any(|w| w == b"rot_secret_98765"),
+                    "加密归档 {} 不应包含明文片段",
+                    name
+                );
             }
-        }).count();
-        
-        // 应该有主文件或轮转文件
-        assert!(log_path.exists() || count > 0);
-        
-        std::env::remove_var("INKLOG_ENCRYPTION_KEY");
+        }
+        assert!(
+            encrypted_archives > 0,
+            "写入量已跨越轮转阈值，应产生加密归档"
+        );
+
+        unsafe {
+            std::env::remove_var("INKLOG_ENCRYPTION_KEY");
+        }
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_encrypted_sink_without_key_fails() {
         let (_temp_dir, log_path) = create_test_dir();
-        
+
         // 确保环境变量已清除
-        std::env::remove_var("INKLOG_ENCRYPTION_KEY");
-        
+        unsafe {
+            std::env::remove_var("INKLOG_ENCRYPTION_KEY");
+        }
+
         let file_config = FileSinkConfig {
             enabled: true,
             path: log_path,
@@ -295,7 +259,7 @@ mod encryption_file_test {
             encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
             ..Default::default()
         };
-        
+
         let config = InklogConfig {
             file_sink: Some(file_config),
             console_sink: Some(inklog::config::ConsoleSinkConfig {
@@ -304,11 +268,11 @@ mod encryption_file_test {
             }),
             ..Default::default()
         };
-        
+
         // 应该能够创建（密钥在初始化 sink 时才加载）
         // 但写入时会失败或降级到控制台
         let result = LoggerManager::with_config(config).await;
-        
+
         // 预期行为：可以创建 logger，但加密写入会失败或降级
         // 这里我们主要验证配置有效性
         assert!(result.is_ok() || result.is_err());
@@ -329,88 +293,15 @@ mod encryption_file_test {
         };
         assert!(valid_config.enabled);
         assert!(valid_config.encrypt);
-        
-        // 测试加密配置时压缩应该为 false（已知限制）
-        let invalid_config = FileSinkConfig {
+
+        // 注意：配置层面不强制禁止 compress+encrypt 组合
+        // 但文档说明了不兼容性的原因
+        let _invalid_config = FileSinkConfig {
             enabled: true,
             path: PathBuf::from("/tmp/test.log.enc"),
             encrypt: true,
             compression_level: 3,
             ..Default::default()
         };
-        // 注意：配置层面不强制禁止 compress+encrypt 组合
-        // 但文档说明了不兼容性的原因
-    }
-
-    // === 性能测试 ===
-
-    #[tokio::test]
-    async fn test_encryption_performance() {
-        use std::time::Instant;
-        
-        let key_base64 = generate_test_key();
-        let encryptor = Encryptor::new(&key_base64).unwrap();
-        
-        // 测试小消息加密性能
-        let iterations = 1000;
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let plaintext = b"Short test message";
-            let nonce = encryptor.generate_nonce();
-            let _ciphertext = encryptor.encrypt(plaintext, &nonce).unwrap();
-        }
-        let elapsed = start.elapsed();
-        
-        // 1000 次小消息加密应该很快（< 1 秒）
-        assert!(elapsed.as_secs() < 5, "Encryption too slow: {:?}", elapsed);
-        
-        // 测试大消息加密性能
-        let large_plaintext = vec![0u8; 1024 * 100]; // 100KB
-        let start = Instant::now();
-        for _ in 0..10 {
-            let nonce = encryptor.generate_nonce();
-            let _ciphertext = encryptor.encrypt(&large_plaintext, &nonce).unwrap();
-        }
-        let elapsed = start.elapsed();
-        
-        // 10 次 100KB 加密应该 < 2 秒
-        assert!(elapsed.as_secs() < 2, "Large encryption too slow: {:?}", elapsed);
-    }
-
-    // === 并发加密测试 ===
-
-    #[tokio::test]
-    async fn test_concurrent_encryption() {
-        use inklog::tokio::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        
-        let key_base64 = generate_test_key();
-        let encryptor = Arc::new(Encryptor::new(&key_base64).unwrap());
-        let counter = Arc::new(AtomicUsize::new(0));
-        let plaintext = b"Concurrent test message";
-        
-        // 并发加密测试
-        let tasks: Vec<_> = (0..10)
-            .map(|_| {
-                let encryptor = encryptor.clone();
-                let counter = counter.clone();
-                tokio::spawn(async move {
-                    for _ in 0..100 {
-                        let nonce = encryptor.generate_nonce();
-                        let ciphertext = encryptor.encrypt(plaintext, &nonce).unwrap();
-                        let decrypted = encryptor.decrypt(&ciphertext, &nonce).unwrap();
-                        assert_eq!(plaintext.to_vec(), decrypted);
-                        counter.fetch_add(1, Ordering::SeqCst);
-                    }
-                })
-            })
-            .collect();
-        
-        for task in tasks {
-            task.await.unwrap();
-        }
-        
-        // 验证所有加密操作成功
-        assert_eq!(counter.load(Ordering::SeqCst), 1000);
     }
 }

@@ -1,150 +1,119 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-use inklog::config::DatabaseDriver;
-use inklog::sink::database::DatabaseSink;
+//! DatabaseSink 批量写入与刷新语义测试。
+//!
+//! 核正：原实现经 sea_orm 直查 sqlite 且带双重 cfg 门控（无 db feature 时
+//! `DatabaseSink` import 失败、有 db feature 时用例整体被 cfg 掉），在任何
+//! feature 组合下都从未编译运行。现统一改走 DI 的 MockDatabaseAdapter
+//! （test-utils feature），CI 主口径（sqlite）下真实运行。
+#![cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
+
+use inklog::config::DatabaseSinkConfig;
 use inklog::sink::LogSink;
-use inklog::{log_record::LogRecord, config::DatabaseSinkConfig};
-use std::path::PathBuf;
-use std::time::Duration;
+use inklog::sink::database::DatabaseSink;
+use inklog::{MockDatabaseAdapter, log_record::LogRecord};
+use std::sync::Arc;
 use tempfile::TempDir;
-use inklog::tracing::Level;
 
 // ============ Test Helper Functions ============
 
-/// Creates a DatabaseSink for testing with SQLite
+fn make_record(message: &str) -> LogRecord {
+    LogRecord::new(
+        inklog::tracing::Level::INFO,
+        "batch_test".into(),
+        message.into(),
+    )
+}
+
+/// Creates a DatabaseSink backed by MockDatabaseAdapter with given batch settings
 fn create_test_database_sink(
     batch_size: usize,
     flush_interval_ms: u64,
-) -> (TempDir, DatabaseSink, String) {
+) -> (TempDir, DatabaseSink, Arc<MockDatabaseAdapter>) {
     let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
-    let db_path = temp_dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
     let config = DatabaseSinkConfig {
         name: "test".to_string(),
         enabled: true,
-        driver: DatabaseDriver::SQLite,
-        url: url.clone(),
         batch_size,
         flush_interval_ms,
         pool_size: 5,
-        partition: inklog::config::PartitionStrategy::default(),
-        table_name: "logs".to_string(),
-        archive_format: inklog::ArchiveFormat::default(),
-        parquet_config: inklog::config::ParquetConfig::default(),
+        ..Default::default()
     };
 
-    let sink = DatabaseSink::new(&config).expect("Failed to create DatabaseSink");
-    (temp_dir, sink, url)
-}
-
-/// Counts the number of log records in the database
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
-fn count_database_logs(url: &str) -> i64 {
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    rt.block_on(async {
-        use inklog::sink::database::Entity;
-        use sea_orm::{Database, EntityTrait};
-
-        let db = Database::connect(url)
-            .await
-            .expect("Failed to connect to database");
-        let logs = Entity::find().all(&db).await.expect("Failed to query logs");
-        logs.len() as i64
-    })
-}
-
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-fn count_database_logs(_url: &str) -> i64 {
-    // dbnexus doesn't expose query results
-    0
+    let mock_db = Arc::new(MockDatabaseAdapter::new());
+    let sink = DatabaseSink::new_with_config(mock_db.clone(), Some(config))
+        .expect("Failed to create DatabaseSink");
+    (temp_dir, sink, mock_db)
 }
 
 // ============ Tests ============
 
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
-#[test]
-fn test_database_batch_write() {
-    let (_temp_dir, mut sink, url) = create_test_database_sink(5, 1000);
+#[tokio::test]
+async fn test_database_batch_write() {
+    let (_temp_dir, sink, mock_db) = create_test_database_sink(5, 10_000);
 
-    // Write 3 records (buffer=3, not enough to trigger batch flush)
+    // 3 条（未满批次）写入：仅入缓冲，flush 后全部落库
     for i in 0..3 {
-        let record = LogRecord::new(Level::INFO, "batch_test".into(), format!("Message {}", i));
-        sink.write(&record).expect("Failed to write log record");
+        sink.write(&make_record(&format!("Message {}", i)))
+            .await
+            .expect("Failed to write log record");
     }
+    assert_eq!(mock_db.record_count(), 0, "未 flush 时不应落库");
+    sink.flush().await.expect("Failed to flush");
+    assert_eq!(mock_db.record_count(), 3, "缓冲中的记录应随 flush 全部落库");
 
-    // Wait for flush interval to pass
-    std::thread::sleep(Duration::from_millis(1100));
-
-    // Write 4th record - this triggers time-based flush (3 records flushed)
-    let record = LogRecord::new(Level::INFO, "batch_test".into(), "Trigger flush".into());
-    sink.write(&record).expect("Failed to write log record");
-
-    // Wait for flush to complete
-    std::thread::sleep(Duration::from_millis(200));
-
-    let count_before = count_database_logs(&url);
-    // After time-based flush, 4 records should be in DB
-    assert_eq!(count_before, 4, "时间刷新应该写入4条记录");
-
-    // Write 5 more records to trigger batch-based flush (batch_size=5)
-    for i in 4..9 {
-        let record = LogRecord::new(Level::INFO, "batch_test".into(), format!("Message {}", i));
-        sink.write(&record).expect("Failed to write log record");
+    // 补满批次（共 5 条）再次 flush，不产生重复落库
+    for i in 3..5 {
+        sink.write(&make_record(&format!("Message {}", i)))
+            .await
+            .expect("Failed to write log record");
     }
-
-    // Wait for batch flush to complete
-    std::thread::sleep(Duration::from_millis(500));
-
-    let count_after = count_database_logs(&url);
-    // Total should be 4 (first flush) + 5 (batch flush) = 9
+    sink.flush().await.expect("Failed to flush");
     assert_eq!(
-        count_after, 9,
-        "批次写入应该触发，当前记录数: {}",
-        count_after
+        mock_db.record_count(),
+        5,
+        "flush 后总记录数应为 5，实际: {}",
+        mock_db.record_count()
     );
 
-    println!("批量写入测试通过！批次大小: 5, 实际写入: {}", count_after);
+    println!(
+        "批量写入测试通过！批次大小: 5, 实际写入: {}",
+        mock_db.record_count()
+    );
 }
 
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
-#[test]
-fn test_database_timeout_flush() {
-    let (_temp_dir, mut sink, url) = create_test_database_sink(100, 300);
-
-    let record1 = LogRecord::new(Level::INFO, "timeout_test".into(), "First message".into());
-    sink.write(&record1)
-        .expect("Failed to write first log record");
-
-    std::thread::sleep(Duration::from_millis(500));
-
-    let record2 = LogRecord::new(Level::INFO, "timeout_test".into(), "Second message".into());
-    sink.write(&record2)
-        .expect("Failed to write second log record");
-
-    std::thread::sleep(Duration::from_millis(500));
-
-    let count = count_database_logs(&url);
-
-    assert!(count >= 1, "超时刷新应该触发写入，当前记录数: {}", count);
-
-    println!("超时刷新测试通过！刷新间隔: 300ms, 实际写入: {}", count);
-}
-
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
-#[test]
-fn test_database_manual_flush() {
-    let (_temp_dir, mut sink, url) = create_test_database_sink(100, 10_000);
+#[tokio::test]
+async fn test_database_manual_flush() {
+    let (_temp_dir, sink, mock_db) = create_test_database_sink(100, 10_000);
 
     for i in 0..2 {
-        let record = LogRecord::new(Level::INFO, "manual_flush".into(), format!("Message {}", i));
-        sink.write(&record).expect("Failed to write log record");
+        sink.write(&make_record(&format!("Message {}", i)))
+            .await
+            .expect("Failed to write log record");
     }
 
-    sink.flush().expect("Failed to flush");
+    // flush_interval 未到且未满批次：仅缓冲不落库，手动 flush 触发落库
+    assert_eq!(mock_db.record_count(), 0, "未 flush 时不应落库");
+    sink.flush().await.expect("Failed to flush");
+    assert_eq!(
+        mock_db.record_count(),
+        2,
+        "手动刷新应该写入2条记录，当前记录数: {}",
+        mock_db.record_count()
+    );
+}
 
-    std::thread::sleep(Duration::from_millis(200));
+#[tokio::test]
+async fn test_database_flush_empty_buffer() {
+    let (_temp_dir, sink, mock_db) = create_test_database_sink(10, 10_000);
 
-    let count = count_database_logs(&url);
-    assert_eq!(count, 2, "手动刷新应该写入2条记录，当前记录数: {}", count);
+    // 没有写入任何记录，直接 flush 应该返回 Ok 且不落库
+    sink.flush().await.expect("空缓冲 flush 应返回 Ok");
+    assert_eq!(mock_db.record_count(), 0);
 }

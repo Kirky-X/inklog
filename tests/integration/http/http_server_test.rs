@@ -1,14 +1,38 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-use inklog::config::{HttpErrorMode, HttpServerConfig};
+//! HTTP 服务器配置与错误模式测试。
+//!
+//! 核正：`HttpServerConfig` 新增 `auth`/`ip_whitelist`/`tls` 字段（以
+//! `..Default::default()` 补齐）；`HttpErrorMode` 仅剩 `Warn`/`Strict`
+//! （`Panic` 变体已移除，默认 `Strict`）；环境变量覆盖经公开入口
+//! `InklogConfig::load_with_env_overrides()`，变量名为 `INKLOG_HTTP_SERVER_*`。
 use inklog::InklogConfig;
+use inklog::config::{HttpErrorMode, HttpServerConfig};
 use serial_test::serial;
 
 fn clear_inklog_env() {
-    for (key, _) in std::env::vars() {
-        if key.starts_with("INKLOG_") {
+    // 先收集再删除，避免在 env::vars() 迭代期间修改环境变量（UB 隐患）
+    let keys: Vec<String> = std::env::vars()
+        .map(|(key, _)| key)
+        .filter(|key| key.starts_with("INKLOG_"))
+        .collect();
+    for key in keys {
+        unsafe {
             std::env::remove_var(&key);
         }
+    }
+}
+
+/// 将配置搜索路径固定到空 TOML 文件，避免读到宿主机已有 inklog 配置
+fn isolate_config_paths() {
+    let dir = std::env::temp_dir().join("inklog_test_config_isolation");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("empty_config.toml");
+    if !path.exists() {
+        std::fs::write(&path, "").unwrap();
+    }
+    unsafe {
+        std::env::set_var("INKLOG_CONFIG_PATH", path.to_str().unwrap());
     }
 }
 
@@ -30,7 +54,8 @@ async fn test_http_server_startup_with_default_config() {
         port,
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
-        error_mode: HttpErrorMode::Panic,
+        error_mode: HttpErrorMode::Strict,
+        ..Default::default()
     };
 
     let inklog_config = InklogConfig {
@@ -46,22 +71,15 @@ async fn test_http_server_startup_with_default_config() {
 
 #[tokio::test]
 #[serial]
-async fn test_http_server_error_mode_panic() {
+async fn test_http_server_error_mode_default_strict() {
     clear_inklog_env();
 
-    let config = HttpServerConfig {
-        enabled: true,
-        host: "127.0.0.1".to_string(),
-        port: 18081,
-        metrics_path: "/metrics".to_string(),
-        health_path: "/health".to_string(),
-        error_mode: HttpErrorMode::Panic,
-    };
-
-    match config.error_mode {
-        HttpErrorMode::Panic => {}
-        _ => panic!("Expected Panic mode"),
-    }
+    // HttpErrorMode 仅 Warn/Strict（Panic 已移除），#[default] 为 Strict
+    let config = HttpServerConfig::default();
+    assert!(
+        matches!(config.error_mode, HttpErrorMode::Strict),
+        "默认错误模式应为 Strict"
+    );
 }
 
 #[tokio::test]
@@ -76,6 +94,7 @@ async fn test_http_server_error_mode_warn() {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Warn,
+        ..Default::default()
     };
 
     match config.error_mode {
@@ -96,6 +115,7 @@ async fn test_http_server_error_mode_strict() {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Strict,
+        ..Default::default()
     };
 
     match config.error_mode {
@@ -108,17 +128,24 @@ async fn test_http_server_error_mode_strict() {
 #[serial]
 async fn test_http_server_with_logger_manager() {
     clear_inklog_env();
+    isolate_config_paths();
 
-    std::env::set_var("INKLOG_HTTP_ENABLED", "true");
-    std::env::set_var("INKLOG_HTTP_HOST", "127.0.0.1");
-    std::env::set_var("INKLOG_HTTP_PORT", "18084");
-    std::env::set_var("INKLOG_HTTP_ERROR_MODE", "warn");
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_HOST", "127.0.0.1");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_PORT", "18084");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
+    }
 
-    let mut config = InklogConfig::default();
-    config.apply_env_overrides();
+    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
 
-    assert!(config.http_server.is_some());
-    let http = config.http_server.unwrap();
+    let http = config.http_server.expect("http_server 应被环境变量启用");
     assert!(http.enabled);
     assert_eq!(http.host, "127.0.0.1");
     assert_eq!(http.port, 18084);
@@ -126,28 +153,29 @@ async fn test_http_server_with_logger_manager() {
         HttpErrorMode::Warn => {}
         _ => panic!("Expected Warn mode from env"),
     }
-
-    std::env::remove_var("INKLOG_HTTP_ENABLED");
-    std::env::remove_var("INKLOG_HTTP_HOST");
-    std::env::remove_var("INKLOG_HTTP_PORT");
-    std::env::remove_var("INKLOG_HTTP_ERROR_MODE");
 }
 
 #[tokio::test]
 #[serial]
 async fn test_http_metrics_path_configuration() {
     clear_inklog_env();
+    isolate_config_paths();
 
-    std::env::set_var("INKLOG_HTTP_ENABLED", "true");
-    std::env::set_var("INKLOG_HTTP_METRICS_PATH", "/prometheus/metrics");
-    std::env::set_var("INKLOG_HTTP_HEALTH_PATH", "/status");
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/prometheus/metrics");
+    }
+    unsafe {
+        std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
+    }
 
-    let mut config = InklogConfig::default();
-    config.apply_env_overrides();
+    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
 
     let http = config
         .http_server
-        .expect("http_server should be Some after setting INKLOG_HTTP_ENABLED");
+        .expect("http_server should be Some after setting INKLOG_HTTP_SERVER_ENABLED");
     assert_eq!(http.metrics_path, "/prometheus/metrics");
     assert_eq!(http.health_path, "/status");
 }
@@ -156,12 +184,12 @@ async fn test_http_metrics_path_configuration() {
 #[serial]
 async fn test_http_server_disabled_by_default() {
     clear_inklog_env();
+    isolate_config_paths();
 
-    let mut config = InklogConfig::default();
-    config.apply_env_overrides();
+    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
 
     assert!(
         config.http_server.is_none(),
-        "INKLOG_HTTP_ENABLED should not be set"
+        "INKLOG_HTTP_SERVER_ENABLED should not be set"
     );
 }

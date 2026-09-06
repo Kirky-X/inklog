@@ -1,15 +1,17 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
 use inklog::LoggerManager;
+use inklog::tracing::{error, info};
 use std::thread;
 use std::time::{Duration, Instant};
-use inklog::tracing::{error, info};
 
 #[tokio::test]
 #[ignore = "Requires Docker database environment"]
 async fn test_long_running_stability() {
     // Set up database environment variables for Docker
-    std::env::set_var("INKLOG_DATABASE_SINK_ENABLED", "false");
+    unsafe {
+        std::env::set_var("INKLOG_DATABASE_SINK_ENABLED", "false");
+    }
 
     let logger = LoggerManager::new()
         .await

@@ -18,7 +18,6 @@ mod tests {
                     .split(':')
                     .nth(1)
                     .unwrap_or("0")
-                    .trim()
                     .split_whitespace()
                     .next()
                     .unwrap_or("0")
@@ -62,7 +61,7 @@ mod tests {
 
             tokio::time::sleep(Duration::from_millis(interval_ms)).await;
 
-            if log_count % 100 == 0 {
+            if log_count.is_multiple_of(100) {
                 let current_memory = get_memory_usage_mb();
                 let growth = current_memory - initial_memory;
                 println!(
@@ -89,7 +88,12 @@ mod tests {
         );
     }
 
+    // 核正：进程级 RSS 增长断言在 cargo test 并发执行下不可靠——同进程其他用例
+    // （性能基准等）的内存占用均计入 VmRSS，增长与本测试行为无关。与
+    // test_long_running_memory_stability 的既有口径一致，改为手动运行：
+    // cargo test -p inklog --test performance long_running -- --ignored
     #[tokio::test]
+    #[ignore = "manual"]
     async fn test_short_memory_stability() {
         let duration = 5u64;
         let initial_memory = get_memory_usage_mb();
@@ -110,7 +114,11 @@ mod tests {
             log_count, memory_growth
         );
 
-        assert!(memory_growth < 10.0, "短时测试内存增长过大: {:.2} MB", memory_growth);
+        assert!(
+            memory_growth < 10.0,
+            "短时测试内存增长过大: {:.2} MB",
+            memory_growth
+        );
     }
 
     #[test]

@@ -7,6 +7,6 @@
 //! - 多 Sink 降级 + 监控
 //! - 数据掩码 + 格式化 + 多 Sink
 
+mod complex_features_test;
 mod encryption_file_test;
-mod multi_sink_fallback_test;
-mod complex_features_test;  // 新增：复杂特性组合测试
+mod multi_sink_fallback_test; // 新增：复杂特性组合测试

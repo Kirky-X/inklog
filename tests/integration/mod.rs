@@ -13,9 +13,9 @@
 
 mod additional_tests;
 mod batch;
+mod comprehensive_validation_test;
 mod compression_ratio;
 mod config;
-mod comprehensive_validation_test;
 mod http;
 mod log;
 mod parquet;
