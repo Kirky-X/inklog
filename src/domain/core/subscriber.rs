@@ -26,6 +26,24 @@ const ERROR_SAMPLING_RATE: u64 = 100;
 /// lock contention in the hot path (on_event).
 /// Uses `Arc<LogRecord>` to avoid deep cloning when sending to multiple sinks.
 /// Includes fallback buffer for critical logs (ERROR/FATAL).
+/// Clone 语义：全字段为 channel sender / Arc 句柄（克隆共享同一 logger 实例），
+/// AtomicU64 计数器克隆当前值。供测试 harness 在子线程以
+/// tracing::subscriber::with_default 安装线程级 subscriber（需 owned 值）。
+impl Clone for LoggerSubscriber {
+    fn clone(&self) -> Self {
+        Self {
+            console_sender: self.console_sender.clone(),
+            async_sender: self.async_sender.clone(),
+            extra_async_senders: self.extra_async_senders.clone(),
+            metrics: self.metrics.clone(),
+            send_timeout_ms: self.send_timeout_ms,
+            fallback_buffer: self.fallback_buffer.clone(),
+            sanitizer: self.sanitizer.clone(),
+            rate_limiter: self.rate_limiter.clone(),
+            error_sample_counter: AtomicU64::new(self.error_sample_counter.load(Ordering::Relaxed)),
+        }
+    }
+}
 pub struct LoggerSubscriber {
     /// Channel sender for console output (lock-free)
     console_sender: Sender<Arc<LogRecord>>,

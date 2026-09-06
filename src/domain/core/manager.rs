@@ -472,6 +472,52 @@ impl LoggerManager {
             }));
 
         let file_sink_cfg = config.file_sink.clone().unwrap_or_default();
+
+        // 确保 database 依赖有效：DI 注入优先；未注入且 db sink 启用时在当前 async
+        // 上下文创建默认 DbNexusAdapter（连接池归属调用方 runtime）。
+        // 核正：此逻辑原先位于 start_workers（同步）内部经 Handle::block_on 创建——
+        // start_workers 在 runtime 线程上被调用时必然 panic（runtime-in-runtime），故上移。
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
+        let database = match database {
+            Some(db) => Some(db),
+            None => {
+                if let Some(ref cfg) = config.database_sink {
+                    if cfg.enabled {
+                        // Cap pool_size to min(configured, num_cpus, 4) to prevent resource exhaustion
+                        let db_worker_limit =
+                            crate::support::io::sink::database::effective_db_worker_limit();
+                        let effective_pool_size = cfg.pool_size.min(db_worker_limit as u32);
+                        if effective_pool_size < cfg.pool_size {
+                            tracing::warn!(
+                                configured_pool_size = cfg.pool_size,
+                                effective_pool_size = effective_pool_size,
+                                limit = db_worker_limit,
+                                "Database pool_size capped to min(configured, num_cpus, 4)"
+                            );
+                        }
+                        Some(Arc::new(
+                            crate::integrations::infra::DbNexusAdapter::with_full_config(
+                                &cfg.url,
+                                effective_pool_size,
+                                &cfg.table_name,
+                                cfg.permissions_path.clone(),
+                                &cfg.admin_role,
+                            )
+                            .await?,
+                        ) as Arc<dyn Database>)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
         let (handles, shutdown_txs) = Self::start_workers(WorkerParams {
             config: config.clone(),
             receiver,
@@ -491,14 +537,18 @@ impl LoggerManager {
                 feature = "mysql",
                 feature = "duckdb"
             ))]
-            db_sink_factory: Box::new(
-                |db: Arc<dyn crate::integrations::Database>, metrics: Arc<Metrics>| {
+            db_sink_factory: Box::new({
+                // 核正：factory 在 spawn_blocking 线程上执行，该线程无 reactor context，
+                // Handle::current() 必 panic（worker 静默死亡、记录永不消费）——
+                // 与 file worker 同款做法：在 build_detached（async 上下文）clone
+                // runtime handle 进闭包使用
+                let runtime_handle = tokio::runtime::Handle::current();
+                move |db: Arc<dyn crate::integrations::Database>, metrics: Arc<Metrics>| {
                     let sink = crate::support::io::DatabaseSink::new(db)?;
-                    let rt = tokio::runtime::Handle::current();
-                    rt.block_on(async { sink.set_metrics(metrics).await });
+                    runtime_handle.block_on(async { sink.set_metrics(metrics).await });
                     Ok(Box::new(sink) as Box<dyn LogSink>)
-                },
-            ),
+                }
+            }),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -649,7 +699,15 @@ impl LoggerManager {
         // 历史缺陷：原先使用单一 `shutdown_tx`，send 一次只能让首个 worker 退出，
         // 其余 worker 进入死循环，导致进程无法退出（PID 20848 等挂起问题）。
         for tx in &self.shutdown_txs {
-            if tx.send(()).is_err() {
+            // 核正：此处必须用 send_timeout 而非 send。worker（spawn_blocking）内的
+            // block_on(sink.write) 依赖调用方 runtime 的驱动线程推进（sqlx pool 等
+            // 任务 spawn 在创建时的 runtime 上）；若驱动线程此刻正阻塞在本 send 上
+            // （drop→shutdown 路径），write 永不完成 → worker 不回循环消费信号 →
+            // channel 满 → send 永久阻塞，形成死锁环（gdb 现场：测试线程卡
+            // crossbeam array::send，db worker 卡 CachedParkThread::park）。
+            // send_timeout 保证 shutdown 永不挂死：超时后继续走 handles 轮询，
+            // 调用方驱动恢复后 worker 会自行消费信号并正常退出。
+            if tx.send_timeout((), Duration::from_secs(2)).is_err() {
                 tracing::warn!("{}", crate::i18n::tr("config-shutdown_signal_lost"));
             }
         }

@@ -215,54 +215,10 @@ impl LoggerManager {
         ))]
         let db_config = config.database_sink.clone();
 
-        // 确保 database 始终有效：如果配置了数据库但没有提供 DI 依赖，则创建默认实现
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
-        let database = {
-            match database {
-                Some(db) => Some(db),
-                None => {
-                    if let Some(ref cfg) = db_config {
-                        if cfg.enabled {
-                            // 获取当前 tokio runtime 并创建默认的 DbNexusAdapter
-                            let handle = tokio::runtime::Handle::current();
-                            let cfg_url = cfg.url.clone();
-                            // Cap pool_size to min(configured, num_cpus, 4) to prevent resource exhaustion
-                            let db_worker_limit =
-                                crate::support::io::sink::database::effective_db_worker_limit();
-                            let effective_pool_size = cfg.pool_size.min(db_worker_limit as u32);
-                            if effective_pool_size < cfg.pool_size {
-                                tracing::warn!(
-                                    configured_pool_size = cfg.pool_size,
-                                    effective_pool_size = effective_pool_size,
-                                    limit = db_worker_limit,
-                                    "Database pool_size capped to min(configured, num_cpus, 4)"
-                                );
-                            }
-                            let adapter = handle.block_on(async {
-                                crate::integrations::infra::DbNexusAdapter::with_full_config(
-                                    &cfg_url,
-                                    effective_pool_size,
-                                    &cfg.table_name,
-                                    cfg.permissions_path.clone(),
-                                    &cfg.admin_role,
-                                )
-                                .await
-                            })?;
-                            Some(Arc::new(adapter) as Arc<dyn crate::integrations::infra::Database>)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-            }
-        };
+        // database 依赖由调用方（build_detached，async 上下文）保证有效：DI 注入优先，
+        // 未注入且 db sink 启用时由 build_detached 在当前 runtime 上创建默认 DbNexusAdapter。
+        // 核正：原先在此处经 Handle::current().block_on 同步创建——start_workers 在
+        // runtime 线程上被调用时必然 panic（runtime-in-runtime），故上移至 async 层。
 
         // Thread 0: Console Sink (dedicated for lock-free hot path)
         // 每个 worker 拥有独立的 shutdown channel，确保广播信号能被每个 worker 接收
