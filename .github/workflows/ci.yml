@@ -44,7 +44,9 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets --features "sqlite http cli kit compression parquet fast-masking" -- -D warnings
+        # test-utils 必须加入：integration 测试目标 required-features 含它，
+        # 缺失时该目标被 cargo 静默跳过，clippy 门禁将不覆盖集成测试代码
+        run: cargo clippy --workspace --all-targets --features "sqlite http cli kit compression parquet fast-masking test-utils" -- -D warnings
 
   check:
     name: Check
@@ -70,7 +72,9 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Run tests
-        run: cargo test --workspace --features "sqlite http cli kit compression parquet fast-masking"
+        # test-utils 必须加入：integration 测试目标 required-features 含它，
+        # 缺失时 cargo 静默跳过该目标（不报错、不执行），测试门禁形同虚设
+        run: cargo test --workspace --features "sqlite http cli kit compression parquet fast-masking test-utils"
 
   build:
     name: Build (${{ matrix.os }})
