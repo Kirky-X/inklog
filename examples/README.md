@@ -1,343 +1,87 @@
-# inklog 示例项目
+# inklog 示例索引
 
-本目录包含 inklog 企业级 Rust 日志基础设施的完整示例，按分层架构组织。
+本目录是 workspace 内的独立子 crate `inklog-examples`，收录 inklog 的全部 **39 个可运行示例**，按主题分为 7 类。
 
-## 分层架构
+- **Rust 版本要求**：1.97.1 及以上（与 workspace MSRV 一致）
+- **运行方式**：在仓库根目录执行 `cargo run --package inklog-examples --example <名称>`
+- **Feature 说明**：部分示例需要启用对应 feature 才能运行（数据库类需 `sqlite` / `postgres` / `mysql`，压缩与归档需 `compression` / `parquet`），命令中已逐一标注；其中 `compression` 与 `di_example` 在 `Cargo.toml` 中声明了 `required-features`，未启用时 cargo 会自动跳过编译
 
-```mermaid
-flowchart TD
-    subgraph L0["Layer 0 - 零依赖示例（开箱即运行）"]
-        direction TB
-        C["console.rs<br/>控制台输出"]
-        T["template.rs<br/>日志模板渲染"]
-        B["builder.rs<br/>Builder 模式配置"]
-        M["masking.rs<br/>数据脱敏"]
-    end
-    subgraph L1["Layer 1 - 本地资源示例（自动清理）"]
-        direction TB
-        F["file.rs<br/>文件输出、轮转、Zstd 压缩"]
-        E["encryption.rs<br/>加密日志"]
-        P["performance.rs<br/>性能测试"]
-    end
-    subgraph L2["Layer 2 - 外部服务示例（可选依赖）"]
-        direction TB
-        D["database.rs<br/>SQLite 数据库连接"]
-        H["http.rs<br/>HTTP 健康检查和指标"]
-        FL["fallback.rs<br/>Sink 降级机制"]
-        S["s3_archive.rs<br/>S3 日志归档"]
-    end
+完整项目介绍见 [主 README](../README.md)，安全策略见 [SECURITY.md](../SECURITY.md)。
 
-    L0 --> L1 --> L2
-```
+## 配置（config）
 
-## 快速开始
-
-### 编译所有示例
-
-```bash
-cd examples
-cargo build
-```
-
-### 运行单个示例
-
-```bash
-# Layer 0 - 零依赖示例
-cargo run --bin console
-cargo run --bin template
-cargo run --bin builder
-cargo run --bin masking
-
-# Layer 1 - 本地资源示例
-cargo run --bin file
-cargo run --bin encryption
-cargo run --bin performance
-
-# Layer 2 - 外部服务示例
-cargo run --bin database
-cargo run --bin http
-cargo run --bin fallback
-cargo run --bin s3_archive
-
-# 保留的原有示例
-cargo run --bin basic
-cargo run --bin production
-cargo run --bin all_features
-```
-
-## Layer 0 详解
-
-### console.rs - 控制台输出
-
-演示三种控制台配置模式：
-
-```rust
-use inklog::config::ConsoleSinkConfig;
-use inklog::sink::console::ConsoleSink;
-
-// 基础输出（无颜色）
-let config = ConsoleSinkConfig {
-    enabled: true,
-    colored: false,
-    stderr_levels: vec![],
-    masking_enabled: false,
-};
-
-// 彩色输出
-let config = ConsoleSinkConfig {
-    enabled: true,
-    colored: true,
-    stderr_levels: vec![],
-    masking_enabled: false,
-};
-
-// stderr 分流
-let config = ConsoleSinkConfig {
-    enabled: true,
-    colored: true,
-    stderr_levels: vec!["error".to_string(), "warn".to_string()],
-    masking_enabled: false,
-};
-```
-
-**环境变量控制**：
-- `NO_COLOR=1`: 禁用颜色输出
-- `CLICOLOR_FORCE=1`: 强制启用颜色
-- `TERM=dumb`: 禁用颜色
-
-### template.rs - 日志模板
-
-支持以下占位符：
-
-| 占位符 | 说明 |
-|--------|------|
-| `{timestamp}` | ISO 8601 时间戳 |
-| `{level}` | 日志级别（TRACE/DEBUG/INFO/WARN/ERROR） |
-| `{target}` | 日志目标/模块 |
-| `{message}` | 日志消息 |
-| `{field:xxx}` | 自定义字段 |
-
-### builder.rs - Builder 模式
-
-链式 API 配置示例：
-
-```rust
-// 最简单配置
-let logger = LoggerManager::builder()
-    .level("debug")
-    .console(true)
-    .build()
-    .await?;
-
-// 多 Sink 配置
-let logger = LoggerManager::builder()
-    .level("info")
-    .console(true)
-    .file("logs/app.log")
-    .build()
-    .await?;
-```
-
-### masking.rs - 数据脱敏
-
-支持的敏感数据类型：
-
-| 类型 | 示例 | 脱敏结果 |
+| 示例 | 说明 | 运行命令 |
 |------|------|----------|
-| 邮箱 | `user@example.com` | `**@**.***` |
-| 电话 | `13812345678` | `***-****-****` |
-| 身份证 | `110101199001011234` | `******1234` |
-| 银行卡 | `6222021234567890123` | `622202******0123` |
+| `config_file` | 配置文件加载示例：从 TOML 配置文件加载 `InklogConfig`（Layer 1 本地资源，临时目录自动清理） | `cargo run --package inklog-examples --example config_file` |
+| `config_inspect` | 配置 inspect 示例：`InklogConfig::sinks_enabled()` 与 `LoggerManager::load()` 的使用 | `cargo run --package inklog-examples --example config_inspect` |
+| `env_overrides` | 环境变量覆盖加载示例：`InklogConfig::load_with_env_overrides()` 的使用 | `cargo run --package inklog-examples --example env_overrides` |
 
-## Layer 1 详解
+## 核心（core）
 
-### file.rs - 文件输出
+| 示例 | 说明 | 运行命令 |
+|------|------|----------|
+| `basic` | 基础用法示例：初始化、日志记录、验证和关闭全流程 | `cargo run --package inklog-examples --example basic` |
+| `builder` | Builder 模式配置示例：`LoggerManager::builder()` 链式 API 的各种用法 | `cargo run --package inklog-examples --example builder` |
+| `all_features` | 完整功能演示：综合演示 inklog 所有主要功能模块及组合使用 | `cargo run --package inklog-examples --example all_features` |
+| `production` | 生产环境配置示例：开发/预发布/生产等不同环境的配置方式 | `cargo run --package inklog-examples --example production` |
+| `template` | 日志模板示例：`LogTemplate` 用法、自定义占位符与不同格式效果 | `cargo run --package inklog-examples --example template` |
+| `error_handling` | 错误处理示例（Layer 0 零依赖）：`InklogError` 与 `InklogResult` 的使用 | `cargo run --package inklog-examples --example error_handling` |
+| `i18n` | 国际化 (i18n) 格式化示例：多语言（en-US / zh-CN）日志格式化 | `cargo run --package inklog-examples --example i18n` |
 
-```rust
-// 基础文件配置
-FileSinkConfig {
-    enabled: true,
-    path: "logs/app.log".to_string(),
-    rotation: Some(RotationPolicy::Size { max_size: "10MB".to_string() }),
-    compress: false,
-    ..Default::default()
-}
+## Sink 与输出（sinks）
 
-// 带压缩配置
-FileSinkConfig {
-    enabled: true,
-    path: "logs/app.log".to_string(),
-    rotation: Some(RotationPolicy::Size { max_size: "10MB".to_string() }),
-    compress: true,  // 启用 Zstd 压缩
-    ..Default::default()
-}
-```
+| 示例 | 说明 | 运行命令 |
+|------|------|----------|
+| `console` | Console Sink 示例：控制台输出的三种配置方式（含颜色与 stderr 分流） | `cargo run --package inklog-examples --example console` |
+| `file` | File Sink 示例：文件输出的三种核心功能 | `cargo run --package inklog-examples --example file` |
+| `rotation` | 日志轮转示例（Layer 1 本地资源）：按大小、按时间等轮转策略 API | `cargo run --package inklog-examples --example rotation` |
+| `compression` | Zstd 压缩/解压缩示例（Layer 1 本地资源）：日志压缩能力（需 `compression` feature） | `cargo run --package inklog-examples --features compression --example compression` |
+| `ring_buffered_file` | ChannelBufferedFileSink 示例（Layer 1 本地资源）：基于 crossbeam channel 的高性能文件 sink | `cargo run --package inklog-examples --example ring_buffered_file` |
+| `archive_format` | 归档格式示例（Layer 0 零依赖）：`ArchiveFormat` 枚举的使用 | `cargo run --package inklog-examples --example archive_format` |
+| `parquet_archive` | Parquet 归档示例：`ParquetConfig` 与 `convert_logs_to_parquet()`（需数据库 feature 与 `parquet` feature） | `cargo run --package inklog-examples --features sqlite,parquet --example parquet_archive` |
+| `partition_strategy` | 数据库分区策略示例：`PartitionStrategy`（Monthly / Yearly）的配置与使用 | `cargo run --package inklog-examples --example partition_strategy` |
 
-**轮转策略**：
-- `Size`: 按文件大小轮转
-- `Time`: 按时间轮转（ hourly/daily/weekly ）
-- `SizeAndTime`: 同时满足大小和时间条件
+## 数据库（database）
 
-### encryption.rs - 加密日志
+| 示例 | 说明 | 运行命令 |
+|------|------|----------|
+| `database` | Database Sink 示例：SQLite 内存数据库连接、批量写入与查询演示（需 `sqlite` feature） | `cargo run --package inklog-examples --features sqlite --example database` |
+| `database_pg_mysql` | PostgreSQL/MySQL 数据库驱动示例：`DatabaseDriver` 枚举、连接配置与驱动对比 | `cargo run --package inklog-examples --example database_pg_mysql` |
+| `di_example` | DI（依赖注入）模式示例：使用真实适配器和 Mock 实现创建 `LoggerManager`（需 `sqlite` feature） | `cargo run --package inklog-examples --features sqlite --example di_example` |
 
-```bash
-# 设置加密密钥（32 字节，Base64 编码）
-export LOG_ENCRYPTION_KEY=<base64_encoded_32_bytes>
+## 基础设施（infra）
 
-# 运行加密示例
-cargo run --bin encryption
-```
+| 示例 | 说明 | 运行命令 |
+|------|------|----------|
+| `channel_strategy` | 自适应 Channel 策略示例：`ChannelStrategy` 枚举与 `PerformanceConfig` 自适应阈值参数 | `cargo run --package inklog-examples --example channel_strategy` |
+| `circuit_breaker` | 断路器示例（Layer 2 外部服务）：Closed → Open → HalfOpen → Closed 完整状态机 | `cargo run --package inklog-examples --example circuit_breaker` |
+| `fallback` | Sink 降级机制示例：故障检测和自动降级策略 | `cargo run --package inklog-examples --example fallback` |
+| `log_adapter` | `log` crate 适配器示例（Layer 0 零依赖）：`LogAdapter` 将标准 `log` 宏日志桥接到 inklog | `cargo run --package inklog-examples --example log_adapter` |
+| `log_level` | LogLevel 类型示例：解析、比较与 Display | `cargo run --package inklog-examples --example log_level` |
+| `metrics` | 健康监控与指标收集示例（Layer 2 外部服务）：指标采集、Sink 健康状态与 Prometheus 格式导出 | `cargo run --package inklog-examples --example metrics` |
+| `object_pool` | 对象池示例（Layer 0 零依赖）：`ObjectPool` async API 与全局线程本地池便捷函数 | `cargo run --package inklog-examples --example object_pool` |
+| `output_format` | 输出格式示例（Layer 0 零依赖）：`OutputFormat` 枚举的使用 | `cargo run --package inklog-examples --example output_format` |
+| `performance` | 性能测试示例：吞吐量、延迟和并发能力 | `cargo run --package inklog-examples --example performance` |
+| `rate_limiter` | 速率限制器示例（Layer 0 零依赖）：`RateLimiter` 令牌桶算法 | `cargo run --package inklog-examples --example rate_limiter` |
+| `runtime_ops` | 运行时操作示例：`LoggerManager` 的运行时监控与运维 API | `cargo run --package inklog-examples --example runtime_ops` |
 
-**加密文件格式**：
+## 网络（network）
 
-```
-┌─────────────────────────────────────────┐
-│ Magic Header (8 bytes)  - "ENCLOG1\0"  │
-├─────────────────────────────────────────┤
-│ Version (2 bytes)       - 0x0001        │
-├─────────────────────────────────────────┤
-│ Algorithm ID (2 bytes)  - 0x0001 (AES)  │
-├─────────────────────────────────────────┤
-│ Nonce (12 bytes)        - 随机/文件唯一  │
-├─────────────────────────────────────────┤
-│ Encrypted Data (可变)    - AES-GCM 密文  │
-├─────────────────────────────────────────┤
-│ Auth Tag (16 bytes)     - GCM 认证标签   │
-└─────────────────────────────────────────┘
-```
+| 示例 | 说明 | 运行命令 |
+|------|------|----------|
+| `http` | HTTP 健康检查和指标端点示例：启动 HTTP 服务器并访问健康检查与 Prometheus 指标端点 | `cargo run --package inklog-examples --example http` |
+| `http_auth` | HTTP 认证与 IP 白名单示例：`HttpAuthConfig` 与 `HttpServerConfig.ip_whitelist` 配置 | `cargo run --package inklog-examples --example http_auth` |
+| `tls_config` | TLS 配置示例：`TlsConfig` 证书与密钥路径等配置 | `cargo run --package inklog-examples --example tls_config` |
 
-### performance.rs - 性能测试
+## 安全（security）
 
-性能基准数据（仅供参考，实际数据因硬件而异）：
-
-| Sink 类型 | 吞吐量 | 延迟 P99 |
-|-----------|--------|----------|
-| Console Sink | ~200,000 条/秒 | ~200μs |
-| File Sink | ~500 条/秒 | ~2ms |
-
-## Layer 2 详解
-
-### database.rs - 数据库日志
-
-使用 SQLite 内存数据库，无需文件管理：
-
-```bash
-cargo run --bin database --features sqlite
-```
-
-**前提条件**：需要 sqlite 功能启用。
-
-### http.rs - HTTP 监控
-
-启动 HTTP 服务器提供健康检查和指标：
-
-```bash
-cargo run --bin http
-```
-
-**端点**：
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/health` | GET | 健康检查（JSON） |
-| `/metrics` | GET | Prometheus 格式指标 |
-
-**示例响应**：
-
-```bash
-# 健康检查
-curl http://localhost:8080/health
-# {"status":"healthy","sinks":[{"type":"Console","healthy":true}],"uptime_seconds":3600}
-
-# Prometheus 指标
-curl http://localhost:8080/metrics
-# inklog_logs_total{level="INFO"} 1234
-# inklog_errors_total 5
-```
-
-### fallback.rs - 降级机制
-
-Sink 降级策略：
-
-```
-Database Sink → File Sink → Console Sink → 系统告警
-```
-
-故障场景：
-
-| 故障场景 | 降级策略 |
-|----------|----------|
-| DB 连接失败 | 降级到 FileSink |
-| 磁盘满 | 降级到 Console Sink |
-| S3 不可达 | 本地保留，网络恢复后重试 |
-
-### s3_archive.rs - S3 归档
-
-```bash
-# 无凭据时显示配置指南
-cargo run --bin s3_archive
-
-# 有 AWS 凭据时尝试归档
-AWS_ACCESS_KEY_ID=xxx AWS_SECRET_ACCESS_KEY=yyy \
-  AWS_DEFAULT_REGION=us-east-1 \
-  cargo run --bin s3_archive
-
-# 使用 LocalStack
-AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
-  AWS_ENDPOINT_URL=http://localhost:4566 \
-  cargo run --bin s3_archive
-```
-
-## 外部依赖配置
-
-部分示例需要额外的 Cargo 特性：
-
-| 特性 | 示例 | 说明 |
-|------|------|------|
-| `dbnexus` | database.rs | 数据库连接池 |
-| `http` | http.rs | HTTP 指标端点 |
-| `aws` | s3_archive.rs | S3 归档功能 |
-
-在 `examples/Cargo.toml` 中启用：
-
-```toml
-[features]
-default = ["dbnexus", "http", "aws"]
-```
-
-## 验证
-
-### 编译验证
-
-```bash
-cargo build --all-targets
-```
-
-### Clippy 检查
-
-```bash
-cargo clippy -- -D warnings
-```
-
-### 运行所有示例
-
-```bash
-# Layer 0（零依赖）
-for bin in console template builder masking; do
-    cargo run --bin $bin
-done
-
-# Layer 1（本地资源）
-for bin in file encryption performance; do
-    cargo run --bin $bin
-done
-
-# Layer 2（外部服务）
-for bin in database http fallback s3_archive; do
-    cargo run --bin $bin
-done
-```
+| 示例 | 说明 | 运行命令 |
+|------|------|----------|
+| `encryption` | 日志加密示例：使用加密功能保护日志数据 | `cargo run --package inklog-examples --example encryption` |
+| `log_sanitizer` | 日志内容净化示例（Layer 0 零依赖）：敏感数据脱敏、严格转义、JSON 安全转义 | `cargo run --package inklog-examples --example log_sanitizer` |
+| `masking` | 数据脱敏示例：使用 `DataMasker` 对敏感信息进行脱敏处理 | `cargo run --package inklog-examples --example masking` |
+| `path_validator` | 路径验证器示例（Layer 0 零依赖）：路径遍历检测、危险组件与符号链接检测 | `cargo run --package inklog-examples --example path_validator` |
 
 ## 许可证
 
-MIT License - 参见项目根目录 LICENSE 文件
+MIT License — 参见项目根目录 [LICENSE](../LICENSE) 文件。

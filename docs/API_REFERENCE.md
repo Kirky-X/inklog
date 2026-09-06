@@ -1,10 +1,13 @@
-# Inklog API 参考文档
+# 📘 Inklog API 参考
 
 本文档提供 Inklog 公共 API 的完整参考。
 
 ---
 
-## 目录
+## 📋 目录
+
+<details open>
+<summary>📑 目录（点击展开）</summary>
 
 - [概述](#概述)
 - [核心类型](#核心类型)
@@ -22,6 +25,13 @@
 - [错误类型](#错误类型)
 - [健康监控类型](#健康监控类型)
 - [特征（Traits）](#特征traits)
+- [依赖注入类型](#依赖注入类型)
+- [基础设施 Trait（Infrastructure Traits）](#基础设施-traitinfrastructure-traits)
+- [Mock 实现（测试用）](#mock-实现测试用)
+- [适配器实现](#适配器实现)
+- [示例参考](#示例参考)
+
+</details>
 
 ---
 
@@ -2310,4 +2320,4 @@ Inklog 在 `examples/` crate 中提供了 10 个可运行示例，演示 API 的
 
 ---
 
-**[返回顶部](#inklog-api-参考文档)**
+**[返回顶部](#-inklog-api-参考)**

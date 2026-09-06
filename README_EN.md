@@ -1,24 +1,14 @@
 <div align="center">
 
-<img src="docs/image/inklog.png" alt="Inklog Logo" width="200" style="margin-bottom: 16px;">
+<img src="docs/assets/inklog.png" alt="Inklog Logo" width="200">
 
-<p>
-  <a href="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml"><img src="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg" alt="CI Status" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/v/inklog.svg" alt="Version" style="display:inline;margin:0 4px;"></a><a href="https://docs.rs/inklog"><img src="https://docs.rs/inklog/badge.svg" alt="Documentation" style="display:inline;margin:0 4px;"></a><a href="https://crates.io/crates/inklog"><img src="https://img.shields.io/crates/d/inklog.svg" alt="Downloads" style="display:inline;margin:0 4px;"></a><a href="https://github.com/Kirky-X/inklog/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/inklog.svg" alt="License" style="display:inline;margin:0 4px;"></a><a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.94+-orange.svg" alt="Rust 1.94+" style="display:inline;margin:0 4px;"></a>
-</p>
+[![CI Status](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![Version](https://img.shields.io/crates/v/inklog.svg)](https://crates.io/crates/inklog) [![Docs.rs](https://docs.rs/inklog/badge.svg)](https://docs.rs/inklog) [![Downloads](https://img.shields.io/crates/d/inklog.svg)](https://crates.io/crates/inklog) [![License](https://img.shields.io/crates/l/inklog.svg)](LICENSE) [![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org/) [![Coverage](https://codecov.io/gh/Kirky-X/inklog/branch/main/graph/badge.svg)](https://codecov.io/gh/Kirky-X/inklog)
 
-[中文](./README.md) | English
+**[中文](README.md)** | English
 
-<p align="center">
-  <strong>Enterprise-grade Rust Logging Infrastructure</strong>
-</p>
+**Enterprise-grade Rust Logging Infrastructure**
 
-<p align="center">
-  <a href="#features" style="color:#3B82F6;">✨ Features</a> •
-  <a href="#quick-start" style="color:#3B82F6;">🚀 Quick Start</a> •
-  <a href="#documentation" style="color:#3B82F6;">📚 Documentation</a> •
-  <a href="#examples" style="color:#3B82F6;">💻 Examples</a> •
-  <a href="#contributing" style="color:#3B82F6;">🤝 Contributing</a>
-</p>
+[✨ Features](#-features) • [🚀 Quick Start](#-quick-start) • [📚 Documentation](#-documentation) • [💻 Examples](#-examples) • [🤝 Contributing](#-contributing)
 
 </div>
 
@@ -63,38 +53,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 📋 Table of Contents
 
-<details open style="border-radius:8px; padding:16px; border:1px solid #E2E8F0;">
-<summary style="cursor:pointer; font-weight:600; color:#1E293B;">📑 Table of Contents (Click to expand)</summary>
+<details open>
+<summary>📑 Table of Contents (Click to expand)</summary>
 
-- [✨ Features](#features)
-- [🚀 Quick Start](#quick-start)
-  - [📦 Installation](#installation)
-  - [💡 Basic Usage](#basic-usage)
-  - [🔧 Advanced Configuration](#advanced-configuration)
-- [🎨 Feature Flags](#feature-flags)
-- [📚 Documentation](#documentation)
-- [💻 Examples](#examples)
-- [🏗️ Architecture](#architecture)
-- [🔒 Security](#security)
-- [🧪 Testing](#testing)
-- [🤝 Contributing](#contributing)
-- [📋 Changelog](#changelog)
-- [📄 License](#license)
-- [🙏 Acknowledgments](#acknowledgments)
+- [✨ Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+  - [📦 Installation](#-installation)
+  - [💡 Basic Usage](#-basic-usage)
+  - [🔧 Advanced Configuration](#-advanced-configuration)
+- [🎨 Feature Flags](#-feature-flags)
+- [📚 Documentation](#-documentation)
+- [💻 Examples](#-examples)
+- [🏗️ Architecture](#️-architecture)
+- [🧪 Testing](#-testing)
+- [📊 Performance](#-performance)
+- [🔒 Security](#-security)
+- [🗺️ Roadmap](#️-roadmap)
+- [🤝 Contributing](#-contributing)
+- [📋 Changelog](#-changelog)
+- [📄 License](#-license)
+- [🙏 Acknowledgments](#-acknowledgments)
+- [📞 Contact & Support](#-contact--support)
+- [⭐ Star History](#-star-history)
 
 </details>
 
 ---
 
-## <span id="features">✨ Features</span>
-
-<div align="center" style="margin: 24px 0;">
+## ✨ Features
 
 | 🎯 Core Features | ⚡ Enterprise Features |
 |:----------:|:----------:|
 | Always Available | Optional |
-
-</div>
 
 <table style="width:100%; border-collapse: collapse;">
 <tr>
@@ -138,12 +128,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | <span style="color:#166534; padding:4px 8px; border-radius:4px;">minimal</span> | No optional features | Core logging only |
 | <span style="color:#1E40AF; padding:4px 8px; border-radius:4px;">standard</span> | `http`, `cli` | Standard development environment |
 | <span style="color:#991B1B; padding:4px 8px; border-radius:4px;">full</span> | All default features | Production-ready logging |
+| <span style="color:#9333EA; padding:4px 8px; border-radius:4px;">test-utils</span> | `MockCache`/`MockConfig`/`MockDatabaseAdapter` | External test consumers: the three mocks have been removed from the default public API (BREAKING); integration tests are fully real (DbNexusAdapter + sqlite) — only external test code needs to enable this feature explicitly |
 
 ---
 
-## <span id="quick-start">🚀 Quick Start</span>
+## 🚀 Quick Start
 
-### <span id="installation">📦 Installation</span>
+### 📦 Installation
 
 Add this to your `Cargo.toml`:
 
@@ -152,14 +143,14 @@ Add this to your `Cargo.toml`:
 inklog = "0.3.0-rc.2"
 ```
 
-Full feature set:
+Full feature set (explicit opt-in):
 
 ```toml
 [dependencies]
 inklog = { version = "0.3.0-rc.2", default-features = false, features = ["http", "cli", "sqlite"] }
 ```
 
-### <span id="basic-usage">💡 Basic Usage</span>
+### 💡 Basic Usage
 
 <div align="center" style="margin: 24px 0;">
 
@@ -260,7 +251,7 @@ let _logger = LoggerManager::with_config(config).await?;
 </tr>
 </table>
 
-### <span id="advanced-configuration">🔧 Advanced Configuration</span>
+### 🔧 Advanced Configuration
 
 #### Encrypted File Logging
 
@@ -308,7 +299,7 @@ let _logger = LoggerManager::with_config(config).await?;
 
 ---
 
-## <span id="feature-flags">🎨 Feature Flags</span>
+## 🎨 Feature Flags
 
 ### Default Features
 
@@ -350,70 +341,35 @@ inklog = { version = "0.3.0-rc.2", features = [
 |---------|-------------|-------------|
 | **http** | axum | HTTP health check endpoint |
 | **cli** | clap, glob | CLI tools |
-| **sqlite** | dbnexus, sea-orm | SQLite database sink |
-| **postgres** | dbnexus, sea-orm | PostgreSQL database sink |
-| **mysql** | dbnexus, sea-orm | MySQL database sink |
-| **duckdb** | dbnexus, sea-orm | DuckDB database Sink |
+| **sqlite** | dbnexus | SQLite database sink |
+| **postgres** | dbnexus | PostgreSQL database sink |
+| **mysql** | dbnexus | MySQL database sink |
+| **duckdb** | dbnexus | DuckDB database Sink |
 | **compression** | zstd | ZSTD compression for rotated log files |
 | **parquet** | parquet, arrow-array, arrow-schema | Parquet export support (analytics) |
 | **fast-masking** | aho-corasick | Aho-Corasick accelerated multi-pattern masking |
-| **kit** | trait-kit, dbnexus, oxcache | DI toolkit integration |
+| **kit** | trait-kit, dbnexus, oxcache | trait-kit AsyncKit integration (InklogModule) |
+| **test-utils** | — | Test-facing mock exports (MockCache/MockConfig/MockDatabaseAdapter); excluded from default and all production combinations |
+
+> ⚠️ **Database backend exclusivity**: the `sqlite`/`postgres`/`mysql`/`duckdb` backend features are mutually exclusive (enforced via dbnexus). `--all-features` is not supported; enable features grouped by backend instead.
 
 ---
 
-## <span id="documentation">📚 Documentation</span>
+## 📚 Documentation
 
-<div align="center" style="margin: 24px 0;">
-
-<table style="width:100%; max-width: 800px;">
-<tr>
-<td align="center" width="33%" style="padding: 16px;">
-<a href="https://docs.rs/inklog" style="text-decoration:none;">
-<div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">📘 API Reference</b>
-</div>
-</a>
-<br><span style="color:#64748B;">Complete API documentation</span>
-</td>
-<td align="center" width="33%" style="padding: 16px;">
-<a href="examples/" style="text-decoration:none;">
-<div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">💻 Examples</b>
-</div>
-</a>
-<br><span style="color:#64748B;">Working code examples</span>
-</td>
-<td align="center" width="33%" style="padding: 16px;">
-<a href="docs/" style="text-decoration:none;">
-<div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">📖 Guides</b>
-</div>
-</a>
-<br><span style="color:#64748B;">In-depth guides</span>
-</td>
-</tr>
-</table>
-
-</div>
-
-### 📖 Additional Resources
-
-| Resource | Description |
+| Document | Description |
 |----------|-------------|
-| 📘 [API Reference](https://docs.rs/inklog) | Complete API documentation on docs.rs |
-| 🏗️ [Architecture](docs/ARCHITECTURE.md) | System architecture and design decisions |
-| 🔒 [Security](docs/SECURITY.md) | Security best practices and features |
-| 📦 [Examples](examples/) | Runnable code examples for all features |
+| [📖 User Guide](docs/USER_GUIDE.md) | Complete tutorial from installation to advanced usage |
+| [📘 API Reference](docs/API_REFERENCE.md) | Detailed description of all public APIs |
+| [🏗️ Architecture](docs/ARCHITECTURE.md) | Design philosophy and internal implementation |
+| [🔒 Security](docs/SECURITY.md) | Security design and best practices |
+| [📋 Changelog](docs/CHANGELOG.md) | Change records for every version |
+| [🤝 Contributing](docs/CONTRIBUTING.md) | How to participate in project development |
+| [📦 Online API Docs](https://docs.rs/inklog) | Latest docs auto-generated on docs.rs |
 
 ---
 
-## <span id="examples">💻 Examples</span>
-
-<div align="center" style="margin: 24px 0;">
-
-### 💡 Practical Examples
-
-</div>
+## 💻 Examples
 
 <table style="width:100%; border-collapse: collapse;">
 <tr>
@@ -589,20 +545,81 @@ log::info!("User email: user@example.com");
 
 ### 📦 Runnable Examples
 
-The `examples/` crate provides 10 specialized examples demonstrating specific features. Run them using `cargo run --example <name>` (in the `examples/` directory or with `--package inklog-examples`).
+`examples/` is a standalone workspace crate (`inklog-examples`) organized into 7 categories with 39 examples in total. Run them from the repository root with `cargo run --package inklog-examples --example <name>` (or `cargo run --example <name>` from inside `examples/`). Some examples require the corresponding feature (e.g. `sqlite`, `postgres`, `compression`, `parquet`).
+
+#### Configuration (config)
 
 | Example | Description | Run Command |
 |---------|-------------|-------------|
-| `object_pool` | Object pool reuse for frequent allocation scenarios | `cargo run --example object_pool` |
-| `path_validator` | Path validation ensuring file sink target safety | `cargo run --example path_validator` |
-| `log_sanitizer` | Log input sanitization preventing log injection | `cargo run --example log_sanitizer` |
-| `log_adapter` | Bridge between `log` and `tracing` ecosystems | `cargo run --example log_adapter` |
-| `compression` | File sink compression (ZSTD/GZIP) | `cargo run --example compression` |
-| `rotation` | Size-based and time-based file rotation | `cargo run --example rotation` |
-| `ring_buffered_file` | Ring-buffered file sink for high-throughput scenarios | `cargo run --example ring_buffered_file` |
-| `config_file` | TOML configuration file loading | `cargo run --example config_file` |
-| `metrics` | Health metrics and Prometheus export | `cargo run --example metrics` |
-| `circuit_breaker` | Sink circuit breaker and fault recovery | `cargo run --example circuit_breaker` |
+| `config_file` | Configuration file loading (Layer 1, local resources) | `cargo run --package inklog-examples --example config_file` |
+| `config_inspect` | Config inspect: `sinks_enabled()` + `LoggerManager::load()` | `cargo run --package inklog-examples --example config_inspect` |
+| `env_overrides` | Environment variable override loading | `cargo run --package inklog-examples --example env_overrides` |
+
+#### Core (core)
+
+| Example | Description | Run Command |
+|---------|-------------|-------------|
+| `basic` | Basic usage | `cargo run --package inklog-examples --example basic` |
+| `builder` | Builder pattern configuration | `cargo run --package inklog-examples --example builder` |
+| `all_features` | Full feature demonstration | `cargo run --package inklog-examples --example all_features` |
+| `production` | Production environment configuration | `cargo run --package inklog-examples --example production` |
+| `template` | Log templates | `cargo run --package inklog-examples --example template` |
+| `error_handling` | Error handling (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example error_handling` |
+| `i18n` | Internationalization (i18n) formatting | `cargo run --package inklog-examples --example i18n` |
+
+#### Sinks & Output (sinks)
+
+| Example | Description | Run Command |
+|---------|-------------|-------------|
+| `console` | Console Sink | `cargo run --package inklog-examples --example console` |
+| `file` | File Sink | `cargo run --package inklog-examples --example file` |
+| `rotation` | Log rotation (Layer 1, local resources) | `cargo run --package inklog-examples --example rotation` |
+| `compression` | Zstd compression/decompression (requires `compression` feature) | `cargo run --package inklog-examples --example compression` |
+| `ring_buffered_file` | ChannelBufferedFileSink (Layer 1, local resources) | `cargo run --package inklog-examples --example ring_buffered_file` |
+| `archive_format` | Archive format (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example archive_format` |
+| `parquet_archive` | Parquet archival (requires `parquet` feature) | `cargo run --package inklog-examples --example parquet_archive` |
+| `partition_strategy` | Database partitioning strategies | `cargo run --package inklog-examples --example partition_strategy` |
+
+#### Database (database)
+
+| Example | Description | Run Command |
+|---------|-------------|-------------|
+| `database` | Database Sink with in-memory SQLite (requires `sqlite` feature) | `cargo run --package inklog-examples --features sqlite --example database` |
+| `database_pg_mysql` | PostgreSQL/MySQL database drivers | `cargo run --package inklog-examples --example database_pg_mysql` |
+| `di_example` | DI (Dependency Injection) pattern | `cargo run --package inklog-examples --example di_example` |
+
+#### Infrastructure (infra)
+
+| Example | Description | Run Command |
+|---------|-------------|-------------|
+| `channel_strategy` | Adaptive channel strategy | `cargo run --package inklog-examples --example channel_strategy` |
+| `circuit_breaker` | Circuit breaker (Layer 2, external services) | `cargo run --package inklog-examples --example circuit_breaker` |
+| `fallback` | Sink fallback/degradation | `cargo run --package inklog-examples --example fallback` |
+| `log_adapter` | `log` crate adapter bridge (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example log_adapter` |
+| `log_level` | LogLevel parsing/comparison/Display | `cargo run --package inklog-examples --example log_level` |
+| `metrics` | Health monitoring and metrics collection (Layer 2, external services) | `cargo run --package inklog-examples --example metrics` |
+| `object_pool` | Object pool (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example object_pool` |
+| `output_format` | Output formats (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example output_format` |
+| `performance` | Performance testing | `cargo run --package inklog-examples --example performance` |
+| `rate_limiter` | Rate limiter (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example rate_limiter` |
+| `runtime_ops` | LoggerManager runtime operations API | `cargo run --package inklog-examples --example runtime_ops` |
+
+#### Network (network)
+
+| Example | Description | Run Command |
+|---------|-------------|-------------|
+| `http` | HTTP health check and metrics endpoints | `cargo run --package inklog-examples --example http` |
+| `http_auth` | HTTP authentication and IP allowlist | `cargo run --package inklog-examples --example http_auth` |
+| `tls_config` | TLS configuration | `cargo run --package inklog-examples --example tls_config` |
+
+#### Security (security)
+
+| Example | Description | Run Command |
+|---------|-------------|-------------|
+| `encryption` | Log encryption | `cargo run --package inklog-examples --example encryption` |
+| `log_sanitizer` | Log content sanitization (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example log_sanitizer` |
+| `masking` | Data masking | `cargo run --package inklog-examples --example masking` |
+| `path_validator` | Path validator (Layer 0, zero dependencies) | `cargo run --package inklog-examples --example path_validator` |
 
 <div align="center" style="margin: 24px 0;">
 
@@ -610,11 +627,11 @@ The `examples/` crate provides 10 specialized examples demonstrating specific fe
 
 </div>
 
-> **Note**: `inklog-examples` is now part of the workspace.
-
 ---
 
-## <span id="architecture">🏗️ Architecture</span>
+## 🏗️ Architecture
+
+> For the complete architecture design, data flow, and extension points, see the [🏗️ Architecture document](docs/ARCHITECTURE.md).
 
 <div align="center" style="margin: 24px 0;">
 
@@ -670,50 +687,7 @@ flowchart TD
 
 ---
 
-## <span id="security">🔒 Security</span>
-
-<div align="center" style="margin: 24px 0;">
-
-### 🛡️ Security Features
-
-</div>
-
-Inklog is built with security as the highest priority:
-
-#### 🔒 Encryption
-
-- **AES-256-GCM**: Military-grade encryption for log files
-- **Key Management**: Environment variable-based key injection
-- **Memory Zeroing**: Secure key clearing via `zeroize` crate after use
-- **SHA-256 Hashing**: Integrity verification for encrypted logs
-
-#### 🎭 Data Masking
-
-- **Regex-based Patterns**: Automated PII detection and masking
-- **Email Masking**: `user@example.com` → `***@***.***`
-- **SSN Masking**: Credit card and social security number masking
-- **Custom Patterns**: Configurable regex patterns for sensitive data
-
-#### 🔐 Secure Key Handling
-
-```rust
-// Set encryption key securely from environment
-std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
-
-// Key is automatically zeroized after use
-// Never hardcode keys in your application
-```
-
-#### 🛡️ Security Best Practices
-
-- **No Hardcoded Keys**: Keys loaded from environment variables
-- **Least Privilege**: Only necessary file/database access
-- **Audit Logging**: Debug feature for security audit trails
-- **Compliance Ready**: Supporting GDPR, HIPAA, PCI-DSS logging requirements
-
----
-
-## <span id="testing">🧪 Testing</span>
+## 🧪 Testing
 
 <div align="center" style="margin: 24px 0;">
 
@@ -776,6 +750,8 @@ cargo deny check bans
 
 ### Dependency Injection Testing
 
+> ⚠️ Since 0.3.0-rc.2, `MockCache`/`MockConfig`/`MockDatabaseAdapter` have been removed from the default public API (BREAKING); external test code must enable the `test-utils` feature explicitly.
+
 Inklog provides Mock implementations for unit testing without external dependencies:
 
 ```rust
@@ -809,7 +785,7 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
 - **MockConfig**: Runtime-modifiable configuration
 - **MockDatabaseAdapter**: In-memory log storage with health status control
 
-See [User Guide](docs/USER_GUIDE.md#using-mock-implementations-for-testing) for detailed usage.
+See the [User Guide](docs/USER_GUIDE.md#使用-mock-实现进行测试) for detailed usage.
 
 ### Integration Testing
 
@@ -825,13 +801,103 @@ docker-compose down
 
 ---
 
-## <span id="contributing">🤝 Contributing</span>
+## 📊 Performance
 
-<div align="center" style="margin: 24px 0;">
+Inklog optimizes the logging path through async I/O, batch writes, bounded queues, and memory pooling. The following design highlights and reference figures are recorded in the "Performance Considerations" chapter of the [architecture document](docs/ARCHITECTURE.md):
 
-Contributions are welcome! See [CONTRIBUTING.md](docs/CONTRIBUTING.md)
+### Batch Writes
 
-</div>
+- **FileSink**: line-level writes + `BufWriter` to reduce syscalls
+- **DatabaseSink**: buffered batch flushing (`batch_size` defaults to 100, flush interval defaults to 500ms)
+
+| Strategy | DB Transactions | I/O Cost | Throughput (reference) |
+|----------|----------------|----------|------------------------|
+| Per-record insert | N (auto-commit) | High | ~100/s |
+| Batch of 100 | Single transaction | Low | ~10,000/s |
+
+> The table above reproduces the strategy comparison recorded in docs/ARCHITECTURE.md; actual throughput varies with hardware, database, and configuration.
+
+### Queue & Backpressure
+
+- Bounded Crossbeam channel (`channel_capacity` defaults to 10,000) prevents memory exhaustion; senders block when the queue is full
+- 3 worker threads by default (`worker_threads`, tunable via `PerformanceConfig`)
+- Channel usage is exposed through health metrics and exportable as a Prometheus metric (`inklog_channel_usage`)
+
+### Compression
+
+- ZSTD compression levels 0–22 (default 3, compression ratio ~3.5x); higher levels compress more but run slower
+
+### Benchmarks
+
+The project maintains Criterion benchmarks (`benches/inklog_bench.rs`):
+
+```bash
+cargo bench
+```
+
+`examples/src/bin/infra/performance.rs` provides a runnable performance example.
+
+> Note: no official cross-version benchmark report is published in the repository yet (there is no PERFORMANCE.md or benchmarks/ directory under docs/). You are welcome to benchmark on your target hardware with the tools above and share the results.
+
+---
+
+## 🔒 Security
+
+Inklog is built with security as the highest priority. For the complete security design, vulnerability reporting process, and best practices, see the [🔒 Security document](docs/SECURITY.md).
+
+#### 🔒 Encryption
+
+- **AES-256-GCM**: Military-grade encryption for log files
+- **Key Management**: Environment variable-based key injection
+- **Memory Zeroing**: Secure key clearing via `zeroize` crate after use
+- **SHA-256 Hashing**: Integrity verification for encrypted logs
+
+#### 🎭 Data Masking
+
+- **Regex-based Patterns**: Automated PII detection and masking
+- **Email Masking**: `user@example.com` → `***@***.***`
+- **ID Masking**: Credit card and social security number masking
+- **Custom Patterns**: Configurable regex patterns for sensitive data
+
+#### 🔐 Secure Key Handling
+
+```rust
+// Set encryption key securely from environment
+std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
+
+// Key is automatically zeroized after use
+// Never hardcode keys in your application
+```
+
+#### 🛡️ Security Best Practices
+
+- **No Hardcoded Keys**: Keys loaded from environment variables
+- **Least Privilege**: Only necessary file/database access
+- **Audit Logging**: Debug feature for security audit trails
+- **Compliance Ready**: Supporting GDPR, HIPAA, PCI-DSS logging requirements
+
+---
+
+## 🗺️ Roadmap
+
+The following phased goals are compiled from the [CHANGELOG](docs/CHANGELOG.md) and the current release plan (timing may adjust with the overall workspace release schedule):
+
+### v0.3.0 Stable Release
+
+- [ ] Complete the 0.3.0-rc.2 → 0.3.0 stable release
+- [ ] Upgrade in lockstep with the workspace dependency chain: trait-kit 0.5.0, oxcache 0.5.0, dbnexus 0.6.0
+
+### Quality & CI
+
+- [ ] Group the CI test matrix by database backend (`sqlite`/`postgres`/`mysql`/`duckdb` backend features are mutually exclusive; the current `--all-features` combination does not compile)
+- [ ] Provision the MySQL integration test environment (integration tests for that backend are currently blocked by the missing MySQL service)
+- [ ] Raise test coverage (llvm-cov baseline is about 80%, moving toward the 95%+ target)
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
 
 ### Development Setup
 
@@ -843,11 +909,11 @@ cd inklog
 # Install pre-commit hooks (if available)
 ./scripts/install-pre-commit.sh
 
-# Run tests
-cargo test --all-features
+# Run tests (grouped by database backend, avoid --all-features)
+cargo test --features "http,cli,compression,parquet,fast-masking"
 
 # Run linter
-cargo clippy --all-features
+cargo clippy --all-targets -- -D warnings
 
 # Format code
 cargo fmt --all
@@ -858,8 +924,8 @@ cargo fmt --all
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
-4. Run tests and ensure all pass (`cargo test --all-features`)
-5. Run clippy and fix warnings (`cargo clippy --all-features`)
+4. Run tests and ensure all pass
+5. Run clippy and fix warnings
 6. Commit your changes (`git commit -m 'Add amazing feature'`)
 7. Push to the branch (`git push origin feature/amazing-feature`)
 8. Open a Pull Request
@@ -874,33 +940,27 @@ cargo fmt --all
 
 ---
 
-## <span id="changelog">📋 Changelog</span>
+## 📋 Changelog
 
-See [CHANGELOG.md](docs/CHANGELOG.md)
+See [CHANGELOG](docs/CHANGELOG.md) for the complete change record.
+
+### Recent Releases
+
+- **0.3.0-rc.2** (2026-09-03): integrated trait-kit 0.5.0-rc.2 and the i18n refactor with a version bump; removed the three mocks from the default public API (BREAKING — external test consumers must enable `test-utils`); cleaned up S3 archival references in docs
+- **0.2.0** (2026-08-05): added `compression`/`parquet`/`fast-masking` features and the i18n core module (fluent-bundle + ICU); added ChannelBufferedFileSink, circuit-breaker protection, and the ring-buffered file sink; edition 2024, MSRV 1.94
+- **0.1.12** (2026-07-22): added `tests/e2e_advanced.rs` (226 tests) covering boundary and error scenarios across 19 modules
 
 ---
 
-## <span id="license">📄 License</span>
+## 📄 License
 
-<div align="center" style="margin: 24px 0;">
-
-This project is licensed under **MIT**:
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-</div>
+This project is licensed under the [MIT License](LICENSE).
 
 MIT License, Copyright (c) 2026 Kirky.X
 
 ---
 
-## <span id="acknowledgments">🙏 Acknowledgments</span>
-
-<div align="center" style="margin: 24px 0;">
-
-### 🌟 Built on Excellent Tools
-
-</div>
+## 🙏 Acknowledgments
 
 Inklog would not be possible without these outstanding projects:
 
@@ -913,7 +973,7 @@ Inklog would not be possible without these outstanding projects:
 
 ---
 
-## 📞 Support
+## 📞 Contact & Support
 
 <div align="center" style="margin: 24px 0;">
 
@@ -956,24 +1016,14 @@ Inklog would not be possible without these outstanding projects:
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Kirky-X/inklog&type=Date)](https://star-history.com/#Kirky-X/inklog&Date)
 
-</div>
-
----
-
-<div align="center" style="margin: 32px 0; padding: 24px; border-radius: 12px;">
-
 ### 💝 Support This Project
 
 If you find this project useful, please consider giving it a ⭐️!
 
 **Built with ❤️ by the Inklog Team**
 
----
-
-**[⬆ Back to Top](#inklog)**
-
----
-
 <sub>© 2026 Inklog Project. All rights reserved.</sub>
+
+**[⬆ Back to Top](#-table-of-contents)**
 
 </div>

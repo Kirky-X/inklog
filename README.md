@@ -1,47 +1,14 @@
-<div align="center" id="inklog">
+<div align="center">
 
-<img src="docs/image/inklog.png" alt="Inklog Logo" width="200" style="margin-bottom: 16px;">
+<img src="docs/assets/inklog.png" alt="Inklog Logo" width="200">
 
-<p>
-  <!-- CI/CD 状态 -->
-  <a href="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml">
-    <img src="https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg" alt="CI Status" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- 版本 -->
-  <a href="https://crates.io/crates/inklog">
-    <img src="https://img.shields.io/crates/v/inklog.svg" alt="Version" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- 文档 -->
-  <a href="https://docs.rs/inklog">
-    <img src="https://docs.rs/inklog/badge.svg" alt="Documentation" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- 下载量 -->
-  <a href="https://crates.io/crates/inklog">
-    <img src="https://img.shields.io/crates/d/inklog.svg" alt="Downloads" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- 许可证 -->
-  <a href="https://github.com/Kirky-X/inklog/blob/main/LICENSE">
-    <img src="https://img.shields.io/crates/l/inklog.svg" alt="License" style="display:inline;margin:0 4px;">
-  </a>
-  <!-- Rust 版本 -->
-  <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/rust-1.94+-orange.svg" alt="Rust 1.94+" style="display:inline;margin:0 4px;">
-  </a>
-</p>
+[![CI Status](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![Version](https://img.shields.io/crates/v/inklog.svg)](https://crates.io/crates/inklog) [![Docs.rs](https://docs.rs/inklog/badge.svg)](https://docs.rs/inklog) [![Downloads](https://img.shields.io/crates/d/inklog.svg)](https://crates.io/crates/inklog) [![License](https://img.shields.io/crates/l/inklog.svg)](LICENSE) [![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org/) [![Coverage](https://codecov.io/gh/Kirky-X/inklog/branch/main/graph/badge.svg)](https://codecov.io/gh/Kirky-X/inklog)
 
-<p align="center">
-  <strong>企业级 Rust 日志基础设施</strong>
-</p>
+**中文** | [English](README_EN.md)
 
-<p align="center">
-  <a href="#核心特性" style="color:#3B82F6;">✨ 核心特性</a> •
-  <a href="#快速开始" style="color:#3B82F6;">🚀 快速开始</a> •
-  <a href="#文档" style="color:#3B82F6;">📚 文档</a> •
-  <a href="#示例" style="color:#3B82F6;">💻 示例</a> •
-  <a href="#贡献" style="color:#3B82F6;">🤝 贡献</a>
-</p>
+**企业级 Rust 日志基础设施**
 
-中文 | [English](./README_EN.md)
+[✨ 功能特性](#-功能特性) • [🚀 快速开始](#-快速开始) • [📚 文档](#-文档) • [💻 示例](#-示例) • [🤝 参与贡献](#-参与贡献)
 
 </div>
 
@@ -86,37 +53,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 📋 目录
 
-<details open style="border-radius:8px; padding:16px; border:1px solid #E2E8F0;">
-<summary style="cursor:pointer; font-weight:600; color:#1E293B;">📑 目录 (点击展开)</summary>
+<details open>
+<summary>📑 目录（点击展开）</summary>
 
-- [✨ 核心特性](#核心特性)
-- [🚀 快速开始](#快速开始)
-  - [📦 安装](#安装)
-  - [💡 基础使用](#基础使用)
-  - [🔧 高级配置](#高级配置)
-- [🎨 功能标志](#功能标志)
-- [📚 文档](#文档)
-- [💻 示例](#示例)
-- [🏗️ 架构](#架构)
-- [🔒 安全](#安全)
-- [🧪 测试](#测试)
-- [🤝 贡献](#贡献)
-- [📄 许可证](#许可证)
-- [🙏 致谢](#致谢)
+- [✨ 功能特性](#-功能特性)
+- [🚀 快速开始](#-快速开始)
+  - [📦 安装](#-安装)
+  - [💡 基本用法](#-基本用法)
+  - [🔧 高级配置](#-高级配置)
+- [🎨 特性标志](#-特性标志)
+- [📚 文档](#-文档)
+- [💻 示例](#-示例)
+- [🏗️ 架构](#️-架构)
+- [🧪 测试](#-测试)
+- [📊 性能](#-性能)
+- [🔒 安全](#-安全)
+- [🗺️ 开发路线图](#️-开发路线图)
+- [🤝 参与贡献](#-参与贡献)
+- [📋 更新日志](#-更新日志)
+- [📄 许可证](#-许可证)
+- [🙏 致谢](#-致谢)
+- [📞 联系与支持](#-联系与支持)
+- [⭐ Star 历史](#-star-历史)
 
 </details>
 
 ---
 
-## <span id="核心特性">✨ 核心特性</span>
-
-<div align="center" style="margin: 24px 0;">
+## ✨ 功能特性
 
 | 🎯 核心功能 | ⚡ 企业功能 |
 |:----------:|:----------:|
 | 始终可用 | 可选特性 |
-
-</div>
 
 <table style="width:100%; border-collapse: collapse;">
 <tr>
@@ -164,9 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-## <span id="快速开始">🚀 快速开始</span>
+## 🚀 快速开始
 
-### <span id="安装">📦 安装</span>
+### 📦 安装
 
 在 `Cargo.toml` 中添加依赖：
 
@@ -182,7 +150,7 @@ inklog = "0.3.0-rc.2"
 inklog = { version = "0.3.0-rc.2", default-features = false, features = ["http", "cli", "sqlite"] }
 ```
 
-### <span id="基础使用">💡 基础使用</span>
+### 💡 基本用法
 
 <div align="center" style="margin: 24px 0;">
 
@@ -283,7 +251,7 @@ let _logger = LoggerManager::with_config(config).await?;
 </tr>
 </table>
 
-### <span id="高级配置">🔧 高级配置</span>
+### 🔧 高级配置
 
 #### 加密文件日志
 
@@ -331,7 +299,7 @@ let _logger = LoggerManager::with_config(config).await?;
 
 ---
 
-## <span id="功能标志">🎨 功能标志</span>
+## 🎨 特性标志
 
 ### 默认功能
 
@@ -372,71 +340,36 @@ inklog = { version = "0.3.0-rc.2", features = [
 | 功能 | 依赖 | 描述 |
 |---------|-------------|-------------|
 | **http** | axum | HTTP 健康检查端点 |
-| **cli** | clap, glob, toml | 命令行工具 |
-| **sqlite** | dbnexus, sea-orm | SQLite 数据库 Sink |
-| **postgres** | dbnexus, sea-orm | PostgreSQL 数据库 Sink |
-| **mysql** | dbnexus, sea-orm | MySQL 数据库 Sink |
+| **cli** | clap, glob | 命令行工具 |
+| **sqlite** | dbnexus | SQLite 数据库 Sink |
+| **postgres** | dbnexus | PostgreSQL 数据库 Sink |
+| **mysql** | dbnexus | MySQL 数据库 Sink |
 | **duckdb** | dbnexus | DuckDB 数据库 Sink |
 | **compression** | zstd | ZSTD 压缩支持（轮转日志文件） |
 | **parquet** | parquet, arrow-array, arrow-schema | Parquet 导出支持（分析场景） |
 | **fast-masking** | aho-corasick | Aho-Corasick 多模式加速脱敏 |
 | **kit** | trait-kit, dbnexus, oxcache | trait-kit AsyncKit 集成 (InklogModule) |
+| **test-utils** | — | 测试面 mock 导出（MockCache/MockConfig/MockDatabaseAdapter），不入 default 与任何生产组合 |
+
+> ⚠️ **数据库后端互斥**：`sqlite`/`postgres`/`mysql`/`duckdb` 后端 feature 互斥（经 dbnexus 强制），不适用 `--all-features`，请按后端分组启用。
 
 ---
 
-## <span id="文档">📚 文档</span>
+## 📚 文档
 
-<div align="center" style="margin: 24px 0;">
-
-<table style="width:100%; max-width: 800px;">
-<tr>
-<td align="center" width="33%" style="padding: 16px;">
-<a href="https://docs.rs/inklog" style="text-decoration:none;">
-<div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">📘 API 参考</b>
-</div>
-</a>
-<br><span style="color:#64748B;">完整的 API 文档</span>
-</td>
-<td align="center" width="33%" style="padding: 16px;">
-<a href="examples/" style="text-decoration:none;">
-<div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">💻 示例</b>
-</div>
-</a>
-<br><span style="color:#64748B;">可运行的代码示例</span>
-</td>
-<td align="center" width="33%" style="padding: 16px;">
-<a href="docs/" style="text-decoration:none;">
-<div style="padding: 24px; border-radius:12px; transition: transform 0.2s;">
-<b style="color:#1E293B;">📖 指南</b>
-</div>
-</a>
-<br><span style="color:#64748B;">深入指南</span>
-</td>
-</tr>
-</table>
-
-</div>
-
-### 📖 附加资源
-
-| 资源 | 描述 |
-|----------|-------------|
-| 📘 [API 参考](https://docs.rs/inklog) | docs.rs 上的完整 API 文档 |
-| 🏗️ [架构文档](docs/ARCHITECTURE.md) | 系统架构和设计决策 |
-| 🔒 [安全文档](docs/SECURITY.md) | 安全最佳实践和特性 |
-| 📦 [示例](examples/) | 所有功能的可运行示例 |
+| 文档 | 说明 |
+|------|------|
+| [📖 用户指南](docs/USER_GUIDE.md) | 从安装到进阶的完整使用教程 |
+| [📘 API 参考](docs/API_REFERENCE.md) | 全部公开 API 的详细说明 |
+| [🏗️ 架构文档](docs/ARCHITECTURE.md) | 设计理念与内部实现 |
+| [🔒 安全文档](docs/SECURITY.md) | 安全设计与最佳实践 |
+| [📋 更新日志](docs/CHANGELOG.md) | 每个版本的变更记录 |
+| [🤝 贡献指南](docs/CONTRIBUTING.md) | 如何参与项目开发 |
+| [📦 在线 API 文档](https://docs.rs/inklog) | docs.rs 自动生成的最新文档 |
 
 ---
 
-## <span id="示例">💻 示例</span>
-
-<div align="center" style="margin: 24px 0;">
-
-### 💡 真实示例
-
-</div>
+## 💻 示例
 
 <table style="width:100%; border-collapse: collapse;">
 <tr>
@@ -612,20 +545,81 @@ log::info!("用户邮箱: user@example.com");
 
 ### 📦 可运行示例
 
-`examples/` crate 提供了 10 个专用示例，演示特定功能。使用 `cargo run --example <名称>` 运行（在 `examples/` 目录下或使用 `--package inklog-examples`）。
+`examples/` 是 workspace 内的独立 crate（`inklog-examples`），按目录分为 7 类共 39 个示例。在仓库根目录使用 `cargo run --package inklog-examples --example <名称>` 运行（或进入 `examples/` 目录后 `cargo run --example <名称>`）。部分示例需启用对应 feature（如 `sqlite`、`postgres`、`compression`、`parquet`）。
+
+#### 配置（config）
 
 | 示例 | 描述 | 运行命令 |
-|---------|-------------|-------------|
-| `object_pool` | 对象池复用，优化高频分配路径 | `cargo run --example object_pool` |
-| `path_validator` | 路径校验，确保文件 Sink 目标安全 | `cargo run --example path_validator` |
-| `log_sanitizer` | 日志输入净化，防止日志注入攻击 | `cargo run --example log_sanitizer` |
-| `log_adapter` | `log` 与 `tracing` 生态桥接适配器 | `cargo run --example log_adapter` |
-| `compression` | 文件 Sink 压缩（ZSTD/GZIP） | `cargo run --example compression` |
-| `rotation` | 基于大小和时间的文件轮转 | `cargo run --example rotation` |
-| `ring_buffered_file` | 环形缓冲文件 Sink，适用于高吞吐场景 | `cargo run --example ring_buffered_file` |
-| `config_file` | TOML 配置文件加载 | `cargo run --example config_file` |
-| `metrics` | 健康指标与 Prometheus 导出 | `cargo run --example metrics` |
-| `circuit_breaker` | Sink 断路器与故障恢复 | `cargo run --example circuit_breaker` |
+|------|------|----------|
+| `config_file` | 配置文件加载示例（Layer 1 本地资源） | `cargo run --package inklog-examples --example config_file` |
+| `config_inspect` | 配置 inspect：`sinks_enabled()` + `LoggerManager::load()` | `cargo run --package inklog-examples --example config_inspect` |
+| `env_overrides` | 环境变量覆盖加载示例 | `cargo run --package inklog-examples --example env_overrides` |
+
+#### 核心（core）
+
+| 示例 | 描述 | 运行命令 |
+|------|------|----------|
+| `basic` | 基础用法示例 | `cargo run --package inklog-examples --example basic` |
+| `builder` | Builder 模式配置示例 | `cargo run --package inklog-examples --example builder` |
+| `all_features` | 完整功能演示 | `cargo run --package inklog-examples --example all_features` |
+| `production` | 生产环境配置示例 | `cargo run --package inklog-examples --example production` |
+| `template` | 日志模板示例 | `cargo run --package inklog-examples --example template` |
+| `error_handling` | 错误处理示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example error_handling` |
+| `i18n` | 国际化 (i18n) 格式化示例 | `cargo run --package inklog-examples --example i18n` |
+
+#### Sink 与输出（sinks）
+
+| 示例 | 描述 | 运行命令 |
+|------|------|----------|
+| `console` | Console Sink 示例 | `cargo run --package inklog-examples --example console` |
+| `file` | File Sink 示例 | `cargo run --package inklog-examples --example file` |
+| `rotation` | 日志轮转示例（Layer 1 本地资源） | `cargo run --package inklog-examples --example rotation` |
+| `compression` | Zstd 压缩/解压缩示例（需 `compression` feature） | `cargo run --package inklog-examples --example compression` |
+| `ring_buffered_file` | ChannelBufferedFileSink 示例（Layer 1 本地资源） | `cargo run --package inklog-examples --example ring_buffered_file` |
+| `archive_format` | 归档格式示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example archive_format` |
+| `parquet_archive` | Parquet 归档示例（需 `parquet` feature） | `cargo run --package inklog-examples --example parquet_archive` |
+| `partition_strategy` | 数据库分区策略示例 | `cargo run --package inklog-examples --example partition_strategy` |
+
+#### 数据库（database）
+
+| 示例 | 描述 | 运行命令 |
+|------|------|----------|
+| `database` | Database Sink 示例（SQLite 内存库，需 `sqlite` feature） | `cargo run --package inklog-examples --features sqlite --example database` |
+| `database_pg_mysql` | PostgreSQL/MySQL 数据库驱动示例 | `cargo run --package inklog-examples --example database_pg_mysql` |
+| `di_example` | DI (Dependency Injection) 模式示例 | `cargo run --package inklog-examples --example di_example` |
+
+#### 基础设施（infra）
+
+| 示例 | 描述 | 运行命令 |
+|------|------|----------|
+| `channel_strategy` | 自适应 Channel 策略示例 | `cargo run --package inklog-examples --example channel_strategy` |
+| `circuit_breaker` | 断路器示例（Layer 2 外部服务） | `cargo run --package inklog-examples --example circuit_breaker` |
+| `fallback` | Sink 降级机制示例 | `cargo run --package inklog-examples --example fallback` |
+| `log_adapter` | `log` crate 适配器示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example log_adapter` |
+| `log_level` | LogLevel 类型解析/比较/Display 示例 | `cargo run --package inklog-examples --example log_level` |
+| `metrics` | 健康监控与指标收集示例（Layer 2 外部服务） | `cargo run --package inklog-examples --example metrics` |
+| `object_pool` | 对象池示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example object_pool` |
+| `output_format` | 输出格式示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example output_format` |
+| `performance` | 性能测试示例 | `cargo run --package inklog-examples --example performance` |
+| `rate_limiter` | 速率限制器示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example rate_limiter` |
+| `runtime_ops` | LoggerManager 运行时操作 API 示例 | `cargo run --package inklog-examples --example runtime_ops` |
+
+#### 网络（network）
+
+| 示例 | 描述 | 运行命令 |
+|------|------|----------|
+| `http` | HTTP 健康检查和指标端点示例 | `cargo run --package inklog-examples --example http` |
+| `http_auth` | HTTP 认证与 IP 白名单示例 | `cargo run --package inklog-examples --example http_auth` |
+| `tls_config` | TLS 配置示例 | `cargo run --package inklog-examples --example tls_config` |
+
+#### 安全（security）
+
+| 示例 | 描述 | 运行命令 |
+|------|------|----------|
+| `encryption` | 日志加密示例 | `cargo run --package inklog-examples --example encryption` |
+| `log_sanitizer` | 日志内容净化示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example log_sanitizer` |
+| `masking` | 数据脱敏示例 | `cargo run --package inklog-examples --example masking` |
+| `path_validator` | 路径验证器示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example path_validator` |
 
 <div align="center" style="margin: 24px 0;">
 
@@ -635,7 +629,9 @@ log::info!("用户邮箱: user@example.com");
 
 ---
 
-## <span id="架构">🏗️ 架构</span>
+## 🏗️ 架构
+
+> 完整的架构设计、数据流与扩展点说明见 [🏗️ 架构文档](docs/ARCHITECTURE.md)。
 
 <div align="center" style="margin: 24px 0;">
 
@@ -691,50 +687,7 @@ flowchart TD
 
 ---
 
-## <span id="安全">🔒 安全</span>
-
-<div align="center" style="margin: 24px 0;">
-
-### 🛡️ 安全特性
-
-</div>
-
-Inklog 以安全为首要优先级构建：
-
-#### 🔒 加密
-
-- **AES-256-GCM**: 军用级日志文件加密
-- **密钥管理**: 基于环境变量的密钥注入
-- **内存安全清除**: 通过 `zeroize` crate 安全清除密钥
-- **SHA-256 哈希**: 加密日志的完整性验证
-
-#### 🎭 数据脱敏
-
-- **基于正则的模式**: 自动 PII 检测和脱敏
-- **邮箱脱敏**: `user@example.com` → `***@***.***`
-- **身份证脱敏**: 信用卡和社会安全号脱敏
-- **自定义模式**: 可配置的正则表达式模式
-
-#### 🔐 密钥安全处理
-
-```rust
-// 从环境变量安全设置加密密钥
-std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
-
-// 密钥使用后自动清除
-// 切勿在代码中硬编码密钥
-```
-
-#### 🛡️ 安全最佳实践
-
-- **无硬编码密钥**: 密钥从环境变量加载
-- **最小权限操作**: 仅必要的文件/数据库访问
-- **审计日志**: 调试功能用于安全审计追踪
-- **合规就绪**: 支持 GDPR、HIPAA、PCI-DSS 日志要求
-
----
-
-## <span id="测试">🧪 测试</span>
+## 🧪 测试
 
 <div align="center" style="margin: 24px 0;">
 
@@ -795,6 +748,8 @@ cargo deny check bans
 
 ### 依赖注入测试
 
+> ⚠️ 自 0.3.0-rc.2 起，`MockCache`/`MockConfig`/`MockDatabaseAdapter` 已从默认公共 API 移除（BREAKING），外部测试代码需显式启用 `test-utils` feature。
+
 Inklog 提供 Mock 实现，支持无外部依赖的单元测试：
 
 ```rust
@@ -844,13 +799,103 @@ docker-compose down
 
 ---
 
-## <span id="贡献">🤝 贡献</span>
+## 📊 性能
 
-<div align="center" style="margin: 24px 0;">
+Inklog 通过异步 I/O、批量写入、有界队列与内存池等设计优化日志路径。以下为[架构文档](docs/ARCHITECTURE.md)「性能考虑」章节中记录的设计要点与参考数据：
+
+### 批量写入
+
+- **FileSink**：行级写入 + `BufWriter` 减少系统调用
+- **DatabaseSink**：缓冲批量刷新（`batch_size` 默认 100，刷新间隔默认 500ms）
+
+| 策略 | 数据库事务 | I/O 开销 | 吞吐量（参考值） |
+|------|-----------|---------|----------------|
+| 逐条插入 | N（自动提交） | 高 | ~100/s |
+| 批量 100 条 | 单次事务 | 低 | ~10,000/s |
+
+> 上表为 docs/ARCHITECTURE.md 中记录的策略对比参考值，实际吞吐因硬件、数据库与配置而异。
+
+### 队列与背压
+
+- Crossbeam 有界通道（`channel_capacity` 默认 10000）防止内存溢出，队列满时发送端阻塞
+- 默认 3 个工作线程（`worker_threads`，经 `PerformanceConfig` 调整）
+- 通道使用率经健康指标暴露，可导出为 Prometheus 指标（`inklog_channel_usage`）
+
+### 压缩
+
+- ZSTD 压缩级别 0-22（默认 3，压缩比约 3.5x）；级别越高压缩比越高、速度越慢
+
+### 基准测试
+
+项目使用 Criterion 维护基准测试（`benches/inklog_bench.rs`）：
+
+```bash
+cargo bench
+```
+
+`examples/src/bin/infra/performance.rs` 提供了可运行的性能示例。
+
+> 注：仓库内暂无正式发布的跨版本基准测试报告（docs/ 下暂无 PERFORMANCE.md 与 benchmarks/ 目录），欢迎基于上述工具在目标硬件上实测并反馈数据。
+
+---
+
+## 🔒 安全
+
+Inklog 以安全为首要优先级构建，完整的安全设计、漏洞报告流程与最佳实践见 [🔒 安全文档](docs/SECURITY.md)。
+
+#### 🔒 加密
+
+- **AES-256-GCM**: 军用级日志文件加密
+- **密钥管理**: 基于环境变量的密钥注入
+- **内存安全清除**: 通过 `zeroize` crate 安全清除密钥
+- **SHA-256 哈希**: 加密日志的完整性验证
+
+#### 🎭 数据脱敏
+
+- **基于正则的模式**: 自动 PII 检测和脱敏
+- **邮箱脱敏**: `user@example.com` → `***@***.***`
+- **身份证脱敏**: 信用卡和社会安全号脱敏
+- **自定义模式**: 可配置的正则表达式模式
+
+#### 🔐 密钥安全处理
+
+```rust
+// 从环境变量安全设置加密密钥
+std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
+
+// 密钥使用后自动清除
+// 切勿在代码中硬编码密钥
+```
+
+#### 🛡️ 安全最佳实践
+
+- **无硬编码密钥**: 密钥从环境变量加载
+- **最小权限操作**: 仅必要的文件/数据库访问
+- **审计日志**: 调试功能用于安全审计追踪
+- **合规就绪**: 支持 GDPR、HIPAA、PCI-DSS 日志要求
+
+---
+
+## 🗺️ 开发路线图
+
+以下为基于 [CHANGELOG](docs/CHANGELOG.md) 与当前发布安排整理的阶段性目标（具体节奏可能随工作区整体发布计划调整）：
+
+### v0.3.0 正式发布
+
+- [ ] 完成 0.3.0-rc.2 → 0.3.0 正式版发布
+- [ ] 随工作区依赖传导表同步升级：trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0
+
+### 质量与 CI
+
+- [ ] CI 测试矩阵按数据库后端分组（`sqlite`/`postgres`/`mysql`/`duckdb` 后端 feature 互斥，当前 `--all-features` 组合无法编译）
+- [ ] 补齐 MySQL 集成测试环境（当前缺少 MySQL 服务导致该后端集成测试阻塞）
+- [ ] 提升测试覆盖率（llvm-cov 基线约 80%，向 95%+ 目标提升）
+
+---
+
+## 🤝 参与贡献
 
 欢迎贡献！请查看 [CONTRIBUTING.md](docs/CONTRIBUTING.md) 了解指南。
-
-</div>
 
 ### 开发环境设置
 
@@ -862,11 +907,11 @@ cd inklog
 # 安装 pre-commit 钩子 (如果可用)
 ./scripts/install-pre-commit.sh
 
-# 运行测试
-cargo test --all-features
+# 运行测试（按数据库后端分组，避免 --all-features）
+cargo test --features "http,cli,compression,parquet,fast-masking"
 
 # 运行 linter
-cargo clippy --all-features
+cargo clippy --all-targets -- -D warnings
 
 # 格式化代码
 cargo fmt --all
@@ -877,8 +922,8 @@ cargo fmt --all
 1. Fork 仓库
 2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
 3. 进行修改
-4. 运行测试确保全部通过 (`cargo test --all-features`)
-5. 运行 clippy 并修复警告 (`cargo clippy --all-features`)
+4. 运行测试确保全部通过
+5. 运行 clippy 并修复警告
 6. 提交修改 (`git commit -m 'Add amazing feature'`)
 7. 推送到分支 (`git push origin feature/amazing-feature`)
 8. 打开 Pull Request
@@ -893,25 +938,25 @@ cargo fmt --all
 
 ---
 
-## <span id="许可证">📄 许可证</span>
+## 📋 更新日志
 
-<div align="center" style="margin: 24px 0;">
+完整的版本变更记录见 [CHANGELOG](docs/CHANGELOG.md)。
 
-本项目采用 **MIT** 许可证：
+### 最近版本
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-</div>
+- **0.3.0-rc.2** (2026-09-03)：集成 trait-kit 0.5.0-rc.2 与 i18n 重构并升级版本号；默认公共 API 移除三个 Mock（BREAKING，外部测试消费者需启用 `test-utils`）；清理 S3 归档相关文档描述
+- **0.2.0** (2026-08-05)：新增 `compression`/`parquet`/`fast-masking` feature 与 i18n 核心模块（fluent-bundle + ICU）；新增 ChannelBufferedFileSink、断路器保护与环形缓冲文件 Sink；edition 2024、MSRV 1.94
+- **0.1.12** (2026-07-22)：新增 `tests/e2e_advanced.rs`（226 个测试），覆盖 19 个模块的边界与异常场景
 
 ---
 
-## <span id="致谢">🙏 致谢</span>
+## 📄 许可证
 
-<div align="center" style="margin: 24px 0;">
+本项目基于 [MIT 许可证](LICENSE) 发布。
 
-### 🌟 建立在优秀工具之上
+---
 
-</div>
+## 🙏 致谢
 
 Inklog 的实现离不开这些优秀的项目：
 
@@ -924,7 +969,7 @@ Inklog 的实现离不开这些优秀的项目：
 
 ---
 
-## 📞 支持
+## 📞 联系与支持
 
 <div align="center" style="margin: 24px 0;">
 
@@ -967,24 +1012,14 @@ Inklog 的实现离不开这些优秀的项目：
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Kirky-X/inklog&type=Date)](https://star-history.com/#Kirky-X/inklog&Date)
 
-</div>
-
----
-
-<div align="center" style="margin: 32px 0; padding: 24px; border-radius: 12px;">
-
 ### 💝 支持本项目
 
-如果您发现本项目有用，请考虑给一个 ⭐️！
+如果您觉得这个项目有用，请考虑给它一个 ⭐️！
 
 **由 ❤️ Inklog 团队构建**
 
----
-
-**[⬆ 返回顶部](#inklog)**
-
----
-
 <sub>© 2026 Inklog Project. 版权所有。</sub>
+
+**[⬆ 返回顶部](#-目录)**
 
 </div>

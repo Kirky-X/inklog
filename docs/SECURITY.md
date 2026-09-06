@@ -1,10 +1,198 @@
-# Inklog 安全指南
+# 🔒 Inklog 安全文档
 
-## 安全概览
+本文档描述 Inklog 的安全设计概览（加密、数据脱敏、内存安全、访问控制、网络安全与合规性）、漏洞报告流程，以及使用 Inklog 处理敏感日志时的安全最佳实践。
+
+---
+
+## 📋 目录
+
+<details open>
+<summary>📑 目录（点击展开）</summary>
+
+- [支持版本](#支持版本)
+- [漏洞报告流程](#漏洞报告流程)
+- [安全设计概览](#安全设计概览)
+  - [安全概览](#安全概览)
+  - [加密](#加密)
+  - [数据脱敏](#数据脱敏)
+  - [内存安全](#内存安全)
+  - [访问控制](#访问控制)
+  - [网络安全](#网络安全)
+  - [合规性](#合规性)
+- [安全最佳实践](#安全最佳实践)
+  - [附录](#附录)
+
+</details>
+
+---
+
+## 支持版本
+
+inklog 目前处于 0.x 预发布阶段（当前版本 **0.3.0-rc.2**），暂无 1.0 长期支持（LTS）分支。安全修复随最新发布版本发布，建议始终升级到最新版本。
+
+| 版本 | 发布日期 | 说明 |
+|------|----------|------|
+| 0.3.0-rc.2 | 2026-09-03 | 最新版本 |
+| 0.2.0 | 2026-08-05 | 历史版本 |
+| 0.1.12 | 2026-07-22 | 历史版本 |
+
+> 历史安全修复示例：0.1.11 修复了 `table_name` SQL 注入防护、`FileSink` 路径穿越防护与 HTTP 认证 fail-closed 三项安全问题（详见 [更新日志](CHANGELOG.md)）。
+
+---
+
+## 漏洞报告流程
+
+如果您发现 Inklog 的安全漏洞,请负责任地向我们报告。
+
+### 安全报告流程
+
+#### 1. 不要公开披露
+
+**❌ 避免**:
+- ❌ 在 GitHub Issues 中公开安全漏洞
+- ❌ 在社交媒体上披露漏洞细节
+- ❌ 在未经授权的情况下进行漏洞利用
+
+**✅ 推荐**:
+- ✅ 通过私密渠道报告漏洞
+- ✅ 提供复现步骤和影响评估
+- ✅ 给予足够的时间修复
+
+#### 2. 报告方式
+
+**首选方式**:
+- 邮件: `security@inklog.dev`
+- PGP 密钥: (将在安全页面提供)
+
+**备选方式**:
+- GitHub Security Advisories: https://github.com/Kirky-X/inklog/security/advisories
+
+#### 3. 报告内容
+
+请包含以下信息:
+
+**漏洞描述**:
+- 漏洞类型 (注入、XSS、认证绕过等)
+- 影响范围 (哪些版本受影响)
+- 严重程度 (CVSS 评分)
+
+**复现步骤**:
+- 详细的重现步骤
+- 代码示例或配置
+- 预期行为 vs 实际行为
+
+**影响评估**:
+- 数据泄露可能性
+- 系统可用性影响
+- 业务影响范围
+
+**缓解措施**:
+- 临时缓解方案
+- 建议的修复方向
+
+#### 4. 响应时间表
+
+| 阶段 | 时间 | 行动 |
+|------|------|------|
+| **确认收到** | 24 小时内 | 确认收到安全报告 |
+| **初步评估** | 48 小时内 | 评估漏洞严重性 |
+| **修复开发** | 7-14 天 | 开发并测试修复 |
+| **补丁发布** | 修复完成后 | 发布安全补丁 |
+| **公开披露** | 修复后 7-30 天 | 发布安全公告 (协调披露) |
+
+#### 5. 协调披露流程
+
+```
+[Day 0]  研究者报告漏洞
+         ↓
+[Day 1]   Inklog 确认并评估
+         ↓
+[Day 7]   修复开发完成
+         ↓
+[Day 10]  补丁发布到私有预览
+         ↓
+[Day 14]  公开发布 + 安全公告
+```
+
+**影响因素**:
+- 漏洞严重程度 (严重漏洞优先处理)
+- 修复复杂度
+- 已知的公开利用情况
+
+### 安全赏金计划
+
+#### 奖励范围
+
+**符合条件的安全漏洞**:
+- 🔴 **严重**: RCE、SQL 注入、认证绕过 - $1000
+- 🟠 **高危**: 敏感数据泄露、XSS - $500
+- 🟡 **中等**: CSRF、信息泄露 - $250
+- 🟢 **低**: 轻微安全问题 - $100
+
+#### 奖励标准
+
+| 严重性 | CVSS 评分 | 奖励金额 |
+|--------|-----------|---------|
+| **严重** | 9.0 - 10.0 | $1000 |
+| **高危** | 7.0 - 8.9 | $500 |
+| **中等** | 4.0 - 6.9 | $250 |
+| **低** | 0.1 - 3.9 | $100 |
+
+#### 排除范围
+
+**不符合条件的问题**:
+- ❌ 已知漏洞的重复报告
+- ❌ 需要物理访问的漏洞
+- ❌ 社会工程攻击
+- ❌ 第三方依赖的漏洞
+- ❌ 最佳实践违规 (非安全漏洞)
+
+### 已知安全问题
+
+查看当前已知安全问题:
+
+- **GitHub Security Advisories**: https://github.com/Kirky-X/inklog/security/advisories
+- **更新日志**: [CHANGELOG](CHANGELOG.md)
+
+### 安全更新订阅
+
+订阅安全更新:
+
+1. **Watch GitHub Repository**:
+   - 访问 https://github.com/Kirky-X/inklog
+   - 点击 "Watch" → "Custom"
+   - 勾选 "Releases" 和 "Security alerts"
+
+2. **订阅邮件列表**:
+   - (待提供)
+
+3. **RSS 订阅**:
+   - (待提供)
+
+### 安全资源
+
+**学习资源**:
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [CWE Top 25](https://cwe.mitre.org/top25/)
+- [Rust Security Guidelines](https://doc.rust-lang.org/nomicon/unsafe.html)
+
+**工具推荐**:
+- `cargo-audit`: 依赖漏洞扫描
+- `cargo-deny`: 许可证和来源检查
+- `grype`: 容器镜像漏洞扫描
+
+**社区**:
+- Rust 安全工作组: https://github.com/rustsec/advisory-db
+
+---
+
+## 安全设计概览
+
+### 安全概览
 
 Inklog 是一个**企业级安全优先**的 Rust 日志基础设施,专为需要严格数据保护和合规性要求的环境设计。我们的安全设计遵循以下核心原则:
 
-### 安全设计原则
+#### 安全设计原则
 
 - **加密优先**: 默认支持 AES-256-GCM 军用级加密
 - **零信任**: 所有敏感数据通过环境变量注入,从不硬编码
@@ -12,7 +200,7 @@ Inklog 是一个**企业级安全优先**的 Rust 日志基础设施,专为需�
 - **深度防御**: 多层安全控制,从加密到访问控制
 - **合规性设计**: 支持 GDPR、HIPAA、PCI-DSS 等合规要求
 
-### 安全承诺
+#### 安全承诺
 
 - ✅ **无硬编码密钥**: 所有密钥通过环境变量或密钥管理服务获取
 - ✅ **内存安全**: 敏感数据自动清零,使用 Rust 内存安全保证
@@ -22,13 +210,11 @@ Inklog 是一个**企业级安全优先**的 Rust 日志基础设施,专为需�
 
 **注意**: 部分功能可能标记为 `#[allow(dead_code)]`,表示这些功能已实现但当前版本中可能未完全激活或仅在特定配置下使用。这些功能仍保持安全性设计。
 
----
-
-## 加密
+### 加密
 
 Inklog 使用 **AES-256-GCM** (Galois/Counter Mode) 进行经过认证的加密,提供机密性和完整性保证。
 
-### 加密架构
+#### 加密架构
 
 ```rust
 use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, Nonce}};
@@ -44,9 +230,9 @@ use rand::Rng;
 4. **完整性验证**: GCM 模式自动包含认证标签
 5. **文件写入**: 按照版本化格式写入加密数据
 
-### 密钥管理
+#### 密钥管理
 
-#### 从环境变量安全获取密钥
+##### 从环境变量安全获取密钥
 
 ```rust
 fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
@@ -93,18 +279,18 @@ export INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 export INKLOG_ENCRYPTION_KEY=your-32-byte-base64-encoded-key
 ```
 
-### 密钥轮换
+#### 密钥轮换
 
 密钥轮换是加密安全的关键实践，Inklog 提供完整的密钥轮换支持。
 
-#### 为什么需要密钥轮换
+##### 为什么需要密钥轮换
 
 - **降低密钥泄露风险**: 定期更换密钥可限制泄露的影响范围
 - **合规要求**: PCI-DSS、HIPAA 等标准要求定期轮换密钥
 - **加密算法演进**: 支持未来升级到更强的加密算法
 - **密钥生命周期管理**: 防止长期使用同一密钥带来的安全隐患
 
-#### 密钥轮换流程
+##### 密钥轮换流程
 
 **步骤 1: 生成新密钥**
 
@@ -168,7 +354,7 @@ kubectl create secret generic inklog-encryption-key \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-#### 自动化密钥轮换脚本
+##### 自动化密钥轮换脚本
 
 ```bash
 #!/bin/bash
@@ -230,7 +416,7 @@ echo "=== 密钥轮换完成 ==="
 echo "请更新您的密钥管理系统以使用新密钥"
 ```
 
-#### 密钥轮换最佳实践
+##### 密钥轮换最佳实践
 
 | 实践 | 说明 |
 |------|------|
@@ -241,7 +427,7 @@ echo "请更新您的密钥管理系统以使用新密钥"
 | **审计日志** | 记录所有密钥轮换操作 |
 | **测试验证** | 轮换后验证解密功能正常 |
 
-#### 多密钥支持
+##### 多密钥支持
 
 Inklog 支持配置多个解密密钥，实现平滑迁移：
 
@@ -260,7 +446,7 @@ for key in decrypt_keys {
 }
 ```
 
-#### 密钥轮换检查清单
+##### 密钥轮换检查清单
 
 - [ ] 生成新的强密钥 (32 字节，高熵值)
 - [ ] 备份当前加密文件
@@ -272,9 +458,9 @@ for key in decrypt_keys {
 - [ ] 记录轮换审计日志
 - [ ] 验证所有日志可正常解密
 
-### 加密/解密流程
+#### 加密/解密流程
 
-#### 文件加密实现
+##### 文件加密实现
 
 ```rust
 fn encrypt_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
@@ -315,7 +501,7 @@ fn encrypt_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
 }
 ```
 
-#### 文件解密实现 (CLI 工具)
+##### 文件解密实现 (CLI 工具)
 
 ```bash
 # 使用 decrypt 命令解密日志文件
@@ -338,9 +524,9 @@ inklog decrypt \
 - 检查算法标识 (仅支持 AES-256-GCM)
 - GCM 认证标签自动验证数据完整性
 
-### 加密文件格式
+#### 加密文件格式
 
-#### V1 格式 (当前版本)
+##### V1 格式 (当前版本)
 
 ```
 偏移    大小    描述
@@ -352,7 +538,7 @@ inklog decrypt \
 24+     N字节   密文 (包含 GCM 认证标签)
 ```
 
-#### Legacy 格式 (向后兼容)
+##### Legacy 格式 (向后兼容)
 
 ```
 偏移    大小    描述
@@ -394,17 +580,15 @@ log::info!("User email: user@example.com");
 // 输出: logs/secure.log.enc (加密 + 脱敏后)
 ```
 
----
-
-## 数据脱敏
+### 数据脱敏
 
 Inklog 内置全面的 **PII (个人身份信息)** 检测和脱敏功能,保护敏感数据不被记录到日志中。
 
-### 内置 PII 检测模式
+#### 内置 PII 检测模式
 
 Inklog 内置 **21 条**脱敏规则，按优先级排序执行。规则分为三个优先级组：高（10-25）、中（30-40）、低（50-100）。
 
-#### 高优先级规则（优先级 10-25）
+##### 高优先级规则（优先级 10-25）
 
 | # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
 |---|---------|--------|---------|----------|
@@ -414,7 +598,7 @@ Inklog 内置 **21 条**脱敏规则，按优先级排序执行。规则分为�
 | 4 | MAC 地址 | 20 | `XX:XX:XX:XX:XX:XX` 或 `XX-XX-XX-XX-XX-XX` | `00:1A:2B:3C:4D:5E` → `XX:**:**:**:**:5E` |
 | 5 | IPv6 地址 | 21 | `{hex}:{hex}:...:{hex}` | `2001:db8::1` → `****:****:****:XXXX` |
 
-#### 中优先级规则（优先级 30-40）
+##### 中优先级规则（优先级 30-40）
 
 | # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
 |---|---------|--------|---------|----------|
@@ -422,7 +606,7 @@ Inklog 内置 **21 条**脱敏规则，按优先级排序执行。规则分为�
 | 7 | SSN (美国社保号) | 35 | `XXX-XX-XXXX` | `123-45-6789` → `***-**-6789` |
 | 8 | DB 连接串 | 40 | `protocol://user:pass@host/db` | `postgres://admin:secret@...` → `postgres://***:***@***` |
 
-#### 低优先级规则（优先级 50-100）
+##### 低优先级规则（优先级 50-100）
 
 | # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
 |---|---------|--------|---------|----------|
@@ -442,9 +626,9 @@ Inklog 内置 **21 条**脱敏规则，按优先级排序执行。规则分为�
 
 > **注意**: 信用卡规则使用 **Luhn 算法**验证校验和，仅脱敏通过校验的合法卡号，避免误判普通数字序列。
 
-### 字段级别敏感检测
+#### 字段级别敏感检测
 
-#### 敏感字段名称列表 (29 种模式)
+##### 敏感字段名称列表 (29 种模式)
 
 ```rust
 static SENSITIVE_FIELDS: &[&str] = &[
@@ -475,7 +659,7 @@ static SENSITIVE_FIELDS: &[&str] = &[
 ];
 ```
 
-#### 快速检测函数
+##### 快速检测函数
 
 ```rust
 impl DataMasker {
@@ -488,11 +672,11 @@ impl DataMasker {
 }
 ```
 
-### 自定义模式支持
+#### 自定义模式支持
 
 Inklog 支持通过 `MaskRuleBuilder` 和 `DataMaskerBuilder` 灵活自定义脱敏规则。
 
-#### 使用 MaskRuleBuilder 创建自定义规则
+##### 使用 MaskRuleBuilder 创建自定义规则
 
 ```rust
 use inklog::{MaskRule, MaskRuleBuilder};
@@ -506,7 +690,7 @@ let custom_rule = MaskRule::builder("employee_id")
     .expect("Invalid pattern");
 ```
 
-#### 使用 DataMaskerBuilder 组装脱敏器
+##### 使用 DataMaskerBuilder 组装脱敏器
 
 ```rust
 use inklog::{DataMasker, DataMaskerBuilder, MaskRule};
@@ -528,7 +712,7 @@ let result = masker.mask("Employee: EMP-123456");
 // 结果: "Employee: EMP-***"
 ```
 
-#### 使用 MaskRuleRegistry 管理规则
+##### 使用 MaskRuleRegistry 管理规则
 
 ```rust
 use inklog::{MaskRuleRegistry, MaskRule};
@@ -553,7 +737,7 @@ let active = registry.active_rules();
 println!("Active rules: {}", active.len());
 ```
 
-#### 从 TOML 配置加载规则
+##### 从 TOML 配置加载规则
 
 ```rust
 let toml_config = r#"
@@ -573,9 +757,9 @@ priority = 35
 let rules = MaskRuleRegistry::load_from_toml(toml_config).unwrap();
 ```
 
-### 脱敏集成
+#### 脱敏集成
 
-#### 自动脱敏流程
+##### 自动脱敏流程
 
 ```rust
 impl LogRecord {
@@ -611,7 +795,7 @@ impl LogRecord {
 }
 ```
 
-#### 配置启用
+##### 配置启用
 
 ```toml
 # inklog_config.toml
@@ -625,9 +809,9 @@ masking_enabled = true  # 启用数据脱敏 (默认: true)
 export INKLOG_GLOBAL_MASKING_ENABLED=true
 ```
 
-### 使用示例
+#### 使用示例
 
-#### 基础使用
+##### 基础使用
 
 ```rust
 use inklog::{InklogConfig, config::GlobalConfig, LoggerManager};
@@ -653,7 +837,7 @@ log::info!("Password: secret123");
 // 输出: Password: ***MASKED***
 ```
 
-#### 直接 API 使用
+##### 直接 API 使用
 
 ```rust
 use inklog::masking::DataMasker;
@@ -683,15 +867,13 @@ masker.mask_value(&mut data);
 // }
 ```
 
----
-
-## 内存安全
+### 内存安全
 
 Inklog 使用 Rust 的内存安全保证和 `zeroize` 库,确保敏感数据在内存中不留痕迹。
 
-### Zeroize 集成
+#### Zeroize 集成
 
-#### SecretString 安全类型
+##### SecretString 安全类型
 
 ```rust
 use zeroize::{Zeroize, Zeroizing};
@@ -741,7 +923,7 @@ impl Serialize for SecretString {
 }
 ```
 
-#### 加密密钥的 Zeroize 使用
+##### 加密密钥的 Zeroize 使用
 
 ```rust
 fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
@@ -754,7 +936,7 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
 }
 ```
 
-### 内存清理机制
+#### 内存清理机制
 
 **自动清理触发时机**:
 1. **Drop 实现**: `SecretString`、`Zeroizing` 在作用域结束时自动清零
@@ -765,7 +947,7 @@ fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
 - 编译器优化不会跳过清理操作 (使用 `volatile_write`)
 - 适用于 Rust 的所有内存模型
 
-### 无 Unsafe 代码
+#### 无 Unsafe 代码
 
 **安全性验证**:
 ```bash
@@ -782,9 +964,9 @@ grep -r "unsafe" src/
 - 编译器保证内存安全
 - 没有缓冲区溢出风险
 
-### 使用示例
+#### 使用示例
 
-#### 加密密钥保护
+##### 加密密钥保护
 
 ```rust
 use zeroize::Zeroizing;
@@ -803,15 +985,13 @@ fn encrypt_sensitive_data(data: &[u8]) -> Result<Vec<u8>> {
 }
 ```
 
----
-
-## 访问控制
+### 访问控制
 
 Inklog 在文件、数据库和网络层面实施严格的访问控制,保护日志数据的机密性和完整性。
 
-### 文件权限控制
+#### 文件权限控制
 
-#### Unix 文件权限设置
+##### Unix 文件权限设置
 
 ```rust
 // src/support/io/sink/file.rs:约284-287
@@ -827,7 +1007,7 @@ if let Err(e) = file.set_permissions(perms) {
 - **适用**: 所有加密日志文件、敏感配置文件
 - **安全保证**: 防止其他用户读取加密日志
 
-#### 文件创建安全
+##### 文件创建安全
 
 ```rust
 fn create_log_file(path: &PathBuf) -> Result<File, InklogError> {
@@ -855,9 +1035,9 @@ fn create_log_file(path: &PathBuf) -> Result<File, InklogError> {
 }
 ```
 
-### 数据库访问控制
+#### 数据库访问控制
 
-#### 连接池管理
+##### 连接池管理
 
 ```rust
 // src/support/io/sink/database/mod.rs:约267-271
@@ -875,7 +1055,7 @@ Database::connect(opt).await
 - **超时保护**: 避免长时间挂起的连接
 - **连接复用**: 减少认证频繁
 
-#### SQL 注入防护
+##### SQL 注入防护
 
 **表名验证** (`src/support/io/sink/database/mod.rs:约141-173`):
 
@@ -968,7 +1148,7 @@ let stmt = Statement::from_string(db.get_database_backend(), sql);
 db.execute_unprepared(&stmt.sql).await?;
 ```
 
-#### 参数化查询
+##### 参数化查询
 
 ```rust
 // Sea-ORM 自动使用参数化查询,防止 SQL 注入
@@ -977,9 +1157,9 @@ Entity::insert_many(logs).exec(db).await
 // 转换为: INSERT INTO logs (...) VALUES ($1, $2, $3), ...
 ```
 
-### 最小权限原则
+#### 最小权限原则
 
-#### 数据库用户权限建议
+##### 数据库用户权限建议
 
 **PostgreSQL**:
 ```sql
@@ -1010,7 +1190,7 @@ GRANT CREATE ON logs.* TO 'inklog_writer'@'%';  -- 分区创建
 - 文件系统权限控制 (0o600)
 - 仅本地访问
 
-### 路径遍历防护
+#### 路径遍历防护
 
 **解密工具路径验证**:
 
@@ -1041,15 +1221,13 @@ fn validate_file_path(input_path: &Path, base_dir: &Path) -> Result<PathBuf> {
 - 解析符号链接后的真实路径
 - 限制在指定目录内操作
 
----
-
-## 网络安全
+### 网络安全
 
 Inklog 在数据库通信中实施严格的网络安全措施。
 
-### 数据库安全连接
+#### 数据库安全连接
 
-#### 安全连接配置
+##### 安全连接配置
 
 **PostgreSQL SSL 模式**:
 
@@ -1072,7 +1250,7 @@ let url = "mysql://user:pass@localhost/logs?ssl_mode=REQUIRED".to_string();
 
 **SQLite**: 本地文件访问,文件权限控制
 
-#### 连接超时和重试
+##### 连接超时和重试
 
 ```rust
 let mut opt = ConnectOptions::new(url);
@@ -1082,24 +1260,22 @@ opt.connect_timeout(Duration::from_secs(5))   // 连接超时 5 秒
    .acquire_timeout(Duration::from_secs(30)); // 获取连接超时 30 秒
 ```
 
-### 网络最佳实践
+#### 网络最佳实践
 
-#### 数据库防火墙规则
+##### 数据库防火墙规则
 
 ```bash
 # PostgreSQL pg_hba.conf (仅允许应用服务器访问)
 hostssl logs    inklog_writer    10.0.1.0/24    scram-sha-256
 ```
 
----
-
-## 合规性
+### 合规性
 
 Inklog 的安全设计支持多种合规性要求,包括 GDPR、HIPAA 和 PCI-DSS。
 
-### GDPR (通用数据保护条例)
+#### GDPR (通用数据保护条例)
 
-#### 个人数据处理
+##### 个人数据处理
 
 **PII 数据检测和脱敏**:
 
@@ -1119,7 +1295,7 @@ log::info!("User registration: email=user@example.com, phone=13812345678");
 - ✅ 私钥 PEM 证书
 - ✅ 数据库连接串
 
-#### 数据主体权利
+##### 数据主体权利
 
 **被遗忘权**:
 
@@ -1157,7 +1333,7 @@ pub async fn export_user_logs(
 }
 ```
 
-#### 数据保护措施
+##### 数据保护措施
 
 **加密存储** (GDPR 第 32 条):
 
@@ -1179,9 +1355,9 @@ let config = InklogConfig {
 };
 ```
 
-### HIPAA (健康保险流通与责任法案)
+#### HIPAA (健康保险流通与责任法案)
 
-#### 受保护健康信息 (PHI) 保护
+##### 受保护健康信息 (PHI) 保护
 
 **敏感字段检测**:
 
@@ -1197,7 +1373,7 @@ log::info!("Patient admitted: patient_id=123456, diagnosis=condition_X");
 // 输出: Patient admitted: patient_id=******, diagnosis=*******
 ```
 
-#### 安全审计日志
+##### 安全审计日志
 
 **启用调试模式记录**:
 
@@ -1221,7 +1397,7 @@ tracing::debug!(
 - 🔍 日志导出操作
 - 🔍 加密/解密操作
 
-#### 技术保障措施
+##### 技术保障措施
 
 **物理和环境安全**:
 - ✅ 网络隔离
@@ -1232,9 +1408,9 @@ tracing::debug!(
 **传输安全**:
 - ✅ TLS 1.2+ 数据库连接
 
-### PCI-DSS (支付卡行业数据安全标准)
+#### PCI-DSS (支付卡行业数据安全标准)
 
-#### 支付卡数据保护
+##### 支付卡数据保护
 
 **信用卡号脱敏**:
 
@@ -1255,7 +1431,7 @@ log::info!("Payment processed: card_number=6222021234567890123");
 | **日志监控** | 结构化日志 + 审计 | ✅ |
 | **定期漏洞扫描** | `cargo deny check` | ✅ |
 
-#### 支付日志最佳实践
+##### 支付日志最佳实践
 
 **不记录的敏感信息**:
 - ❌ CVV/CVC 码
@@ -1272,9 +1448,9 @@ log::info!("Payment: card_number=6222021234567890123, cvv=123");
 // 这将自动脱敏为: Payment: card_number=****-****-****-0123, cvv=***
 ```
 
-### 合规性检查清单
+#### 合规性检查清单
 
-#### GDPR 合规性
+##### GDPR 合规性
 
 - [ ] 启用数据脱敏 (`INKLOG_GLOBAL_MASKING_ENABLED=true`)
 - [ ] 配置数据保留期限 (`retention_days`)
@@ -1282,14 +1458,14 @@ log::info!("Payment: card_number=6222021234567890123, cvv=123");
 - [ ] 定期清理过期日志 (`cargo run --example cleanup`)
 - [ ] 记录数据访问审计日志 (启用 `tracing` debug 级别)
 
-#### HIPAA 合规性
+##### HIPAA 合规性
 
 - [ ] 限制数据库访问权限 (专用用户)
 - [ ] 启用审计日志 (tracing debug 级别)
 - [ ] 实施 PHI 字段脱敏 (自定义规则)
 - [ ] 配置网络隔离
 
-#### PCI-DSS 合规性
+##### PCI-DSS 合规性
 
 - [ ] 启用信用卡号脱敏 (内置规则)
 - [ ] 不记录 CVV/CVC 码 (代码审查)
@@ -1533,159 +1709,11 @@ log::error!(
 );
 ```
 
----
+### 附录
 
-## 报告安全问题
+#### A. 配置示例
 
-如果您发现 Inklog 的安全漏洞,请负责任地向我们报告。
-
-### 安全报告流程
-
-#### 1. 不要公开披露
-
-**❌ 避免**:
-- ❌ 在 GitHub Issues 中公开安全漏洞
-- ❌ 在社交媒体上披露漏洞细节
-- ❌ 在未经授权的情况下进行漏洞利用
-
-**✅ 推荐**:
-- ✅ 通过私密渠道报告漏洞
-- ✅ 提供复现步骤和影响评估
-- ✅ 给予足够的时间修复
-
-#### 2. 报告方式
-
-**首选方式**:
-- 邮件: `security@inklog.dev`
-- PGP 密钥: (将在安全页面提供)
-
-**备选方式**:
-- GitHub Security Advisories: https://github.com/Kirky-X/inklog/security/advisories
-
-#### 3. 报告内容
-
-请包含以下信息:
-
-**漏洞描述**:
-- 漏洞类型 (注入、XSS、认证绕过等)
-- 影响范围 (哪些版本受影响)
-- 严重程度 (CVSS 评分)
-
-**复现步骤**:
-- 详细的重现步骤
-- 代码示例或配置
-- 预期行为 vs 实际行为
-
-**影响评估**:
-- 数据泄露可能性
-- 系统可用性影响
-- 业务影响范围
-
-**缓解措施**:
-- 临时缓解方案
-- 建议的修复方向
-
-#### 4. 响应时间表
-
-| 阶段 | 时间 | 行动 |
-|------|------|------|
-| **确认收到** | 24 小时内 | 确认收到安全报告 |
-| **初步评估** | 48 小时内 | 评估漏洞严重性 |
-| **修复开发** | 7-14 天 | 开发并测试修复 |
-| **补丁发布** | 修复完成后 | 发布安全补丁 |
-| **公开披露** | 修复后 7-30 天 | 发布安全公告 (协调披露) |
-
-#### 5. 协调披露流程
-
-```
-[Day 0]  研究者报告漏洞
-         ↓
-[Day 1]   Inklog 确认并评估
-         ↓
-[Day 7]   修复开发完成
-         ↓
-[Day 10]  补丁发布到私有预览
-         ↓
-[Day 14]  公开发布 + 安全公告
-```
-
-**影响因素**:
-- 漏洞严重程度 (严重漏洞优先处理)
-- 修复复杂度
-- 已知的公开利用情况
-
-### 安全赏金计划
-
-#### 奖励范围
-
-**符合条件的安全漏洞**:
-- 🔴 **严重**: RCE、SQL 注入、认证绕过 - $1000
-- 🟠 **高危**: 敏感数据泄露、XSS - $500
-- 🟡 **中等**: CSRF、信息泄露 - $250
-- 🟢 **低**: 轻微安全问题 - $100
-
-#### 奖励标准
-
-| 严重性 | CVSS 评分 | 奖励金额 |
-|--------|-----------|---------|
-| **严重** | 9.0 - 10.0 | $1000 |
-| **高危** | 7.0 - 8.9 | $500 |
-| **中等** | 4.0 - 6.9 | $250 |
-| **低** | 0.1 - 3.9 | $100 |
-
-#### 排除范围
-
-**不符合条件的问题**:
-- ❌ 已知漏洞的重复报告
-- ❌ 需要物理访问的漏洞
-- ❌ 社会工程攻击
-- ❌ 第三方依赖的漏洞
-- ❌ 最佳实践违规 (非安全漏洞)
-
-### 已知安全问题
-
-查看当前已知安全问题:
-
-- **GitHub Security Advisories**: https://github.com/Kirky-X/inklog/security/advisories
-- **更新日志**: CHANGELOG.md
-
-### 安全更新订阅
-
-订阅安全更新:
-
-1. **Watch GitHub Repository**:
-   - 访问 https://github.com/Kirky-X/inklog
-   - 点击 "Watch" → "Custom"
-   - 勾选 "Releases" 和 "Security alerts"
-
-2. **订阅邮件列表**:
-   - (待提供)
-
-3. **RSS 订阅**:
-   - (待提供)
-
-### 安全资源
-
-**学习资源**:
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
-- [CWE Top 25](https://cwe.mitre.org/top25/)
-- [Rust Security Guidelines](https://doc.rust-lang.org/nomicon/unsafe.html)
-
-**工具推荐**:
-- `cargo-audit`: 依赖漏洞扫描
-- `cargo-deny`: 许可证和来源检查
-- `grype`: 容器镜像漏洞扫描
-
-**社区**:
-- Rust 安全工作组: https://github.com/rustsec/advisory-db
-
----
-
-## 附录
-
-### A. 配置示例
-
-#### 完整安全配置 (inklog_config.toml)
+##### 完整安全配置 (inklog_config.toml)
 
 ```toml
 [global]
@@ -1720,7 +1748,7 @@ flush_interval_ms = 1000
 table_name = "logs"
 ```
 
-#### 环境变量示例 (.env)
+##### 环境变量示例 (.env)
 
 ```bash
 # 全局配置
@@ -1738,7 +1766,7 @@ INKLOG_DATABASE_SINK_POOL_SIZE=10
 INKLOG_DECRYPT_KEY=$INKLOG_ENCRYPTION_KEY
 ```
 
-### B. CLI 命令速查
+#### B. CLI 命令速查
 
 ```bash
 # 生成配置模板
@@ -1774,7 +1802,7 @@ inklog decrypt \
   --key-env INKLOG_DECRYPT_KEY
 ```
 
-### C. 安全检查命令
+#### C. 安全检查命令
 
 ```bash
 # 1. 运行所有测试
@@ -1802,7 +1830,7 @@ find logs/ -type d -exec chmod 700 {} \;
 openssl rand -base64 32 > /dev/null  # 生成测试密钥
 ```
 
-### D. 术语表
+#### D. 术语表
 
 | 术语 | 定义 |
 |------|------|
@@ -1818,9 +1846,9 @@ openssl rand -base64 32 > /dev/null  # 生成测试密钥
 | **HIPAA** | 健康保险流通与责任法案 (Health Insurance Portability and Accountability Act) |
 | **PCI-DSS** | 支付卡行业数据安全标准 (Payment Card Industry Data Security Standard) |
 
-### E. 故障排除
+#### E. 故障排除
 
-#### 常见安全问题
+##### 常见安全问题
 
 **问题 1**: 解密失败 "Authentication failed"
 

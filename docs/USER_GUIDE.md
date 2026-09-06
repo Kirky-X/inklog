@@ -1,10 +1,13 @@
-# Inklog 用户指南
+# 📖 Inklog 用户指南
 
 本文档提供了 Inklog 企业级 Rust 日志基础设施的完整使用指南。
 
 ---
 
-## 目录
+## 📋 目录
+
+<details open>
+<summary>📑 目录（点击展开）</summary>
 
 - [项目概述](#项目概述)
 - [核心特性](#核心特性)
@@ -41,6 +44,8 @@
   - [加密日志无法读取](#加密日志无法读取)
 - [常见问题](#常见问题)
 - [相关资源](#相关资源)
+
+</details>
 
 ---
 
@@ -1463,10 +1468,10 @@ println!("Channel 使用率: {:.2}%", health.channel_usage * 100.0);
 ### 官方文档
 
 - **API 参考**：[https://docs.rs/inklog](https://docs.rs/inklog)
-- **示例代码**：[examples/](./examples/)
-- **架构文档**：[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- **安全文档**：[docs/SECURITY.md](./docs/SECURITY.md)
-- **贡献指南**：[CONTRIBUTING.md](./CONTRIBUTING.md)
+- **示例代码**：[examples/](../examples/)
+- **架构文档**：[ARCHITECTURE.md](./ARCHITECTURE.md)
+- **安全文档**：[SECURITY.md](./SECURITY.md)
+- **贡献指南**：[CONTRIBUTING.md](CONTRIBUTING.md)
 
 ### 生态系统
 
@@ -1482,4 +1487,4 @@ println!("Channel 使用率: {:.2}%", health.channel_usage * 100.0);
 
 ---
 
-**[返回顶部](#inklog-用户指南)**
+**[返回顶部](#-inklog-用户指南)**
