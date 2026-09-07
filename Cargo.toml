@@ -36,7 +36,7 @@ tempfile = { version = "3.27", default-features = false }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
-dbnexus = { version = "0.6.0-rc.2", path = "../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+dbnexus = { version = "0.6.0-rc.2", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "compression", "parquet"]
@@ -89,7 +89,7 @@ regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.2", path = "../trait-kit", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+trait-kit = { version = "0.5.0-rc.2", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -100,7 +100,7 @@ is-terminal = { version = "0.4", default-features = false }
 bytes = { version = "1.12", default-features = false, features = ["std"] }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
-oxcache = { version = "0.5.0-rc.2", path = "../oxcache", default-features = false, features = ["macros", "memory", "serialization", "metrics", "batch"] }
+oxcache = { version = "0.5.0-rc.2", default-features = false, features = ["macros", "memory", "serialization", "metrics", "batch"] }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
