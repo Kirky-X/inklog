@@ -1,5 +1,6 @@
 # CodeQL 静态安全分析（GitHub 原生，跨语言自动检测）。
 # 触发: push 到主分支 / PR / 每周二定时全量扫描
+# 无需额外 secret：使用自动注入的 GITHUB_TOKEN。
 name: CodeQL
 
 on:
@@ -8,7 +9,7 @@ on:
   pull_request:
     branches: [main, develop]
   schedule:
-    - cron: "37 4 * * 2" # 每周二 04:37 UTC
+    - cron: "37 4 * * 2" # 每周二 04:37 UTC（避开整点）
 
 permissions:
   contents: read
@@ -22,6 +23,7 @@ jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       security-events: write
       actions: read
@@ -32,12 +34,14 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.37.8
+        with:
+          languages: rust
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v4
+        uses: github/codeql-action/autobuild@v4.37.8
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.37.8
         with:
-          category: "/language:autodetect"
+          category: "/language:rust"

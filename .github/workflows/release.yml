@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,10 +13,13 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  # 更新版本号并提交
   update-version:
-    continue-on-error: true  # 版本回写自动化容错：版本已由 bump 提交维护，push 受 main 保护限制时不影响发布链
+    continue-on-error: true
     name: Update Version
     runs-on: ubuntu-latest
     outputs:
@@ -52,7 +56,6 @@ jobs:
           git commit -m "chore: bump version to ${{ steps.get_version.outputs.version }}" || echo "No changes to commit"
           git push origin HEAD:main || echo "Failed to push, continuing..."
 
-  # 构建多平台二进制文件
   build:
     name: Build ${{ matrix.target }}
     needs: update-version
@@ -62,15 +65,13 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
-
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main  # 使用更新后的版本
+          ref: main
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.97.1
@@ -94,14 +95,9 @@ jobs:
         run: |
           mkdir -p artifacts
           cd target/${{ matrix.target }}/release
-
-          # 查找所有二进制文件（排除 .d 文件和库文件）
           for binary in $(find . -maxdepth 1 -type f -executable ! -name "*.d" ! -name "*.so" ! -name "*.dylib" ! -name "*.dll"); do
             binary_name=$(basename "$binary")
-            # 创建 tar.gz 包
             tar czf "../../../artifacts/${binary_name}-${{ needs.update-version.outputs.version }}-${{ matrix.target }}.tar.gz" "$binary_name"
-
-            # 生成 SHA256
             sha256sum "$binary_name" | awk '{print $1}' > "../../../artifacts/${binary_name}-${{ needs.update-version.outputs.version }}-${{ matrix.target }}.tar.gz.sha256"
           done
 
@@ -111,7 +107,6 @@ jobs:
           name: binaries-${{ matrix.target }}
           path: artifacts/*
 
-  # 发布到 GitHub Release
   release:
     name: Create GitHub Release
     needs: [update-version, build]
@@ -136,19 +131,14 @@ jobs:
         id: changelog
         run: |
           VERSION=${{ needs.update-version.outputs.version }}
-
-          # 获取上一个 tag
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-
           echo "## What's Changed" > changelog.md
           echo "" >> changelog.md
-
           if [ -n "$PREV_TAG" ]; then
             git log $PREV_TAG..HEAD --pretty=format:"- %s (%h)" >> changelog.md
           else
             git log --pretty=format:"- %s (%h)" >> changelog.md
           fi
-
           echo "" >> changelog.md
           echo "" >> changelog.md
           echo "## Assets" >> changelog.md
@@ -158,7 +148,6 @@ jobs:
             basename_file=$(basename "$file")
             echo "- \`$basename_file\`" >> changelog.md
           done
-
           cat changelog.md
 
       - name: Create Release
@@ -171,7 +160,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 发布到 crates.io（使用 Trusted Publishing）
   publish-crates:
     name: Publish to crates.io
     needs: [update-version, build]
@@ -192,7 +180,6 @@ jobs:
           VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name=="inklog") | .version')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # 幂等守卫:crates.io 已存在该版本则跳过发布(本地 publish 后推 tag 的场景)
       - name: Check already published
         id: published
         run: |
@@ -203,11 +190,7 @@ jobs:
       - name: Publish to crates.io
         if: steps.published.outputs.exists == 'false'
         run: |
-          # 等待 crates.io 索引更新(如果有依赖)
           sleep 5
-
-          # 发布 workspace 中的所有 crate
-          # 如果有多个 crate,按依赖顺序发布
           cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
