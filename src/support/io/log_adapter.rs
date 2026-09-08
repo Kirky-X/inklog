@@ -7,6 +7,7 @@
 
 use crate::LogRecord;
 use crate::Metrics;
+use crate::validation::LogSanitizer;
 use chrono::Utc;
 use crossbeam_channel::Sender;
 use log::{Level, LevelFilter, Metadata, Record};
@@ -19,13 +20,32 @@ use std::sync::Arc;
 ///
 /// 使用 channel 实现无锁热路径，避免锁竞争。
 /// 使用 `Arc<LogRecord>` 避免深拷贝。
+///
+/// # 脱敏
+///
+/// 转换时对 `message` 与 `target` 应用与原生 tracing 路径一致的
+/// [`LogSanitizer`] 脱敏（diting 修复：外部 log 入口此前绕过脱敏，
+/// 构成与原生路径不一致的日志注入面）。`fields` 在本路径恒为空——
+/// `log` crate 记录不携带结构化字段——故无需字段级脱敏。
+///
+/// # 结构性限制：database sink 不可达
+///
+/// 经本适配器转换的记录只会进入 console 与 file 两条通道，**永远进不了
+/// database sink**：database worker 消费的是 manager 专用的
+/// `db_sender`/`db_receiver` 独立通道，仅与 tracing subscriber 桥接
+/// （`subscriber.with_extra_async_sender`），而本适配器只持有 console 与
+/// file 的发送端，且 `log` crate 记录不含 database sink 所需的结构化
+/// fields 路由信息。宿主应用如需 log 记录入库，应使用原生 tracing API。
 pub struct LogAdapter {
     /// Channel sender for console output (lock-free)
     console_sender: Sender<Arc<LogRecord>>,
-    /// Channel sender for async sinks (file, database, etc.)
+    /// Channel sender for async sinks (file, etc.; see struct docs for the
+    /// database sink limitation)
     async_sender: Sender<Arc<LogRecord>>,
     /// Metrics for monitoring
     metrics: Arc<Metrics>,
+    /// 与主路径一致的脱敏器（ANSI 剥离、换行/控制字符转义、敏感信息打码）
+    sanitizer: LogSanitizer,
 }
 
 impl LogAdapter {
@@ -44,7 +64,14 @@ impl LogAdapter {
             console_sender,
             async_sender,
             metrics,
+            sanitizer: LogSanitizer::new(),
         }
+    }
+
+    /// 以自定义脱敏器创建 LogAdapter（其余同 [`LogAdapter::new`]）
+    pub fn with_sanitizer(mut self, sanitizer: LogSanitizer) -> Self {
+        self.sanitizer = sanitizer;
+        self
     }
 
     /// 将 `log::Level` 转换为字符串
@@ -59,12 +86,17 @@ impl LogAdapter {
     }
 
     /// 将 `log::Record` 转换为 `LogRecord`
+    ///
+    /// `message` 与 `target` 经 [`LogSanitizer`] 脱敏（剥离 ANSI 转义、
+    /// 转义换行/控制字符、打码敏感信息），与原生 tracing 路径保持一致，
+    /// 堵住经外部 log crate 注入伪造日志行的入口。
+    /// `fields` 恒为空（`log` crate 无结构化字段），见结构体文档。
     fn record_to_log_record(&self, record: &Record) -> LogRecord {
         LogRecord {
             timestamp: Utc::now(),
             level: Self::level_to_string(record.level()).to_string(),
-            target: record.target().to_string(),
-            message: record.args().to_string(),
+            target: self.sanitizer.sanitize(record.target()),
+            message: self.sanitizer.sanitize(&record.args().to_string()),
             file: record.file().map(|s| s.to_string()),
             line: record.line(),
             thread_id: format!("{:?}", std::thread::current().id()),
@@ -201,6 +233,112 @@ mod tests {
         assert_eq!(log_record.message, "Test message");
         assert_eq!(log_record.file, Some("test.rs".to_string()));
         assert_eq!(log_record.line, Some(42));
+    }
+
+    // ========================================================================
+    // diting 修复：log 入口绕过脱敏（注入面）
+    // ========================================================================
+
+    #[test]
+    fn test_record_to_log_record_sanitizes_message_and_target() {
+        let (console_tx, _) = bounded(100);
+        let (async_tx, _) = bounded(100);
+        let adapter = LogAdapter::new(console_tx, async_tx, Arc::new(Metrics::new()));
+
+        // 消息含 ANSI 控制序列 + CRLF 伪造日志行注入；target 含 ANSI + LF
+        let raw_message = "\x1b[31mERR\x1b[0m fake\r\n2026-01-01 INFO injected";
+        let raw_target = "tgt\x1b[31m\ninjected";
+
+        let metadata = log::Metadata::builder()
+            .target(raw_target)
+            .level(Level::Info)
+            .build();
+        let args = format_args!("{}", raw_message);
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(args)
+            .build();
+
+        let log_record = adapter.record_to_log_record(&record);
+
+        // 转换前（原始输入）确实携带注入载荷
+        assert!(raw_message.contains('\x1b') && raw_message.contains('\n'));
+        assert!(raw_target.contains('\x1b') && raw_target.contains('\n'));
+
+        // 转换后：ANSI 被剥离、换行被转义为字面量 "\n"，伪造行注入失效
+        assert_eq!(log_record.message, "ERR fake\\n2026-01-01 INFO injected");
+        assert_eq!(log_record.target, "tgt\\ninjected");
+        assert!(!log_record.message.contains('\x1b'));
+        assert!(!log_record.message.contains('\n') && !log_record.message.contains('\r'));
+        assert!(!log_record.target.contains('\x1b'));
+        assert!(!log_record.target.contains('\n'));
+
+        // fields 路径恒为空（见结构体文档），无注入面
+        assert!(log_record.fields.is_empty());
+    }
+
+    #[test]
+    fn test_log_adapter_log_sanitizes_injected_record_through_channels() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let adapter = LogAdapter::new(console_tx, async_tx, Arc::new(Metrics::new()));
+
+        log::set_max_level(log::LevelFilter::Info);
+        // token 后置空格，避免 redaction 的 \S+ 连带吞掉字面量 "\n"
+        let raw_message = "line1\r\n\x1b[32mtoken=supersecret injected";
+        let metadata = log::Metadata::builder()
+            .target("test::adapter::inject")
+            .level(Level::Info)
+            .build();
+        let args = format_args!("{}", raw_message);
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(args)
+            .build();
+
+        adapter.log(&record);
+
+        // console 与 async 两条通道收到的记录均已脱敏
+        for rx in [&console_rx, &async_rx] {
+            let received = rx.recv().unwrap();
+            assert!(!received.message.contains('\x1b'));
+            assert!(!received.message.contains('\n') && !received.message.contains('\r'));
+            // 敏感信息打码 + 换行转义 + ANSI 剥离
+            assert!(
+                received.message.contains("token=[REDACTED]"),
+                "sensitive pattern should be redacted: {}",
+                received.message
+            );
+            assert!(
+                !received.message.contains("supersecret"),
+                "secret must not survive sanitization: {}",
+                received.message
+            );
+            assert!(received.message.contains("\\n"));
+        }
+    }
+
+    #[test]
+    fn test_log_adapter_with_sanitizer_uses_custom_instance() {
+        let (console_tx, _) = bounded(10);
+        let (async_tx, _) = bounded(10);
+        // 自定义 sanitizer：额外替换规则生效
+        let mut sanitizer = LogSanitizer::new();
+        sanitizer.add_replacement("corp-secret".to_string(), "[CUSTOM]".to_string());
+        let adapter = LogAdapter::new(console_tx, async_tx, Arc::new(Metrics::new()))
+            .with_sanitizer(sanitizer);
+
+        let metadata = log::Metadata::builder()
+            .target("test::custom")
+            .level(Level::Info)
+            .build();
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!("leak corp-secret now"))
+            .build();
+
+        let log_record = adapter.record_to_log_record(&record);
+        assert_eq!(log_record.message, "leak [CUSTOM] now");
     }
 
     #[test]
