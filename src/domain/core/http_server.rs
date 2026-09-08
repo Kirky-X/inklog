@@ -145,17 +145,12 @@ impl LoggerManager {
             if let Some(ref whitelist) = state.ip_whitelist {
                 let client_ip = addr.ip().to_string();
                 if !whitelist.iter().any(|allowed| {
-                    if allowed.ends_with(".*") {
-                        // 剥离 ".*" 后必须补回结尾点，否则 "192.168" 会
-                        // 前缀匹配 "192.1681.x" / "10.01.x" 等越界地址被放行
-                        // （diting MED-003 修复）
-                        let prefix = format!("{}.", &allowed[..allowed.len() - 2]);
-                        client_ip.starts_with(&prefix)
-                    } else if allowed.contains('/') {
-                        matches!(parse_cidr(allowed), Some(network) if network.contains(&addr.ip()))
-                    } else {
-                        client_ip == *allowed
-                    }
+                    whitelist_entry_matches(
+                        allowed,
+                        &client_ip,
+                        addr.ip(),
+                        &INVALID_WHITELIST_WARNED,
+                    )
                 }) {
                     return (StatusCode::FORBIDDEN, "IP not in whitelist").into_response();
                 }
@@ -168,9 +163,10 @@ impl LoggerManager {
             a.ct_eq(b).unwrap_u8() == 1
         }
 
-        fn parse_cidr(cidr: &str) -> Option<ipnet::IpNet> {
-            cidr.parse().ok()
-        }
+        // 进程级一次性告警标志：坏白名单条目在请求热路径上只告警一次，
+        // 主防线是配置期校验（InklogConfig::validate）
+        static INVALID_WHITELIST_WARNED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
 
         let app = Router::new()
             .route(
@@ -292,5 +288,118 @@ impl LoggerManager {
 
         info!("HTTP monitoring server configured on {}", addr);
         Ok(())
+    }
+}
+
+/// 单条 IP 白名单匹配：`IP` 精确、`前缀.*` 通配（补结尾点防越界前缀匹配，
+/// diting MED-003 修复）、`CIDR` 经 [`parse_cidr`]。
+///
+/// CIDR 解析失败的条目 fail-closed（永不匹配），并经 `invalid_warned`
+/// 进程级标志仅首次输出 `tracing::warn`——配置期校验是主防线，此处为
+/// 覆盖直接构造 HttpServer 路径的运行期兜底。
+#[cfg(feature = "http")]
+fn whitelist_entry_matches(
+    allowed: &str,
+    client_ip: &str,
+    ip: std::net::IpAddr,
+    invalid_warned: &std::sync::atomic::AtomicBool,
+) -> bool {
+    use std::sync::atomic::Ordering;
+
+    if let Some(prefix_body) = allowed.strip_suffix(".*") {
+        // 剥离 ".*" 后必须补回结尾点，否则 "192.168" 会
+        // 前缀匹配 "192.1681.x" / "10.01.x" 等越界地址被放行
+        let prefix = format!("{prefix_body}.");
+        client_ip.starts_with(&prefix)
+    } else if allowed.contains('/') {
+        match parse_cidr(allowed) {
+            Some(network) => network.contains(&ip),
+            None => {
+                if !invalid_warned.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(
+                        entry = %allowed,
+                        "ip_whitelist entry is not a valid IP or CIDR; it never matches (fail-closed)"
+                    );
+                }
+                false
+            }
+        }
+    } else {
+        client_ip == allowed
+    }
+}
+
+#[cfg(feature = "http")]
+fn parse_cidr(cidr: &str) -> Option<ipnet::IpNet> {
+    cidr.parse().ok()
+}
+
+#[cfg(all(test, feature = "http"))]
+mod tests {
+    use super::whitelist_entry_matches;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+
+    fn ip(s: &str) -> std::net::IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn test_invalid_cidr_entry_fails_closed_and_raises_warn_flag() {
+        let flag = AtomicBool::new(false);
+        // 非法 CIDR：不匹配任何 IP（fail-closed）
+        assert!(!whitelist_entry_matches(
+            "10.0.0.0/33",
+            "10.0.0.1",
+            ip("10.0.0.1"),
+            &flag
+        ));
+        // 首次失败置位告警标志
+        assert!(flag.load(Ordering::Relaxed));
+        // 后续请求不再重复置位（swap 返回 true = 已告警过，跳过第二次日志）
+        assert!(!whitelist_entry_matches(
+            "10.0.0.0/33",
+            "10.0.0.2",
+            ip("10.0.0.2"),
+            &flag
+        ));
+        assert!(flag.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_valid_entries_match_without_touching_warn_flag() {
+        let flag = AtomicBool::new(false);
+
+        // 精确匹配
+        assert!(whitelist_entry_matches(
+            "192.168.1.1",
+            "192.168.1.1",
+            ip("192.168.1.1"),
+            &flag
+        ));
+        // 通配：补结尾点防越界前缀匹配
+        assert!(whitelist_entry_matches("10.*", "10.1.2.3", ip("10.1.2.3"), &flag));
+        assert!(!whitelist_entry_matches(
+            "10.*",
+            "110.1.2.3",
+            ip("110.1.2.3"),
+            &flag
+        ));
+        // CIDR 包含判定
+        assert!(whitelist_entry_matches(
+            "192.168.0.0/24",
+            "192.168.0.99",
+            ip("192.168.0.99"),
+            &flag
+        ));
+        assert!(!whitelist_entry_matches(
+            "192.168.0.0/24",
+            "192.168.1.1",
+            ip("192.168.1.1"),
+            &flag
+        ));
+
+        // 合法条目全程不应触发告警标志
+        assert!(!flag.load(Ordering::Relaxed));
     }
 }

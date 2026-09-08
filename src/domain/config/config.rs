@@ -483,6 +483,20 @@ impl InklogConfig {
                     "config-http_port_zero",
                 )));
             }
+            // ip_whitelist 条目格式校验：解析失败的条目在运行期会被静默跳过
+            // （fail-closed），导致预期放行的 IP 被拒且无任何提示，故在配置期
+            // 直接拒绝坏条目
+            if let Some(ref whitelist) = http.ip_whitelist {
+                for (idx, entry) in whitelist.iter().enumerate() {
+                    let parseable = entry.parse::<std::net::IpAddr>().is_ok()
+                        || entry.parse::<ipnet::IpNet>().is_ok();
+                    if !parseable {
+                        return Err(InklogError::ConfigError(format!(
+                            "http_server.ip_whitelist[{idx}] is not a valid IP or CIDR: {entry:?}"
+                        )));
+                    }
+                }
+            }
             if let Some(ref tls) = http.tls {
                 tls.validate().map_err(InklogError::ConfigError)?;
             }
@@ -1291,6 +1305,38 @@ level = "debug"
             ..Default::default()
         });
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_http_ip_whitelist_entries() {
+        // 合法 IP / CIDR 条目通过
+        let mut config = InklogConfig::default();
+        config.http_server = Some(HttpServerConfig {
+            enabled: true,
+            ip_whitelist: Some(vec![
+                "10.0.0.1".to_string(),
+                "192.168.1.0/24".to_string(),
+                "2001:db8::1".to_string(),
+            ]),
+            ..Default::default()
+        });
+        assert!(config.validate().is_ok());
+
+        // 非法条目拒绝，错误消息含条目原文与序号
+        for bad in ["10.0.0.0/33", "not-an-ip"] {
+            let mut config = InklogConfig::default();
+            config.http_server = Some(HttpServerConfig {
+                enabled: true,
+                ip_whitelist: Some(vec!["10.0.0.1".to_string(), bad.to_string()]),
+                ..Default::default()
+            });
+            let err = config.validate().unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("ip_whitelist[1]") && msg.contains(bad),
+                "unexpected error for {bad}: {msg}"
+            );
+        }
     }
 
     #[test]
