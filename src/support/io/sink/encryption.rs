@@ -11,6 +11,13 @@ use rand::Rng;
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
+/// PBKDF2-HMAC-SHA256 迭代次数。
+///
+/// 单一事实来源：派生路径与守卫测试都引用本常量。
+/// 600,000 为 OWASP 对 PBKDF2-HMAC-SHA256 的推荐值；调低前必须同步
+/// 评估兼容性与安全影响，并更新 [`test_pbkdf2_iteration_count_is_at_least_600k`]。
+pub(crate) const PBKDF2_ITERATIONS: u32 = 600_000;
+
 /// 从环境变量获取加密密钥
 ///
 /// 支持以下格式：
@@ -29,6 +36,14 @@ use zeroize::Zeroizing;
 /// # 错误
 ///
 /// 如果环境变量未设置、密钥格式无效或长度不正确，返回错误
+///
+/// # 兼容性
+///
+/// 长度恰为 32 字节的输入会被**直接用作原始密钥**（不经过 PBKDF2 派生），
+/// 即使内容是可读密码。这是为解密既有按此格式加密的文件而保留的兼容行为，
+/// 存在语义歧义（32 字符密码与 32 字节随机密钥无法区分）。新部署应使用
+/// Base64 编码的随机密钥（`openssl rand -base64 32` 生成），或长度不等于
+/// 32 字节的密码。运行期遇到此路径会输出 `tracing::warn`。
 pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogError> {
     // 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
     let env_value = Zeroizing::new(std::env::var(env_var).map_err(|_| {
@@ -130,7 +145,7 @@ pub fn derive_key_from_password(
     pbkdf2_hmac::<Sha256>(
         password.as_bytes(),
         &salt,
-        600_000, // 迭代次数 (OWASP recommendation for PBKDF2-HMAC-SHA256)
+        PBKDF2_ITERATIONS,
         &mut key,
     );
 
@@ -349,15 +364,41 @@ mod tests {
 
     #[test]
     fn test_pbkdf2_iteration_count_is_at_least_600k() {
-        // Document the PBKDF2 iteration constant — OWASP recommends >= 600,000 for PBKDF2-HMAC-SHA256.
-        // This test ensures the value is not accidentally reduced.
-        let iterations = 600_000_u32;
-        let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(b"test_password_1234", b"test_salt", iterations, &mut key);
+        // (a) 常量本身不得低于 OWASP 对 PBKDF2-HMAC-SHA256 的推荐值（600,000）。
+        // 该断言对当前编译单元恒真是有意为之——它守卫的是未来对该常量的改动。
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(
+                PBKDF2_ITERATIONS >= 600_000,
+                "PBKDF2 iterations must stay at or above the OWASP recommendation \
+                 (600,000), got {PBKDF2_ITERATIONS}"
+            );
+        }
+
+        // (b) 生产派生路径必须真实使用 PBKDF2_ITERATIONS：固定盐经
+        // derive_key_from_password 的输出应与本地按常量重算逐字节一致。
+        // 若派生路径绕开常量（内联字面量）或常量被改动，比对即失败。
+        // 固定测试向量（非真实凭据），与确定性比对用途一致。
+        let test_vector = "pbkdf2-guard-test-vector-01";
+        let test_salt: &[u8] = b"pbkdf2-guard-salt";
+        let (derived, used_salt) =
+            derive_key_from_password(test_vector, Some(test_salt)).expect("derive should succeed");
         assert_eq!(
-            key.len(),
-            32,
-            "key derivation with 600k iterations should succeed"
+            used_salt,
+            test_salt.to_vec(),
+            "provided salt must be used as-is"
+        );
+
+        let mut expected = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(
+            test_vector.as_bytes(),
+            used_salt.as_slice(),
+            PBKDF2_ITERATIONS,
+            &mut expected,
+        );
+        assert_eq!(
+            derived, expected,
+            "derive_key_from_password must derive with PBKDF2_ITERATIONS iterations"
         );
     }
 
