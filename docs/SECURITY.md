@@ -462,6 +462,14 @@ for key in decrypt_keys {
 
 ##### 文件加密实现
 
+> **加密文件格式 v2（2026-09-08 起）**：文件头新增 16 字节 PBKDF2 盐字段
+> （`[MAGIC 8][version 2][algo 2][salt 16][nonce 12]`，version=2）。
+> 密钥来源两种：环境变量为 Base64/原始 32 字节时直接作密钥（盐存而不用，
+> 为格式统一）；为普通密码时经 PBKDF2-HMAC-SHA256（600,000 次迭代，
+> OWASP 推荐）+ 头中盐派生——解密方从文件头读盐做确定性派生。
+> **v1（无盐、version=1）文件仍可解密**，但 v1 时代密码模式因未存盐而
+> 无法恢复（解密时显式报错），请迁移到 v2。
+
 ```rust
 fn encrypt_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
     let encrypted_path = path.with_extension("enc");
@@ -485,10 +493,11 @@ fn encrypt_file(&self, path: &PathBuf) -> Result<PathBuf, InklogError> {
     // 5. 写入加密文件
     let mut output_file = File::create(&encrypted_path)?;
 
-    // 文件头: [8字节 MAGIC][2字节版本][2字节算法][12字节 nonce]
+    // 文件头: [8字节 MAGIC][2字节版本][2字节算法][16字节盐][12字节 nonce]
     output_file.write_all(MAGIC_HEADER)?;           // "ENCLOG1\0"
-    output_file.write_all(&1u16.to_le_bytes())?;    // 版本 = 1
+    output_file.write_all(&2u16.to_le_bytes())?;    // 版本 = 2
     output_file.write_all(&1u16.to_le_bytes())?;    // 算法 = 1 (AES-256-GCM)
+    output_file.write_all(&salt)?;                  // 16 字节 PBKDF2 盐
     output_file.write_all(&nonce)?;                  // 12 字节 nonce
     output_file.write_all(&ciphertext)?;             // 加密数据
 

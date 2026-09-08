@@ -26,7 +26,7 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 use tracing::{debug, error, info, warn};
@@ -106,6 +106,12 @@ pub struct FileSink {
     last_disk_check: parking_lot::Mutex<Option<(Instant, bool)>>,
     /// Shutdown flag for graceful thread termination
     shutdown_flag: Arc<AtomicBool>,
+    /// 终态写失败（熔断无 fallback / 磁盘不足无 fallback / fallback 写失败）
+    /// 后置位；批量全量刷盘成功后清除。供 [`FileSink::is_healthy`] 使用，
+    /// 保证日志丢失不静默。
+    write_unhealthy: AtomicBool,
+    /// 因终态写失败而丢失的记录计数（可观测性指标）
+    lost_records: AtomicU64,
     /// 数据脱敏器（只读）
     masker: DataMasker,
     /// 可变内部状态
@@ -165,6 +171,8 @@ impl FileSink {
             last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
             last_disk_check: parking_lot::Mutex::new(None),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
+            write_unhealthy: AtomicBool::new(false),
+            lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
             inner: RwLock::new(inner),
         };
@@ -198,54 +206,28 @@ impl FileSink {
         super::rotation::parse_size(size_str).ok()
     }
 
-    /// 获取加密密钥
-    /// 获取加密密钥（`Zeroizing` 包裹，离开作用域自动清零）
-    fn get_encryption_key(&self) -> Result<Zeroizing<[u8; 32]>, InklogError> {
+    /// 获取加密密钥（密码模式用文件头中的盐确定性派生）
+    ///
+    /// v2 加密格式：加密时生成 16 字节随机盐写入文件头，密码模式密钥经
+    /// PBKDF2(密码, 盐) 确定性派生，解密方（CLI）读出盐后可重导出同一密钥。
+    /// Base64 / 原始 32 字节密钥分支与盐无关。
+    ///
+    /// 密钥（`Zeroizing` 包裹，离开作用域自动清零）
+    fn get_encryption_key(&self, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, InklogError> {
         let default_key = "LOG_ENCRYPTION_KEY".to_string();
-        let key_str = self
+        let key_env = self
             .config
             .encryption_key_env
             .as_ref()
             .unwrap_or(&default_key);
 
-        let key = std::env::var(key_str).map_err(|_| InklogError::EncryptionError {
-            message: format!(
-                "Encryption key not found in environment variable: {}",
-                key_str
-            ),
-            source: None,
-        })?;
+        let key = super::encryption::get_encryption_key_with_salt(key_env, salt)?;
 
-        // 验证密钥长度（Base64 编码前至少 16 字符）
-        if key.len() < 16 {
-            return Err(InklogError::EncryptionError {
-                message: "Encryption key must be at least 16 characters".to_string(),
-                source: None,
-            });
-        }
+        // 纵深防御：对直接用作密钥的原始字节（非 PBKDF2 派生输出）保留
+        // Shannon 熵校验，拒绝全零等弱密钥。
+        Self::validate_key_entropy(&*key)?;
 
-        let decoded = Zeroizing::new(
-            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key).map_err(
-                |_| InklogError::EncryptionError {
-                    message: "Invalid base64 encoding in encryption key".to_string(),
-                    source: None,
-                },
-            )?,
-        );
-
-        if decoded.len() != 32 {
-            return Err(InklogError::EncryptionError {
-                message: "Encryption key must be 32 bytes (256 bits)".to_string(),
-                source: None,
-            });
-        }
-
-        // 验证密钥熵（确保不是弱密钥）
-        Self::validate_key_entropy(&decoded)?;
-
-        let mut key_bytes = [0u8; 32];
-        key_bytes.copy_from_slice(&decoded);
-        Ok(Zeroizing::new(key_bytes))
+        Ok(key)
     }
 
     /// 验证密钥熵（Shannon entropy）
@@ -341,11 +323,26 @@ impl FileSink {
             return Err(InklogError::IoError(e));
         }
 
-        match OpenOptions::new()
+        // vuln-0004: 打开时在内核层拒绝末段符号链接（O_NOFOLLOW）。
+        // 上方 PathValidator 的符号链接检查与实际 open 之间存在 validate-then-use
+        // 窗口（TOCTOU）：攻击者可在校验通过后把日志路径替换为符号链接。
+        // 非 Unix 平台退化为普通打开（与 validation 模块的策略一致）。
+        #[cfg(unix)]
+        let open_result = {
+            use std::os::unix::fs::OpenOptionsExt;
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits())
+                .open(&self.config.path)
+        };
+        #[cfg(not(unix))]
+        let open_result = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&self.config.path)
-        {
+            .open(&self.config.path);
+
+        match open_result {
             Ok(file) => {
                 inner.current_file = Some(file);
                 inner.current_size = self.config.path.metadata().map(|m| m.len()).unwrap_or(0);
@@ -618,6 +615,34 @@ impl FileSink {
     /// 避免 async write 每条记录都执行 fs::metadata + statfs
     const DISK_CHECK_THROTTLE: StdDuration = StdDuration::from_secs(5);
 
+    /// 记录一条**终态丢失**的日志记录，保证丢失可观测而非静默吞掉：
+    ///
+    /// - `tracing::error` 结构化记录；
+    /// - stderr 输出丢失详情（sink 路径与原因），覆盖无 tracing subscriber
+    ///   的运行场景（记录本身已无法写入日志文件）；
+    /// - 置位健康标志，使 [`FileSink::is_healthy`] 返回 false；
+    /// - 递增丢失记录计数器。
+    ///
+    /// 返回值语义保持兼容（调用方仍收到 `Ok`，不改变错误传播契约）。
+    fn mark_write_lost(&self, record: &LogRecord, reason: &str) {
+        self.lost_records.fetch_add(1, Ordering::Relaxed);
+        self.write_unhealthy.store(true, Ordering::Relaxed);
+        error!(
+            path = %self.config.path.display(),
+            target = %record.target,
+            level = %record.level,
+            "Log record lost: {}",
+            reason
+        );
+        eprintln!(
+            "[inklog] LOST log record (sink: {}, target: {}, level: {}): {}",
+            self.config.path.display(),
+            record.target,
+            record.level,
+            reason
+        );
+    }
+
     /// 检查磁盘空间是否充足
     ///
     /// 带节流：距上次实际检查不足 [`Self::DISK_CHECK_THROTTLE`] 且结果为
@@ -643,12 +668,19 @@ impl FileSink {
 
     /// 计算下次轮转时间
     fn calculate_next_rotation_time(rotation_time: &str) -> Option<DateTime<Utc>> {
-        let now = Utc::now();
+        Self::calculate_next_rotation_time_from(rotation_time, Utc::now())
+    }
 
+    /// [`Self::calculate_next_rotation_time`] 的可注入时钟变体（便于测试）。
+    fn calculate_next_rotation_time_from(
+        rotation_time: &str,
+        now: DateTime<Utc>,
+    ) -> Option<DateTime<Utc>> {
         match rotation_time {
             "hourly" => Some(now + chrono::Duration::hours(1)),
             "daily" => {
-                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
+                let next_naive =
+                    now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
                 Some(next_naive.and_utc())
             }
             "weekly" => {
@@ -657,13 +689,16 @@ impl FileSink {
                 Some(next_naive.and_utc())
             }
             "monthly" => {
-                let next_naive =
-                    (now.date_naive() + chrono::Duration::days(1)).and_hms_opt(0, 0, 0)?;
-                Some(next_naive.and_utc())
+                // 修复：原实现误写为“明天零点”，导致 monthly 实际每天轮转。
+                // 正确语义为“下个月同日的零点”；`checked_add_months` 在月末
+                // 溢出时钳制到次月最后一天（如 1 月 31 日 → 2 月 28 日）。
+                let next_date = now.date_naive().checked_add_months(chrono::Months::new(1))?;
+                Some(next_date.and_hms_opt(0, 0, 0)?.and_utc())
             }
             _ => {
                 // 默认每日轮转
-                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
+                let next_naive =
+                    now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
                 Some(next_naive.and_utc())
             }
         }
@@ -814,6 +849,9 @@ impl FileSink {
             }
             if !write_failed {
                 inner.circuit_breaker.record_success();
+                // 全量刷盘成功：清除终态写失败的健康标记（瞬时磁盘满等故障
+                // 恢复后 sink 自动转回健康）。
+                self.write_unhealthy.store(false, Ordering::Relaxed);
             }
         } else {
             // 无文件句柄：没有任何记录被写入，全部回填等待重试
@@ -968,12 +1006,23 @@ impl FileSink {
     }
 
     /// 同步加密文件（可在后台线程调用）
+    ///
+    /// 输出格式 v2（与 CLI 解密工具一致）：
+    /// magic(8) + version=2(2) + algo(2) + **salt(16)** + nonce(12) + ciphertext
+    ///
+    /// v2 相比 v1 新增 16 字节盐字段：密码模式密钥经 PBKDF2(密码, 盐) 确定性
+    /// 派生，盐随头存储，解密方才能重导出同一密钥（v1 密码模式文件因未存盐
+    /// 而不可解密，见 CLI 解密工具的 v1 诊断）。
     pub fn encrypt_file(&self, input_path: &Path, output_path: &Path) -> Result<(), InklogError> {
         use aes_gcm::{Aes256Gcm, Nonce};
         use rand::Rng;
 
-        // 获取密钥
-        let key_bytes = self.get_encryption_key()?;
+        // 生成加密安全的随机盐（16 字节），写入 v2 文件头
+        let mut salt = [0u8; 16];
+        rand::rng().fill_bytes(&mut salt);
+
+        // 获取密钥（密码模式用上面的盐确定性派生）
+        let key_bytes = self.get_encryption_key(&salt)?;
         let cipher = Aes256Gcm::new_from_slice(&*key_bytes).map_err(|e| {
             let mut args = fluent_bundle::FluentArgs::new();
             args.set("err", e.to_string());
@@ -1011,16 +1060,53 @@ impl FileSink {
             InklogError::IoError(e)
         })?;
 
-        // 写入格式（与 CLI 解密工具及 docs/SECURITY.md 一致）：
-        // magic header (8) + version (2) + algo (2) + nonce (12) + ciphertext
+        // 写入格式（v2，与 CLI 解密工具及 docs/SECURITY.md 一致）：
+        // magic header (8) + version (2) + algo (2) + salt (16) + nonce (12) + ciphertext
         output.write_all(b"ENCLOG1\0")?;
+        output.write_all(&2u16.to_le_bytes())?;
         output.write_all(&1u16.to_le_bytes())?;
-        output.write_all(&1u16.to_le_bytes())?;
+        output.write_all(&salt)?;
         output.write_all(&nonce_bytes)?;
         output.write_all(&ciphertext)?;
 
         debug!("Encrypted log file: {}", output_path.display());
         Ok(())
+    }
+
+    /// 解析轮转目标路径：`{stem}_{timestamp}.{ext}`，冲突时追加序号后缀。
+    ///
+    /// 时间戳为秒级精度（`%Y%m%d_%H%M%S`），同一秒内二次轮转会命中同名目标。
+    /// 目标已存在时依次尝试 `.1`、`.2` … 序号后缀，保证绝不覆盖既有轮转产物。
+    fn resolve_rotation_target(original: &Path, stamp: &str) -> PathBuf {
+        let make_path = |attempt: u32| -> PathBuf {
+            let suffix = if attempt == 0 {
+                String::new()
+            } else {
+                format!(".{attempt}")
+            };
+            match original.parent() {
+                Some(parent) => {
+                    let stem = original.file_stem().unwrap_or_default();
+                    let ext = original.extension().unwrap_or_default();
+                    parent.join(format!(
+                        "{}_{}.{}{}",
+                        stem.to_string_lossy(),
+                        stamp,
+                        ext.to_string_lossy(),
+                        suffix
+                    ))
+                }
+                None => PathBuf::from(format!("{}_{}{}", original.display(), stamp, suffix)),
+            }
+        };
+
+        let mut attempt = 0u32;
+        let mut candidate = make_path(attempt);
+        while candidate.exists() {
+            attempt += 1;
+            candidate = make_path(attempt);
+        }
+        candidate
     }
 
     /// 执行文件轮转
@@ -1031,19 +1117,10 @@ impl FileSink {
         let _ = inner.current_file.take();
 
         // 重命名当前日志文件
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let new_path = if let Some(parent) = self.config.path.parent() {
-            let stem = self.config.path.file_stem().unwrap_or_default();
-            let ext = self.config.path.extension().unwrap_or_default();
-            parent.join(format!(
-                "{}_{}.{}",
-                stem.to_string_lossy(),
-                timestamp,
-                ext.to_string_lossy()
-            ))
-        } else {
-            PathBuf::from(format!("{}_{}", self.config.path.display(), timestamp))
-        };
+        // 修复：`%Y%m%d_%H%M%S` 为秒级精度，同秒二次轮转会静默覆盖既有轮转
+        // 产物。目标已存在时追加 `.1`、`.2` … 序号后缀，保证永不覆盖。
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let new_path = Self::resolve_rotation_target(&self.config.path, &timestamp);
 
         // 尝试重命名
         if self.config.path.exists()
@@ -1111,6 +1188,8 @@ impl FileSink {
                         last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
                         last_disk_check: parking_lot::Mutex::new(None),
                         shutdown_flag: Arc::new(AtomicBool::new(false)),
+                        write_unhealthy: AtomicBool::new(false),
+                        lost_records: AtomicU64::new(0),
                         masker: DataMasker::new(),
                         inner: RwLock::new(inner),
                     };
@@ -1162,6 +1241,8 @@ impl FileSink {
                         last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
                         last_disk_check: parking_lot::Mutex::new(None),
                         shutdown_flag: Arc::new(AtomicBool::new(false)),
+                        write_unhealthy: AtomicBool::new(false),
+                        lost_records: AtomicU64::new(0),
                         masker: DataMasker::new(),
                         inner: RwLock::new(inner),
                     };
@@ -1216,19 +1297,45 @@ impl LogSink for FileSink {
             !inner.circuit_breaker.can_execute()
         };
         if circuit_open {
+            // 修复：熔断打开时记录不能静默吞掉——降级失败/无 fallback 时
+            // 记录已终态丢失，必须 error + stderr + 置不健康。
             let fallback = self.inner.read().fallback_sink.clone();
-            if let Some(sink) = fallback {
-                let _ = sink.write(record).await;
+            match fallback {
+                Some(sink) => {
+                    if let Err(e) = sink.write(record).await {
+                        self.mark_write_lost(
+                            record,
+                            &format!("circuit breaker open and fallback sink write failed: {e}"),
+                        );
+                    }
+                }
+                None => {
+                    self.mark_write_lost(
+                        record,
+                        "circuit breaker open and no fallback sink configured",
+                    );
+                }
             }
             return Ok(());
         }
 
         // 检查磁盘空间（sync，不持有锁）
         if !self.check_disk_space()? {
+            // 修复：磁盘不足且无法降级时记录不能静默吞掉
             warn!("Low disk space - checking before write");
             let fallback = self.inner.read().fallback_sink.clone();
-            if let Some(sink) = fallback {
-                let _ = sink.write(record).await;
+            match fallback {
+                Some(sink) => {
+                    if let Err(e) = sink.write(record).await {
+                        self.mark_write_lost(
+                            record,
+                            &format!("low disk space and fallback sink write failed: {e}"),
+                        );
+                    }
+                }
+                None => {
+                    self.mark_write_lost(record, "low disk space and no fallback sink configured");
+                }
             }
             return Ok(());
         }
@@ -1317,6 +1424,7 @@ impl LogSink for FileSink {
 
     fn is_healthy(&self) -> bool {
         self.inner.read().current_file.is_some()
+            && !self.write_unhealthy.load(Ordering::Relaxed)
     }
 
     async fn shutdown(&self) -> Result<(), InklogError> {
@@ -1479,6 +1587,8 @@ impl Clone for FileSink {
             last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
             last_disk_check: parking_lot::Mutex::new(None),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
+            write_unhealthy: AtomicBool::new(false),
+            lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
             inner: RwLock::new(inner),
         }
@@ -1535,6 +1645,8 @@ mod tests {
             last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
             last_disk_check: parking_lot::Mutex::new(None),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
+            write_unhealthy: AtomicBool::new(false),
+            lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
             inner: RwLock::new(inner),
         }
@@ -1599,7 +1711,7 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let key_result = sink.get_encryption_key();
+        let key_result = sink.get_encryption_key(b"test-salt-16bytes");
         assert!(key_result.is_ok());
         assert_eq!(key_result.unwrap().len(), 32);
 
@@ -1787,7 +1899,7 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let result = sink.get_encryption_key();
+        let result = sink.get_encryption_key(b"test-salt-16bytes");
         assert!(result.is_err());
     }
 
@@ -1802,7 +1914,7 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let result = sink.get_encryption_key();
+        let result = sink.get_encryption_key(b"test-salt-16bytes");
         // When encryption_key_env is None, it tries to use LOG_ENCRYPTION_KEY env var
         // This test expects the env var to be set or the test to handle missing env
         // Let's check if we get an error and skip if env var is not set
@@ -1897,13 +2009,14 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let result = sink.get_encryption_key();
+        let result = sink.get_encryption_key(b"test-salt-16bytes");
         assert!(result.is_err());
+        // v2 统一走加密模块派生：base64 解码成功但只有 4 字节 → 长度错误
         assert!(
             result
                 .unwrap_err()
                 .to_string()
-                .contains("at least 16 characters")
+                .contains("32 bytes")
         );
     }
 
@@ -2430,13 +2543,13 @@ mod tests {
         assert_eq!(encrypted_path.extension().unwrap(), "enc");
         assert!(encrypted_path.exists());
 
-        // 解密：24 字节头（magic 8 + version 2 + algo 2 + nonce 12）+ ciphertext
+        // 解密：v2 头 40 字节（magic 8 + version 2 + algo 2 + salt 16 + nonce 12）+ ciphertext
         let encrypted_data = std::fs::read(&encrypted_path).unwrap();
-        assert!(encrypted_data.len() > 24);
+        assert!(encrypted_data.len() > 40);
         assert_eq!(&encrypted_data[..8], b"ENCLOG1\0");
         assert_eq!(
             u16::from_le_bytes([encrypted_data[8], encrypted_data[9]]),
-            1
+            2
         );
         assert_eq!(
             u16::from_le_bytes([encrypted_data[10], encrypted_data[11]]),
@@ -2444,9 +2557,9 @@ mod tests {
         );
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce_arr: [u8; 12] = encrypted_data[12..24].try_into().unwrap();
+        let nonce_arr: [u8; 12] = encrypted_data[28..40].try_into().unwrap();
         let nonce = Nonce::from(nonce_arr);
-        let ciphertext = &encrypted_data[24..];
+        let ciphertext = &encrypted_data[40..];
         let decrypted_compressed = cipher.decrypt(&nonce, ciphertext).unwrap();
 
         // 解压
@@ -2498,13 +2611,13 @@ mod tests {
         assert_eq!(encrypted_path.extension().unwrap(), "enc");
         assert!(encrypted_path.exists());
 
-        // 解密：24 字节头（magic 8 + version 2 + algo 2 + nonce 12）+ ciphertext
+        // 解密：v2 头 40 字节（magic 8 + version 2 + algo 2 + salt 16 + nonce 12）+ ciphertext
         let encrypted_data = std::fs::read(&encrypted_path).unwrap();
-        assert!(encrypted_data.len() > 24);
+        assert!(encrypted_data.len() > 40);
         assert_eq!(&encrypted_data[..8], b"ENCLOG1\0");
         assert_eq!(
             u16::from_le_bytes([encrypted_data[8], encrypted_data[9]]),
-            1
+            2
         );
         assert_eq!(
             u16::from_le_bytes([encrypted_data[10], encrypted_data[11]]),
@@ -2512,9 +2625,9 @@ mod tests {
         );
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce_arr: [u8; 12] = encrypted_data[12..24].try_into().unwrap();
+        let nonce_arr: [u8; 12] = encrypted_data[28..40].try_into().unwrap();
         let nonce = Nonce::from(nonce_arr);
-        let ciphertext = &encrypted_data[24..];
+        let ciphertext = &encrypted_data[40..];
         let decrypted_compressed = cipher.decrypt(&nonce, ciphertext).unwrap();
 
         // gzip 解压
@@ -2630,23 +2743,29 @@ mod tests {
         assert!(result.is_ok(), "encrypt_file failed: {:?}", result.err());
         assert!(output_path.exists());
 
-        // 解密：24 字节头（magic 8 + version 2 + algo 2 + nonce 12）+ ciphertext
+        // 解密：v2 头 40 字节（magic 8 + version 2 + algo 2 + salt 16 + nonce 12）+ ciphertext
         let encrypted_data = std::fs::read(&output_path).unwrap();
-        assert!(encrypted_data.len() > 24);
+        assert!(encrypted_data.len() > 40);
         assert_eq!(&encrypted_data[..8], b"ENCLOG1\0");
+        // v2：version 字段必须为 2（密码模式密钥依赖头中的盐）
         assert_eq!(
             u16::from_le_bytes([encrypted_data[8], encrypted_data[9]]),
-            1
+            2
         );
         assert_eq!(
             u16::from_le_bytes([encrypted_data[10], encrypted_data[11]]),
             1
         );
+        let header_salt: [u8; 16] = encrypted_data[12..28].try_into().unwrap();
+        assert!(
+            header_salt.iter().any(|&b| b != 0),
+            "v2 header must carry a random salt"
+        );
         use aes_gcm::{Aes256Gcm, Nonce};
         let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
-        let nonce_arr: [u8; 12] = encrypted_data[12..24].try_into().unwrap();
+        let nonce_arr: [u8; 12] = encrypted_data[28..40].try_into().unwrap();
         let nonce = Nonce::from(nonce_arr);
-        let ciphertext = &encrypted_data[24..];
+        let ciphertext = &encrypted_data[40..];
         let decrypted = cipher.decrypt(&nonce, ciphertext).unwrap();
         assert_eq!(decrypted, original_content);
 
@@ -2676,7 +2795,8 @@ mod tests {
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
+        // v2 统一走加密模块派生，未设置变量报 i18n "not set" 错误
+        assert!(result.unwrap_err().to_string().contains("not set"));
     }
 
     #[test]
@@ -2713,9 +2833,9 @@ mod tests {
         let input_path = temp_dir.path().join("input.log");
         let output_path = temp_dir.path().join("output.log.enc");
         std::fs::write(&input_path, "content").unwrap();
-        // 长度 >= 16 但不是有效 base64
+        // v2 语义：非 Base64 输入按密码处理；但短于 12 字符的密码必须被拒绝
         unsafe {
-            std::env::set_var("TEST_INVALID_B64_KEY", "not_valid_base64!!!*@$");
+            std::env::set_var("TEST_INVALID_B64_KEY", "short");
         }
 
         let config = FileSinkConfig {
@@ -2728,6 +2848,12 @@ mod tests {
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("at least 12 characters")
+        );
         unsafe {
             std::env::remove_var("TEST_INVALID_B64_KEY");
         }
@@ -3178,31 +3304,35 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_get_encryption_key_invalid_base64() {
-        // 覆盖行 239-244: 无效 base64 解码错误
+    fn test_get_encryption_key_password_mode_deterministic_with_salt() {
+        // v2 语义：非 Base64、非 32 字节的输入按密码处理，
+        // 同一盐确定性派生（与解密方用文件头盐重导出对齐）。
         let config = FileSinkConfig {
             enabled: true,
             path: PathBuf::from("test.log"),
-            encryption_key_env: Some("TEST_INVALID_B64".to_string()),
+            encryption_key_env: Some("TEST_PWD_SALT_KEY".to_string()),
             ..Default::default()
         };
-        // 设置非法 base64 字符串（长度足够但不是有效 base64）
+        // 含 '_'/'!'/'@'/'#' → 非 Base64；长度 30 ≠ 32 → 密码分支
         unsafe {
-            std::env::set_var("TEST_INVALID_B64", "this_is_not_valid_base64!!!@#$");
+            std::env::set_var("TEST_PWD_SALT_KEY", "this_is_not_valid_base64!!!@#$");
         }
 
         let sink = create_test_file_sink(config);
-        let result = sink.get_encryption_key();
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid base64 encoding")
-        );
+        let k1 = sink
+            .get_encryption_key(b"fixed-salt-16byt")
+            .expect("password mode with salt should derive a key");
+        let k2 = sink
+            .get_encryption_key(b"fixed-salt-16byt")
+            .expect("second derive with same salt should succeed");
+        assert_eq!(*k1, *k2, "same password + same salt must be deterministic");
+        let k3 = sink
+            .get_encryption_key(b"other-salt-16byt")
+            .expect("derive with different salt should succeed");
+        assert_ne!(*k1, *k3, "different salt must derive a different key");
 
         unsafe {
-            std::env::remove_var("TEST_INVALID_B64");
+            std::env::remove_var("TEST_PWD_SALT_KEY");
         }
     }
 
@@ -3389,7 +3519,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Encryption key not found")
+                .contains("not set")
         );
     }
 
@@ -4693,5 +4823,304 @@ mod tests {
             any_content,
             "at least one file should contain written records"
         );
+    }
+
+    // ========================================================================
+    // 缺陷修复回归测试（diting 审查）
+    // ========================================================================
+
+    // ---- 缺陷 #2: monthly 轮转实际每天轮转 ----
+
+    #[test]
+    fn test_calculate_next_rotation_time_monthly_july_31_is_august_31() {
+        // 回归：7 月 31 日 20:00 的 monthly 下次轮转必须是 8 月 31 日，
+        // 而不是旧实现算出的“明天（7 月）零点”。
+        use chrono::TimeZone;
+        let now = Utc.with_ymd_and_hms(2026, 7, 31, 20, 0, 0).unwrap();
+        let next = FileSink::calculate_next_rotation_time_from("monthly", now)
+            .expect("monthly rotation time must be computable");
+        assert_eq!(
+            next,
+            Utc.with_ymd_and_hms(2026, 8, 31, 0, 0, 0).unwrap(),
+            "monthly rotation on Jul 31 must land on Aug 31, not any day in July"
+        );
+    }
+
+    #[test]
+    fn test_calculate_next_rotation_time_monthly_clamps_month_end() {
+        // 月末溢出：1 月 31 日 + 1 个月应钳制到 2 月最后一天（2026 非闰年 → 28 日）
+        use chrono::TimeZone;
+        let now = Utc.with_ymd_and_hms(2026, 1, 31, 12, 0, 0).unwrap();
+        let next = FileSink::calculate_next_rotation_time_from("monthly", now).unwrap();
+        assert_eq!(next, Utc.with_ymd_and_hms(2026, 2, 28, 0, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn test_calculate_next_rotation_time_monthly_lands_in_next_month() {
+        use chrono::TimeZone;
+        let now = Utc.with_ymd_and_hms(2026, 9, 9, 10, 30, 0).unwrap();
+        let next = FileSink::calculate_next_rotation_time_from("monthly", now).unwrap();
+        assert!(next > now);
+        assert_eq!((next.year(), next.month()), (2026, 10));
+        assert_eq!((next.hour(), next.minute(), next.second()), (0, 0, 0));
+    }
+
+    // ---- 缺陷 #3: 轮转文件名秒级精度覆盖 ----
+
+    #[test]
+    fn test_resolve_rotation_target_avoids_collision_with_sequence_suffix() {
+        let dir = tempdir().unwrap();
+        let original = dir.path().join("test.log");
+        let stamp = "20260909_120000";
+
+        // 无冲突 → 标准名
+        let first = FileSink::resolve_rotation_target(&original, stamp);
+        assert_eq!(first, dir.path().join("test_20260909_120000.log"));
+
+        // 同秒二次轮转：目标已存在 → 追加 .1，绝不覆盖
+        std::fs::write(&first, "first rotation").unwrap();
+        let second = FileSink::resolve_rotation_target(&original, stamp);
+        assert_eq!(second, dir.path().join("test_20260909_120000.log.1"));
+        assert_eq!(
+            std::fs::read_to_string(&first).unwrap(),
+            "first rotation",
+            "existing rotated file must not be overwritten"
+        );
+
+        // 同秒三次轮转 → .2
+        std::fs::write(&second, "second rotation").unwrap();
+        let third = FileSink::resolve_rotation_target(&original, stamp);
+        assert_eq!(third, dir.path().join("test_20260909_120000.log.2"));
+    }
+
+    #[test]
+    fn test_rotate_inner_same_second_does_not_overwrite_existing_target() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+
+        // 预创建“本秒/下一秒”两个可能的时间戳目标，模拟同秒二次轮转
+        let t0 = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let t1 = (Utc::now() + chrono::Duration::seconds(1))
+            .format("%Y%m%d_%H%M%S")
+            .to_string();
+        let candidate0 = dir.path().join(format!("test_{t0}.log"));
+        let candidate1 = dir.path().join(format!("test_{t1}.log"));
+        std::fs::write(&candidate0, "PRECIOUS0").unwrap();
+        std::fs::write(&candidate1, "PRECIOUS1").unwrap();
+
+        std::fs::write(&log_path, "rotated content").unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            compress: false,
+            encrypt: false,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        sink.open_file_inner(&mut inner).unwrap();
+        sink.rotate_inner(&mut inner).unwrap();
+        drop(inner);
+
+        // 预创建文件内容必须原封不动（不被静默覆盖）
+        assert_eq!(std::fs::read_to_string(&candidate0).unwrap(), "PRECIOUS0");
+        assert_eq!(std::fs::read_to_string(&candidate1).unwrap(), "PRECIOUS1");
+
+        // 轮转内容应落入带序号后缀的新文件
+        let suffixed_candidates = [
+            dir.path().join(format!("test_{t0}.log.1")),
+            dir.path().join(format!("test_{t1}.log.1")),
+        ];
+        let rotated_into = suffixed_candidates
+            .iter()
+            .find(|p| p.exists())
+            .unwrap_or_else(|| panic!("rotated content must go to a sequence-suffixed file"));
+        assert_eq!(
+            std::fs::read_to_string(rotated_into).unwrap(),
+            "rotated content"
+        );
+    }
+
+    // ---- 缺陷 #4: 打开日志文件未用 O_NOFOLLOW ----
+
+    #[cfg(unix)]
+    #[test]
+    fn test_open_file_inner_fails_when_path_is_symlink() {
+        // 日志路径为符号链接时打开必须失败：
+        // 第一层（PathValidator, allow_symlinks=false）+ 第二层（O_NOFOLLOW
+        // 内核兜底，覆盖 validate-then-use 竞态）都应使打开失败。
+        let dir = tempdir().unwrap();
+        let real_file = dir.path().join("real.log");
+        std::fs::write(&real_file, "real content").unwrap();
+        let link = dir.path().join("link.log");
+        std::os::unix::fs::symlink(&real_file, &link).unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: link.clone(),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        let result = sink.open_file_inner(&mut inner);
+        assert!(result.is_err(), "symlinked log path must fail to open");
+        assert!(inner.current_file.is_none());
+        // 符号链接目标不得被创建/截断/写入
+        assert_eq!(
+            std::fs::read_to_string(&real_file).unwrap(),
+            "real content"
+        );
+    }
+
+    // ---- 缺陷 #5: 断路器/磁盘不足路径静默吞日志 ----
+
+    #[test]
+    fn test_mark_write_lost_sets_unhealthy_and_recovers_on_successful_flush() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            compress: false,
+            encrypt: false,
+            batch_size: 10,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        {
+            let mut inner = sink.inner.write();
+            sink.open_file_inner(&mut inner).unwrap();
+        }
+        assert!(sink.is_healthy());
+
+        // 终态写丢失：error + stderr（mark_write_lost 内部）+ 置不健康 + 计数
+        sink.mark_write_lost(
+            &create_test_record("lost record"),
+            "test: no fallback configured",
+        );
+        assert!(
+            !sink.is_healthy(),
+            "terminal write loss must mark the sink unhealthy"
+        );
+        assert_eq!(sink.lost_records.load(Ordering::Relaxed), 1);
+
+        // 成功全量刷盘后应恢复健康（瞬时故障恢复），丢失计数不清零
+        {
+            let mut inner = sink.inner.write();
+            inner.batch_buffer.push(create_test_record("recovered"));
+            sink.flush_batch_inner(&mut inner).unwrap();
+        }
+        assert!(
+            sink.is_healthy(),
+            "a fully successful flush must clear the unhealthy flag"
+        );
+        assert_eq!(
+            sink.lost_records.load(Ordering::Relaxed),
+            1,
+            "lost-record counter must not reset on recovery"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn test_write_lost_is_observable_when_circuit_opens_without_fallback() {
+        // /dev/full 写入始终返回 ENOSPC：注入连续写失败使断路器打开后，
+        // 无 fallback 的写入必须可观测（不健康 + 丢失计数），且返回值仍为 Ok
+        //（保持调用方语义兼容）。
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("/dev/full"),
+            compress: false,
+            encrypt: false,
+            batch_size: 1,
+            flush_interval_ms: 1000,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        {
+            let mut inner = sink.inner.write();
+            if sink.open_file_inner(&mut inner).is_err() {
+                eprintln!("Skipping: /dev/full not accessible in this environment");
+                return;
+            }
+        }
+        assert!(sink.is_healthy());
+
+        let record = create_test_record("will be lost");
+        for _ in 0..5 {
+            let result = sink.write(&record).await;
+            assert!(result.is_ok(), "failed flush path must still return Ok");
+        }
+        // 5 次批量写失败 → 断路器打开
+        {
+            let inner = sink.inner.read();
+            assert_eq!(inner.circuit_breaker.state(), CircuitState::Open);
+        }
+
+        // 第 6 条：熔断打开且无 fallback → 记录终态丢失但可观测
+        let result = sink.write(&record).await;
+        assert!(result.is_ok(), "write must stay Ok to keep caller semantics");
+        assert!(
+            !sink.is_healthy(),
+            "sink must be marked unhealthy after a lost record"
+        );
+        assert_eq!(sink.lost_records.load(Ordering::Relaxed), 1);
+    }
+
+    // ---- 缺陷 #1（Critical）: 密码模式加密文件无法解密（v2 头 + 盐） ----
+
+    #[test]
+    #[serial]
+    fn test_encrypt_file_password_mode_v2_salt_roundtrip() {
+        // Critical 修复回归：密码模式 env → encrypt_file(v2) →
+        // 解密方读出头中的盐 → 确定性重导出同一密钥 → 解密还原明文。
+        let dir = tempdir().unwrap();
+        let input_path = dir.path().join("plain.log");
+        let output_path = dir.path().join("plain.log.enc");
+        let original = b"password-mode roundtrip content";
+        std::fs::write(&input_path, original).unwrap();
+
+        // 测试用假密码向量（非真实凭据）
+        unsafe {
+            std::env::set_var("TEST_PWD_V2_KEY", "v2-roundtrip-password-01");
+        }
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: dir.path().join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some("TEST_PWD_V2_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        sink.encrypt_file(&input_path, &output_path)
+            .expect("password-mode encrypt_file must succeed in v2");
+
+        // v2 头布局：magic(8) + version(2) + algo(2) + salt(16) + nonce(12)
+        let encrypted = std::fs::read(&output_path).unwrap();
+        assert_eq!(&encrypted[..8], b"ENCLOG1\0");
+        assert_eq!(
+            u16::from_le_bytes([encrypted[8], encrypted[9]]),
+            2,
+            "password-mode file must be written as version 2"
+        );
+        let header_salt: [u8; 16] = encrypted[12..28].try_into().unwrap();
+        let nonce: [u8; 12] = encrypted[28..40].try_into().unwrap();
+
+        // 解密方路径：用头中的盐确定性重导出密钥
+        let key = crate::support::io::sink::encryption::get_encryption_key_with_salt(
+            "TEST_PWD_V2_KEY",
+            &header_salt,
+        )
+        .expect("key re-derivation from header salt must succeed");
+        let cipher = aes_gcm::Aes256Gcm::new_from_slice(&*key).unwrap();
+        let decrypted = cipher
+            .decrypt(&aes_gcm::Nonce::from(nonce), &encrypted[40..])
+            .expect("deterministic key from header salt must decrypt the v2 file");
+        assert_eq!(decrypted, original);
+
+        unsafe {
+            std::env::remove_var("TEST_PWD_V2_KEY");
+        }
     }
 }

@@ -306,7 +306,8 @@ pub fn decrypt_file_compatible(
         inklog::i18n::tr_args("cli-decrypt-err-open", args)
     })?;
 
-    let mut header = [0u8; 24];
+    // v2 头最大 40 字节：magic(8) + version(2) + algo(2) + salt(16) + nonce(12)
+    let mut header = [0u8; 40];
     let read_count = file
         .read(&mut header)
         .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-header"))?;
@@ -320,64 +321,111 @@ pub fn decrypt_file_compatible(
     }
 
     let version = u16::from_le_bytes([header[8], header[9]]);
-    if version != 1 {
-        let mut args = fluent_bundle::FluentArgs::new();
-        args.set("version", version.to_string());
-        return Err(anyhow!(
-            "{}",
-            inklog::i18n::tr_args("cli-decrypt-err-version", args)
-        ));
-    }
 
-    let key = get_encryption_key_cli(key_env).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
-        args.set("env", key_env.to_string());
-        inklog::i18n::tr_args("cli-decrypt-err-key", args)
-    })?;
+    // 注：初次 read 一次最多读入 40 字节；对 v1/legacy（头 < 40 字节）格式，
+    // 超出头的部分属于密文，须回填，否则密文被静默截断。
+    let plaintext = match version {
+        1 => {
+            // v1 头未存储 PBKDF2 盐：若密钥环境变量是普通密码（派生路径），
+            // 加密时使用的随机盐已不可恢复，任何尝试都必然失败。
+            // 提前给出明确诊断，而非误导性的 "decryption failed"。
+            if inklog::sink::encryption::env_key_is_password(key_env) {
+                return Err(anyhow!(
+                    "v1 encrypted files written with a password-derived key are \
+                     unrecoverable: the v1 header does not store the PBKDF2 salt, so \
+                     the original key cannot be re-derived (fixed in v2). Re-encrypt \
+                     the source with the current inklog version, or supply the \
+                     original raw/Base64 32-byte key."
+                ));
+            }
+            let key = get_encryption_key_cli(key_env).with_context(|| {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("env", key_env.to_string());
+                inklog::i18n::tr_args("cli-decrypt-err-key", args)
+            })?;
+            let algo = u16::from_le_bytes([header[10], header[11]]);
+            if algo == 1 {
+                if read_count < 24 {
+                    return Err(anyhow!("{}", inklog::i18n::tr("cli-decrypt-err-small-v1")));
+                }
+                let nonce_slice: [u8; 12] = header[12..24].try_into().unwrap();
+                let nonce = aes_gcm::Nonce::from(nonce_slice);
 
-    let algo = u16::from_le_bytes([header[10], header[11]]);
-    let plaintext = if algo == 1 {
-        if read_count < 24 {
-            return Err(anyhow!("{}", inklog::i18n::tr("cli-decrypt-err-small-v1")));
+                let mut ciphertext = Vec::new();
+                ciphertext.extend_from_slice(&header[24..read_count]);
+                file.read_to_end(&mut ciphertext)
+                    .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-cipher"))?;
+
+                let cipher = Aes256Gcm::new((&*key).into());
+                cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("err", e.to_string());
+                    anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
+                })?
+            } else {
+                // Assume Legacy format (MAGIC + VER + NONCE + CIPHERTEXT)
+                // Legacy header is 22 bytes (8 MAGIC + 2 VER + 12 NONCE)
+                if read_count < 22 {
+                    return Err(anyhow!("{}", inklog::i18n::tr("cli-decrypt-err-small")));
+                }
+
+                let mut nonce_bytes = [0u8; 12];
+                nonce_bytes.copy_from_slice(&header[10..22]);
+                let nonce = aes_gcm::Nonce::from(nonce_bytes);
+
+                let mut ciphertext = Vec::new();
+                // If we read more than 22 bytes, the extras are part of the ciphertext
+                ciphertext.extend_from_slice(&header[22..read_count]);
+                file.read_to_end(&mut ciphertext)
+                    .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-cipher"))?;
+
+                let cipher = Aes256Gcm::new((&*key).into());
+                cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("err", e.to_string());
+                    anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
+                })?
+            }
         }
-        let nonce_slice: [u8; 12] = header[12..24].try_into().unwrap();
-        let nonce = aes_gcm::Nonce::from(nonce_slice);
+        2 => {
+            // v2 头：magic(8) + version(2) + algo(2) + salt(16) + nonce(12) = 40 字节。
+            // 盐随头存储，密码模式密钥可确定性重导出。
+            if read_count < 40 {
+                return Err(anyhow!(
+                    "truncated v2 header: expected 40 bytes (including the 16-byte PBKDF2 salt), got {read_count}"
+                ));
+            }
+            let header_salt: [u8; 16] = header[12..28].try_into().unwrap();
+            let key = get_encryption_key_with_salt_cli(key_env, &header_salt).with_context(
+                || {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("env", key_env.to_string());
+                    inklog::i18n::tr_args("cli-decrypt-err-key", args)
+                },
+            )?;
 
-        let mut ciphertext = Vec::new();
-        file.read_to_end(&mut ciphertext)
-            .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-cipher"))?;
+            let nonce_slice: [u8; 12] = header[28..40].try_into().unwrap();
+            let nonce = aes_gcm::Nonce::from(nonce_slice);
 
-        let cipher = Aes256Gcm::new((&*key).into());
-        cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
+            let mut ciphertext = Vec::new();
+            file.read_to_end(&mut ciphertext)
+                .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-cipher"))?;
+
+            let cipher = Aes256Gcm::new((&*key).into());
+            cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("err", e.to_string());
+                anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
+            })?
+        }
+        other => {
             let mut args = fluent_bundle::FluentArgs::new();
-            args.set("err", e.to_string());
-            anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
-        })?
-    } else {
-        // Assume Legacy format (MAGIC + VER + NONCE + CIPHERTEXT)
-        // Legacy header is 22 bytes (8 MAGIC + 2 VER + 12 NONCE)
-        if read_count < 22 {
-            return Err(anyhow!("{}", inklog::i18n::tr("cli-decrypt-err-small")));
+            args.set("version", other.to_string());
+            return Err(anyhow!(
+                "{}",
+                inklog::i18n::tr_args("cli-decrypt-err-version", args)
+            ));
         }
-
-        let mut nonce_bytes = [0u8; 12];
-        nonce_bytes.copy_from_slice(&header[10..22]);
-        let nonce = aes_gcm::Nonce::from(nonce_bytes);
-
-        let mut ciphertext = Vec::new();
-        // If we read more than 22 bytes, the extras are part of the ciphertext
-        if read_count > 22 {
-            ciphertext.extend_from_slice(&header[22..read_count]);
-        }
-        file.read_to_end(&mut ciphertext)
-            .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-cipher"))?;
-
-        let cipher = Aes256Gcm::new((&*key).into());
-        cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
-            args.set("err", e.to_string());
-            anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
-        })?
     };
 
     // O_NOFOLLOW 创建：关闭校验后输出路径被替换为符号链接的竞态
@@ -398,6 +446,13 @@ pub fn decrypt_file_compatible(
 
 fn get_encryption_key_cli(env_var: &str) -> Result<Zeroizing<[u8; 32]>> {
     inklog::sink::encryption::get_encryption_key(env_var).map_err(|e| anyhow!("{}", e))
+}
+
+/// v2 路径的密钥获取：密码模式用**文件头中的盐**确定性派生，
+/// 与加密端 `FileSink::encrypt_file` 的派生方式严格对齐。
+fn get_encryption_key_with_salt_cli(env_var: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>> {
+    inklog::sink::encryption::get_encryption_key_with_salt(env_var, salt)
+        .map_err(|e| anyhow!("{}", e))
 }
 
 pub fn decrypt_directory_compatible(
@@ -914,10 +969,155 @@ mod tests {
         let sink = inklog::support::io::sink::FileSink::new(config).unwrap();
         sink.encrypt_file(&input_path, &encrypted_path).unwrap();
 
+        // v2 头：Base64 密钥与盐无关，但 version 字段必须是 2
+        let encrypted = std::fs::read(&encrypted_path).unwrap();
+        assert_eq!(&encrypted[..8], b"ENCLOG1\0");
+        assert_eq!(
+            u16::from_le_bytes([encrypted[8], encrypted[9]]),
+            2,
+            "library-produced encrypted files must use the v2 header (salt-carrying)"
+        );
+
         decrypt_file_compatible(&encrypted_path, &output_path, "TEST_LIB_ENC_KEY").unwrap();
         assert_eq!(std::fs::read(&output_path).unwrap(), plaintext);
 
         unsafe { std::env::remove_var("TEST_LIB_ENC_KEY") };
+    }
+
+    // ==================== v2 密码模式 round-trip（Critical 缺陷补漏） ====================
+
+    /// 借助 FileSink::encrypt_file（lib）加密的辅助函数，供 CLI 侧 round-trip 测试使用
+    fn encrypt_with_file_sink(
+        temp_dir: &Path,
+        input_path: &Path,
+        encrypted_path: &Path,
+        key_env: &str,
+    ) {
+        let config = inklog::FileSinkConfig {
+            enabled: true,
+            path: temp_dir.join("dummy.log"),
+            encrypt: true,
+            encryption_key_env: Some(key_env.to_string()),
+            ..Default::default()
+        };
+        let sink = inklog::support::io::sink::FileSink::new(config).unwrap();
+        sink.encrypt_file(input_path, encrypted_path).unwrap();
+    }
+
+    #[test]
+    fn test_password_mode_v2_roundtrip() {
+        // Critical 修复补漏 (a)：普通密码 env → encrypt_file(v2) →
+        // decrypt_file_compatible 同密码 env → 内容一致。
+        // v1 时该场景必败（头中无盐，解密方随机盐派生出不同密钥）。
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input_path = temp_dir.path().join("pwd_plain.log");
+        let encrypted_path = temp_dir.path().join("pwd_plain.log.enc");
+        let output_path = temp_dir.path().join("pwd_decrypted.log");
+        let plaintext = b"Password-mode roundtrip must succeed with the v2 header";
+        std::fs::write(&input_path, plaintext).unwrap();
+
+        // 测试用假密码向量（非真实凭据）：非 Base64、非 32 字节、>= 12 字符
+        unsafe { std::env::set_var("TEST_PWD_RT_KEY", "round-trip-password-01") };
+
+        encrypt_with_file_sink(
+            temp_dir.path(),
+            &input_path,
+            &encrypted_path,
+            "TEST_PWD_RT_KEY",
+        );
+
+        // 头中必须携带盐（version 2）
+        let encrypted = std::fs::read(&encrypted_path).unwrap();
+        assert_eq!(u16::from_le_bytes([encrypted[8], encrypted[9]]), 2);
+        assert!(
+            encrypted[12..28].iter().any(|&b| b != 0),
+            "v2 header must store the PBKDF2 salt"
+        );
+
+        decrypt_file_compatible(&encrypted_path, &output_path, "TEST_PWD_RT_KEY").unwrap();
+        assert_eq!(std::fs::read(&output_path).unwrap(), plaintext);
+
+        unsafe { std::env::remove_var("TEST_PWD_RT_KEY") };
+    }
+
+    #[test]
+    fn test_v1_password_key_returns_clear_error() {
+        // v1 头未存盐：密码模式密钥不可恢复，必须返回明确诊断
+        // 而非误导性的 "decryption failed"。
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input_file = temp_dir.path().join("v1_pwd.enc");
+        let output_file = temp_dir.path().join("v1_pwd.log");
+        let test_key = generate_test_key();
+        create_encrypted_file_v1(&input_file, b"v1 secret", &test_key).unwrap();
+
+        // 测试用假密码向量（非真实凭据）
+        unsafe { std::env::set_var("TEST_V1_PWD_KEY", "some-plain-password-01") };
+
+        let result = decrypt_file_compatible(&input_file, &output_file, "TEST_V1_PWD_KEY");
+        assert!(result.is_err(), "v1 + password key must not decrypt");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("v1") && err_msg.contains("salt"),
+            "error must explain the v1 missing-salt limitation, got: {err_msg}"
+        );
+        assert!(
+            !output_file.exists(),
+            "no output file should be created on failure"
+        );
+
+        unsafe { std::env::remove_var("TEST_V1_PWD_KEY") };
+    }
+
+    #[test]
+    fn test_v2_wrong_password_fails() {
+        // v2 密码模式：密码错误时盐虽可读出，但派生密钥不同 → 解密失败
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input_path = temp_dir.path().join("wrong_pwd.log");
+        let encrypted_path = temp_dir.path().join("wrong_pwd.log.enc");
+        let output_path = temp_dir.path().join("wrong_pwd_out.log");
+        std::fs::write(&input_path, b"secret").unwrap();
+
+        unsafe {
+            std::env::set_var("TEST_V2_PWD_A", "correct-horse-battery-01");
+            std::env::set_var("TEST_V2_PWD_B", "wrong-password-entry-99");
+        }
+
+        encrypt_with_file_sink(temp_dir.path(), &input_path, &encrypted_path, "TEST_V2_PWD_A");
+
+        let result = decrypt_file_compatible(&encrypted_path, &output_path, "TEST_V2_PWD_B");
+        assert!(result.is_err(), "wrong password must fail to decrypt");
+        assert!(!output_path.exists());
+
+        unsafe {
+            std::env::remove_var("TEST_V2_PWD_A");
+            std::env::remove_var("TEST_V2_PWD_B");
+        }
+    }
+
+    #[test]
+    fn test_v2_base64_key_roundtrip_via_cli() {
+        // Critical 修复补漏 (b)：Base64 32 字节 env → v2 round-trip
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input_path = temp_dir.path().join("b64_plain.log");
+        let encrypted_path = temp_dir.path().join("b64_plain.log.enc");
+        let output_path = temp_dir.path().join("b64_decrypted.log");
+        let plaintext = b"Base64-key v2 roundtrip content";
+        std::fs::write(&input_path, plaintext).unwrap();
+
+        let test_key = generate_test_key();
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
+        unsafe { std::env::set_var("TEST_V2_B64_RT_KEY", &key_base64) };
+
+        encrypt_with_file_sink(
+            temp_dir.path(),
+            &input_path,
+            &encrypted_path,
+            "TEST_V2_B64_RT_KEY",
+        );
+        decrypt_file_compatible(&encrypted_path, &output_path, "TEST_V2_B64_RT_KEY").unwrap();
+        assert_eq!(std::fs::read(&output_path).unwrap(), plaintext);
+
+        unsafe { std::env::remove_var("TEST_V2_B64_RT_KEY") };
     }
 
     #[test]

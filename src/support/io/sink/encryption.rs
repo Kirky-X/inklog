@@ -25,6 +25,10 @@ pub(crate) const PBKDF2_ITERATIONS: u32 = 600_000;
 /// - 原始 32 字节密钥
 /// - 密码字符串（1-127 字符），使用 PBKDF2 派生
 ///
+/// > 注意：密码分支使用**随机生成**的盐值且盐值不随返回值暴露，因此本函数
+/// > 派生结果不可复现。加密文件（v2 头存盐）请使用
+/// > [`get_encryption_key_with_salt`]；本函数保留作为既有调用方的兼容包装。
+///
 /// # 参数
 ///
 /// * `env_var` - 环境变量名称
@@ -45,13 +49,76 @@ pub(crate) const PBKDF2_ITERATIONS: u32 = 600_000;
 /// Base64 编码的随机密钥（`openssl rand -base64 32` 生成），或长度不等于
 /// 32 字节的密码。运行期遇到此路径会输出 `tracing::warn`。
 pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogError> {
-    // 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
-    let env_value = Zeroizing::new(std::env::var(env_var).map_err(|_| {
+    let env_value = read_key_env_value(env_var)?;
+    key_from_env_value(env_var, &env_value, None)
+}
+
+/// 从环境变量获取加密密钥，密码模式使用**调用方提供的盐值**做确定性派生。
+///
+/// 这是 [`get_encryption_key`] 的确定性变体，专用于加密文件头中存储了盐值的
+/// 场景（v2 加密头）：加密方把随机盐写入文件头，解密方用同一盐重导出同一
+/// 密钥。各分支行为：
+/// - 原始 32 字节输入：直接用作密钥，`salt` 被忽略；
+/// - Base64 编码的 32 字节密钥：解码后直接用作密钥，`salt` 被忽略；
+/// - 密码字符串（1-127 字符）：以**传入的 `salt`** 调用 PBKDF2 确定性派生。
+///
+/// # 参数
+///
+/// * `env_var` - 环境变量名称
+/// * `salt` - 密码派生使用的盐值（对前两个分支无影响）
+///
+/// # 错误
+///
+/// 与 [`get_encryption_key`] 一致：环境变量未设置、密钥格式无效或长度不正确
+/// 时返回错误。
+pub fn get_encryption_key_with_salt(
+    env_var: &str,
+    salt: &[u8],
+) -> Result<Zeroizing<[u8; 32]>, InklogError> {
+    let env_value = read_key_env_value(env_var)?;
+    key_from_env_value(env_var, &env_value, Some(salt))
+}
+
+/// 判断环境变量中的密钥是否会按**密码模式**（PBKDF2 派生）处理。
+///
+/// 用于解密端诊断：v1 加密头未存储盐值，密码模式加密的 v1 文件的密钥无法
+/// 确定性重放（解密必败）。解密方据此提前返回明确错误，而非误导性的
+/// "decryption failed"。
+///
+/// 判定与 [`get_encryption_key`] 的分支逻辑一致：
+/// - 非 32 字节、非空、长度 < 128，且**不是**合法 Base64 → 密码模式；
+/// - Base64 能解码（无论长度）→ 不是密码模式（密钥路径或 base64 长度错误）；
+/// - 环境变量未设置 / 恰为 32 字节 / 长度 >= 128 → 不是密码模式。
+pub fn env_key_is_password(env_var: &str) -> bool {
+    let Ok(value) = std::env::var(env_var) else {
+        return false;
+    };
+    let raw = value.as_bytes();
+    raw.len() != 32
+        && !raw.is_empty()
+        && raw.len() < 128
+        && general_purpose::STANDARD.decode(value.as_str()).is_err()
+}
+
+/// 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
+fn read_key_env_value(env_var: &str) -> Result<Zeroizing<String>, InklogError> {
+    let value = std::env::var(env_var).map_err(|_| {
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("env", env_var);
         InklogError::ConfigError(crate::i18n::tr_args("config-encryption_key_not_set", args))
-    })?);
+    })?;
+    Ok(Zeroizing::new(value))
+}
 
+/// 按密钥格式分支解析出 32 字节密钥。
+///
+/// `salt` 仅在密码分支生效：`None` 生成随机盐（加密端兼容包装），`Some(s)`
+/// 用调用方盐值确定性派生（v2 加密头场景）。
+fn key_from_env_value(
+    env_var: &str,
+    env_value: &str,
+    salt: Option<&[u8]>,
+) -> Result<Zeroizing<[u8; 32]>, InklogError> {
     let raw_bytes = env_value.as_bytes();
 
     // 如果长度是32字节，尝试直接使用原始字节。
@@ -70,7 +137,7 @@ pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogEr
     }
 
     // 尝试解码 Base64 编码的密钥
-    if let Ok(decoded) = general_purpose::STANDARD.decode(env_value.as_str()) {
+    if let Ok(decoded) = general_purpose::STANDARD.decode(env_value) {
         if decoded.len() == 32 {
             let mut result = [0u8; 32];
             result.copy_from_slice(&decoded);
@@ -86,8 +153,9 @@ pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogEr
     }
 
     // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
+    // salt: None → 随机盐（历史兼容路径），Some(s) → 调用方提供的确定性盐（v2 头）
     if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
-        let (key, _salt) = derive_key_from_password(env_value.as_str(), None)?;
+        let (key, _salt) = derive_key_from_password(env_value, salt)?;
         return Ok(Zeroizing::new(key));
     }
 
@@ -155,6 +223,7 @@ pub fn derive_key_from_password(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_get_encryption_key_from_base64() {
@@ -411,5 +480,115 @@ mod tests {
         // 12 chars should pass
         let result = derive_key_from_password("123456789012", Some(b"salt"));
         assert!(result.is_ok(), "12-char password should be accepted");
+    }
+
+    // ==================== get_encryption_key_with_salt 测试 ====================
+
+    #[test]
+    #[serial]
+    fn test_get_encryption_key_with_salt_password_deterministic() {
+        // Critical 修复的核心保证：密码模式 + 同一盐 → 确定性密钥，
+        // 解密方用文件头中的盐重导出同一密钥。
+        unsafe {
+            std::env::set_var("INKLOG_TEST_KEY_WITH_SALT", "round-trip-password-01");
+        }
+        let salt = b"0123456789abcdef"; // 16 字节，与 v2 头中的盐长度一致
+        let key1 = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT", salt).unwrap();
+        let key2 = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT", salt).unwrap();
+        assert_eq!(*key1, *key2, "same password + same salt must derive the same key");
+
+        let key3 =
+            get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT", b"different-salt!!").unwrap();
+        assert_ne!(*key1, *key3, "different salt must derive a different key");
+
+        // 与显式 PBKDF2 结果逐字节一致（证明传入的盐被真正使用）
+        let (expected, used_salt) =
+            derive_key_from_password("round-trip-password-01", Some(salt)).unwrap();
+        assert_eq!(used_salt, salt.to_vec());
+        assert_eq!(*key1, expected);
+
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_KEY_WITH_SALT");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_get_encryption_key_with_salt_ignores_salt_for_base64() {
+        // Base64/32 字节分支必须忽略 salt，直接返回原始密钥
+        let key_bytes: [u8; 32] = core::array::from_fn(|i| (i as u8) * 7 + 3);
+        let key_b64 = general_purpose::STANDARD.encode(key_bytes);
+        unsafe {
+            std::env::set_var("INKLOG_TEST_KEY_WITH_SALT_B64", &key_b64);
+        }
+        let key = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT_B64", b"ignored-salt!").unwrap();
+        assert_eq!(*key, key_bytes, "Base64 branch must ignore salt");
+
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_KEY_WITH_SALT_B64");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_get_encryption_key_with_salt_ignores_salt_for_raw_32() {
+        // 恰为 32 字节的原始输入：直接用作密钥，salt 被忽略
+        let raw = "abcdefghijklmnopqrstuvwxyz123456"; // 32 bytes
+        unsafe {
+            std::env::set_var("INKLOG_TEST_KEY_WITH_SALT_RAW", raw);
+        }
+        let key = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT_RAW", b"ignored!").unwrap();
+        assert_eq!(&*key, raw.as_bytes());
+
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_KEY_WITH_SALT_RAW");
+        }
+    }
+
+    #[test]
+    fn test_get_encryption_key_with_salt_missing_env() {
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_KEY_WITH_SALT_MISSING");
+        }
+        let result = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT_MISSING", b"salt");
+        assert!(result.is_err());
+    }
+
+    // ==================== env_key_is_password 测试 ====================
+
+    #[test]
+    #[serial]
+    fn test_env_key_is_password_classification() {
+        // 密码（非 Base64、非 32 字节、1-127 字符）→ true
+        unsafe {
+            std::env::set_var("INKLOG_TEST_CLASSIFY_PWD", "plain-password-01");
+            std::env::set_var(
+                "INKLOG_TEST_CLASSIFY_B64",
+                general_purpose::STANDARD.encode([0x5Au8; 32]).as_str(),
+            );
+            std::env::set_var("INKLOG_TEST_CLASSIFY_RAW32", "abcdefghijklmnopqrstuvwxyz123456");
+            // Base64 可解码但长度不对 → 走 base64_wrong_length 错误，不是密码
+            std::env::set_var(
+                "INKLOG_TEST_CLASSIFY_B64_SHORT",
+                general_purpose::STANDARD.encode([0u8; 16]).as_str(),
+            );
+        }
+
+        assert!(env_key_is_password("INKLOG_TEST_CLASSIFY_PWD"));
+        assert!(!env_key_is_password("INKLOG_TEST_CLASSIFY_B64"));
+        assert!(!env_key_is_password("INKLOG_TEST_CLASSIFY_RAW32"));
+        assert!(!env_key_is_password("INKLOG_TEST_CLASSIFY_B64_SHORT"));
+        assert!(!env_key_is_password("INKLOG_TEST_CLASSIFY_MISSING"));
+
+        unsafe {
+            for var in [
+                "INKLOG_TEST_CLASSIFY_PWD",
+                "INKLOG_TEST_CLASSIFY_B64",
+                "INKLOG_TEST_CLASSIFY_RAW32",
+                "INKLOG_TEST_CLASSIFY_B64_SHORT",
+            ] {
+                std::env::remove_var(var);
+            }
+        }
     }
 }
