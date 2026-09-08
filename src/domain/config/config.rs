@@ -82,6 +82,39 @@ fn is_safe_http_path(value: &str) -> bool {
         && !decoded.chars().any(char::is_control)
 }
 
+/// Validate the `前缀.*` wildcard form of an `ip_whitelist` entry (e.g. `10.*`,
+/// `192.168.*`): after stripping the `.*` suffix the remainder must be 1-3
+/// dot-separated decimal segments (each 0-255) and must not contain `/`.
+///
+/// This keeps config-time validation consistent with the runtime
+/// `whitelist_entry_matches` in http_server, which explicitly supports the
+/// `<prefix>.*` form (with a trailing-dot guard against overreaching prefix
+/// matches). Previously only `IpAddr`/`IpNet` were accepted, so `10.*` was
+/// rejected at load time despite being valid at runtime.
+fn is_valid_prefix_wildcard_entry(entry: &str) -> bool {
+    let Some(prefix) = entry.strip_suffix(".*") else {
+        return false;
+    };
+    if prefix.contains('/') {
+        return false;
+    }
+    let mut segments = 0;
+    for segment in prefix.split('.') {
+        if segment.is_empty()
+            || !segment.bytes().all(|b| b.is_ascii_digit())
+            || segment.parse::<u8>().is_err()
+        {
+            return false;
+        }
+        segments += 1;
+        if segments > 3 {
+            return false;
+        }
+    }
+    // split(".") 至少产出一段；空 prefix（"::.*"、".*"）已被空段检查拒绝
+    true
+}
+
 impl Default for InklogConfig {
     fn default() -> Self {
         Self {
@@ -485,14 +518,16 @@ impl InklogConfig {
             }
             // ip_whitelist 条目格式校验：解析失败的条目在运行期会被静默跳过
             // （fail-closed），导致预期放行的 IP 被拒且无任何提示，故在配置期
-            // 直接拒绝坏条目
+            // 直接拒绝坏条目。合法形式三选一：精确 IP、CIDR、`前缀.*` 通配
+            // （运行期 whitelist_entry_matches 支持的同款语法）。
             if let Some(ref whitelist) = http.ip_whitelist {
                 for (idx, entry) in whitelist.iter().enumerate() {
                     let parseable = entry.parse::<std::net::IpAddr>().is_ok()
-                        || entry.parse::<ipnet::IpNet>().is_ok();
+                        || entry.parse::<ipnet::IpNet>().is_ok()
+                        || is_valid_prefix_wildcard_entry(entry);
                     if !parseable {
                         return Err(InklogError::ConfigError(format!(
-                            "http_server.ip_whitelist[{idx}] is not a valid IP or CIDR: {entry:?}"
+                            "http_server.ip_whitelist[{idx}] is not a valid IP, CIDR, or prefix wildcard (e.g. \"10.*\"): {entry:?}"
                         )));
                     }
                 }
@@ -1309,7 +1344,7 @@ level = "debug"
 
     #[test]
     fn test_validate_http_ip_whitelist_entries() {
-        // 合法 IP / CIDR 条目通过
+        // 合法 IP / CIDR / `前缀.*` 通配条目通过
         let mut config = InklogConfig::default();
         config.http_server = Some(HttpServerConfig {
             enabled: true,
@@ -1317,6 +1352,8 @@ level = "debug"
                 "10.0.0.1".to_string(),
                 "192.168.1.0/24".to_string(),
                 "2001:db8::1".to_string(),
+                "10.*".to_string(),
+                "192.168.*".to_string(),
             ]),
             ..Default::default()
         });
@@ -1334,6 +1371,67 @@ level = "debug"
             let msg = err.to_string();
             assert!(
                 msg.contains("ip_whitelist[1]") && msg.contains(bad),
+                "unexpected error for {bad}: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_valid_prefix_wildcard_entry() {
+        // 1-3 段点分十进制前缀均合法
+        assert!(is_valid_prefix_wildcard_entry("10.*"));
+        assert!(is_valid_prefix_wildcard_entry("192.168.*"));
+        assert!(is_valid_prefix_wildcard_entry("192.168.1.*"));
+
+        // 超过 3 段（完整 IP 加 ".*"）不合法
+        assert!(!is_valid_prefix_wildcard_entry("10.0.0.1.*"));
+        // 非数字段
+        assert!(!is_valid_prefix_wildcard_entry("abc.*"));
+        assert!(!is_valid_prefix_wildcard_entry("10.x.*"));
+        // 段越界（>255）
+        assert!(!is_valid_prefix_wildcard_entry("10.0.0.300.*"));
+        assert!(!is_valid_prefix_wildcard_entry("256.*"));
+        // 含 CIDR 分隔符
+        assert!(!is_valid_prefix_wildcard_entry("10.0.0.0/24.*"));
+        assert!(!is_valid_prefix_wildcard_entry("10.0/24.*"));
+        // 空前缀 / 空段
+        assert!(!is_valid_prefix_wildcard_entry(".*"));
+        assert!(!is_valid_prefix_wildcard_entry("10..*"));
+        // 非通配形式一律不由此函数判定
+        assert!(!is_valid_prefix_wildcard_entry("10.0.0.1"));
+        assert!(!is_valid_prefix_wildcard_entry("10.0.0.0/24"));
+    }
+
+    #[test]
+    fn test_validate_http_ip_whitelist_prefix_wildcard_entries() {
+        // `10.*` / `192.168.*` 与运行期 whitelist_entry_matches 语法一致，须通过校验
+        let mut config = InklogConfig::default();
+        config.http_server = Some(HttpServerConfig {
+            enabled: true,
+            ip_whitelist: Some(vec!["10.*".to_string(), "192.168.*".to_string()]),
+            ..Default::default()
+        });
+        assert!(config.validate().is_ok());
+
+        // 非法通配形式拒绝，错误消息含条目原文与序号
+        for bad in [
+            "abc.*",
+            "10.0.0.300.*",
+            "10.0.0.0/24.*",
+            ".*",
+            "10.0.0.1.*",
+            "-1.*",
+        ] {
+            let mut config = InklogConfig::default();
+            config.http_server = Some(HttpServerConfig {
+                enabled: true,
+                ip_whitelist: Some(vec![bad.to_string()]),
+                ..Default::default()
+            });
+            let err = config.validate().unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("ip_whitelist[0]") && msg.contains(bad),
                 "unexpected error for {bad}: {msg}"
             );
         }

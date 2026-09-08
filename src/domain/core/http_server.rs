@@ -208,37 +208,51 @@ impl LoggerManager {
 
         let auth_enabled = config.auth.as_ref().map(|a| a.enabled).unwrap_or(false);
         let ip_whitelist = config.ip_whitelist.clone();
+        let error_mode = config.error_mode.clone();
 
         let tls_config = config.tls.clone();
 
-        let handle = tokio::spawn(async move {
-            let make_svc = app.into_make_service_with_connect_info::<SocketAddr>();
+        let make_svc = app.into_make_service_with_connect_info::<SocketAddr>();
 
-            if let Some(ref tls) = tls_config {
-                // TLS mode via axum-server + rustls
-                use axum_server::tls_rustls::RustlsConfig;
+        // diting 修复（HttpErrorMode::Strict 形同虚设）：端口 bind 与 TLS 配置构建
+        // 从 spawn 出去的任务移到本函数内同步执行——bind 成功后才 spawn 仅含 serve
+        // 循环的任务。Strict 模式下失败直接返回 Err（启动失败）；Warn 模式下仅告警
+        // 并返回 Ok、不启动服务器（决策见 [`bind_failure_outcome`]）。
+        let handle = if let Some(ref tls) = tls_config {
+            use axum_server::tls_rustls::RustlsConfig;
 
-                let rustls_config =
-                    match RustlsConfig::from_pem_file(&tls.cert_path, &tls.key_path).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let mut args = fluent_bundle::FluentArgs::new();
-                            args.set("err", e.to_string());
-                            tracing::error!(
-                                "{}",
-                                crate::i18n::tr_args("config-https_server_error", args)
-                            );
-                            return;
-                        }
-                    };
-                info!(
-                    "HTTPS server started on {} (auth: {}, ip_whitelist: {:?})",
-                    addr, auth_enabled, ip_whitelist
-                );
-                if let Err(e) = axum_server::tls_rustls::bind_rustls(addr, rustls_config)
-                    .serve(make_svc)
-                    .await
-                {
+            // TLS 证书/密钥解析同步完成，失败走同一 error_mode 决策
+            let rustls_config =
+                match RustlsConfig::from_pem_file(&tls.cert_path, &tls.key_path).await {
+                    Ok(c) => c,
+                    Err(e) => return bind_failure_outcome(&error_mode, addr, &e, true),
+                };
+            // axum-server 0.8 的 `bind_rustls` 是惰性 bind（serve 阶段才绑端口，
+            // 失败只会落在 spawn 任务内）。故先自行 bind TCP 端口以同步观测失败，
+            // 再经 `from_tcp_rustls` 把 listener 交还 axum-server，serve 语义不变。
+            let tcp_listener = match tokio::net::TcpListener::bind(addr).await {
+                Ok(l) => l,
+                Err(e) => return bind_failure_outcome(&error_mode, addr, &e, true),
+            };
+            let std_listener = match tcp_listener.into_std() {
+                Ok(l) => l,
+                Err(e) => return bind_failure_outcome(&error_mode, addr, &e, true),
+            };
+            // from_tcp_rustls 内部经 TcpListener::from_std 接管 fd，要求非阻塞模式
+            if let Err(e) = std_listener.set_nonblocking(true) {
+                return bind_failure_outcome(&error_mode, addr, &e, true);
+            }
+            let server =
+                match axum_server::tls_rustls::from_tcp_rustls(std_listener, rustls_config) {
+                    Ok(s) => s,
+                    Err(e) => return bind_failure_outcome(&error_mode, addr, &e, true),
+                };
+            info!(
+                "HTTPS server started on {} (auth: {}, ip_whitelist: {:?})",
+                addr, auth_enabled, ip_whitelist
+            );
+            tokio::spawn(async move {
+                if let Err(e) = server.serve(make_svc).await {
                     let mut args = fluent_bundle::FluentArgs::new();
                     args.set("err", e.to_string());
                     tracing::error!(
@@ -246,25 +260,17 @@ impl LoggerManager {
                         crate::i18n::tr_args("config-https_server_error", args)
                     );
                 }
-            } else {
-                // Plain TCP mode
-                let listener = match tokio::net::TcpListener::bind(addr).await {
-                    Ok(l) => l,
-                    Err(e) => {
-                        let mut args = fluent_bundle::FluentArgs::new();
-                        args.set("addr", addr.to_string());
-                        args.set("err", e.to_string());
-                        tracing::error!(
-                            "{}",
-                            crate::i18n::tr_args("config-http_bind_failed", args)
-                        );
-                        return;
-                    }
-                };
-                info!(
-                    "HTTP server started on {} (auth: {}, ip_whitelist: {:?})",
-                    addr, auth_enabled, ip_whitelist
-                );
+            })
+        } else {
+            let listener = match tokio::net::TcpListener::bind(addr).await {
+                Ok(l) => l,
+                Err(e) => return bind_failure_outcome(&error_mode, addr, &e, false),
+            };
+            info!(
+                "HTTP server started on {} (auth: {}, ip_whitelist: {:?})",
+                addr, auth_enabled, ip_whitelist
+            );
+            tokio::spawn(async move {
                 match axum::serve(listener, make_svc).await {
                     Ok(_) => info!("HTTP server stopped"),
                     Err(e) => {
@@ -276,8 +282,8 @@ impl LoggerManager {
                         );
                     }
                 }
-            }
-        });
+            })
+        };
 
         // 此锁仅保护 JoinHandle 槽位，无复合不变量：毒化时恢复出守卫继续写入，
         // 消除"仅记日志但 handle 未存入"的路径
@@ -288,6 +294,41 @@ impl LoggerManager {
 
         info!("HTTP monitoring server configured on {}", addr);
         Ok(())
+    }
+}
+
+/// bind / TLS 初始化失败后按 [`crate::HttpErrorMode`] 决策启动行为
+/// （diting 修复：此前失败被吞在 spawn 任务内，Strict 形同虚设）。
+///
+/// - [`crate::HttpErrorMode::Strict`]：启动失败，返回 `Err`（配置要求失败即拒）。
+/// - [`crate::HttpErrorMode::Warn`]：降级——记录 warn 后返回 `Ok`，但 HTTP 服务器
+///   不会启动（对调用方无感，仅日志可见）。
+///
+/// `https` 仅选择 i18n 文案：HTTPS 路径复用 `config-https_server_error`，
+/// TCP 路径复用 `config-http_bind_failed`（与运行期 serve 错误口径一致）。
+#[cfg(feature = "http")]
+fn bind_failure_outcome(
+    error_mode: &crate::HttpErrorMode,
+    addr: std::net::SocketAddr,
+    err: &std::io::Error,
+    https: bool,
+) -> Result<(), InklogError> {
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("addr", addr.to_string());
+    args.set("err", err.to_string());
+    let message_key = if https {
+        "config-https_server_error"
+    } else {
+        "config-http_bind_failed"
+    };
+    match error_mode {
+        crate::HttpErrorMode::Strict => Err(InklogError::ConfigError(
+            crate::i18n::tr_args(message_key, args),
+        )),
+        crate::HttpErrorMode::Warn => {
+            tracing::warn!("{}", crate::i18n::tr_args(message_key, args));
+            Ok(())
+        }
     }
 }
 
@@ -336,6 +377,7 @@ fn parse_cidr(cidr: &str) -> Option<ipnet::IpNet> {
 
 #[cfg(all(test, feature = "http"))]
 mod tests {
+    use super::bind_failure_outcome;
     use super::whitelist_entry_matches;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
@@ -401,5 +443,55 @@ mod tests {
 
         // 合法条目全程不应触发告警标志
         assert!(!flag.load(Ordering::Relaxed));
+    }
+
+    // ========================================================================
+    // diting 修复（Strict 形同虚设）：bind 失败按 HttpErrorMode 传播
+    // ========================================================================
+
+    #[test]
+    fn test_bind_failure_outcome_strict_propagates_error() {
+        let addr: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let err = std::io::Error::new(std::io::ErrorKind::AddrInUse, "address in use");
+
+        // Strict 模式：bind 失败必须向上传播为 Err（启动失败）
+        let result = bind_failure_outcome(&crate::HttpErrorMode::Strict, addr, &err, false);
+        let msg = match result {
+            Err(crate::InklogError::ConfigError(msg)) => msg,
+            other => panic!("expected ConfigError, got {other:?}"),
+        };
+        // 错误消息应包含 addr 与 err（i18n 渲染）
+        assert!(msg.contains("127.0.0.1"), "addr should appear: {msg}");
+        assert!(msg.contains("address in use"), "err should appear: {msg}");
+    }
+
+    #[test]
+    fn test_bind_failure_outcome_warn_degrades_to_ok() {
+        let addr: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let err = std::io::Error::new(std::io::ErrorKind::AddrInUse, "address in use");
+
+        // Warn（Lenient）模式：降级为告警，返回 Ok 但服务器不启动
+        let result = bind_failure_outcome(&crate::HttpErrorMode::Warn, addr, &err, false);
+        assert!(result.is_ok(), "Warn mode must degrade bind failure to Ok");
+    }
+
+    #[tokio::test]
+    async fn test_bind_conflict_propagates_per_error_mode() {
+        // 真实 bind 冲突：先占用一个 OS 分配的端口，再对同一地址二次 bind
+        let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = occupied.local_addr().unwrap();
+        let bind_err = tokio::net::TcpListener::bind(addr)
+            .await
+            .expect_err("binding an occupied port must fail");
+
+        // 同一 bind 失败在两种模式下的传播路径
+        assert!(
+            bind_failure_outcome(&crate::HttpErrorMode::Strict, addr, &bind_err, false).is_err(),
+            "Strict mode must surface bind conflict as Err"
+        );
+        assert!(
+            bind_failure_outcome(&crate::HttpErrorMode::Warn, addr, &bind_err, false).is_ok(),
+            "Warn mode must degrade bind conflict to Ok"
+        );
     }
 }
