@@ -437,7 +437,7 @@ static ID_CARD_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b(\d{6})(\d{8})(\d{3}[\dX])\b").expect("Invalid ID card regex"));
 
 static BANK_CARD_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(\d{4})(\d{5,11})(\d{4})").expect("Invalid bank card regex"));
+    LazyLock::new(|| Regex::new(r"\b(\d{4})(\d{5,11})(\d{4})\b").expect("Invalid bank card regex"));
 
 /// API Key 模式 - 匹配常见的 API key 格式
 static API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -551,7 +551,7 @@ impl MaskRule {
             "MASK_ID_CARD",
             100,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex.replace(text, "******$3").to_string()
+                regex.replace_all(text, "******$3").to_string()
             })),
         )
     }
@@ -630,7 +630,7 @@ impl MaskRule {
             enabled: true,
             apply_fn: apply_fn.unwrap_or_else(|| {
                 Arc::new(|regex: &Regex, text: &str, replacement: &str| {
-                    regex.replace(text, replacement).to_string()
+                    regex.replace_all(text, replacement).to_string()
                 })
             }),
             is_literal: false,
@@ -655,7 +655,7 @@ impl MaskRule {
             CREDIT_CARD_REGEX.clone(),
             "***REDACTED_CC***",
             15,
-            Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
+            Some(Arc::new(|regex: &Regex, text: &str, replacement: &str| {
                 regex
                     .replace_all(text, |caps: &regex::Captures| {
                         let number = caps.get(0).unwrap().as_str();
@@ -673,7 +673,10 @@ impl MaskRule {
                             alternate = !alternate;
                         }
                         if !sum.is_multiple_of(10) {
-                            return number.to_string();
+                            // Not a valid card number, but still card-shaped:
+                            // fall back to the rule's replacement instead of
+                            // leaving the digits untouched.
+                            return replacement.to_string();
                         }
                         let last4 = &number[number.len() - 4..];
                         if number.starts_with('3') {
@@ -904,7 +907,7 @@ impl MaskRule {
 /// # Defaults
 /// - `priority`: 100
 /// - `enabled`: true
-/// - `apply_fn`: standard `regex.replace(text, replacement)`
+/// - `apply_fn`: standard `regex.replace_all(text, replacement)`
 ///
 /// # Example
 ///
@@ -1007,7 +1010,7 @@ impl MaskRuleBuilder {
             enabled: self.enabled,
             apply_fn: self.apply_fn.unwrap_or_else(|| {
                 Arc::new(|regex: &Regex, text: &str, replacement: &str| {
-                    regex.replace(text, replacement).to_string()
+                    regex.replace_all(text, replacement).to_string()
                 })
             }),
             is_literal: self.is_literal,
@@ -1529,5 +1532,75 @@ mod tests {
         // No rules means nothing gets masked
         let result = masker.mask("user@example.com 4111111111111111");
         assert_eq!(result, "user@example.com 4111111111111111");
+    }
+
+    #[test]
+    fn test_default_apply_fn_masks_all_matches() {
+        // 默认 apply_fn 必须替换全部匹配，而非仅首个
+        let rule = MaskRule::builder("digits")
+            .pattern(r"\d+")
+            .replacement("*")
+            .build()
+            .unwrap();
+        let masker = DataMasker::builder().add_rule(rule).build();
+        assert_eq!(masker.mask("a1b22c333"), "a*b*c*");
+    }
+
+    #[test]
+    fn test_mask_multiple_emails_all_masked() {
+        let masker = DataMasker::new();
+        let result = masker.mask("a@test.com and b@test.org and c@test.net");
+        assert_eq!(result.matches("**@**.***").count(), 3, "Result: {}", result);
+        assert!(!result.contains("@test"));
+    }
+
+    #[test]
+    fn test_mask_multiple_phones_all_masked() {
+        let masker = DataMasker::new();
+        let result = masker.mask("13812345678 / 15987654321 / 18611112222");
+        assert_eq!(
+            result.matches("***-****-****").count(),
+            3,
+            "Result: {}",
+            result
+        );
+        assert!(!result.contains("13812345678"));
+        assert!(!result.contains("15987654321"));
+        assert!(!result.contains("18611112222"));
+    }
+
+    #[test]
+    fn test_id_card_multiple_matches_all_masked() {
+        let masker = DataMasker::new();
+        let result = masker.mask("A: 110101199001011234 B: 310105199001012345");
+        assert_eq!(result.matches("******").count(), 2, "Result: {}", result);
+        assert!(!result.contains("110101199001011234"));
+        assert!(!result.contains("310105199001012345"));
+    }
+
+    #[test]
+    fn test_credit_card_luhn_failure_masked_when_bank_card_disabled() {
+        // Luhn 校验失败只说明"不是有效银行卡"，不代表不需要脱敏：
+        // 即使 bank_card 规则被禁用，形似卡号的数字串仍应被 credit_card 规则掩码
+        let masker = DataMasker::builder().disable_builtin("bank_card").build();
+        // 4111111111111112 fails Luhn (last digit changed from 1 to 2)
+        let result = masker.mask("Card: 4111111111111112");
+        assert!(
+            !result.contains("4111111111111112"),
+            "Luhn-failing card-shaped number must still be masked: {}",
+            result
+        );
+        assert!(result.contains("***REDACTED_CC***"), "Result: {}", result);
+    }
+
+    #[test]
+    fn test_bank_card_requires_word_boundaries() {
+        // \b 边界：嵌入更长字母数字 token 中的 13-19 位数字不再被误判为银行卡号
+        let masker = DataMasker::builder().disable_builtin("credit_card").build();
+        let result = masker.mask("ref no: REF1234567890123456END");
+        assert_eq!(
+            result, "ref no: REF1234567890123456END",
+            "digits embedded in a word must not be treated as a bank card"
+        );
     }
 }

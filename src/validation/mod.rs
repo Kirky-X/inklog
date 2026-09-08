@@ -7,5 +7,8 @@
 pub mod path;
 pub mod sanitize;
 
-pub use path::{PathValidator, PathValidatorConfig, ValidationResult};
+pub use path::{
+    PathValidator, PathValidatorConfig, ValidationResult, create_validated_file,
+    open_validated_file,
+};
 pub use sanitize::{EscapeMode, LogSanitizer, SanitizerConfig};

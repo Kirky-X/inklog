@@ -97,13 +97,18 @@ mod masking_test {
 
         let test_cases = vec![
             ("6222021234567890123", "****-****-****-0123"),
-            ("4567890123456789", "****-****-****-6789"),
+            // Luhn-valid 16 位卡号：保留后 4 位
+            ("4111111111111111", "****-****-****-1111"),
         ];
 
         for (input, expected) in test_cases {
             let result = masker.mask(input);
             assert_eq!(result, expected, "Failed for: {}", input);
         }
+
+        // Luhn-invalid 16 位卡号：整体替换为 ***REDACTED_CC***，不再原样保留
+        let luhn_invalid = masker.mask("4567890123456789");
+        assert_eq!(luhn_invalid, "***REDACTED_CC***");
     }
 
     // === JWT 令牌脱敏测试 ===
@@ -441,11 +446,13 @@ mod masking_test {
     #[test]
     fn test_credit_card_invalid_luhn() {
         let masker = DataMasker::builder().disable_builtin("bank_card").build();
-        // Invalid Luhn checksum (sum=32, not divisible by 10)
+        // Invalid Luhn checksum (sum=32, not divisible by 10):
+        // the credit_card rule still redacts via its replacement fallback
+        // instead of returning the number unchanged.
         let result = masker.mask("4111111111111114");
         assert!(
-            result.contains("4111111111111114"),
-            "Invalid Luhn should be unchanged: {}",
+            !result.contains("4111111111111114"),
+            "Invalid Luhn should be redacted by the rule fallback: {}",
             result
         );
     }

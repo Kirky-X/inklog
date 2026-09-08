@@ -245,6 +245,14 @@ impl LogTemplate {
             }
         }
 
+        // 未闭合的占位符按 Literal 渲染（保持既有行为），但必须留痕
+        if in_placeholder {
+            tracing::warn!(
+                fragment = format!("{{{current}"),
+                "template contains an unclosed placeholder; it is rendered as literal text"
+            );
+        }
+
         // Don't forget remaining content after last placeholder
         if !current.is_empty() {
             placeholders.push(Placeholder::Literal(current));
@@ -266,6 +274,12 @@ impl LogTemplate {
     ///
     /// A formatted string with all placeholders replaced by their corresponding values
     /// from the log record.
+    ///
+    /// # Note
+    ///
+    /// Rendering performs **no masking/sanitization**: the message and the
+    /// `{fields}` values are emitted as-is. Sensitive-data masking is the
+    /// sink layer's responsibility (see `LogRecord::mask_sensitive_fields`).
     ///
     /// # Placeholder Resolution
     ///
@@ -681,5 +695,38 @@ mod tests {
         record.message = "Value is {variable}".to_string();
         let output = template.render(&record);
         assert!(output.contains("{variable}"));
+    }
+
+    #[test]
+    fn test_unclosed_placeholder_renders_as_literal() {
+        // 未闭合占位符保持既有渲染行为（尾部按 Literal 输出），解析时记录 warn
+        let template = LogTemplate::new("{message");
+        let mut record = create_test_record();
+        record.fields.clear();
+        let output = template.render(&record);
+        assert_eq!(output, "message", "output must not regress");
+    }
+
+    #[test]
+    fn test_unclosed_placeholder_after_literal() {
+        // 形如 "abc{" 的模板：占位符开启但为空，同样不改变渲染输出
+        let template = LogTemplate::new("abc{");
+        let record = create_test_record();
+        let output = template.render(&record);
+        assert!(output.starts_with("abc"), "Output: {}", output);
+        assert!(!output.contains("Test message"));
+    }
+
+    #[test]
+    fn test_fields_render_without_masking() {
+        // {fields} 分支按设计原样输出字段值，不做脱敏（掩码在 sink 层）
+        let template = LogTemplate::new("{message} {fields}");
+        let mut record = create_test_record();
+        record.fields = HashMap::from([(
+            "raw_note".to_string(),
+            Value::String("as-is value".to_string()),
+        )]);
+        let output = template.render(&record);
+        assert!(output.contains("raw_note=as-is value"), "Output: {}", output);
     }
 }

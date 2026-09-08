@@ -197,9 +197,10 @@ impl LogRecord {
     /// # Sensitive Data
     ///
     /// For performance reasons, this method does **NOT** automatically mask
-    /// sensitive fields. Callers who need masking (e.g., FileSink, DatabaseSink)
-    /// should call [`mask_sensitive_fields()`](Self::mask_sensitive_fields) in
-    /// their write() method. ConsoleSink may optionally call it based on configuration.
+    /// sensitive fields. Callers must either call
+    /// [`mask_sensitive_fields()`](Self::mask_sensitive_fields) themselves
+    /// before persisting the record, or use the masking constructor
+    /// [`from_event_masked()`](Self::from_event_masked) instead.
     ///
     /// # Arguments
     ///
@@ -244,21 +245,158 @@ impl LogRecord {
 
         // NOTE: mask_sensitive_fields() is NOT called here for performance.
         // Callers who need masking (e.g., FileSink, DatabaseSink) should call
-        // record.mask_sensitive_fields() in their write() method.
+        // record.mask_sensitive_fields() in their write() method, or use
+        // from_event_masked() instead.
         // ConsoleSink may optionally call it based on configuration.
         record
     }
 
-    /// Sensitive key patterns to mask (lowercase for case-insensitive matching)
-    const SENSITIVE_KEY_PATTERNS: &[&str] =
-        &["password", "token", "secret", "key", "credential", "auth"];
+    /// Creates a log record from a tracing event with sensitive data masked.
+    ///
+    /// Convenience constructor equivalent to [`from_event()`](Self::from_event)
+    /// followed by [`mask_sensitive_fields()`](Self::mask_sensitive_fields):
+    /// email addresses, phone numbers, ID/bank card numbers and values of
+    /// sensitive field names (password, token, api_key, …) are masked before
+    /// the record is returned.
+    ///
+    /// # Performance
+    ///
+    /// This method has the object-pooling behavior of [`from_event()`](Self::from_event)
+    /// plus the cost of running the masking pipeline (regex matching over the
+    /// message and all field values). Use [`from_event()`](Self::from_event) in
+    /// hot paths where masking is applied later at the sink layer.
+    ///
+    /// # Arguments
+    ///
+    /// * `event` - The tracing event to convert
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tracing::Event;
+    /// use inklog::log_record::LogRecord;
+    ///
+    /// fn process_event(event: &Event) {
+    ///     let record = LogRecord::from_event_masked(event);
+    ///     // Sensitive fields are already masked...
+    /// }
+    /// ```
+    pub fn from_event_masked(event: &Event) -> Self {
+        let mut record = Self::from_event(event);
+        record.mask_sensitive_fields();
+        record
+    }
 
-    /// Checks if a key contains sensitive patterns
+    /// Sensitive key tokens: a field name is sensitive when one of its
+    /// separator-delimited tokens exactly equals one of these
+    /// (case-insensitive, camelCase-aware). Substring matches are
+    /// intentionally not counted, so "author" does not trigger "auth"
+    /// and "authorizer" does not trigger "auth" either.
+    const SENSITIVE_KEY_PATTERNS: &[&str] = &[
+        "password",
+        "passwd",
+        "pwd",
+        "token",
+        "secret",
+        "credential",
+        "credentials",
+        "auth",
+        "oauth",
+        "authorization",
+    ];
+
+    /// Qualifier tokens that make a compound "…key/…keys" field name sensitive
+    /// (e.g. `api_key`, `secret-key`, `accessKey`). Generic qualifiers such as
+    /// `primary` or `index` are intentionally absent, so `primary_key` and
+    /// `index_key` are not masked.
+    const SENSITIVE_KEY_QUALIFIERS: &[&str] = &[
+        "api",
+        "access",
+        "secret",
+        "private",
+        "public",
+        "encryption",
+        "decryption",
+        "master",
+        "session",
+        "aws",
+        "ssh",
+        "auth",
+    ];
+
+    /// Splits a key into lowercase alphanumeric tokens, treating separators
+    /// (`_`, `-`, `.`, spaces, …) and camelCase humps as token boundaries
+    /// (`apiKey` → `api`, `key`).
+    fn key_tokens(key: &str) -> Vec<String> {
+        let chars: Vec<char> = key.chars().collect();
+        let mut normalized = String::with_capacity(key.len() + 4);
+        for (i, &c) in chars.iter().enumerate() {
+            let next = chars.get(i + 1).copied();
+            if c.is_ascii_uppercase()
+                && i > 0
+                && (chars[i - 1].is_ascii_lowercase()
+                    || chars[i - 1].is_ascii_digit()
+                    || next.is_some_and(|n| n.is_ascii_lowercase()))
+            {
+                normalized.push('_');
+            }
+            normalized.extend(c.to_lowercase());
+        }
+        normalized
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Checks if a field name is sensitive, using token-boundary-aware matching
+    /// (case-insensitive, camelCase-aware) instead of substring matching.
+    ///
+    /// 例如：
+    /// - `"auth_token"` 匹配（`auth` 为完整 token）
+    /// - `"author"` 不匹配（`auth` 不是完整 token，避免误判）
+    /// - `"api_key"` 匹配（敏感限定词 + `key`）
+    /// - `"primary_key"` 不匹配（`primary` 不是敏感限定词）
     fn is_sensitive_key(key: &str) -> bool {
-        let key_lower = key.to_lowercase();
-        Self::SENSITIVE_KEY_PATTERNS
+        // 无分隔符的单段键（如 "PASSWORD"、"pAsSwOrD"、"apiKey"）：
+        // 驼峰切分会把交替大小写撕碎，先按小写整体比对
+        if !key.chars().any(|c| !c.is_ascii_alphanumeric()) {
+            let lowered = key.to_lowercase();
+            if Self::SENSITIVE_KEY_PATTERNS.contains(&lowered.as_str())
+                || lowered == "key"
+                || lowered == "keys"
+                || Self::is_glued_sensitive_key(&lowered)
+            {
+                return true;
+            }
+        }
+        let tokens = Self::key_tokens(key);
+        if tokens
             .iter()
-            .any(|pattern| key_lower.contains(*pattern))
+            .any(|t| Self::SENSITIVE_KEY_PATTERNS.contains(&t.as_str()))
+        {
+            return true;
+        }
+        match tokens.as_slice() {
+            // 单 token：确切的 "key"/"keys" 视为敏感；粘连形式（如 "apikey"）
+            // 仅当去掉 key 后的前缀是敏感限定词时才视为敏感
+            [single] => single == "key" || single == "keys" || Self::is_glued_sensitive_key(single),
+            // 多 token：仅当 "key"/"keys" 与敏感限定词相邻时才视为敏感
+            _ => tokens.windows(2).any(|w| {
+                let (a, b) = (w[0].as_str(), w[1].as_str());
+                (a == "key" || a == "keys") && Self::SENSITIVE_KEY_QUALIFIERS.contains(&b)
+                    || Self::SENSITIVE_KEY_QUALIFIERS.contains(&a) && (b == "key" || b == "keys")
+            }),
+        }
+    }
+
+    /// 粘连形式（无分隔符）的 "…key/…keys" 判定：去掉 key 后缀的前缀必须是
+    /// 敏感限定词（"apikey" → "api"，"primarykey" → "primary" 不匹配）
+    fn is_glued_sensitive_key(lowered_token: &str) -> bool {
+        lowered_token
+            .strip_suffix("keys")
+            .or_else(|| lowered_token.strip_suffix("key"))
+            .is_some_and(|prefix| Self::SENSITIVE_KEY_QUALIFIERS.contains(&prefix))
     }
 
     /// Masks sensitive information in the log message and fields.
@@ -425,6 +563,69 @@ mod tests {
         assert_eq!(
             record.fields.get("username").unwrap(),
             &Value::String("user".to_string())
+        );
+    }
+
+    #[test]
+    fn test_is_sensitive_key_token_boundaries() {
+        // "author" 含子串 "auth" 但 token 边界不匹配，不应脱敏
+        assert!(!LogRecord::is_sensitive_key("author"));
+        assert!(!LogRecord::is_sensitive_key("authorizer"));
+        assert!(LogRecord::is_sensitive_key("auth"));
+        assert!(LogRecord::is_sensitive_key("auth_token"));
+        assert!(LogRecord::is_sensitive_key("api_key"));
+        // primary_key / index_key 属数据库索引语义，不再脱敏
+        assert!(!LogRecord::is_sensitive_key("primary_key"));
+        assert!(!LogRecord::is_sensitive_key("index_key"));
+        assert!(LogRecord::is_sensitive_key("password"));
+        assert!(LogRecord::is_sensitive_key("token"));
+    }
+
+    #[test]
+    fn test_is_sensitive_key_compound_and_camel_case() {
+        assert!(LogRecord::is_sensitive_key("secret_key"));
+        assert!(LogRecord::is_sensitive_key("access_key_id"));
+        assert!(LogRecord::is_sensitive_key("private-key"));
+        // camelCase 归一化为 token 后仍可识别
+        assert!(LogRecord::is_sensitive_key("apiKey"));
+        assert!(LogRecord::is_sensitive_key("secretKey"));
+        assert!(LogRecord::is_sensitive_key("AUTHORIZATION"));
+        // 确切 token "key"/"keys" 视为敏感
+        assert!(LogRecord::is_sensitive_key("key"));
+        assert!(LogRecord::is_sensitive_key("keys"));
+        // 非敏感组合词
+        assert!(!LogRecord::is_sensitive_key("hotkey"));
+        assert!(!LogRecord::is_sensitive_key("keyspace"));
+        assert!(!LogRecord::is_sensitive_key("monkeys"));
+    }
+
+    #[test]
+    fn test_mask_sensitive_fields_respects_token_boundaries() {
+        let mut record = LogRecord::new(Level::INFO, "test".to_string(), "message".to_string());
+        record
+            .fields
+            .insert("author".to_string(), Value::String("Alice".to_string()));
+        record
+            .fields
+            .insert("primary_key".to_string(), Value::Number(1.into()));
+        record.fields.insert(
+            "auth_token".to_string(),
+            Value::String("bearer-value".to_string()),
+        );
+
+        record.mask_sensitive_fields();
+
+        assert_eq!(
+            record.fields.get("author").unwrap(),
+            &Value::String("Alice".to_string())
+        );
+        assert_eq!(
+            record.fields.get("primary_key").unwrap(),
+            &Value::Number(1.into())
+        );
+        assert_eq!(
+            record.fields.get("auth_token").unwrap(),
+            &Value::String("***MASKED***".to_string())
         );
     }
 
@@ -1060,5 +1261,48 @@ mod tests {
             .get("neg_inf")
             .expect("neg_inf field should exist");
         assert_eq!(neg.as_str(), Some("-Infinity"));
+    }
+
+    #[test]
+    fn test_log_record_from_event_masked() {
+        use std::sync::{Arc, Mutex};
+        use tracing::subscriber::with_default;
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::Context;
+        use tracing_subscriber::prelude::*;
+
+        struct CaptureMaskedLayer(Arc<Mutex<Option<LogRecord>>>);
+
+        impl<S: tracing::Subscriber> Layer<S> for CaptureMaskedLayer {
+            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+                let record = LogRecord::from_event_masked(event);
+                *self.0.lock().unwrap() = Some(record);
+            }
+        }
+
+        let captured: Arc<Mutex<Option<LogRecord>>> = Arc::new(Mutex::new(None));
+        let layer = CaptureMaskedLayer(captured.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(
+                target: "test::masked",
+                message = "Contact: user@example.com",
+                password = "secret-value-1",
+            );
+        });
+
+        let record = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("should capture record");
+        // message 中的 PII 已被掩码
+        assert_eq!(record.message, "Contact: **@**.***");
+        // 敏感字段名对应的值已被替换为 ***MASKED***
+        assert_eq!(
+            record.fields.get("password").unwrap(),
+            &Value::String("***MASKED***".to_string())
+        );
     }
 }

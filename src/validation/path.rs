@@ -5,6 +5,7 @@
 //! This module provides path validation to prevent path traversal attacks
 //! and ensure safe file operations.
 
+use crate::error::InklogError;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -145,6 +146,10 @@ impl PathValidator {
         }
 
         if let Some(ref base_dir) = self.config.base_dir {
+            // TOCTOU caveat: `canonicalize()` resolves symlinks at validation
+            // time only. When it fails, falling back to the raw (unchecked)
+            // path widens the validate-then-use window — the filesystem may
+            // change between this check and the actual file operation.
             let canonical_path = match path.canonicalize() {
                 Ok(p) => p,
                 Err(_) => path.to_path_buf(),
@@ -154,31 +159,25 @@ impl PathValidator {
                 Err(_) => base_dir.clone(),
             };
 
-            if !canonical_path.starts_with(&canonical_base) {
+            // 仅 Windows 的 verbatim 前缀回退比较会重新赋值
+            #[cfg_attr(not(windows), allow(unused_mut))]
+            let mut inside_base = canonical_path.starts_with(&canonical_base);
+            if !inside_base {
                 // Windows：canonicalize() 返回 `\\?\` verbatim 前缀，而 canonicalize 失败
-                // 时回退的原始路径没有此前缀，导致 starts_with 误判——比较前对齐两侧前缀
+                // 时回退的原始路径没有此前缀，导致 starts_with 误判——比较前对齐两侧前缀。
+                // 无 verbatim 前缀时上方标准 starts_with 比较即为权威结果，直接落到底部判定。
                 #[cfg(windows)]
+                if let Some(base_plain) = canonical_base
+                    .to_string_lossy()
+                    .strip_prefix(r"\\?\")
+                    .map(std::path::PathBuf::from)
                 {
-                    let base_plain = canonical_base
-                        .to_string_lossy()
-                        .strip_prefix(r"\\?\")
-                        .map(std::path::PathBuf::from);
-                    if let Some(base_plain) = base_plain {
-                        if !canonical_path.starts_with(&base_plain) {
-                            return ValidationResult::invalid(&crate::i18n::tr(
-                                "validation-outside_base",
-                            ));
-                        }
-                    } else {
-                        return ValidationResult::invalid(&crate::i18n::tr(
-                            "validation-outside_base",
-                        ));
-                    }
+                    inside_base = canonical_path.starts_with(&base_plain);
                 }
-                #[cfg(not(windows))]
-                {
-                    return ValidationResult::invalid(&crate::i18n::tr("validation-outside_base"));
-                }
+            }
+
+            if !inside_base {
+                return ValidationResult::invalid(&crate::i18n::tr("validation-outside_base"));
             }
         }
 
@@ -200,26 +199,51 @@ impl PathValidator {
     pub fn validate_and_sanitize(&self, path: &Path) -> ValidationResult {
         let result = self.validate(path);
         if result.valid {
-            let sanitized = self.sanitize(path);
-            ValidationResult::sanitized(sanitized)
+            match self.sanitize(path) {
+                Ok(sanitized) => ValidationResult::sanitized(sanitized),
+                Err(e) => ValidationResult::invalid(&e.to_string()),
+            }
         } else {
             result
         }
     }
 
     /// Sanitize a path by removing dangerous components.
-    pub fn sanitize(&self, path: &Path) -> PathBuf {
-        let mut components = Vec::new();
+    ///
+    /// `..` components pop the last remaining component and `.` components
+    /// are dropped. A `..` that would escape past the start of the path
+    /// (nothing left to pop, i.e. the path is pure traversal such as
+    /// `../../etc/passwd` or `..`) is an error rather than a silent no-op:
+    /// silently dropping the traversal would return a deceptively safe
+    /// relative path.
+    ///
+    /// # Note
+    ///
+    /// Sanitization alone performs **no base-directory check**. For security
+    /// sensitive use cases always use
+    /// [`validate_and_sanitize()`](Self::validate_and_sanitize), which rejects
+    /// traversal paths outright.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InklogError::ConfigError` when a `..` component pops an empty
+    /// component stack (the path escapes its virtual root).
+    pub fn sanitize(&self, path: &Path) -> Result<PathBuf, InklogError> {
+        let mut components: Vec<std::path::Component<'_>> = Vec::new();
         for component in path.components() {
             match component {
                 std::path::Component::ParentDir => {
-                    components.pop();
+                    if components.pop().is_none() {
+                        return Err(InklogError::ConfigError(
+                            crate::i18n::tr("validation-path_traversal"),
+                        ));
+                    }
                 }
                 std::path::Component::CurDir => {}
                 _ => components.push(component),
             }
         }
-        components.iter().collect()
+        Ok(components.iter().collect())
     }
 }
 
@@ -227,6 +251,59 @@ impl Default for PathValidator {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// 以 `O_NOFOLLOW` 打开已校验的现有文件（只读）。
+///
+/// `PathValidator::validate` 与实际 `open` 之间存在 validate-then-use 窗口：
+/// 攻击者可在校验通过后把路径末段替换为符号链接。本函数在内核打开时
+/// 拒绝末段符号链接（`ELOOP`），把该竞态窗口压缩到中间目录组件被攻击者
+/// 控制的场景。仅 Unix 平台支持 `O_NOFOLLOW`，其他平台退化为普通打开。
+///
+/// 应紧随 `validate`/`validate_file_path` 调用使用。
+#[cfg(unix)]
+pub fn open_validated_file(path: &Path) -> std::io::Result<std::fs::File> {
+    use nix::fcntl::OFlag;
+    use nix::sys::stat::Mode;
+
+    let fd = nix::fcntl::open(
+        path,
+        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(std::fs::File::from(fd))
+}
+
+/// 非 Unix 平台的退化实现：无 `O_NOFOLLOW`，仅普通打开。
+#[cfg(not(unix))]
+pub fn open_validated_file(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+/// 以 `O_NOFOLLOW | O_CREAT | O_TRUNC` 创建/截断已校验的输出文件（写入，0600）。
+///
+/// 语义对齐 [`std::fs::File::create`]，但末段为符号链接时在内核层被拒绝
+/// （`ELOOP`），关闭"校验后输出路径被替换为符号链接"的竞态。非 Unix
+/// 平台退化为普通 `File::create`。
+#[cfg(unix)]
+pub fn create_validated_file(path: &Path) -> std::io::Result<std::fs::File> {
+    use nix::fcntl::OFlag;
+    use nix::sys::stat::Mode;
+
+    let fd = nix::fcntl::open(
+        path,
+        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(std::fs::File::from(fd))
+}
+
+/// 非 Unix 平台的退化实现：无 `O_NOFOLLOW`，仅普通创建。
+#[cfg(not(unix))]
+pub fn create_validated_file(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::create(path)
 }
 
 #[cfg(test)]
@@ -288,14 +365,34 @@ mod tests {
         // 路径分隔符中性断言：Windows 输出 `\`，其余平台输出 `/`
         let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").to_string();
 
-        let sanitized = validator.sanitize(Path::new("foo/../bar"));
+        let sanitized = validator.sanitize(Path::new("foo/../bar")).unwrap();
         assert_eq!(norm(&sanitized), "bar");
 
-        let sanitized = validator.sanitize(Path::new("foo/./bar"));
+        let sanitized = validator.sanitize(Path::new("foo/./bar")).unwrap();
         assert_eq!(norm(&sanitized), "foo/bar");
 
-        let sanitized = validator.sanitize(Path::new("foo/../bar/../baz"));
+        let sanitized = validator.sanitize(Path::new("foo/../bar/../baz")).unwrap();
         assert_eq!(norm(&sanitized), "baz");
+    }
+
+    #[test]
+    fn test_sanitize_rejects_pure_traversal() {
+        let validator = PathValidator::new();
+
+        // 前导 ".." 在空栈上弹出会逃逸虚拟根目录，必须报错而非静默丢弃
+        assert!(validator.sanitize(Path::new("../../etc/passwd")).is_err());
+        assert!(validator.sanitize(Path::new("..")).is_err());
+        assert!(validator.sanitize(Path::new("../foo")).is_err());
+        assert!(validator.sanitize(Path::new("../..")).is_err());
+    }
+
+    #[test]
+    fn test_sanitize_allows_internal_traversal() {
+        let validator = PathValidator::new();
+
+        // 内部 ".." 有可弹出的组件，规范化后不逃逸
+        let sanitized = validator.sanitize(Path::new("foo/..")).unwrap();
+        assert!(sanitized.as_os_str().is_empty());
     }
 
     #[test]
@@ -382,14 +479,14 @@ mod tests {
     #[test]
     fn test_sanitize_with_curdir_only() {
         let validator = PathValidator::new();
-        let sanitized = validator.sanitize(Path::new("././foo"));
+        let sanitized = validator.sanitize(Path::new("././foo")).unwrap();
         assert_eq!(sanitized.to_string_lossy(), "foo");
     }
 
     #[test]
     fn test_sanitize_empty_path() {
         let validator = PathValidator::new();
-        let sanitized = validator.sanitize(Path::new(""));
+        let sanitized = validator.sanitize(Path::new("")).unwrap();
         assert_eq!(sanitized.to_string_lossy(), "");
     }
 
@@ -621,5 +718,51 @@ mod tests {
         // But actual parent directory traversal should still be rejected
         let result = validator.validate(Path::new("../etc/passwd"));
         assert!(!result.valid, "../etc/passwd should be rejected");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_open_validated_file_rejects_symlink() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let real = dir.path().join("real.log");
+        std::fs::write(&real, b"data").unwrap();
+        let link = dir.path().join("link.log");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        // 末段符号链接必须被内核拒绝（ELOOP）
+        assert!(
+            super::open_validated_file(&link).is_err(),
+            "symlinked leaf must be rejected by O_NOFOLLOW"
+        );
+        // 普通文件正常打开
+        let f = super::open_validated_file(&real).expect("regular file should open");
+        drop(f);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_create_validated_file_rejects_symlink_and_preserves_target() {
+        use std::io::Write;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let victim = dir.path().join("victim.log");
+        std::fs::write(&victim, b"do not touch").unwrap();
+        let out_link = dir.path().join("out.log");
+        std::os::unix::fs::symlink(&victim, &out_link).unwrap();
+
+        // 输出路径为符号链接时创建必须失败，且目标内容不被破坏
+        assert!(
+            super::create_validated_file(&out_link).is_err(),
+            "symlinked output must be rejected by O_NOFOLLOW"
+        );
+        assert_eq!(std::fs::read(&victim).unwrap(), b"do not touch");
+
+        // 普通路径正常创建并可写
+        let out = dir.path().join("out2.log");
+        super::create_validated_file(&out)
+            .unwrap()
+            .write_all(b"x")
+            .unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"x");
     }
 }

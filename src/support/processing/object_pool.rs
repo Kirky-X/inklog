@@ -165,6 +165,9 @@ where
     /// Note: This count tracks the number of `put()` calls and may over-count
     /// if the underlying oxcache evicts entries (TTL expiry, capacity pressure).
     /// It is an approximation, not an exact count of current cache contents.
+    /// In particular it only ever increments: it does **not** decrement when
+    /// entries are evicted or removed, so after an eviction `len()` over-counts
+    /// permanently.
     pub fn len(&self) -> usize {
         self.stats.total_items.load(Ordering::Relaxed)
     }

@@ -110,6 +110,9 @@ impl MaskRuleRegistry {
     /// enabled = true
     /// ```
     ///
+    /// 重复的 `name` 与 [`register()`](Self::register) 的查重语义对齐：
+    /// 跳过后出现的定义并记录 `tracing::warn`，首个定义生效。
+    ///
     /// # Errors
     /// - TOML 解析失败返回 `Err(InklogError)`
     /// - 缺少 `name` 或 `pattern` 字段返回 `Err(InklogError)`
@@ -128,11 +131,18 @@ impl MaskRuleRegistry {
                 InklogError::ConfigError(crate::i18n::tr("config-toml_missing_masking_rules"))
             })?;
 
-        let mut rules = Vec::new();
+        let mut rules: Vec<MaskRule> = Vec::new();
         for table in rules_tables {
             let name = table.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
                 InklogError::ConfigError(crate::i18n::tr("config-masking_missing_name"))
             })?;
+            if rules.iter().any(|r| r.name() == name) {
+                tracing::warn!(
+                    rule = name,
+                    "duplicate masking rule name in TOML config; keeping the first definition and skipping the later one"
+                );
+                continue;
+            }
             let pattern = table
                 .get("pattern")
                 .and_then(|v| v.as_str())
@@ -285,5 +295,35 @@ pattern = "[invalid"
     fn test_load_from_toml_missing_array() {
         let toml_str = "[other]\nkey = \"value\"\n";
         assert!(MaskRuleRegistry::load_from_toml(toml_str).is_err());
+    }
+
+    #[test]
+    fn test_load_from_toml_skips_duplicate_names() {
+        // 与 register() 的查重语义对齐：重复 name 跳过后者（首个定义生效）
+        let toml_str = r#"
+[[masking_rules]]
+name = "dup_rule"
+pattern = "\\bFIRST-\\d+\\b"
+replacement = "first"
+
+[[masking_rules]]
+name = "dup_rule"
+pattern = "\\bSECOND-\\d+\\b"
+replacement = "second"
+
+[[masking_rules]]
+name = "other_rule"
+pattern = "\\bOTHER-\\d+\\b"
+"#;
+        let rules = MaskRuleRegistry::load_from_toml(toml_str).unwrap();
+        assert_eq!(rules.len(), 2, "duplicate name must be skipped");
+        assert_eq!(rules[0].name(), "dup_rule");
+        // 首个定义生效：replacement 保持 "first"
+        assert!(
+            format!("{:?}", rules[0]).contains(r#"replacement: "first""#),
+            "first definition should win, got: {:?}",
+            rules[0]
+        );
+        assert_eq!(rules[1].name(), "other_rule");
     }
 }

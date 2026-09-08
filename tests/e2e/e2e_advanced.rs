@@ -6,7 +6,8 @@
 //! - 默认 feature：ConsoleSink/FileSink/LogTemplate/DataMasker/LogSanitizer/
 //!   PathValidator/CircuitBreaker/ObjectPool/LogRecord/InklogError/LogLevel/
 //!   SinkRegistry/RotationStrategy/Config validation/encryption
-//! - `compression` feature：ZstdCompression/GzipCompression/NoCompression round-trip
+//! - `compression` feature：ZstdCompression/NoCompression round-trip
+//! - `gzip` feature：GzipCompression round-trip
 //! - `i18n` feature：LogI18nFormatter 全方法
 //! - 多组件集成 E2E：tracing→FileSink、log→FileSink
 
@@ -726,7 +727,9 @@ mod security_e2e {
     #[test]
     fn test_path_validator_sanitize() {
         let validator = PathValidator::new();
-        let sanitized = validator.sanitize(Path::new("logs/app.log"));
+        let sanitized = validator
+            .sanitize(Path::new("logs/app.log"))
+            .expect("safe relative path should sanitize");
         assert!(!sanitized.as_os_str().is_empty());
     }
 
@@ -1062,12 +1065,25 @@ mod data_masker_e2e {
     #[test]
     fn test_data_masker_masks_bank_card_16_digits() {
         let masker = DataMasker::new();
-        let result = masker.mask("4567890123456789");
+        // Luhn-valid 卡号：掩码后保留后 4 位
+        let result = masker.mask("4111111111111111");
         assert!(
-            !result.contains("4567890123456789"),
+            !result.contains("4111111111111111"),
             "16-digit bank_card should be masked"
         );
-        assert!(result.contains("6789"), "last 4 digits should be preserved");
+        assert!(result.contains("1111"), "last 4 digits should be preserved");
+
+        // Luhn-invalid 卡号：不再原样返回，而是整体替换为 ***REDACTED_CC***
+        let luhn_invalid = masker.mask("4567890123456789");
+        assert!(
+            !luhn_invalid.contains("4567890123456789"),
+            "Luhn-invalid card-shaped number should not be returned unchanged"
+        );
+        assert!(
+            luhn_invalid.contains("***REDACTED_CC***"),
+            "Luhn-invalid card-shaped number should be redacted: {}",
+            luhn_invalid
+        );
     }
 
     #[test]
@@ -2623,7 +2639,9 @@ mod file_sink_e2e {
 mod compression_e2e {
     use super::*;
     use inklog::sink::CompressionStrategy;
-    use inklog::sink::{GzipCompression, NoCompression, ZstdCompression};
+    #[cfg(feature = "gzip")]
+    use inklog::sink::GzipCompression;
+    use inklog::sink::{NoCompression, ZstdCompression};
 
     #[test]
     fn test_zstd_compression_round_trip() {
@@ -2785,6 +2803,7 @@ mod compression_e2e {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compression_round_trip() {
         let strategy = GzipCompression::new(6);
         let data = b"Hello, World! This is a test message for gzip compression E2E.";
@@ -2799,6 +2818,7 @@ mod compression_e2e {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compression_empty_data() {
         let strategy = GzipCompression::new(6);
         let compressed = strategy
@@ -2811,6 +2831,7 @@ mod compression_e2e {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compression_large_data() {
         let strategy = GzipCompression::new(6);
         let data: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
@@ -2823,6 +2844,7 @@ mod compression_e2e {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_decompress_invalid_data_errors() {
         let strategy = GzipCompression::new(6);
         let invalid_data = b"not valid gzip data";
@@ -2835,6 +2857,7 @@ mod compression_e2e {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_level_clamping() {
         let high = GzipCompression::new(100);
         assert_eq!(high.level(), 9, "level should be clamped to 9");
@@ -2844,12 +2867,14 @@ mod compression_e2e {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_default_level() {
         let strategy = GzipCompression::default();
         assert_eq!(strategy.level(), 6);
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_extension_and_name() {
         let strategy = GzipCompression::new(6);
         assert_eq!(strategy.extension(), "gz");
@@ -2857,6 +2882,7 @@ mod compression_e2e {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compress_file_round_trip() {
         let temp = tempdir().expect("tempdir failed");
         let file_path = temp.path().join("test_gzip.log");

@@ -68,7 +68,7 @@ static DEFAULT_SENSITIVE_PATTERNS: LazyLock<Vec<(Regex, String)>> = LazyLock::ne
             "[CARD_NUM]".to_string(),
         ),
         (
-            Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
+            Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
                 .expect("hardcoded email regex is valid"),
             "[EMAIL]".to_string(),
         ),
@@ -127,18 +127,28 @@ impl LogSanitizer {
     }
 
     /// Sanitize a log message.
+    ///
+    /// # Processing Order Contract
+    ///
+    /// 1. ANSI escape sequences are stripped first.
+    /// 2. Custom string replacements run next.
+    /// 3. Sensitive-pattern redaction runs **last** (before escape-mode
+    ///    encoding). This ordering is deliberate: a custom replacement could
+    ///    otherwise re-introduce sensitive content into the output after
+    ///    redaction had already run, so redaction is positioned as the final
+    ///    content transform.
     pub fn sanitize(&self, message: &str) -> String {
         // Strip ANSI escape sequences before any other processing
         let mut result = self.strip_ansi(message).into_owned();
+
+        for (from, to) in &self.config.custom_replacements {
+            result = result.replace(from, to);
+        }
 
         for (pattern, replacement) in &self.sensitive_regexes {
             result = pattern
                 .replace_all(&result, replacement.as_str())
                 .to_string();
-        }
-
-        for (from, to) in &self.config.custom_replacements {
-            result = result.replace(from, to);
         }
 
         match self.config.mode {
@@ -459,6 +469,32 @@ mod tests {
         assert!(result.contains("external"));
         assert!(!result.contains("PHONE-555"));
         assert!(!result.contains("internal"));
+    }
+
+    #[test]
+    fn test_custom_replacement_reintroduced_content_is_redacted() {
+        // 顺序契约：自定义替换先执行、敏感正则脱敏最后执行（安全后置）。
+        // 若正则先执行，自定义替换重新拼出的敏感内容将绕过脱敏直接泄漏。
+        let mut sanitizer = LogSanitizer::new();
+        sanitizer.add_replacement("MYSECRET".to_string(), "password".to_string());
+
+        // 原文不命中任何敏感正则；替换后 "password=..." 必须被再掩码
+        let result = sanitizer.sanitize("MYSECRET=opensesame123");
+        assert!(
+            result.contains("[REDACTED]"),
+            "reassembled sensitive content must be redacted: {}",
+            result
+        );
+        assert!(!result.contains("opensesame123"));
+    }
+
+    #[test]
+    fn test_email_redaction_does_not_swallow_pipe_suffix() {
+        // 修复前 TLD 字符类 [A-Z|a-z] 中的 "|" 是字面量，会把邮箱后的
+        // "|" 及后续字母吞进 [EMAIL]；修复后管道符保持原样
+        let sanitizer = LogSanitizer::new();
+        let result = sanitizer.sanitize("mail user@example.com|tail");
+        assert_eq!(result, "mail [EMAIL]|tail");
     }
 
     #[test]

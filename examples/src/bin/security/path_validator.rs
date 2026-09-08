@@ -189,19 +189,24 @@ fn show_sanitize_method() {
     let validator = PathValidator::new();
 
     print_section("6.1 \"foo/../bar\" → 移除 ParentDir");
-    let sanitized: PathBuf = validator.sanitize(Path::new("foo/../bar"));
+    let sanitized: PathBuf = validator.sanitize(Path::new("foo/../bar")).expect("非纯穿越路径应成功");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "bar");
 
     print_section("6.2 \"foo/./bar\" → 移除 CurDir");
-    let sanitized = validator.sanitize(Path::new("foo/./bar"));
+    let sanitized = validator.sanitize(Path::new("foo/./bar")).expect("非纯穿越路径应成功");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "foo/bar");
 
     print_section("6.3 \"foo/../bar/../baz\" → 多级移除");
-    let sanitized = validator.sanitize(Path::new("foo/../bar/../baz"));
+    let sanitized = validator
+        .sanitize(Path::new("foo/../bar/../baz"))
+        .expect("非纯穿越路径应成功");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "baz");
+
+    print_section("6.3.1 \"../../etc/passwd\" → 纯穿越被拒绝");
+    assert!(validator.sanitize(Path::new("../../etc/passwd")).is_err());
 
     print_section("6.4 validate_and_sanitize() 组合方法");
     let result = validator.validate_and_sanitize(Path::new("logs/app.log"));

@@ -105,23 +105,34 @@ const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
 
 /// Pre-compiled regex patterns for efficient repeated sanitization.
 /// Compiled once on first access via `LazyLock` instead of on every call.
-static COMPILED_PATTERNS: LazyLock<Vec<(regex::Regex, &'static str)>> = LazyLock::new(|| {
-    SENSITIVE_PATTERNS
+static COMPILED_PATTERNS: LazyLock<Vec<(regex::Regex, &'static str)>> =
+    LazyLock::new(|| compile_sensitive_patterns(SENSITIVE_PATTERNS));
+
+/// Compiles sensitive redaction patterns, skipping (not silently dropping)
+/// any pattern that fails to compile.
+///
+/// Static initialization has no `Result` channel to propagate into, so an
+/// invalid pattern is logged at `ERROR` level (with its index and the compile
+/// error) and excluded from the returned set. A skipped pattern means weaker
+/// redaction, which is why the failure must be observable rather than silent.
+fn compile_sensitive_patterns(patterns: &'static [(&'static str, &'static str)]) -> Vec<(regex::Regex, &'static str)> {
+    patterns
         .iter()
-        .filter_map(|(pattern, replacement)| match regex::Regex::new(pattern) {
+        .enumerate()
+        .filter_map(|(index, (pattern, replacement))| match regex::Regex::new(pattern) {
             Ok(re) => Some((re, *replacement)),
             Err(e) => {
-                // Use eprintln during static init (tracing may not be set up yet)
-                // but prefix with clear warning marker
-                eprintln!(
-                    "[inklog] WARNING: failed to compile sensitive pattern '{}': {}",
-                    pattern, e
+                tracing::error!(
+                    index = index,
+                    pattern = pattern,
+                    error = %e,
+                    "failed to compile sensitive redaction pattern; it is disabled and messages will NOT be redacted for it"
                 );
                 None
             }
         })
         .collect()
-});
+}
 
 /// Sanitizes a message by removing sensitive information.
 /// Uses pre-compiled regex patterns for optimal performance under high-frequency logging.
@@ -841,5 +852,31 @@ mod tests {
                 err
             );
         }
+    }
+
+    // ── compile_sensitive_patterns() tests ─────────────────────────
+
+    #[test]
+    fn test_compile_sensitive_patterns_all_builtin_patterns_compile() {
+        // 内置模式必须全部可编译——任何一条编译失败都意味着对应脱敏规则被静默禁用
+        let compiled = compile_sensitive_patterns(SENSITIVE_PATTERNS);
+        assert_eq!(
+            compiled.len(),
+            SENSITIVE_PATTERNS.len(),
+            "every builtin pattern must compile"
+        );
+    }
+
+    #[test]
+    fn test_compile_sensitive_patterns_skips_invalid_pattern() {
+        // 非法模式走 error 路径：被剔除但其余模式保留
+        static TEST_PATTERNS: &[(&str, &str)] = &[
+            ("\\d+", "[NUM]"),
+            ("[invalid", "[BROKEN]"),
+            ("\\w+", "[WORD]"),
+        ];
+        let compiled = compile_sensitive_patterns(TEST_PATTERNS);
+        assert_eq!(compiled.len(), 2, "invalid pattern must be skipped");
+        assert!(compiled.iter().all(|(re, _)| re.as_str() != "[invalid"));
     }
 }
