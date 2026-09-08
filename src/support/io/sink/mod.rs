@@ -26,7 +26,9 @@ pub mod rotation;
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 #[cfg(feature = "compression")]
 pub use compression::ZstdCompression;
-pub use compression::{CompressionStrategy, GzipCompression, NoCompression};
+#[cfg(feature = "gzip")]
+pub use compression::GzipCompression;
+pub use compression::{CompressionStrategy, NoCompression};
 pub use console::ConsoleSink;
 #[cfg(any(
     feature = "sqlite",
@@ -55,8 +57,8 @@ use async_trait::async_trait;
 /// # Trait Isolation
 ///
 /// Optional capabilities are split into separate traits:
-/// - [`Rotatable`]: File rotation support (FileSink only)
-/// - [`DiskCheckable`]: Disk space checking (FileSink only)
+/// - [`Rotatable`]: File rotation support (implemented by [`FileSink`], extensible)
+/// - [`DiskCheckable`]: Disk space checking (implemented by [`FileSink`], extensible)
 #[async_trait]
 pub trait LogSink: Send + Sync {
     /// Write a log record to the sink.
@@ -66,6 +68,12 @@ pub trait LogSink: Send + Sync {
     async fn flush(&self) -> Result<(), InklogError>;
 
     /// Check if the sink is healthy and operational.
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation **always returns `true`** so that sinks
+    /// which do not track health keep working unchanged. Implementations
+    /// SHOULD override this method to reflect their real health state.
     fn is_healthy(&self) -> bool {
         true
     }
@@ -76,8 +84,9 @@ pub trait LogSink: Send + Sync {
 
 /// Trait for sinks that support log file rotation.
 ///
-/// Only implemented by [`FileSink`]. Separated from [`LogSink`] to keep
-/// the core trait minimal for sinks that don't need rotation.
+/// Implemented by [`FileSink`]; the trait is `pub`, so custom sinks may
+/// implement it too. Separated from [`LogSink`] to keep the core trait
+/// minimal for sinks that don't need rotation.
 pub trait Rotatable {
     /// Start rotation timer (for file-based sinks with time-based rotation).
     fn start_rotation_timer(&self);
@@ -88,8 +97,9 @@ pub trait Rotatable {
 
 /// Trait for sinks that can check disk space before writing.
 ///
-/// Only implemented by [`FileSink`]. Separated from [`LogSink`] to keep
-/// the core trait minimal for sinks that don't write to disk.
+/// Implemented by [`FileSink`]; the trait is `pub`, so custom sinks may
+/// implement it too. Separated from [`LogSink`] to keep the core trait
+/// minimal for sinks that don't write to disk.
 pub trait DiskCheckable {
     /// Check if there is sufficient disk space for writing.
     fn check_disk_space(&self) -> Result<bool, InklogError>;

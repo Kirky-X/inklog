@@ -6,11 +6,14 @@
 //! supporting multiple compression algorithms (Zstd, Gzip, etc.).
 
 use crate::InklogError;
+#[cfg(any(feature = "compression", feature = "gzip"))]
 use std::fs::File;
+#[cfg(any(feature = "compression", feature = "gzip"))]
 use std::io::{BufReader, Read};
 #[cfg(feature = "compression")]
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+#[cfg(any(feature = "compression", feature = "gzip"))]
 use tracing::error;
 
 /// Trait for compression strategies.
@@ -30,6 +33,11 @@ pub trait CompressionStrategy: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Compress a file at the given path.
+    ///
+    /// On success the original file is removed. If removing the original
+    /// fails after the compressed file has been written, both the original
+    /// and the compressed file remain on disk (an error is logged) and the
+    /// compressed path is still returned.
     fn compress_file(&self, path: &Path, level: i32) -> Result<PathBuf, InklogError>;
 }
 
@@ -111,11 +119,13 @@ impl CompressionStrategy for NoCompression {
 }
 
 /// Gzip compression strategy.
+#[cfg(feature = "gzip")]
 #[derive(Debug, Clone)]
 pub struct GzipCompression {
     level: u32,
 }
 
+#[cfg(feature = "gzip")]
 impl GzipCompression {
     /// Create a new Gzip compression strategy with the given level (0-9).
     pub fn new(level: u32) -> Self {
@@ -129,12 +139,14 @@ impl GzipCompression {
     }
 }
 
+#[cfg(feature = "gzip")]
 impl Default for GzipCompression {
     fn default() -> Self {
         Self::new(6)
     }
 }
 
+#[cfg(feature = "gzip")]
 impl CompressionStrategy for GzipCompression {
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>, InklogError> {
         use flate2::Compression;
@@ -203,9 +215,12 @@ impl CompressionStrategy for GzipCompression {
         })?;
 
         if let Err(e) = std::fs::remove_file(path) {
+            // 删除失败时原始文件与压缩文件并存，需保留两者待人工/后续清理
             let mut args = fluent_bundle::FluentArgs::new();
             args.set("err", e.to_string());
-            tracing::warn!(
+            error!(
+                original = %path.display(),
+                compressed = %compressed_path.display(),
                 "{}",
                 crate::i18n::tr_args("config-compression_remove_failed", args)
             );
@@ -255,9 +270,12 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
     })?;
 
     if let Err(e) = std::fs::remove_file(path) {
+        // 删除失败时原始文件与压缩文件并存，需保留两者待人工/后续清理
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("err", e.to_string());
-        tracing::warn!(
+        error!(
+            original = %path.display(),
+            compressed = %compressed_path.display(),
             "{}",
             crate::i18n::tr_args("config-compression_remove_failed", args)
         );
@@ -347,6 +365,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compression() {
         let strategy = GzipCompression::new(6);
         let data = b"Hello, World! This is a test message for gzip compression.";
@@ -359,6 +378,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_level_clamping() {
         let strategy = GzipCompression::new(100);
         assert_eq!(strategy.level(), 9);
@@ -368,6 +388,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_extension() {
         let gzip = GzipCompression::default();
         assert_eq!(gzip.extension(), "gz");
@@ -410,6 +431,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compress_empty_data() {
         let strategy = GzipCompression::new(6);
         let compressed = strategy.compress(b"").unwrap();
@@ -418,6 +440,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_decompress_invalid_data_errors() {
         let strategy = GzipCompression::new(6);
         let invalid_data = b"not valid gzip data";
@@ -426,6 +449,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_default_level() {
         let gzip = GzipCompression::default();
         assert_eq!(gzip.level(), 6);
@@ -502,6 +526,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compress_file_via_strategy() {
         use std::io::Write;
         let temp = tempfile::tempdir().unwrap();
@@ -524,6 +549,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compress_file_missing_input_errors() {
         let strategy = GzipCompression::new(6);
         let result = strategy.compress_file(Path::new("/nonexistent/gzip_input.log"), 6);
@@ -545,6 +571,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_with_level_zero() {
         let strategy = GzipCompression::new(0);
         let data = b"data at level 0";
@@ -568,6 +595,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[cfg(feature = "gzip")]
     fn test_gzip_compress_file_create_output_fails_errors() {
         // 覆盖行 181-182：GzipCompression::compress_file 中 File::create 失败
         // 策略：输入文件存在，但 compressed_path（path.with_extension("gz")）

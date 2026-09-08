@@ -19,7 +19,6 @@ use crate::validation::PathValidatorConfig;
 use aes_gcm::KeyInit;
 use aes_gcm::aead::Aead;
 use async_trait::async_trait;
-use bytes::BytesMut;
 use chrono::{DateTime, Datelike, Utc};
 use parking_lot::RwLock;
 use std::fs::{self, File, OpenOptions};
@@ -31,6 +30,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 use tracing::{debug, error, info, warn};
+use zeroize::Zeroizing;
 
 // 类型别名，保持向后兼容
 pub use super::circuit_breaker::{CircuitBreakerConfig, CircuitState};
@@ -102,6 +102,8 @@ pub struct FileSink {
     rotation_interval: StdDuration,
     /// 上次清理时间（每个实例独立）
     last_cleanup_time: Arc<parking_lot::Mutex<Option<Instant>>>,
+    /// 上次磁盘空间检查的时间与结果（节流缓存）
+    last_disk_check: parking_lot::Mutex<Option<(Instant, bool)>>,
     /// Shutdown flag for graceful thread termination
     shutdown_flag: Arc<AtomicBool>,
     /// 数据脱敏器（只读）
@@ -161,6 +163,7 @@ impl FileSink {
             config: config.clone(),
             rotation_interval,
             last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
+            last_disk_check: parking_lot::Mutex::new(None),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             masker: DataMasker::new(),
             inner: RwLock::new(inner),
@@ -196,7 +199,8 @@ impl FileSink {
     }
 
     /// 获取加密密钥
-    fn get_encryption_key(&self) -> Result<BytesMut, InklogError> {
+    /// 获取加密密钥（`Zeroizing` 包裹，离开作用域自动清零）
+    fn get_encryption_key(&self) -> Result<Zeroizing<[u8; 32]>, InklogError> {
         let default_key = "LOG_ENCRYPTION_KEY".to_string();
         let key_str = self
             .config
@@ -220,11 +224,14 @@ impl FileSink {
             });
         }
 
-        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key)
-            .map_err(|_| InklogError::EncryptionError {
-                message: "Invalid base64 encoding in encryption key".to_string(),
-                source: None,
-            })?;
+        let decoded = Zeroizing::new(
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key).map_err(
+                |_| InklogError::EncryptionError {
+                    message: "Invalid base64 encoding in encryption key".to_string(),
+                    source: None,
+                },
+            )?,
+        );
 
         if decoded.len() != 32 {
             return Err(InklogError::EncryptionError {
@@ -236,9 +243,9 @@ impl FileSink {
         // 验证密钥熵（确保不是弱密钥）
         Self::validate_key_entropy(&decoded)?;
 
-        let key_bytes = BytesMut::from(&decoded[..]);
-
-        Ok(key_bytes)
+        let mut key_bytes = [0u8; 32];
+        key_bytes.copy_from_slice(&decoded);
+        Ok(Zeroizing::new(key_bytes))
     }
 
     /// 验证密钥熵（Shannon entropy）
@@ -498,12 +505,17 @@ impl FileSink {
             .map(|metadata| metadata.len())
             .sum();
 
+        // 始终按修改时间保留最新的 keep_files 个轮转文件，
+        // 两个清理分支都只允许删除更旧的文件
+        let keep_newest = config.keep_files as usize;
+        let deletable = candidates.len().saturating_sub(keep_newest);
+
         if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size) {
             if total_size > max_total_size_bytes {
                 let excess_size = total_size.saturating_sub(max_total_size_bytes);
                 let mut deleted_size: u64 = 0;
 
-                for (path, _) in &candidates {
+                for (path, _) in candidates.iter().take(deletable) {
                     if deleted_size >= excess_size {
                         break;
                     }
@@ -521,12 +533,7 @@ impl FileSink {
                     }
                 }
             } else {
-                // 只删除已过期的文件，且始终保留最新的 keep_files 个轮转文件
-                let keep_newest = config.keep_files as usize;
-                for (index, (path, modified)) in candidates.iter().enumerate() {
-                    if index >= candidates.len().saturating_sub(keep_newest) {
-                        break;
-                    }
+                for (path, modified) in candidates.iter().take(deletable) {
                     let modified_utc: DateTime<Utc> = (*modified).into();
                     if modified_utc < cutoff_date
                         && let Err(e) = fs::remove_file(path)
@@ -607,12 +614,31 @@ impl FileSink {
         )))
     }
 
+    /// 磁盘空间检查的节流窗口：窗口内的"空间充足"结果直接复用，
+    /// 避免 async write 每条记录都执行 fs::metadata + statfs
+    const DISK_CHECK_THROTTLE: StdDuration = StdDuration::from_secs(5);
+
     /// 检查磁盘空间是否充足
+    ///
+    /// 带节流：距上次实际检查不足 [`Self::DISK_CHECK_THROTTLE`] 且结果为
+    /// 空间充足时直接复用缓存结果；缓存结果为空间不足时不节流，每次都
+    /// 实际检查，以便空间恢复后能立即恢复写入。
     fn check_disk_space(&self) -> Result<bool, InklogError> {
+        {
+            let cached = self.last_disk_check.lock();
+            if let Some((at, true)) = *cached
+                && at.elapsed() < Self::DISK_CHECK_THROTTLE
+            {
+                return Ok(true);
+            }
+        }
+
         let (_total, available) = self.get_disk_space_info()?;
         // 保留 50MB 或 10% 的可用空间，以较大者为准
         let reserved = (50 * 1024 * 1024u64).max(available / 10);
-        Ok(available > reserved)
+        let sufficient = available > reserved;
+        *self.last_disk_check.lock() = Some((Instant::now(), sufficient));
+        Ok(sufficient)
     }
 
     /// 计算下次轮转时间
@@ -747,7 +773,8 @@ impl FileSink {
         let records = std::mem::take(&mut inner.batch_buffer);
 
         if let Some(file) = &mut inner.current_file {
-            for record in &records {
+            let mut write_failed = false;
+            for (index, record) in records.iter().enumerate() {
                 let write_result = if self.config.output_format == OutputFormat::Json {
                     // NDJSON: each record is a single-line JSON object
                     match serde_json::to_string(record) {
@@ -773,11 +800,24 @@ impl FileSink {
                         error!("Batch write error: {}", e);
                         inner.circuit_breaker.record_failure();
                         let _ = self.open_file_inner(inner);
+                        // 失败记录及其后的记录回填缓冲区，等待下次 flush 重试
+                        let unsent = records.len() - index;
+                        inner.batch_buffer.extend_from_slice(&records[index..]);
+                        warn!(
+                            "Batch write failed: {} unsent records re-queued for retry",
+                            unsent
+                        );
+                        write_failed = true;
                         break;
                     }
                 }
             }
-            inner.circuit_breaker.record_success();
+            if !write_failed {
+                inner.circuit_breaker.record_success();
+            }
+        } else {
+            // 无文件句柄：没有任何记录被写入，全部回填等待重试
+            inner.batch_buffer = records;
         }
 
         // Sync estimated size with actual file position to prevent drift
@@ -861,15 +901,15 @@ impl FileSink {
         }
     }
 
-    /// 同步压缩文件 fallback（compression feature 未启用时）。
+    /// 同步压缩文件 fallback（gzip feature 启用、compression feature 未启用时）。
     ///
-    /// 当 `compression` feature 未启用但用户配置了 `compress = true` 时，
-    /// 使用 gzip（flate2，始终可用的非 optional 依赖）进行压缩，而非返回错误。
+    /// 当 `compression`（zstd）feature 未启用但用户配置了 `compress = true` 时，
+    /// 使用 gzip（flate2，`gzip` feature）进行压缩，而非返回错误。
     /// 这样下游项目无需引入 zstd-sys 即可获得日志压缩能力。
     ///
     /// 当 `encrypt = true` 时，与 compression feature 启用时的 zstd 路径行为对齐：
     /// 对压缩产物加密生成 `.gz.enc`，加密失败时保留压缩文件为 `.gz.unencrypted`。
-    #[cfg(not(feature = "compression"))]
+    #[cfg(all(feature = "gzip", not(feature = "compression")))]
     fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
         use super::CompressionStrategy;
         use super::GzipCompression;
@@ -901,6 +941,32 @@ impl FileSink {
         }
     }
 
+    /// 同步压缩文件 fallback（无任何压缩后端 feature 时）。
+    ///
+    /// `gzip` 与 `compression` 均未启用时无法压缩：跳过压缩但保留加密语义
+    /// （`encrypt = true` 时直接加密原文件），避免静默丢弃加密保证。
+    #[cfg(not(any(feature = "compression", feature = "gzip")))]
+    fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
+        warn!(
+            path = %path.display(),
+            "Compression requested but no compression backend feature is enabled \
+             (enable \"gzip\" or \"compression\"); leaving the file uncompressed"
+        );
+        if self.config.encrypt {
+            let encrypted_path = path.with_extension("enc");
+            self.encrypt_file(path, &encrypted_path)?;
+            if let Err(e) = fs::remove_file(path) {
+                warn!(
+                    "Failed to remove original file after encryption {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+            return Ok(encrypted_path);
+        }
+        Ok(path.to_path_buf())
+    }
+
     /// 同步加密文件（可在后台线程调用）
     pub fn encrypt_file(&self, input_path: &Path, output_path: &Path) -> Result<(), InklogError> {
         use aes_gcm::{Aes256Gcm, Nonce};
@@ -908,7 +974,7 @@ impl FileSink {
 
         // 获取密钥
         let key_bytes = self.get_encryption_key()?;
-        let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| {
+        let cipher = Aes256Gcm::new_from_slice(&*key_bytes).map_err(|e| {
             let mut args = fluent_bundle::FluentArgs::new();
             args.set("err", e.to_string());
             InklogError::EncryptionError {
@@ -1017,35 +1083,50 @@ impl FileSink {
             let config = self.config.clone();
             let path = new_path.clone();
             let _ = thread::spawn(move || {
-                // 为后台线程创建一个最小化的 FileSink 实例用于压缩
-                let inner = FileSinkInner {
-                    current_file: None,
-                    current_size: 0,
-                    last_rotation: Instant::now(),
-                    next_rotation_time: None,
-                    last_rotation_date: None,
-                    sequence: 0,
-                    fallback_sink: None,
-                    circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-                    batch_buffer: Vec::new(),
-                    last_flush_time: Instant::now(),
-                    timer_handle: None,
-                    rotation_timer: None,
-                    cleanup_timer_handle: None,
-                    rotation_strategy: Box::new(crate::support::io::sink::CompositeRotation::new(
-                        vec![],
-                    )),
-                };
-                let sink = FileSink {
-                    config,
-                    rotation_interval: StdDuration::from_secs(86400),
-                    last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
-                    shutdown_flag: Arc::new(AtomicBool::new(false)),
-                    masker: DataMasker::new(),
-                    inner: RwLock::new(inner),
-                };
-                if let Err(e) = sink.compress_file(&path) {
-                    error!("Failed to compress rotated log: {}", e);
+                // Wrap thread body in catch_unwind so a compression panic is
+                // logged instead of aborting an unnoticed worker thread.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    // 为后台线程创建一个最小化的 FileSink 实例用于压缩
+                    let inner = FileSinkInner {
+                        current_file: None,
+                        current_size: 0,
+                        last_rotation: Instant::now(),
+                        next_rotation_time: None,
+                        last_rotation_date: None,
+                        sequence: 0,
+                        fallback_sink: None,
+                        circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
+                        batch_buffer: Vec::new(),
+                        last_flush_time: Instant::now(),
+                        timer_handle: None,
+                        rotation_timer: None,
+                        cleanup_timer_handle: None,
+                        rotation_strategy: Box::new(
+                            crate::support::io::sink::CompositeRotation::new(vec![]),
+                        ),
+                    };
+                    let sink = FileSink {
+                        config,
+                        rotation_interval: StdDuration::from_secs(86400),
+                        last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
+                        last_disk_check: parking_lot::Mutex::new(None),
+                        shutdown_flag: Arc::new(AtomicBool::new(false)),
+                        masker: DataMasker::new(),
+                        inner: RwLock::new(inner),
+                    };
+                    if let Err(e) = sink.compress_file(&path) {
+                        error!("Failed to compress rotated log: {}", e);
+                    }
+                }));
+                if let Err(panic_info) = result {
+                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    error!("Compression thread panicked: {}", msg);
                 }
             });
         } else if self.config.encrypt {
@@ -1053,43 +1134,56 @@ impl FileSink {
             let config = self.config.clone();
             let path = new_path.clone();
             let _ = thread::spawn(move || {
-                // 为后台线程创建一个最小化的 FileSink 实例用于加密
-                let inner = FileSinkInner {
-                    current_file: None,
-                    current_size: 0,
-                    last_rotation: Instant::now(),
-                    next_rotation_time: None,
-                    last_rotation_date: None,
-                    sequence: 0,
-                    fallback_sink: None,
-                    circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-                    batch_buffer: Vec::new(),
-                    last_flush_time: Instant::now(),
-                    timer_handle: None,
-                    rotation_timer: None,
-                    cleanup_timer_handle: None,
-                    rotation_strategy: Box::new(crate::support::io::sink::CompositeRotation::new(
-                        vec![],
-                    )),
-                };
-                let sink = FileSink {
-                    config,
-                    rotation_interval: StdDuration::from_secs(86400),
-                    last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
-                    shutdown_flag: Arc::new(AtomicBool::new(false)),
-                    masker: DataMasker::new(),
-                    inner: RwLock::new(inner),
-                };
-                let encrypted_path = path.with_extension("enc");
-                if let Err(e) = sink.encrypt_file(&path, &encrypted_path) {
-                    error!("Failed to encrypt rotated log: {}", e);
-                } else {
-                    if let Err(e) = fs::remove_file(&path) {
+                // Wrap thread body in catch_unwind so an encryption panic is
+                // logged instead of aborting an unnoticed worker thread.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    // 为后台线程创建一个最小化的 FileSink 实例用于加密
+                    let inner = FileSinkInner {
+                        current_file: None,
+                        current_size: 0,
+                        last_rotation: Instant::now(),
+                        next_rotation_time: None,
+                        last_rotation_date: None,
+                        sequence: 0,
+                        fallback_sink: None,
+                        circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
+                        batch_buffer: Vec::new(),
+                        last_flush_time: Instant::now(),
+                        timer_handle: None,
+                        rotation_timer: None,
+                        cleanup_timer_handle: None,
+                        rotation_strategy: Box::new(
+                            crate::support::io::sink::CompositeRotation::new(vec![]),
+                        ),
+                    };
+                    let sink = FileSink {
+                        config,
+                        rotation_interval: StdDuration::from_secs(86400),
+                        last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
+                        last_disk_check: parking_lot::Mutex::new(None),
+                        shutdown_flag: Arc::new(AtomicBool::new(false)),
+                        masker: DataMasker::new(),
+                        inner: RwLock::new(inner),
+                    };
+                    let encrypted_path = path.with_extension("enc");
+                    if let Err(e) = sink.encrypt_file(&path, &encrypted_path) {
+                        error!("Failed to encrypt rotated log: {}", e);
+                    } else if let Err(e) = fs::remove_file(&path) {
                         warn!(
                             "Failed to remove original file after encryption during rotation: {}",
                             e
                         );
                     }
+                }));
+                if let Err(panic_info) = result {
+                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    error!("Encryption thread panicked: {}", msg);
                 }
             });
         }
@@ -1383,6 +1477,7 @@ impl Clone for FileSink {
             config: self.config.clone(),
             rotation_interval: self.rotation_interval,
             last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
+            last_disk_check: parking_lot::Mutex::new(None),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             masker: DataMasker::new(),
             inner: RwLock::new(inner),
@@ -1438,6 +1533,7 @@ mod tests {
             config,
             rotation_interval: StdDuration::from_secs(86400),
             last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
+            last_disk_check: parking_lot::Mutex::new(None),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             masker: DataMasker::new(),
             inner: RwLock::new(inner),
@@ -1546,6 +1642,63 @@ mod tests {
         let result = sink.check_disk_space();
         // Should succeed if there's sufficient disk space
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_disk_space_throttle_reuses_cached_result() {
+        // 节流窗口内的"空间充足"结果直接复用：即使磁盘信息不可获取也返回缓存值
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("/nonexistent_root_path_xyz/log.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        *sink.last_disk_check.lock() = Some((Instant::now(), true));
+
+        // get_disk_space_info 对不存在的路径会失败；命中节流缓存则不会触达
+        let result = sink.check_disk_space();
+        assert!(
+            matches!(result, Ok(true)),
+            "cached sufficient result should be reused within throttle window, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_check_disk_space_insufficient_result_not_throttled() {
+        // 缓存为"空间不足"时不节流，每次都实际检查（此处路径无效 → Err 透传）
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("/nonexistent_root_path_xyz/log.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        *sink.last_disk_check.lock() = Some((Instant::now(), false));
+
+        let result = sink.check_disk_space();
+        assert!(
+            result.is_err(),
+            "insufficient cached result must force a real disk check"
+        );
+    }
+
+    #[test]
+    fn test_check_disk_space_stale_cache_triggers_real_check() {
+        // 缓存超过节流窗口后应重新实际检查并刷新缓存
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("test.log"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        *sink.last_disk_check.lock() = Some((Instant::now() - StdDuration::from_secs(10), true));
+
+        let marker = Instant::now();
+        let result = sink.check_disk_space();
+        assert!(result.is_ok(), "real check should succeed on a valid path");
+        let (at, _) = sink.last_disk_check.lock().expect("cache should be set");
+        assert!(at >= marker, "cache should be refreshed by the real check");
     }
 
     #[tokio::test]
@@ -2309,7 +2462,7 @@ mod tests {
 
     #[test]
     #[serial]
-    #[cfg(not(feature = "compression"))]
+    #[cfg(all(feature = "gzip", not(feature = "compression")))]
     fn test_compress_file_gzip_fallback_with_encryption_roundtrip() {
         // 覆盖 gzip fallback 路径的 compress + encrypt 行为：
         // compression feature 未启用时，compress_file 应用 gzip 压缩 + AES-GCM 加密，
@@ -2379,6 +2532,72 @@ mod tests {
 
         unsafe {
             std::env::remove_var("TEST_GZIP_ENC_KEY");
+        }
+    }
+
+    #[test]
+    #[serial]
+    #[cfg(not(any(feature = "compression", feature = "gzip")))]
+    fn test_compress_file_no_backend_leaves_file_uncompressed() {
+        // 无任何压缩后端 feature：compress=true 时不压缩、原文件保留
+        let temp_dir = tempdir().unwrap();
+        let original_path = temp_dir.path().join("no_backend.log");
+        std::fs::write(&original_path, b"plain content").unwrap();
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            compress: true,
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.compress_file(&original_path);
+        assert!(result.is_ok(), "err: {:?}", result.err());
+        assert_eq!(result.unwrap(), original_path);
+        assert!(original_path.exists(), "file should be left in place");
+    }
+
+    #[test]
+    #[serial]
+    #[cfg(not(any(feature = "compression", feature = "gzip")))]
+    fn test_compress_file_no_backend_still_encrypts() {
+        // 无压缩后端但 encrypt=true：跳过压缩但保留加密保证
+        let temp_dir = tempdir().unwrap();
+        let original_path = temp_dir.path().join("no_backend_enc.log");
+        std::fs::write(&original_path, b"secret content").unwrap();
+
+        let (_key_bytes, key_b64) = make_test_key();
+        unsafe {
+            std::env::set_var("TEST_NO_BACKEND_ENC_KEY", &key_b64);
+        }
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("dummy.log"),
+            compress: true,
+            encrypt: true,
+            encryption_key_env: Some("TEST_NO_BACKEND_ENC_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+
+        let result = sink.compress_file(&original_path);
+        assert!(result.is_ok(), "err: {:?}", result.err());
+        let encrypted_path = result.unwrap();
+        assert_eq!(encrypted_path.extension().unwrap(), "enc");
+        assert!(encrypted_path.exists());
+
+        let encrypted_data = std::fs::read(&encrypted_path).unwrap();
+        assert!(encrypted_data.len() > 24);
+        assert_eq!(&encrypted_data[..8], b"ENCLOG1\0");
+        assert!(
+            !original_path.exists(),
+            "original file should be removed after encryption"
+        );
+
+        unsafe {
+            std::env::remove_var("TEST_NO_BACKEND_ENC_KEY");
         }
     }
 
@@ -2582,6 +2801,42 @@ mod tests {
             remaining < 5,
             "expected some files removed, got {}",
             remaining
+        );
+    }
+
+    #[test]
+    fn test_perform_cleanup_size_limit_respects_keep_files() {
+        // 尺寸超限触发删除时，同样必须保留最新的 keep_files 个文件
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("keep_size.log");
+
+        // 5 个 1KB 轮转文件，mtime 依次递增（keep_size_4.log 最新）
+        let now = std::time::SystemTime::now();
+        for i in 0..5 {
+            let p = temp_dir.path().join(format!("keep_size_{}.log", i));
+            std::fs::write(&p, "x".repeat(1024)).unwrap();
+            let mtime = now - std::time::Duration::from_secs(1000 - i as u64 * 100);
+            let _ = filetime::set_file_mtime(&p, filetime::FileTime::from_system_time(mtime));
+        }
+
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path,
+            keep_files: 1,
+            max_total_size: "1KB".to_string(),
+            ..Default::default()
+        };
+        let result = FileSink::perform_cleanup(&config, &temp_dir.path().join("keep_size.log"));
+        assert!(result.is_ok());
+
+        // 总量 5KB 超限 4KB：删除最旧的 4 个，keep_files=1 保留最新的
+        for i in 0..4 {
+            let p = temp_dir.path().join(format!("keep_size_{}.log", i));
+            assert!(!p.exists(), "keep_size_{}.log should be removed", i);
+        }
+        assert!(
+            temp_dir.path().join("keep_size_4.log").exists(),
+            "newest file must survive keep_files=1 under size-based cleanup"
         );
     }
 
@@ -3546,6 +3801,46 @@ mod tests {
             inner.circuit_breaker.failure_count(),
             initial_failures,
             "no failure should be recorded when there is no file handle"
+        );
+        // 无文件句柄时记录不应被静默丢弃，应回填等待重试
+        assert_eq!(
+            inner.batch_buffer.len(),
+            1,
+            "records must be re-queued when there is no file handle"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_flush_batch_inner_write_error_requeues_remaining_records() {
+        // /dev/full 写入始终返回 ENOSPC：构造批量写入中途失败，
+        // 未写入的记录应回填 batch_buffer 以便重试
+        let config = FileSinkConfig {
+            enabled: true,
+            path: PathBuf::from("/dev/full"),
+            ..Default::default()
+        };
+        let sink = create_test_file_sink(config);
+        let mut inner = sink.inner.write();
+        if sink.open_file_inner(&mut inner).is_err() {
+            eprintln!("Skipping: /dev/full not accessible in this environment");
+            return;
+        }
+
+        inner.batch_buffer.push(create_test_record("Unsent 1"));
+        inner.batch_buffer.push(create_test_record("Unsent 2"));
+
+        let result = sink.flush_batch_inner(&mut inner);
+        assert!(result.is_ok(), "flush_batch_inner swallows the io error");
+        assert_eq!(
+            inner.batch_buffer.len(),
+            2,
+            "unsent records should be re-queued after a write failure"
+        );
+        assert_eq!(
+            inner.circuit_breaker.failure_count(),
+            1,
+            "a failed batch should record a circuit breaker failure, not a success"
         );
     }
 

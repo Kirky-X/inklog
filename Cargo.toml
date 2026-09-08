@@ -71,6 +71,10 @@ kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
 # Zstd compression support for rotated log files (optional to avoid zstd-sys
 # symbol conflicts with downstream projects that bundle their own zstd).
 compression = ["dep:zstd"]
+# Gzip compression backend (optional, pure-Rust flate2). FileSink falls back to
+# gzip for rotated-file compression when `compression` is off; without either
+# feature rotated files are left uncompressed.
+gzip = ["dep:flate2"]
 # Parquet/Arrow export support for database sink archival.
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 # Aho-Corasick multi-pattern masking acceleration.
@@ -97,7 +101,6 @@ chrono = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["json", "tokio", "http1"], optional = true }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
 is-terminal = { version = "0.4", default-features = false }
-bytes = { version = "1.12", default-features = false, features = ["std"] }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
 oxcache = { version = "0.5.0-rc.2", default-features = false, features = ["macros", "memory", "serialization", "metrics", "batch"] }
@@ -109,7 +112,7 @@ parquet = { version = "59.0", default-features = false, features = ["async", "ar
 arrow-array = { version = "59.0", default-features = false, optional = true }
 arrow-schema = { version = "59.0", default-features = false, optional = true }
 dbnexus = { workspace = true, optional = true }
-flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false }
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }

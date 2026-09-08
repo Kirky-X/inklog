@@ -148,8 +148,8 @@ pub mod i18n;
 ))]
 compile_error!(
     "The 'kit' feature requires at least one database driver feature: \
-     \"sqlite\", \"postgres\", or \"mysql\". Enable one or more of these \
-     features alongside 'kit'."
+     \"sqlite\", \"postgres\", \"mysql\", or \"duckdb\". Enable one or more \
+     of these features alongside 'kit'."
 );
 
 // Backwards compatibility - expose modules at root level
@@ -173,11 +173,13 @@ pub use support::io::sink::encryption::{derive_key_from_password, get_encryption
 pub use support::io::sink::ring_buffered_file::{
     BackpressureStrategy, ChannelBufferedConfig, ChannelBufferedFileSink, ChannelBufferedMetrics,
 };
+#[cfg(feature = "gzip")]
+pub use support::io::sink::GzipCompression;
 pub use support::io::sink::{
     CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation, CompressionStrategy,
-    DiskCheckable, FileSinkFactory, GzipCompression, LogSink, NoCompression, Rotatable,
-    RotationContext, RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry,
-    SizeBasedRotation, TimeBasedRotation,
+    DiskCheckable, FileSinkFactory, LogSink, NoCompression, Rotatable, RotationContext,
+    RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry, SizeBasedRotation,
+    TimeBasedRotation,
 };
 
 // Re-export masking for benchmarks
