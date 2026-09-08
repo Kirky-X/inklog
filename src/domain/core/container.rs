@@ -74,6 +74,7 @@
 //! }
 //! ```
 
+use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::InklogConfig;
@@ -109,7 +110,8 @@ use crate::{LoggerDependencies, LoggerManager};
 ///
 /// # 线程安全
 ///
-/// 容器本身是线程安全的，可以在多个线程间共享：
+/// 容器的读取接口（`cache()`、`config()`、`database()`、`create_logger()`）
+/// 均为 `&self`，可通过 `Arc<InklogContainer>` 跨线程共享并发调用：
 ///
 /// ```ignore
 /// use std::sync::Arc;
@@ -126,6 +128,10 @@ use crate::{LoggerDependencies, LoggerManager};
 ///     c2.create_logger().await
 /// });
 /// ```
+///
+/// 注意：`set_database()` 等要求 `&mut self` 的方法需要在独占访问下调用。
+/// 若需在共享所有权下变更容器状态，同步方式（如 `Arc<Mutex<InklogContainer>>`）
+/// 由调用方自行负责。
 pub struct InklogContainer {
     /// 缓存实例
     cache: Arc<dyn Cache>,
@@ -360,9 +366,66 @@ impl InklogContainer {
     }
 }
 
+/// Default 降级路径使用的空缓存：不存储任何数据，所有操作成功但无效。
+/// 仅在 `Default::default()` 的默认缓存初始化失败时兜底使用。
+struct NoopCache;
+
+#[async_trait]
+impl Cache for NoopCache {
+    async fn get(&self, _key: &str) -> Result<Option<String>, InklogError> {
+        Ok(None)
+    }
+
+    async fn set(&self, _key: &str, _value: String) -> Result<(), InklogError> {
+        Ok(())
+    }
+
+    async fn delete(&self, _key: &str) -> Result<bool, InklogError> {
+        Ok(false)
+    }
+
+    async fn exists(&self, _key: &str) -> Result<bool, InklogError> {
+        Ok(false)
+    }
+}
+
 impl Default for InklogContainer {
     fn default() -> Self {
-        Self::new().expect("Failed to create default InklogContainer")
+        // Default 无法返回 Result：cache/config 默认初始化失败时降级为
+        // 空缓存 + 默认配置（不加载文件系统），仅记录警告，绝不 panic。
+        let cache = match OxCacheAdapter::new() {
+            Ok(cache) => Arc::new(cache) as Arc<dyn Cache>,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "InklogContainer default cache init failed; using no-op cache"
+                );
+                Arc::new(NoopCache) as Arc<dyn Cache>
+            }
+        };
+        let config = match InklogConfigAdapter::new() {
+            Ok(config) => Arc::new(config) as Arc<dyn Config>,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "InklogContainer default config init failed; using default config"
+                );
+                Arc::new(InklogConfigAdapter::from_config(InklogConfig::default()))
+                    as Arc<dyn Config>
+            }
+        };
+
+        Self {
+            cache,
+            config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            database: None,
+        }
     }
 }
 
@@ -471,15 +534,18 @@ impl InklogContainerBuilder {
     ///
     /// # 返回
     ///
-    /// 成功返回 `Ok(InklogContainer)`，失败返回 `Err(InklogError)`
+    /// 成功返回 `Ok(InklogContainer)`，失败返回 `Err(InklogError)`。
+    /// 默认初始化失败时以 `Err` 传播（与 `new()` 一致），不 panic。
     pub fn build(self) -> Result<InklogContainer, InklogError> {
-        let cache = self.cache.unwrap_or_else(|| {
-            Arc::new(OxCacheAdapter::new().expect("Failed to create default cache"))
-        });
+        let cache = match self.cache {
+            Some(cache) => cache,
+            None => Arc::new(OxCacheAdapter::new()?),
+        };
 
-        let config = self.config.unwrap_or_else(|| {
-            Arc::new(InklogConfigAdapter::new().expect("Failed to create default config"))
-        });
+        let config = match self.config {
+            Some(config) => config,
+            None => Arc::new(InklogConfigAdapter::new()?),
+        };
 
         Ok(InklogContainer {
             cache,
@@ -504,13 +570,17 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    // 以下默认路径测试依赖 InklogConfigAdapter::new()（读取 INKLOG_CONFIG_PATH/
+    // 文件系统配置），与操纵该环境变量的 serial 测试互斥执行
     #[test]
+    #[serial]
     fn test_container_new() {
         let container = InklogContainer::new();
         assert!(container.is_ok());
     }
 
     #[test]
+    #[serial]
     fn test_container_default() {
         let container = InklogContainer::default();
         // 验证容器已创建
@@ -519,6 +589,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_container_from_config() {
         let config = InklogConfig::default();
         let container = InklogContainer::from_config(config);
@@ -526,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_container_builder_default() {
         let container = InklogContainer::builder().build();
         assert!(container.is_ok());
@@ -673,6 +745,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_container_builder_new() {
         // 直接调用 InklogContainerBuilder::new()（覆盖 new 方法体）
         let builder = InklogContainerBuilder::new();
@@ -681,6 +754,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_container_builder_new_equals_default() {
         // new() 内部调用 default()，两者应等价
         let from_new = InklogContainerBuilder::new();
@@ -689,6 +763,48 @@ mod tests {
         // 两者都能成功构建
         assert!(from_new.build().is_ok());
         assert!(from_default.build().is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn test_container_builder_build_returns_err_when_default_config_init_fails() {
+        // INKLOG_CONFIG_PATH 指向非法 TOML → 默认 InklogConfigAdapter::new() 失败
+        // → build() 应返回 Err 而非 panic（旧实现为 .expect panic）
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let bad = dir.path().join("invalid.toml");
+        std::fs::write(&bad, "this is = = not valid toml [[[")
+            .expect("Failed to write config");
+        unsafe {
+            std::env::set_var("INKLOG_CONFIG_PATH", &bad);
+        }
+        let result = InklogContainer::builder().build();
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        assert!(
+            result.is_err(),
+            "build() should return Err instead of panicking when default config init fails"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_container_default_does_not_panic_when_config_init_fails() {
+        // Default 无法返回 Result：默认配置初始化失败时降级为默认配置，绝不 panic
+        let dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let bad = dir.path().join("invalid.toml");
+        std::fs::write(&bad, "this is = = not valid toml [[[")
+            .expect("Failed to write config");
+        unsafe {
+            std::env::set_var("INKLOG_CONFIG_PATH", &bad);
+        }
+        let container = InklogContainer::default();
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        // 降级路径下 cache/config 仍可用
+        let _cache = container.cache();
+        let _config = container.config();
     }
 
     // ============================================================================

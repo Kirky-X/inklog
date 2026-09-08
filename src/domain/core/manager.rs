@@ -388,6 +388,8 @@ impl LoggerManager {
 
         // 每个启用的异步 sink 拥有独立 channel，避免 MPMC 单接收者语义导致
         // 记录只被一个 worker 消费（其余 sink 数据缺失）。
+        // 默认语义差异（有意设计）：file sink 未配置（None）视为启用——file 通道
+        // 默认开；database sink 未配置（None）视为禁用——db 通道默认关。
         let file_enabled = config.file_sink.as_ref().is_none_or(|cfg| cfg.enabled);
         let db_enabled = config.database_sink.as_ref().is_some_and(|cfg| cfg.enabled);
         #[allow(unused_variables)] // db_receiver 仅在启用 db 后端 feature 时使用
@@ -398,10 +400,12 @@ impl LoggerManager {
             (None, None)
         };
 
-        let console_sink: Arc<Mutex<dyn LogSink>> = Arc::new(Mutex::new(ConsoleSink::new(
-            config.console_sink.clone().unwrap_or_default(),
-            LogTemplate::new(&config.global.format),
-        )));
+        let console_sink: Arc<Mutex<Arc<dyn LogSink>>> = Arc::new(Mutex::new(Arc::new(
+            ConsoleSink::new(
+                config.console_sink.clone().unwrap_or_default(),
+                LogTemplate::new(&config.global.format),
+            ),
+        ) as Arc<dyn LogSink>));
 
         // Initialize tracing subscriber with console_sender channel
         let primary_async_sender = if file_enabled {
@@ -458,9 +462,9 @@ impl LoggerManager {
             path: PathBuf::from("logs/error.log"),
             ..Default::default()
         };
-        let error_sink: Arc<Mutex<Option<Box<dyn LogSink>>>> =
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> =
             Arc::new(Mutex::new(match FileSink::new(error_sink_config) {
-                Ok(sink) => Some(Box::new(sink) as Box<dyn LogSink>),
+                Ok(sink) => Some(Arc::new(sink) as Arc<dyn LogSink>),
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to create error sink");
                     None
@@ -480,7 +484,25 @@ impl LoggerManager {
             feature = "duckdb"
         ))]
         let database = match database {
-            Some(db) => Some(db),
+            Some(db) => {
+                // 注入路径与自动创建路径对齐：db sink 启用且配置的 pool_size 超过
+                // effective_db_worker_limit 上限时记录警告。注入的 Database 为不透明
+                // trait 对象，无法在此外调整其连接池，仅提示调用方。
+                if let Some(ref cfg) = config.database_sink
+                    && cfg.enabled
+                {
+                    let db_worker_limit =
+                        crate::support::io::sink::database::effective_db_worker_limit();
+                    if cfg.pool_size > db_worker_limit as u32 {
+                        tracing::warn!(
+                            configured_pool_size = cfg.pool_size,
+                            limit = db_worker_limit,
+                            "Injected Database configured with pool_size above effective_db_worker_limit; cap the pool at the adapter level"
+                        );
+                    }
+                }
+                Some(db)
+            }
             None => {
                 if let Some(ref cfg) = config.database_sink {
                     if cfg.enabled {
@@ -515,13 +537,13 @@ impl LoggerManager {
             }
         };
         let (handles, shutdown_txs) = Self::start_workers(WorkerParams {
-            config: config,
+            config,
             receiver,
             console_receiver,
             control_rx,
             control_tx: control_tx.clone(),
             metrics: metrics.clone(),
-            console_sink: console_sink,
+            console_sink,
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
             file_sink_factory: Box::new(move || {
@@ -674,6 +696,28 @@ impl LoggerManager {
         self.sender.len()
     }
 
+    /// 返回注入的缓存依赖（`Arc` 克隆，与内部共享同一实例）。
+    ///
+    /// 该字段由 `with_dependencies`/builder 的 DI 路径写入，供下游服务
+    /// 按需取用；未注入时返回 `None`。
+    pub fn cache(&self) -> Option<Arc<dyn Cache>> {
+        self.cache.clone()
+    }
+
+    /// 返回注入的数据库依赖（需要 dbnexus feature）。
+    ///
+    /// 该字段由 `with_dependencies`/builder 的 DI 路径写入，供下游服务
+    /// 按需取用；未注入时返回 `None`。
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub fn database(&self) -> Option<Arc<dyn Database>> {
+        self.database.clone()
+    }
+
     pub fn trigger_recovery_for_unhealthy_sinks(&self) -> Result<Vec<String>, InklogError> {
         let health_status = self.get_health_status();
         let mut recovered_sinks = Vec::new();
@@ -731,11 +775,14 @@ impl LoggerManager {
         // tokio::task::JoinHandle has no sync .join(); is_finished() confirms completion
         for handle in handles {
             let start = Instant::now();
+            let mut backoff = Duration::from_millis(10);
             while start.elapsed() < Duration::from_secs(5) {
                 if handle.is_finished() {
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(backoff);
+                // 自适应退避：10ms 起，每轮 ×2 至上限 100ms，减少空转
+                backoff = (backoff * 2).min(Duration::from_millis(100));
             }
             // If still not finished after timeout, abort the task
             if !handle.is_finished() {
@@ -1052,6 +1099,72 @@ mod tests {
         let manager = LoggerManager::with_dependencies(deps)
             .await
             .expect("Failed to create manager with deps");
+        let _ = manager.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_manager_cache_getter_returns_injected_instance() {
+        // cache()/database() getter 应返回与注入实例共享底层数据的 Arc
+        use crate::integrations::MockCache;
+        let cache: Arc<dyn Cache> = Arc::new(MockCache::new());
+        let deps = LoggerDependencies {
+            cache: Some(Arc::clone(&cache)),
+            config: None,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            database: None,
+        };
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with deps");
+        let got = manager
+            .cache()
+            .expect("injected cache dependency should be returned");
+        assert!(Arc::ptr_eq(&cache, &got), "getter must return the same instance");
+        let _ = manager.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_manager_cache_getter_none_by_default() {
+        let manager = LoggerManager::with_dependencies(LoggerDependencies::default())
+            .await
+            .expect("Failed to create manager");
+        assert!(
+            manager.cache().is_none(),
+            "cache getter should be None without DI injection"
+        );
+        let _ = manager.shutdown();
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_manager_database_getter_returns_injected_instance() {
+        use crate::integrations::MockDatabaseAdapter;
+        let database: Arc<dyn Database> = Arc::new(MockDatabaseAdapter::new());
+        let deps = LoggerDependencies {
+            cache: None,
+            config: None,
+            database: Some(Arc::clone(&database)),
+        };
+        let manager = LoggerManager::with_dependencies(deps)
+            .await
+            .expect("Failed to create manager with database injection");
+        let got = manager
+            .database()
+            .expect("injected database dependency should be returned");
+        assert!(
+            Arc::ptr_eq(&database, &got),
+            "getter must return the same instance"
+        );
         let _ = manager.shutdown();
     }
 

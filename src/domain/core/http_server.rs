@@ -283,17 +283,12 @@ impl LoggerManager {
             }
         });
 
-        match http_server_handle.lock() {
-            Ok(mut guard) => *guard = Some(handle),
-            Err(e) => {
-                let mut args = fluent_bundle::FluentArgs::new();
-                args.set("err", e.to_string());
-                tracing::error!(
-                    "{}",
-                    crate::i18n::tr_args("config-http_lock_poisoned", args)
-                );
-            }
-        }
+        // 此锁仅保护 JoinHandle 槽位，无复合不变量：毒化时恢复出守卫继续写入，
+        // 消除"仅记日志但 handle 未存入"的路径
+        let mut handle_guard = http_server_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *handle_guard = Some(handle);
 
         info!("HTTP monitoring server configured on {}", addr);
         Ok(())

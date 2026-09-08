@@ -39,8 +39,11 @@ pub(crate) struct WorkerParams {
     pub(crate) control_rx: Receiver<SinkControlMessage>,
     pub(crate) control_tx: Sender<SinkControlMessage>,
     pub(crate) metrics: Arc<Metrics>,
-    pub(crate) console_sink: Arc<Mutex<dyn LogSink>>,
-    pub(crate) error_sink: Arc<Mutex<Option<Box<dyn LogSink>>>>,
+    /// Mutex 保护的是 sink 句柄（`Arc<dyn LogSink>`）而非 sink 本体：
+    /// 锁内只做句柄克隆，异步写必须在锁外执行（MutexGuard 不得横跨 block_on）
+    pub(crate) console_sink: Arc<Mutex<Arc<dyn LogSink>>>,
+    /// 同上：锁内仅克隆 `Option<Arc<dyn LogSink>>`，异步写在锁外执行
+    pub(crate) error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>>,
     pub(crate) effective_capacity: Arc<AtomicUsize>,
     /// FileSink 工厂闭包（用于初始创建和恢复，打破具体类型依赖）
     pub(crate) file_sink_factory:
@@ -243,9 +246,15 @@ impl LoggerManager {
                                 .unwrap_or(Duration::ZERO);
                             metrics_console.record_latency(latency);
 
-                            // Hot path: use try_lock to avoid blocking
-                            match console_sink_console.try_lock() {
-                                Ok(sink) => {
+                            // Hot path: use try_lock to avoid blocking.
+                            // 锁内仅克隆 sink 句柄，异步写在锁外执行，
+                            // 避免MutexGuard 横跨 block_on
+                            let sink = console_sink_console
+                                .try_lock()
+                                .ok()
+                                .map(|guard| Arc::clone(&*guard));
+                            match sink {
+                                Some(sink) => {
                                     if runtime_handle
                                         .block_on(async { sink.write(&record).await })
                                         .is_err()
@@ -253,7 +262,7 @@ impl LoggerManager {
                                         metrics_console.inc_sink_error();
                                     }
                                 }
-                                Err(_) => {
+                                None => {
                                     // Lock contention detected, increment metric and skip
                                     metrics_console.inc_lock_contention();
                                 }
@@ -275,9 +284,15 @@ impl LoggerManager {
                                 .unwrap_or(Duration::ZERO);
                             metrics_console.record_latency(latency);
 
-                            // Hot path: use try_lock to avoid blocking
-                            match console_sink_console.try_lock() {
-                                Ok(sink) => {
+                            // Hot path: use try_lock to avoid blocking.
+                            // 锁内仅克隆 sink 句柄，异步写在锁外执行，
+                            // 避免MutexGuard 横跨 block_on
+                            let sink = console_sink_console
+                                .try_lock()
+                                .ok()
+                                .map(|guard| Arc::clone(&*guard));
+                            match sink {
+                                Some(sink) => {
                                     if runtime_handle
                                         .block_on(async { sink.write(&record).await })
                                         .is_err()
@@ -293,7 +308,7 @@ impl LoggerManager {
                                         metrics_console.update_sink_health("console", true, None);
                                     }
                                 }
-                                Err(_) => {
+                                None => {
                                     // Lock contention detected, increment metric and skip
                                     metrics_console.inc_lock_contention();
                                 }
@@ -344,6 +359,7 @@ impl LoggerManager {
 
                                 // Retry logic
                                 let mut attempts = 0;
+                                let mut write_succeeded = false;
                                 while attempts < 3 {
                                     match runtime_handle
                                         .block_on(async { sink.write(&record).await })
@@ -351,14 +367,23 @@ impl LoggerManager {
                                         Ok(_) => {
                                             metrics_file.inc_logs_written();
                                             metrics_file.update_sink_health("file", true, None);
+                                            consecutive_failures = 0;
+                                            last_failure_time = None;
+                                            write_succeeded = true;
                                             break;
                                         }
                                         Err(e) => {
                                             attempts += 1;
+                                            consecutive_failures += 1;
+                                            last_failure_time = Some(Instant::now());
+
                                             // Log error to error.log
-                                            if let Ok(mut error_sink_guard) = error_sink_file.lock()
-                                                && let Some(sink) = error_sink_guard.as_mut()
-                                            {
+                                            // 锁内仅取句柄，异步写在锁外执行
+                                            let error_sink_handle = error_sink_file
+                                                .lock()
+                                                .ok()
+                                                .and_then(|guard| guard.clone());
+                                            if let Some(error_sink) = error_sink_handle {
                                                 let error_record = LogRecord {
                                                     timestamp: Utc::now(),
                                                     level: "ERROR".to_string(),
@@ -373,7 +398,7 @@ impl LoggerManager {
                                                         .to_string(),
                                                 };
                                                 let _ = runtime_handle.block_on(async {
-                                                    sink.write(&error_record).await
+                                                    error_sink.write(&error_record).await
                                                 });
                                             }
 
@@ -384,11 +409,18 @@ impl LoggerManager {
                                                     false,
                                                     Some(e.to_string()),
                                                 );
-                                                // Fallback to console
-                                                if let Ok(cs) = console_sink_file.lock() {
+                                                // Fallback to console（与 console 热路径一致：
+                                                // try_lock 争用时递增指标并跳过）
+                                                let cs = console_sink_file
+                                                    .try_lock()
+                                                    .ok()
+                                                    .map(|guard| Arc::clone(&*guard));
+                                                if let Some(cs) = cs {
                                                     let _ = runtime_handle.block_on(async {
                                                         cs.write(&record).await
                                                     });
+                                                } else {
+                                                    metrics_file.inc_lock_contention();
                                                 }
                                             } else {
                                                 thread::sleep(Duration::from_millis(
@@ -396,6 +428,22 @@ impl LoggerManager {
                                                 ));
                                             }
                                         }
+                                    }
+                                }
+
+                                // Auto-recovery trigger（与 DB worker 的 drain 循环保持一致）
+                                if !write_succeeded
+                                    && should_auto_recover(consecutive_failures, last_failure_time)
+                                {
+                                    tracing::warn!("{}", crate::i18n::tr("sink-file_auto_recovery"));
+                                    if let Ok(new_sink) = file_sink_factory() {
+                                        sink = new_sink;
+                                        consecutive_failures = 0;
+                                        metrics_file.update_sink_health("file", true, None);
+                                        tracing::info!(
+                                            "{}",
+                                            crate::i18n::tr("sink-file_auto_recovery_ok")
+                                        );
                                     }
                                 }
 
@@ -464,9 +512,12 @@ impl LoggerManager {
                                         last_failure_time = Some(Instant::now());
 
                                         // Log error to error.log
-                                        if let Ok(mut error_sink_guard) = error_sink_file.lock()
-                                            && let Some(sink) = error_sink_guard.as_mut()
-                                        {
+                                        // 锁内仅取句柄，异步写在锁外执行
+                                        let error_sink_handle = error_sink_file
+                                            .lock()
+                                            .ok()
+                                            .and_then(|guard| guard.clone());
+                                        if let Some(error_sink) = error_sink_handle {
                                             let error_record = LogRecord {
                                                 timestamp: Utc::now(),
                                                 level: "ERROR".to_string(),
@@ -481,7 +532,7 @@ impl LoggerManager {
                                                     .to_string(),
                                             };
                                             let _ = runtime_handle.block_on(async {
-                                                sink.write(&error_record).await
+                                                error_sink.write(&error_record).await
                                             });
                                         }
 
@@ -492,10 +543,18 @@ impl LoggerManager {
                                                 false,
                                                 Some(e.to_string()),
                                             );
-                                            // Fallback to console
-                                            if let Ok(cs) = console_sink_file.lock() {
-                                                let _ = runtime_handle
-                                                    .block_on(async { cs.write(&record).await });
+                                            // Fallback to console（与 console 热路径一致：
+                                            // try_lock 争用时递增指标并跳过）
+                                            let cs = console_sink_file
+                                                .try_lock()
+                                                .ok()
+                                                .map(|guard| Arc::clone(&*guard));
+                                            if let Some(cs) = cs {
+                                                let _ = runtime_handle.block_on(async {
+                                                    cs.write(&record).await
+                                                });
+                                            } else {
+                                                metrics_file.inc_lock_contention();
                                             }
                                         } else {
                                             thread::sleep(Duration::from_millis(
@@ -624,10 +683,12 @@ impl LoggerManager {
                                                 last_failure_time = Some(Instant::now());
 
                                                 // Log error to error.log
-                                                if let Ok(mut error_sink_guard) =
-                                                    error_sink_db.lock()
-                                                    && let Some(sink) = error_sink_guard.as_mut()
-                                                {
+                                                // 锁内仅取句柄，异步写在锁外执行
+                                                let error_sink_handle = error_sink_db
+                                                    .lock()
+                                                    .ok()
+                                                    .and_then(|guard| guard.clone());
+                                                if let Some(error_sink) = error_sink_handle {
                                                     let error_record = LogRecord {
                                                         timestamp: Utc::now(),
                                                         level: "ERROR".to_string(),
@@ -645,7 +706,7 @@ impl LoggerManager {
                                                             .to_string(),
                                                     };
                                                     let _ = runtime_handle.block_on(async {
-                                                        sink.write(&error_record).await
+                                                        error_sink.write(&error_record).await
                                                     });
                                                 }
 
@@ -657,11 +718,18 @@ impl LoggerManager {
                                                         false,
                                                         Some(error_msg),
                                                     );
-                                                    // Fallback to console
-                                                    if let Ok(cs) = console_sink_db.lock() {
+                                                    // Fallback to console（与 console 热路径一致：
+                                                    // try_lock 争用时递增指标并跳过）
+                                                    let cs = console_sink_db
+                                                        .try_lock()
+                                                        .ok()
+                                                        .map(|guard| Arc::clone(&*guard));
+                                                    if let Some(cs) = cs {
                                                         let _ = runtime_handle.block_on(async {
                                                             cs.write(&record).await
                                                         });
+                                                    } else {
+                                                        metrics_db.inc_lock_contention();
                                                     }
                                                 } else {
                                                     thread::sleep(Duration::from_millis(
@@ -776,10 +844,18 @@ impl LoggerManager {
                                                 );
 
                                                 // Fallback chain: DB -> File -> Console
-                                                if let Ok(cs) = console_sink_db.lock() {
+                                                // （与 console 热路径一致：try_lock 争用时
+                                                // 递增指标并跳过）
+                                                let cs = console_sink_db
+                                                    .try_lock()
+                                                    .ok()
+                                                    .map(|guard| Arc::clone(&*guard));
+                                                if let Some(cs) = cs {
                                                     let _ = runtime_handle.block_on(async {
                                                         cs.write(&record).await
                                                     });
+                                                } else {
+                                                    metrics_db.inc_lock_contention();
                                                 }
                                             } else {
                                                 thread::sleep(Duration::from_millis(
@@ -1174,5 +1250,122 @@ mod tests {
             &mut low_usage_since,
         );
         assert_eq!(new_cap, 50);
+    }
+
+    // ========================================================================
+    // Console worker 并发回归测试：多任务并发写 console sink 不死锁/不 panic，
+    // 所有 worker 在 shutdown 广播后均能终止（MutexGuard 不得横跨 block_on）
+    // ========================================================================
+
+    #[test]
+    fn test_console_worker_concurrent_writes_terminate_without_deadlock() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to build test runtime");
+
+        let config = InklogConfig::default();
+        let (file_tx, file_rx) = bounded::<Arc<LogRecord>>(100);
+        let (console_tx, console_rx) = bounded::<Arc<LogRecord>>(2048);
+        let (control_tx, control_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let effective_capacity = Arc::new(AtomicUsize::new(2048));
+        let console_sink: Arc<Mutex<Arc<dyn LogSink>>> = Arc::new(Mutex::new(Arc::new(
+            crate::support::io::ConsoleSink::new(
+                config.console_sink.clone().unwrap_or_default(),
+                crate::LogTemplate::new(&config.global.format),
+            ),
+        ) as Arc<dyn LogSink>));
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
+
+        let params = WorkerParams {
+            config,
+            receiver: file_rx,
+            console_receiver: console_rx,
+            control_rx,
+            control_tx,
+            metrics: metrics.clone(),
+            console_sink,
+            error_sink,
+            effective_capacity,
+            file_sink_factory: Box::new(|| {
+                Err(InklogError::ConfigError("unused in test".to_string()))
+            }),
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            db_sink_factory: Box::new(|_db, _metrics| {
+                Err(InklogError::ConfigError("unused in test".to_string()))
+            }),
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            database: None,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            db_receiver: None,
+        };
+
+        let (handles, shutdown_txs) = runtime
+            .block_on(async { LoggerManager::start_workers(params).expect("start workers") });
+        let _ = file_tx;
+
+        // 多任务并发向 console channel 投递记录
+        let producers: Vec<_> = (0..4)
+            .map(|t| {
+                let tx = console_tx.clone();
+                thread::spawn(move || {
+                    for i in 0..100 {
+                        let record = Arc::new(LogRecord {
+                            timestamp: Utc::now(),
+                            level: "INFO".to_string(),
+                            target: format!("concurrent::{t}"),
+                            message: format!("concurrent write {t}-{i}"),
+                            fields: Default::default(),
+                            file: None,
+                            line: None,
+                            thread_id: "test".to_string(),
+                        });
+                        if tx.send(record).is_err() {
+                            break;
+                        }
+                    }
+                })
+            })
+            .collect();
+        for producer in producers {
+            producer.join().expect("producer thread panicked");
+        }
+        drop(console_tx);
+
+        // 广播 shutdown 并等待所有 worker 终止；限时未结束即视为死锁回归
+        for tx in &shutdown_txs {
+            let _ = tx.send_timeout((), Duration::from_secs(2));
+        }
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut all_finished = true;
+        for handle in handles {
+            while !handle.is_finished() {
+                if Instant::now() > deadline {
+                    all_finished = false;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            handle.abort();
+        }
+        assert!(all_finished, "workers must terminate without deadlock");
+        assert_eq!(metrics.sink_errors(), 0, "console writes must not fail");
     }
 }

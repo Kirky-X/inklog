@@ -120,6 +120,43 @@ mod tests {
         assert_eq!(builder.validation_errors.len(), 2);
     }
 
+    #[test]
+    fn test_builder_invalid_level_keeps_default_value() {
+        // 校验失败时不把非法值写入配置，保持默认 "info"
+        let builder = LoggerBuilder::new().level("not-a-level");
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert_eq!(builder.config.global.level, "info");
+    }
+
+    #[test]
+    fn test_builder_invalid_level_keeps_previous_value() {
+        // 合法值先设置，随后非法值不应覆盖
+        let builder = LoggerBuilder::new().level("debug").level("not-a-level");
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert_eq!(builder.config.global.level, "debug");
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_builder_http_port_zero_does_not_write_config() {
+        // 非法端口不写入配置：http_server 保持 None（未被创建）
+        let builder = LoggerBuilder::new().http_port(0);
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert!(builder.config.http_server.is_none());
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_builder_http_port_zero_does_not_overwrite_existing() {
+        // 非法端口不应覆盖之前设置的合法端口
+        let builder = LoggerBuilder::new()
+            .enable_http_server(true)
+            .http_port(8080)
+            .http_port(0);
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert_eq!(builder.config.http_server.as_ref().unwrap().port, 8080);
+    }
+
     #[cfg(feature = "http")]
     #[test]
     fn test_builder_http_port_zero() {
@@ -189,6 +226,245 @@ mod tests {
             crate::HttpErrorMode::Warn
         ));
     }
+
+    // =========================================================================
+    // database() 配置 setter 与 driver 推断测试（需要 db 后端 feature）
+    // =========================================================================
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_pool_size_sets_config() {
+        let builder = LoggerBuilder::new()
+            .database("postgres://localhost/logs")
+            .with_pool_size(5);
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert_eq!(db.pool_size, 5);
+        assert!(db.enabled);
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_pool_size_creates_config_when_absent() {
+        let builder = LoggerBuilder::new().with_pool_size(3);
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert_eq!(db.pool_size, 3);
+        // 仅 setter 不启用 db sink
+        assert!(!db.enabled);
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_batch_size_sets_config() {
+        let builder = LoggerBuilder::new()
+            .database("postgres://localhost/logs")
+            .with_batch_size(50);
+        assert_eq!(builder.config.database_sink.as_ref().unwrap().batch_size, 50);
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_flush_interval_ms_sets_config() {
+        let builder = LoggerBuilder::new()
+            .database("postgres://localhost/logs")
+            .with_flush_interval_ms(250);
+        assert_eq!(
+            builder.config.database_sink.as_ref().unwrap().flush_interval_ms,
+            250
+        );
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_table_name_sets_config() {
+        let builder = LoggerBuilder::new()
+            .database("postgres://localhost/logs")
+            .with_table_name("app_logs");
+        assert_eq!(
+            builder.config.database_sink.as_ref().unwrap().table_name,
+            "app_logs"
+        );
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_admin_role_sets_config() {
+        let builder = LoggerBuilder::new()
+            .database("postgres://localhost/logs")
+            .with_admin_role("log_admin");
+        assert_eq!(
+            builder.config.database_sink.as_ref().unwrap().admin_role,
+            "log_admin"
+        );
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_driver_sets_config() {
+        let builder = LoggerBuilder::new()
+            .database("sqlite::memory:")
+            .with_driver(crate::DatabaseDriver::MySQL);
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert!(matches!(db.driver, crate::DatabaseDriver::MySQL));
+        // driver 已显式设置
+        assert!(builder.db_driver_explicit);
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_database_infers_postgres_driver() {
+        // URL 可推断时使用推断值（旧实现恒为默认 SQLite）
+        let builder = LoggerBuilder::new().database("postgres://localhost/logs");
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert!(matches!(db.driver, crate::DatabaseDriver::PostgreSQL));
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_database_infers_mysql_driver() {
+        let builder = LoggerBuilder::new().database("mysql://localhost/logs");
+        assert!(matches!(
+            builder.config.database_sink.as_ref().unwrap().driver,
+            crate::DatabaseDriver::MySQL
+        ));
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_database_infers_sqlite_memory_driver() {
+        // "sqlite::memory:" 无 "//"，scheme 解析为 "sqlite"
+        let builder = LoggerBuilder::new().database("sqlite::memory:");
+        assert!(matches!(
+            builder.config.database_sink.as_ref().unwrap().driver,
+            crate::DatabaseDriver::SQLite
+        ));
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_database_unknown_scheme_keeps_default_driver() {
+        // 无法推断时保持默认值（SQLite）
+        let builder = LoggerBuilder::new().database("custom-backend://localhost");
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert!(matches!(db.driver, crate::DatabaseDriver::SQLite));
+        assert!(builder.validation_errors.is_empty());
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_infer_driver_common_schemes() {
+        use crate::DatabaseDriver;
+        assert_eq!(LoggerBuilder::infer_driver("postgres://h/db"), Some(DatabaseDriver::PostgreSQL));
+        assert_eq!(
+            LoggerBuilder::infer_driver("postgresql://h/db"),
+            Some(DatabaseDriver::PostgreSQL)
+        );
+        assert_eq!(LoggerBuilder::infer_driver("mysql://h/db"), Some(DatabaseDriver::MySQL));
+        assert_eq!(LoggerBuilder::infer_driver("sqlite://f.db"), Some(DatabaseDriver::SQLite));
+        assert_eq!(LoggerBuilder::infer_driver("sqlite3://f.db"), Some(DatabaseDriver::SQLite));
+        assert_eq!(LoggerBuilder::infer_driver("sqlite::memory:"), Some(DatabaseDriver::SQLite));
+        assert_eq!(LoggerBuilder::infer_driver("duckdb://f.db"), Some(DatabaseDriver::DuckDB));
+        // 大小写不敏感
+        assert_eq!(LoggerBuilder::infer_driver("POSTGRES://h/db"), Some(DatabaseDriver::PostgreSQL));
+        // 无法识别
+        assert_eq!(LoggerBuilder::infer_driver("weird://x"), None);
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_with_driver_conflicting_url_records_error() {
+        // 显式 driver 与 URL 推断冲突 → validation error
+        let builder = LoggerBuilder::new()
+            .database("postgres://localhost/logs")
+            .with_driver(crate::DatabaseDriver::SQLite);
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert!(builder.validation_errors[0].contains("conflicts with"));
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_builder_database_conflicting_explicit_driver_records_error() {
+        // 先显式设置 driver，再提供冲突 scheme 的 URL → validation error
+        let builder = LoggerBuilder::new()
+            .with_driver(crate::DatabaseDriver::MySQL)
+            .database("postgres://localhost/logs");
+        assert_eq!(builder.validation_errors.len(), 1);
+        assert!(builder.validation_errors[0].contains("conflicts with"));
+        // URL 可推断时推断值生效
+        assert!(matches!(
+            builder.config.database_sink.as_ref().unwrap().driver,
+            crate::DatabaseDriver::PostgreSQL
+        ));
+    }
 }
 
 // ============================================================================
@@ -233,6 +509,15 @@ pub struct LoggerBuilder {
     pub(crate) deps: LoggerDependencies,
     /// Accumulated validation errors for deferred reporting at `build()` time.
     pub(crate) validation_errors: Vec<String>,
+    /// 是否通过 `with_driver` 显式设置过数据库 driver
+    /// （用于与 URL scheme 推断结果做冲突校验）
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub(crate) db_driver_explicit: bool,
 }
 
 impl LoggerBuilder {
@@ -240,6 +525,10 @@ impl LoggerBuilder {
         Self::default()
     }
 
+    /// 设置全局日志级别。
+    ///
+    /// 非法级别会记录 validation error（`build()` 时统一返回 `Err`），
+    /// 且不会写入配置——配置字段保持原值/默认值。
     pub fn level(mut self, level: impl Into<String>) -> Self {
         let level_str = level.into();
         if !crate::LogLevel::is_valid_level(&level_str) {
@@ -248,6 +537,7 @@ impl LoggerBuilder {
                 level_str,
                 crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
             ));
+            return self;
         }
         self.config.global.level = level_str;
         self
@@ -290,22 +580,185 @@ impl LoggerBuilder {
     ))]
     pub fn database(mut self, url: impl Into<String>) -> Self {
         let url_str = url.into();
-        let config = crate::DatabaseSinkConfig {
-            name: "default".to_string(),
-            enabled: true,
-            driver: crate::DatabaseDriver::default(),
-            url: url_str,
-            pool_size: 10,
-            batch_size: 100,
-            flush_interval_ms: 500,
-            partition: crate::PartitionStrategy::default(),
-            table_name: "logs".to_string(),
-            archive_format: crate::ArchiveFormat::default(),
-            parquet_config: crate::ParquetConfig::default(),
-            permissions_path: None,
-            admin_role: "admin".to_string(),
-        };
-        self.config.database_sink = Some(config);
+        let inferred = Self::infer_driver(&url_str);
+        // 显式设置过 driver 且与 URL scheme 推断结果冲突时记录 validation error
+        if self.db_driver_explicit
+            && let Some(ref db) = self.config.database_sink
+            && let Some(ref target) = inferred
+            && db.driver != *target
+        {
+            self.validation_errors.push(format!(
+                "Database driver '{}' (explicitly set) conflicts with driver '{}' inferred from URL '{}'. The inferred driver takes precedence.",
+                db.driver, target, url_str
+            ));
+        }
+        if let Some(ref mut db) = self.config.database_sink {
+            db.enabled = true;
+            db.url = url_str;
+            if let Some(target) = inferred {
+                db.driver = target;
+            }
+        } else {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                enabled: true,
+                url: url_str,
+                driver: inferred.unwrap_or_default(),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 根据 URL scheme 推断数据库 driver。
+    ///
+    /// 与 `DatabaseDriver` 的 `FromStr` 接受的名字保持一致：
+    /// postgres/postgresql、mysql、sqlite/sqlite3、duckdb。
+    /// 无法识别的 scheme 返回 `None`，调用方保持默认值。
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    fn infer_driver(url: &str) -> Option<crate::DatabaseDriver> {
+        let scheme = url.split(':').next()?;
+        match scheme.to_ascii_lowercase().as_str() {
+            "postgres" | "postgresql" => Some(crate::DatabaseDriver::PostgreSQL),
+            "mysql" => Some(crate::DatabaseDriver::MySQL),
+            "sqlite" | "sqlite3" => Some(crate::DatabaseDriver::SQLite),
+            "duckdb" => Some(crate::DatabaseDriver::DuckDB),
+            _ => None,
+        }
+    }
+
+    // === Database 配置快捷方法 ===
+
+    /// 显式设置数据库 driver。
+    ///
+    /// 若与已配置 URL 的 scheme 推断结果冲突，会记录 validation error
+    /// （`build()` 时统一返回 `Err`）。
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub fn with_driver(mut self, driver: crate::DatabaseDriver) -> Self {
+        if let Some(ref db) = self.config.database_sink
+            && let Some(target) = Self::infer_driver(&db.url)
+            && target != driver
+        {
+            self.validation_errors.push(format!(
+                "Database driver '{}' conflicts with driver '{}' inferred from URL '{}'.",
+                driver, target, db.url
+            ));
+        }
+        self.db_driver_explicit = true;
+        if let Some(ref mut db) = self.config.database_sink {
+            db.driver = driver;
+        } else {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                driver,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置数据库连接池大小（默认 10）
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub fn with_pool_size(mut self, pool_size: u32) -> Self {
+        if let Some(ref mut db) = self.config.database_sink {
+            db.pool_size = pool_size;
+        } else {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                pool_size,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置数据库批量写入大小（默认 100）
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub fn with_batch_size(mut self, batch_size: usize) -> Self {
+        if let Some(ref mut db) = self.config.database_sink {
+            db.batch_size = batch_size;
+        } else {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                batch_size,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置数据库 flush 间隔（毫秒，默认 500）
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub fn with_flush_interval_ms(mut self, flush_interval_ms: u64) -> Self {
+        if let Some(ref mut db) = self.config.database_sink {
+            db.flush_interval_ms = flush_interval_ms;
+        } else {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                flush_interval_ms,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置数据库日志表名（默认 "logs"）
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub fn with_table_name(mut self, table_name: impl Into<String>) -> Self {
+        let table_name = table_name.into();
+        if let Some(ref mut db) = self.config.database_sink {
+            db.table_name = table_name;
+        } else {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                table_name,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置数据库管理员角色名（默认 "admin"）
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    pub fn with_admin_role(mut self, admin_role: impl Into<String>) -> Self {
+        let admin_role = admin_role.into();
+        if let Some(ref mut db) = self.config.database_sink {
+            db.admin_role = admin_role;
+        } else {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                admin_role,
+                ..Default::default()
+            });
+        }
         self
     }
 
@@ -443,11 +896,15 @@ impl LoggerBuilder {
     ///
     /// # Arguments
     /// * `port` - 监听端口号 (1-65535)
+    ///
+    /// 非法端口（0）会记录 validation error（`build()` 时统一返回 `Err`），
+    /// 且不会写入配置——配置字段保持原值/默认值。
     #[cfg(feature = "http")]
     pub fn http_port(mut self, port: u16) -> Self {
         if port == 0 {
             self.validation_errors
                 .push("HTTP port must be between 1 and 65535".to_string());
+            return self;
         }
         if let Some(ref mut http) = self.config.http_server {
             http.port = port;

@@ -130,26 +130,83 @@ impl LoggerSubscriber {
         level == "ERROR" || level == "FATAL"
     }
 
-    /// Sanitize a log record's message and fields values.
+    /// 敏感键判定，与 `LogRecord::is_sensitive_key`
+    /// （src/domain/types/log_record.rs，crate 内非 pub）等价：
+    /// 该方法未提供 pub 接口，无法直接引用，故按同一模式列表在此实现，
+    /// 两处需保持一致。
+    fn is_sensitive_key(key: &str) -> bool {
+        const SENSITIVE_KEY_PATTERNS: &[&str] =
+            &["password", "token", "secret", "key", "credential", "auth"];
+        let key_lower = key.to_lowercase();
+        SENSITIVE_KEY_PATTERNS
+            .iter()
+            .any(|pattern| key_lower.contains(*pattern))
+    }
+
+    /// Sanitize a log record's message and fields values, recursing into
+    /// nested objects and arrays so strings under sensitive keys are not
+    /// left untouched.
     fn sanitize_record(&self, record: &mut LogRecord) {
         if let Some(ref sanitizer) = self.sanitizer {
             record.message = sanitizer.sanitize(&record.message);
             for value in record.fields.values_mut() {
-                if let Value::String(s) = value {
-                    *s = sanitizer.sanitize(s);
-                }
+                Self::sanitize_field_value(sanitizer, value);
             }
         }
     }
 
+    /// 递归脱敏字段值：字符串值一律 sanitize；Object 按键递归（敏感键的
+    /// 字符串值同样被脱敏，不再被跳过）；Array 逐元素递归。
+    fn sanitize_field_value(sanitizer: &LogSanitizer, value: &mut Value) {
+        match value {
+            Value::String(s) => *s = sanitizer.sanitize(s),
+            Value::Array(items) => {
+                for item in items.iter_mut() {
+                    Self::sanitize_field_value(sanitizer, item);
+                }
+            }
+            Value::Object(map) => {
+                for (nested_key, nested_value) in map.iter_mut() {
+                    if Self::is_sensitive_key(nested_key) {
+                        // 敏感键：直接脱敏其字符串值
+                        if let Value::String(s) = nested_value {
+                            *s = sanitizer.sanitize(s);
+                        } else {
+                            Self::sanitize_field_value(sanitizer, nested_value);
+                        }
+                    } else {
+                        Self::sanitize_field_value(sanitizer, nested_value);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn try_flush_fallback(&self) {
-        let mut buffer = self.fallback_buffer.lock();
-        while let Some(record) = buffer.front() {
-            let timeout = Duration::from_millis(self.send_timeout_ms);
+        // 锁内仅取出待 flush 批量，循环发送在锁外执行，
+        // 避免锁被持有 N × send_timeout
+        let batch: Vec<Arc<LogRecord>> = {
+            let mut buffer = self.fallback_buffer.lock();
+            buffer.drain(..).collect()
+        };
+        if batch.is_empty() {
+            return;
+        }
+        let timeout = Duration::from_millis(self.send_timeout_ms);
+        let mut flushed = 0;
+        for record in &batch {
             if !self.send_to_async_sinks(record, timeout) {
                 break;
             }
-            buffer.pop_front();
+            flushed += 1;
+        }
+        if flushed < batch.len() {
+            // flush 失败：未发出的记录按原顺序回填到队首
+            let mut buffer = self.fallback_buffer.lock();
+            for record in batch[flushed..].iter().rev() {
+                buffer.push_front(Arc::clone(record));
+            }
         }
     }
 }
@@ -165,10 +222,11 @@ impl Drop for LoggerSubscriber {
             self.try_flush_fallback();
             let remaining = self.fallback_buffer.lock().len();
             if remaining > 0 {
-                tracing::warn!(
-                    unflushed_records = remaining,
-                    "LoggerSubscriber dropped with unflushed fallback records"
+                // Drop 阶段不依赖 tracing 全局状态：格式化到 String 后直接输出
+                let warning = format!(
+                    "LoggerSubscriber dropped with {remaining} unflushed fallback records"
                 );
+                eprintln!("{warning}");
             }
         }
     }
@@ -454,6 +512,157 @@ mod tests {
             subscriber.fallback_buffer.lock().len(),
             1,
             "buffer should still contain the record after disconnect"
+        );
+    }
+
+    #[test]
+    fn test_try_flush_fallback_preserves_order_on_partial_flush() {
+        let (console_tx, _console_rx) = bounded(10);
+        // 容量 1：第一条发送成功后 channel 满，第二条 send_timeout 超时中断
+        let (async_tx, async_rx) = bounded(1);
+        let metrics = Arc::new(Metrics::new());
+
+        let subscriber = LoggerSubscriber::new(console_tx, async_tx, metrics);
+
+        for i in 0..3 {
+            let record = Arc::new(LogRecord::new(
+                tracing::Level::ERROR,
+                "test::fallback".to_string(),
+                format!("fallback-order-{i}"),
+            ));
+            subscriber.fallback_buffer.lock().push_back(record);
+        }
+
+        subscriber.try_flush_fallback();
+
+        // 第一条已发出，剩余两条应按原顺序回填到队首
+        let first = async_rx
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .expect("first record should be flushed");
+        assert_eq!(first.message, "fallback-order-0");
+
+        let buffer = subscriber.fallback_buffer.lock();
+        assert_eq!(buffer.len(), 2, "remaining records should be refilled");
+        assert_eq!(
+            buffer.front().unwrap().message,
+            "fallback-order-1",
+            "refilled records must keep original order (front)"
+        );
+        assert_eq!(
+            buffer.back().unwrap().message,
+            "fallback-order-2",
+            "refilled records must keep original order (back)"
+        );
+    }
+
+    // =========================================================================
+    // sanitize_record 嵌套结构递归测试：嵌套对象/数组中敏感键被脱敏
+    // =========================================================================
+
+    #[test]
+    fn test_sanitize_record_recurses_into_nested_object_and_array() {
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let sanitizer = Arc::new(LogSanitizer::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics).with_sanitizer(sanitizer);
+
+        let mut record = LogRecord::new(
+            tracing::Level::INFO,
+            "test::sanitize".to_string(),
+            "nested sanitize".to_string(),
+        );
+
+        // 嵌套对象：敏感键 + 普通键
+        let mut nested = serde_json::Map::new();
+        nested.insert(
+            "password".to_string(),
+            Value::String("line1\nline2".to_string()),
+        );
+        nested.insert("note".to_string(), Value::String("a\nb".to_string()));
+        record
+            .fields
+            .insert("config".to_string(), Value::Object(nested));
+
+        // 数组内对象：敏感键
+        let mut item = serde_json::Map::new();
+        item.insert(
+            "api_token".to_string(),
+            Value::String("tok1\ntok2".to_string()),
+        );
+        record
+            .fields
+            .insert("items".to_string(), Value::Array(vec![Value::Object(item)]));
+
+        layer.sanitize_record(&mut record);
+
+        // 嵌套对象中的敏感键字符串值被脱敏（换行被转义）
+        let config = record.fields.get("config").unwrap();
+        if let Value::Object(map) = config {
+            if let Value::String(s) = map.get("password").unwrap() {
+                assert!(
+                    !s.contains('\n') && s.contains("\\n"),
+                    "nested sensitive key 'password' must be sanitized, got: {s:?}"
+                );
+            } else {
+                panic!("password value should remain a string");
+            }
+            // 普通键同样被递归脱敏
+            if let Value::String(s) = map.get("note").unwrap() {
+                assert!(
+                    !s.contains('\n'),
+                    "nested plain string must also be sanitized, got: {s:?}"
+                );
+            }
+        } else {
+            panic!("config field should remain an object");
+        }
+
+        // 数组内对象中的敏感键字符串值被脱敏
+        let items = record.fields.get("items").unwrap();
+        if let Value::Array(arr) = items {
+            if let Value::Object(map) = &arr[0] {
+                if let Value::String(s) = map.get("api_token").unwrap() {
+                    assert!(
+                        !s.contains('\n') && s.contains("\\n"),
+                        "sensitive key inside array must be sanitized, got: {s:?}"
+                    );
+                } else {
+                    panic!("api_token value should remain a string");
+                }
+            } else {
+                panic!("array element should remain an object");
+            }
+        } else {
+            panic!("items field should remain an array");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_record_leaves_non_string_values_untouched() {
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let sanitizer = Arc::new(LogSanitizer::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics).with_sanitizer(sanitizer);
+
+        let mut record = LogRecord::new(
+            tracing::Level::INFO,
+            "test::sanitize".to_string(),
+            "non-string values".to_string(),
+        );
+        record
+            .fields
+            .insert("count".to_string(), serde_json::json!(42));
+
+        layer.sanitize_record(&mut record);
+
+        assert_eq!(
+            record.fields.get("count").unwrap(),
+            &serde_json::json!(42),
+            "non-string values must not be modified"
         );
     }
 
