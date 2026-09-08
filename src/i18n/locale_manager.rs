@@ -4,7 +4,10 @@
 //!
 //! Provides locale initialization, Fluent resource management, and
 //! translation lookup. Uses `fluent-bundle` for runtime message
-//! formatting with `.ftl` translation files.
+//! formatting with `.ftl` translation files. All `.ftl` files are
+//! embedded at compile time (`EMBEDDED_LOCALES`) so deployed binaries
+//! translate without the build machine's `locales/` directory; an
+//! on-disk `locales/` directory (development) takes precedence.
 //!
 //! ## Locale Resolution Priority
 //!
@@ -184,19 +187,92 @@ fn is_valid_locale(locale: &str) -> bool {
     normalize_locale(locale).parse::<LanguageIdentifier>().is_ok()
 }
 
+/// Compile-time embedded copies of the `locales/` directory.
+///
+/// Each entry maps a locale directory name to its `.ftl` files, embedded
+/// via `include_str!` so deployed binaries translate without the
+/// build machine's `locales/` directory. When adding a new `.ftl` file
+/// or locale, register it here manually —
+/// `test_embedded_locales_cover_locales_dir` fails if a file on disk is
+/// missing from this table.
+const EMBEDDED_LOCALES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "en",
+        &[
+            ("cli.ftl", include_str!("../../locales/en/cli.ftl")),
+            ("config.ftl", include_str!("../../locales/en/config.ftl")),
+            ("error.ftl", include_str!("../../locales/en/error.ftl")),
+            (
+                "log_level.ftl",
+                include_str!("../../locales/en/log_level.ftl"),
+            ),
+            ("sink.ftl", include_str!("../../locales/en/sink.ftl")),
+            (
+                "validation.ftl",
+                include_str!("../../locales/en/validation.ftl"),
+            ),
+        ],
+    ),
+    (
+        "zh-CN",
+        &[
+            ("cli.ftl", include_str!("../../locales/zh-CN/cli.ftl")),
+            ("config.ftl", include_str!("../../locales/zh-CN/config.ftl")),
+            ("error.ftl", include_str!("../../locales/zh-CN/error.ftl")),
+            (
+                "log_level.ftl",
+                include_str!("../../locales/zh-CN/log_level.ftl"),
+            ),
+            ("sink.ftl", include_str!("../../locales/zh-CN/sink.ftl")),
+            (
+                "validation.ftl",
+                include_str!("../../locales/zh-CN/validation.ftl"),
+            ),
+        ],
+    ),
+];
+
 fn load_resources() -> (
+    HashMap<String, HashMap<String, FluentResource>>,
+    HashMap<String, LanguageIdentifier>,
+) {
+    let locales_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
+    load_resources_with_fallback(&locales_dir)
+}
+
+/// Prefer an on-disk locales directory (development hot-editing); the
+/// build-machine path only exists during development, so deployed
+/// binaries fall back to the embedded copies.
+fn load_resources_with_fallback(
+    locales_dir: &std::path::Path,
+) -> (
+    HashMap<String, HashMap<String, FluentResource>>,
+    HashMap<String, LanguageIdentifier>,
+) {
+    let (resources, lang_ids) = load_resources_from_dir(locales_dir);
+    if !resources.is_empty() {
+        return (resources, lang_ids);
+    }
+    load_embedded_resources()
+}
+
+/// Load Fluent resources from an on-disk locale directory laid out as
+/// `<dir>/<locale>/<name>.ftl`. Returns empty maps when the directory
+/// does not exist or cannot be read.
+fn load_resources_from_dir(
+    dir: &std::path::Path,
+) -> (
     HashMap<String, HashMap<String, FluentResource>>,
     HashMap<String, LanguageIdentifier>,
 ) {
     let mut resources: HashMap<String, HashMap<String, FluentResource>> = HashMap::new();
     let mut lang_ids: HashMap<String, LanguageIdentifier> = HashMap::new();
-    let locales_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
 
-    if !locales_dir.exists() {
+    if !dir.exists() {
         return (resources, lang_ids);
     }
 
-    let entries = match std::fs::read_dir(&locales_dir) {
+    let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("[inklog] WARNING: failed to read locales dir: {e}");
@@ -264,6 +340,49 @@ fn load_resources() -> (
         if !locale_resources.is_empty() {
             resources.insert(locale_str.clone(), locale_resources);
             lang_ids.insert(locale_str, lang_id);
+        }
+    }
+
+    (resources, lang_ids)
+}
+
+/// Build resources from [`EMBEDDED_LOCALES`] through the same
+/// `FluentResource` parse path as [`load_resources_from_dir`].
+fn load_embedded_resources() -> (
+    HashMap<String, HashMap<String, FluentResource>>,
+    HashMap<String, LanguageIdentifier>,
+) {
+    let mut resources: HashMap<String, HashMap<String, FluentResource>> = HashMap::new();
+    let mut lang_ids: HashMap<String, LanguageIdentifier> = HashMap::new();
+
+    for &(locale_str, files) in EMBEDDED_LOCALES {
+        let Ok(lang_id) = locale_str.parse::<LanguageIdentifier>() else {
+            eprintln!("[inklog] WARNING: invalid embedded locale identifier: {locale_str}");
+            continue;
+        };
+
+        let mut locale_resources = HashMap::new();
+        for &(file_name, source) in files {
+            // Key by file stem so embedded resources are indistinguishable
+            // from filesystem-loaded ones.
+            let resource_name = file_name.strip_suffix(".ftl").unwrap_or(file_name);
+            match FluentResource::try_new(source.to_string()) {
+                Ok(r) => {
+                    locale_resources.insert(resource_name.to_string(), r);
+                }
+                Err((_res, errs)) => {
+                    for err in errs {
+                        eprintln!(
+                            "[inklog] WARNING: FTL parse error in embedded {locale_str}/{file_name}: {err:?}"
+                        );
+                    }
+                }
+            }
+        }
+
+        if !locale_resources.is_empty() {
+            resources.insert(locale_str.to_string(), locale_resources);
+            lang_ids.insert(locale_str.to_string(), lang_id);
         }
     }
 
@@ -387,6 +506,97 @@ mod tests {
                 format_message("zh-CN", "log_level-name_warn", None).as_deref(),
                 Some("警告")
             );
+        }
+    }
+
+    #[test]
+    fn test_load_resources_missing_dir_falls_back_to_embedded() {
+        // Simulates a deployed binary: no on-disk locales directory at
+        // all. Translations must still work via the embedded copies,
+        // resolved through the same Fluent path as the filesystem loader.
+        let (resources, lang_ids) =
+            load_resources_with_fallback(std::path::Path::new("/nonexistent/inklog/locales"));
+        assert!(lang_ids.contains_key("en"), "en must load from embedded");
+        assert!(
+            lang_ids.contains_key("zh-CN"),
+            "zh-CN must load from embedded"
+        );
+
+        let mut bundle = FluentBundle::new(vec![lang_ids["zh-CN"].clone()]);
+        for resource in resources["zh-CN"].values() {
+            let _ = bundle.add_resource(resource);
+        }
+        let message = bundle
+            .get_message("log_level-name_info")
+            .expect("embedded zh-CN message");
+        let pattern = message.value().expect("pattern");
+        let mut errors = vec![];
+        assert_eq!(
+            bundle.format_pattern(pattern, None, &mut errors).to_string(),
+            "信息"
+        );
+    }
+
+    #[test]
+    fn test_embedded_resources_match_filesystem_entries() {
+        let locales_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
+        let (fs_resources, _) = load_resources_from_dir(&locales_dir);
+        let (embedded, _) = load_embedded_resources();
+        assert!(!embedded.is_empty(), "embedded table must not be empty");
+        for (locale, fs_map) in &fs_resources {
+            let emb_map = embedded.get(locale).unwrap_or_else(|| {
+                panic!("EMBEDDED_LOCALES missing locale dir '{locale}'")
+            });
+            assert_eq!(
+                emb_map.len(),
+                fs_map.len(),
+                "locale '{locale}': embedded resource count differs from filesystem"
+            );
+            for name in fs_map.keys() {
+                assert!(
+                    emb_map.contains_key(name),
+                    "locale '{locale}': embedded resources missing '{name}'"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_embedded_locales_cover_locales_dir() {
+        // Compile-time registration guard: every `.ftl` file under
+        // `locales/` must be listed in EMBEDDED_LOCALES, otherwise a
+        // freshly added file silently ships untranslated in production.
+        let locales_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
+        for entry in std::fs::read_dir(&locales_dir).expect("locales dir exists") {
+            let path = entry.expect("locale entry").path();
+            if !path.is_dir() {
+                continue;
+            }
+            let locale = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("locale dir name");
+            let files = EMBEDDED_LOCALES
+                .iter()
+                .find(|(l, _)| *l == locale)
+                .unwrap_or_else(|| panic!("EMBEDDED_LOCALES missing locale dir '{locale}'"))
+                .1;
+            for ftl_entry in std::fs::read_dir(&path).expect("locale dir readable") {
+                let ftl_path = ftl_entry.expect("ftl entry").path();
+                if ftl_path.extension().and_then(|e| e.to_str()) != Some("ftl") {
+                    continue;
+                }
+                let stem = ftl_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .expect("ftl file stem");
+                assert!(
+                    files
+                        .iter()
+                        .any(|(name, _)| name.strip_suffix(".ftl") == Some(stem)),
+                    "locale '{locale}': '{stem}.ftl' exists on disk but is not registered in EMBEDDED_LOCALES"
+                );
+            }
         }
     }
 }
