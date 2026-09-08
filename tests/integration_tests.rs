@@ -28,17 +28,16 @@ use inklog::sink::database::DatabaseSink;
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_e2e_logging() {
-    // This test might fail if run in parallel with others due to global subscriber
-    // We wrap it to ignore error if subscriber already set
-    if let Ok(logger) = LoggerManager::new().await {
-        info!("This is an info message");
-        error!("This is an error message");
+    let logger = LoggerManager::new()
+        .await
+        .expect("logger init should succeed");
+    info!("This is an info message");
+    error!("This is an error message");
 
-        // Give some time for async workers
-        std::thread::sleep(Duration::from_millis(200));
+    // Give some time for async workers
+    std::thread::sleep(Duration::from_millis(200));
 
-        logger.shutdown().expect("Failed to shutdown logger");
-    }
+    logger.shutdown().expect("Failed to shutdown logger");
 }
 
 #[tokio::test]
@@ -358,21 +357,55 @@ async fn test_database_timeout_flush_dbnexus() {
 use inklog::InklogConfig as ConfigInklogConfig;
 use serial_test::serial as config_serial;
 
-fn clear_all_inklog_env_vars() {
-    // 清除所有可能的 INKLOG_* 环境变量
-    for (key, _) in std::env::vars() {
-        if key.starts_with("INKLOG_") {
+/// INKLOG_* 环境变量守卫：构造时快照并清空全部 INKLOG_* 变量，
+/// drop 时先删除测试期间新增/修改的变量，再还原快照值，
+/// 保证用例失败（panic 展开）时环境同样恢复到测试前状态。
+struct InklogEnvSnapshot {
+    saved: Vec<(String, String)>,
+}
+
+impl InklogEnvSnapshot {
+    fn take_and_clear() -> Self {
+        let saved: Vec<(String, String)> = std::env::vars()
+            .filter(|(key, _)| key.starts_with("INKLOG_"))
+            .collect();
+        for (key, _) in std::env::vars() {
+            if key.starts_with("INKLOG_") {
+                unsafe {
+                    std::env::remove_var(&key);
+                }
+            }
+        }
+        Self { saved }
+    }
+}
+
+impl Drop for InklogEnvSnapshot {
+    fn drop(&mut self) {
+        for (key, _) in std::env::vars() {
+            if key.starts_with("INKLOG_") {
+                unsafe {
+                    std::env::remove_var(&key);
+                }
+            }
+        }
+        for (key, value) in &self.saved {
             unsafe {
-                std::env::remove_var(&key);
+                std::env::set_var(key, value);
             }
         }
     }
 }
 
+fn clear_all_inklog_env_vars() -> InklogEnvSnapshot {
+    // 清除所有可能的 INKLOG_* 环境变量，并返回恢复快照守卫
+    InklogEnvSnapshot::take_and_clear()
+}
+
 #[test]
 #[config_serial]
 fn test_config_from_env_overrides() {
-    clear_all_inklog_env_vars();
+    let _env = clear_all_inklog_env_vars();
 
     unsafe {
         std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
@@ -406,7 +439,7 @@ fn test_config_from_env_overrides() {
 #[test]
 #[config_serial]
 fn test_config_env_override_http_server() {
-    clear_all_inklog_env_vars();
+    let _env = clear_all_inklog_env_vars();
 
     unsafe {
         std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
@@ -439,7 +472,7 @@ fn test_config_env_override_http_server() {
 #[test]
 #[config_serial]
 fn test_config_env_override_performance() {
-    clear_all_inklog_env_vars();
+    let _env = clear_all_inklog_env_vars();
 
     unsafe {
         std::env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");

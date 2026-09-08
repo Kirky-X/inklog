@@ -260,11 +260,10 @@ mod performance_test {
 
     #[tokio::test]
     async fn test_batch_write_performance() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("batch_test.db");
-
         #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         {
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir.path().join("batch_test.db");
             let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
             let config = InklogConfig {

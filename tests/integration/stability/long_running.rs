@@ -42,4 +42,8 @@ async fn test_long_running_stability() {
     let status = logger.get_health_status();
     assert!(status.overall_status.is_operational());
     println!("Stability test passed. Metrics: {:?}", status.metrics);
+
+    unsafe {
+        std::env::remove_var("INKLOG_DATABASE_SINK_ENABLED");
+    }
 }

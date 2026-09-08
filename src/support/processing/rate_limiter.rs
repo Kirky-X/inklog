@@ -80,6 +80,22 @@ impl RateLimiterInner {
 mod tests {
     use super::*;
 
+    /// Builds a limiter whose refill window is far longer than any test
+    /// execution gap (1 token/hour), so rejections never depend on how much
+    /// real time elapses between adjacent statements on a slow CI.
+    fn limiter_with_slow_refill(max_tokens: u64) -> RateLimiter {
+        let max_tokens_f = max_tokens as f64;
+        RateLimiter {
+            inner: Mutex::new(RateLimiterInner {
+                tokens: max_tokens_f,
+                max_tokens: max_tokens_f,
+                refill_rate: 1.0 / 3600.0,
+                last_refill: Instant::now(),
+                dropped_count: 0,
+            }),
+        }
+    }
+
     #[test]
     fn test_rate_limiter_allows_within_limit() {
         let limiter = RateLimiter::new(1000);
@@ -91,18 +107,18 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_rejects_when_exhausted() {
-        // Very low rate: 2 tokens/sec
-        let limiter = RateLimiter::new(2);
+        // Bucket of 2 tokens with a negligible refill rate
+        let limiter = limiter_with_slow_refill(2);
         // Consume both tokens
         assert!(limiter.try_acquire());
         assert!(limiter.try_acquire());
-        // Third should be rejected (no time for refill)
+        // Third should be rejected (refill window far exceeds test duration)
         assert!(!limiter.try_acquire());
     }
 
     #[test]
     fn test_rate_limiter_dropped_count_increments() {
-        let limiter = RateLimiter::new(1);
+        let limiter = limiter_with_slow_refill(1);
         // Consume the single token
         assert!(limiter.try_acquire());
         // These should be dropped

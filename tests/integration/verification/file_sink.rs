@@ -122,6 +122,10 @@ fn verify_file_sink_encryption() {
 
     let enc_path = find_file_with_extension(&temp_dir, "enc").expect("No encrypted file found");
     verify_encrypted_file(&enc_path);
+
+    unsafe {
+        std::env::remove_var("LOG_KEY");
+    }
 }
 
 #[test]
