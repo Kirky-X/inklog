@@ -78,9 +78,11 @@ impl FallbackState {
 ///
 /// 用于演示当主 Sink 发生故障时如何切换到备用 Sink
 ///
-/// 使用 `tokio::sync::Mutex` 实现内部可变性，以满足 `LogSink: &self` 的 trait 约束
+/// 使用 `tokio::sync::Mutex` 实现内部可变性，以满足 `LogSink: &self` 的 trait 约束。
+/// 内部 sink 以 `Arc` 持有，便于在 flush/shutdown 中先 clone 出句柄、
+/// 释放锁之后再执行异步 I/O（避免持锁 await）。
 struct FailingSink {
-    inner: Arc<Mutex<Option<Box<dyn LogSink>>>>,
+    inner: Arc<Mutex<Option<Arc<dyn LogSink>>>>,
     fail_after: usize,
     write_count: Arc<Mutex<usize>>,
     original_name: String,
@@ -89,7 +91,7 @@ struct FailingSink {
 impl FailingSink {
     fn new(sink: Box<dyn LogSink>, fail_after: usize, name: &str) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Some(sink))),
+            inner: Arc::new(Mutex::new(Some(Arc::from(sink)))),
             fail_after,
             write_count: Arc::new(Mutex::new(0)),
             original_name: name.to_string(),
@@ -124,15 +126,19 @@ impl LogSink for FailingSink {
     }
 
     async fn flush(&self) -> Result<(), inklog::InklogError> {
-        // 注意：示例代码中 flush 在锁内执行异步 I/O，
-        // 生产环境应通过 Arc 共享 sink 引用来避免持锁 await
-        let inner = self.inner.lock().await;
-        if let Some(ref sink) = *inner {
-            sink.flush().await
-        } else {
-            Err(inklog::InklogError::IoError(std::io::Error::other(
+        // 参照 write() 的模式：锁内只 clone 出 sink 的 Arc 句柄，
+        // 释放锁之后再执行异步 I/O，避免持有 tokio Mutex 期间 await
+        //（持锁 await 会阻塞其他尝试获取锁的任务，甚至造成死锁）
+        let sink = {
+            let inner = self.inner.lock().await;
+            inner.as_ref().cloned()
+        }; // 锁在此处已释放
+
+        match sink {
+            Some(sink) => sink.flush().await,
+            None => Err(inklog::InklogError::IoError(std::io::Error::other(
                 "Sink is failed",
-            )))
+            ))),
         }
     }
 
@@ -142,11 +148,15 @@ impl LogSink for FailingSink {
     }
 
     async fn shutdown(&self) -> Result<(), inklog::InklogError> {
-        let inner = self.inner.lock().await;
-        if let Some(ref sink) = *inner {
-            sink.shutdown().await
-        } else {
-            Ok(())
+        // 同 flush()：锁内 clone Arc，锁外执行异步 I/O
+        let sink = {
+            let inner = self.inner.lock().await;
+            inner.as_ref().cloned()
+        };
+
+        match sink {
+            Some(sink) => sink.shutdown().await,
+            None => Ok(()),
         }
     }
 }

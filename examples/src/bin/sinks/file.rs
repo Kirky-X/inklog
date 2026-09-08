@@ -33,7 +33,6 @@ use inklog::config::FileSinkConfig;
 use inklog::sink::LogSink;
 use inklog::sink::file::FileSink;
 use inklog_examples::common::{print_section, print_separator, temp_file_path};
-use std::fs;
 use std::path::PathBuf;
 
 /// 示例1: 基础文件写入
@@ -91,13 +90,13 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
 
     sink.flush().await?;
 
-    // 读取并展示文件内容
+    // 读取并展示文件内容（tokio::fs 异步读取，避免阻塞 worker 线程）
     print_section("文件内容");
-    let content = fs::read_to_string(&log_path)?;
+    let content = tokio::fs::read_to_string(&log_path).await?;
     println!("{}", content);
 
     // 清理临时文件
-    cleanup_files(&log_path, "inklog_example_basic")?;
+    cleanup_files(&log_path, "inklog_example_basic").await?;
     println!("\n✓ 基础文件写入完成\n");
 
     Ok(())
@@ -170,10 +169,12 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     println!("目录: {}", log_dir.display());
     println!("\n文件列表:");
 
-    // 列出目录中所有文件
-    let mut all_files: Vec<_> = fs::read_dir(&log_dir)?
-        .filter_map(|entry| entry.ok())
-        .collect();
+    // 列出目录中所有文件（tokio::fs 异步遍历，避免阻塞 worker 线程）
+    let mut dir_entries = tokio::fs::read_dir(&log_dir).await?;
+    let mut all_files: Vec<_> = Vec::new();
+    while let Some(entry) = dir_entries.next_entry().await? {
+        all_files.push(entry);
+    }
 
     all_files.sort_by_key(|entry| entry.file_name());
 
@@ -181,7 +182,7 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     for file in &all_files {
         let file_name = file.file_name().to_string_lossy().to_string();
         if file_name.contains("inklog_example_rotation") {
-            let metadata = file.metadata()?;
+            let metadata = file.metadata().await?;
             let size = metadata.len();
             let marker = if file_name.contains("_2026") {
                 rotation_count += 1;
@@ -196,7 +197,7 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n轮转次数: {}", rotation_count);
 
     // 清理临时文件
-    cleanup_files(&log_path, "inklog_example_rotation")?;
+    cleanup_files(&log_path, "inklog_example_rotation").await?;
     println!("\n✓ 文件轮转演示完成\n");
 
     Ok(())
@@ -273,10 +274,12 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
     println!("目录: {}", log_dir.display());
     println!("\n文件列表:");
 
-    // 列出目录中所有文件
-    let mut all_files: Vec<_> = fs::read_dir(&log_dir)?
-        .filter_map(|entry| entry.ok())
-        .collect();
+    // 列出目录中所有文件（tokio::fs 异步遍历，避免阻塞 worker 线程）
+    let mut dir_entries = tokio::fs::read_dir(&log_dir).await?;
+    let mut all_files: Vec<_> = Vec::new();
+    while let Some(entry) = dir_entries.next_entry().await? {
+        all_files.push(entry);
+    }
 
     all_files.sort_by_key(|entry| entry.file_name());
 
@@ -284,7 +287,7 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
     for file in &all_files {
         let file_name = file.file_name().to_string_lossy().to_string();
         if file_name.contains("inklog_example_compression") {
-            let metadata = file.metadata()?;
+            let metadata = file.metadata().await?;
             let size = metadata.len();
 
             let marker = if file_name.ends_with(".zst") {
@@ -301,7 +304,7 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n压缩文件数: {}", compression_count);
 
     // 清理临时文件
-    cleanup_files(&log_path, "inklog_example_compression")?;
+    cleanup_files(&log_path, "inklog_example_compression").await?;
     println!("\n✓ Zstd 压缩演示完成\n");
 
     Ok(())
@@ -309,8 +312,10 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 清理临时文件（包括轮转文件）
 ///
-/// 删除指定路径相关的所有文件（包括轮转文件和压缩文件）
-fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// 删除指定路径相关的所有文件（包括轮转文件和压缩文件）。
+/// 使用 `tokio::fs` 异步 API，避免在 async 上下文中
+/// 调用同步文件 IO 阻塞 tokio worker 线程。
+async fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
     print_section("清理临时文件");
 
     let log_dir = PathBuf::from(log_path)
@@ -320,13 +325,13 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
 
     let mut deleted_count = 0;
 
-    for entry in fs::read_dir(&log_dir)? {
-        let entry = entry?;
+    let mut entries = tokio::fs::read_dir(&log_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
         let file_name = entry.file_name().to_string_lossy().to_string();
 
         // 只删除当前示例相关的文件
         if file_name.contains(prefix) {
-            fs::remove_file(entry.path())?;
+            tokio::fs::remove_file(entry.path()).await?;
             println!("  删除: {}", file_name);
             deleted_count += 1;
         }

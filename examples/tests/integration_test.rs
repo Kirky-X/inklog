@@ -52,7 +52,7 @@ async fn integration_file_ops_end_to_end() {
 
     // 4. 用 cleanup_files 清理（按 prefix）
     let prefix = "integration";
-    let deleted = cleanup_files(path_str, prefix).expect("cleanup 失败");
+    let deleted = cleanup_files(path_str, prefix).await.expect("cleanup 失败");
     assert!(deleted >= 1, "至少应删除 1 个文件");
     assert!(!log_path.exists(), "清理后文件应不存在");
 }

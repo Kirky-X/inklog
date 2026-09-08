@@ -143,9 +143,20 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
                     match result {
                         Ok((stream, addr)) => {
                             let metrics = metrics.clone();
+                            // 外层任务持有内层连接任务的 JoinHandle 并监控其结果：
+                            // handle_connection 返回的 Err 与任务 panic 都会在此记录，
+                            // 避免 JoinHandle 被丢弃后异常被静默吞掉
+                            //（生产环境可基于 JoinError 进一步做重试或熔断）
                             tokio::spawn(async move {
-                                if let Err(e) = handle_connection(stream, &metrics).await {
-                                    eprintln!("处理连接 {} 失败: {}", addr, e);
+                                let handle = tokio::spawn(handle_connection(stream, metrics));
+                                match handle.await {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(e)) => {
+                                        eprintln!("处理连接 {} 失败: {}", addr, e);
+                                    }
+                                    Err(join_err) => {
+                                        eprintln!("连接 {} 处理任务异常终止: {}", addr, join_err);
+                                    }
                                 }
                             });
                         }
@@ -166,14 +177,35 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
     Ok((port, shutdown_tx))
 }
 
+/// 单次读取超时：防止慢速或异常客户端长期占用连接与工作线程
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// 处理单个 HTTP 连接
-async fn handle_connection(mut stream: TcpStream, metrics: &std::sync::Arc<Metrics>) -> Result<()> {
+///
+/// 注意：接收 `Arc<Metrics>`（而非引用），便于在外层任务中
+/// 通过 `tokio::spawn` 独立运行（future 需满足 `'static` 约束）。
+async fn handle_connection(
+    mut stream: TcpStream,
+    metrics: std::sync::Arc<Metrics>,
+) -> Result<()> {
     // 读取请求
     let mut buffer = Vec::new();
     let mut temp_buf = [0u8; 8192];
 
     loop {
-        let n = stream.read(&mut temp_buf).await?;
+        // 每轮读取都带超时：对端在 READ_TIMEOUT 内无数据则主动关闭连接，
+        // 避免连接被恶意或失效的客户端无限期挂起
+        let n = match tokio::time::timeout(READ_TIMEOUT, stream.read(&mut temp_buf)).await {
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_elapsed) => {
+                eprintln!(
+                    "读取请求超时 ({}s)，关闭连接",
+                    READ_TIMEOUT.as_secs()
+                );
+                return Ok(());
+            }
+        };
         if n == 0 {
             return Ok(());
         }

@@ -36,7 +36,7 @@
 //! cargo run --bin rotation
 //! cargo run --bin compression --features compression
 //! cargo run --bin ring_buffered_file
-//! cargo run --bin parquet_archive --features sqlite
+//! cargo run --bin parquet_archive --features sqlite,parquet
 //! cargo run --bin partition_strategy
 //!
 //! # 数据库

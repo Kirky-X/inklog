@@ -182,28 +182,35 @@ async fn show_log_levels_with_logger() -> Result<(), Box<dyn std::error::Error>>
 fn show_structured_logging() {
     println!("--- 功能 4：结构化日志 ---\n");
 
-    // 用户操作
+    // 按本文件声明的最佳实践（DataMasker 应在日志写入前调用，见功能 7 与最佳实践 1）：
+    // 敏感值（user_id/amount/request_id 等）必须先经 DataMasker 脱敏，再写入日志
+    let masker = DataMasker::new();
+
+    // 用户操作：敏感字段先脱敏再记录
+    let user_id = masker.mask("12345");
+    let amount = masker.mask("99.99");
     tracing::info!(
-        user_id = 12345,
+        user_id = %user_id,
         action = "purchase",
-        amount = 99.99,
+        amount = %amount,
         currency = "USD",
         "用户购买商品"
     );
-    println!("✓ 用户操作日志（user_id, action, amount, currency）");
+    println!("✓ 用户操作日志（user_id, amount 先经 DataMasker 脱敏, action, currency）");
 
-    // 请求处理
+    // 请求处理：request_id 同样走脱敏管道
+    let request_id = masker.mask("req-abc-123");
     tracing::info!(
-        request_id = "req-abc-123",
+        request_id = %request_id,
         method = "POST",
         path = "/api/orders",
         status = 201,
         latency_ms = 42,
         "API 请求完成"
     );
-    println!("✓ 请求日志（request_id, method, path, status, latency_ms）");
+    println!("✓ 请求日志（request_id 先经 DataMasker 脱敏, method, path, status, latency_ms）");
 
-    // 错误处理
+    // 错误处理：仅含非敏感的运行指标，无需脱敏
     tracing::error!(
         error_code = "PAYMENT_FAILED",
         component = "payment",

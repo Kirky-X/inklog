@@ -176,18 +176,28 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
 
     print_section("3.1 单条延迟测量（500 次）");
     let count = 500;
-    let mut latencies = Vec::with_capacity(count);
+    let mut produce_instants = Vec::with_capacity(count);
 
-    // 测量每条日志的延迟
+    // 记录每条日志的产生时刻
     for i in 0..count {
-        let start = Instant::now();
+        let produce_at = Instant::now();
         tracing::info!(iteration = i, "Latency test");
-        let latency = start.elapsed();
-        latencies.push(latency);
+        produce_instants.push(produce_at);
     }
 
-    // 等待所有日志写入完成
+    // 以 shutdown()/flush 全部完成作为持久化终点：
+    // 端到端延迟 = 持久化完成时刻 - 该条日志产生时刻。
+    // 异步 Sink 中单条日志的落盘时刻不可观测，
+    // 用全量 flush 的终点作为每条日志"从产生到持久化"的度量（上界），
+    // 与文件头声明的延迟定义保持一致
     manager.shutdown()?;
+    let persist_done = Instant::now();
+
+    // 计算每条日志的产生 → 持久化延迟
+    let mut latencies: Vec<_> = produce_instants
+        .iter()
+        .map(|produce_at| persist_done.duration_since(*produce_at))
+        .collect();
 
     // 排序以计算百分位
     latencies.sort();
@@ -203,7 +213,8 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
     println!("  P99 延迟:    {}", format_duration(p99));
 
     // 延迟性能通常很好，即使在异步场景下 P99 也应保持在合理范围内
-    println!("  注: 延迟性能受系统负载和 Channel 状态影响");
+    println!("  注: 延迟口径为\"从产生到持久化\"（以 shutdown/flush 完成为终点，含队列等待）");
+    println!("      实际数值受系统负载和 Channel 状态影响");
 
     // 清理临时文件
     if let Err(e) = fs::remove_file(&log_path).await {
@@ -223,8 +234,9 @@ async fn backpressure_test() -> Result<(), Box<dyn std::error::Error>> {
 
     let log_path = temp_file_path("backpressure");
 
-    // 测试不同 Channel 容量
-    let capacities = [1000];
+    // 测试不同 Channel 容量（含不足/临界/充足三档，
+    // 使下方的容量检查逻辑真实生效）
+    let capacities = [100, 1000, 10_000];
 
     for (idx, capacity) in capacities.iter().enumerate() {
         print_section(&format!("4.{} Channel 容量: {}", idx + 1, capacity));

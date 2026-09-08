@@ -155,7 +155,9 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
             "ring_example::drop_newest".to_string(),
             format!("drop-newest-{:02}", i),
         );
-        sink.write(&record).await?;
+        // DropNewest 策略下 channel 满时丢弃新日志并返回 Err——
+        // 这正是本节演示的行为，不作为示例错误传播
+        let _ = sink.write(&record).await;
     }
 
     let m = sink.metrics();
@@ -198,7 +200,9 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
             "ring_example::drop_oldest".to_string(),
             format!("drop-oldest-{:02}", i),
         );
-        sink.write(&record).await?;
+        // DropOldest 策略在驱逐竞态偶发失败时同样返回 Err，
+        // 丢弃行为由下方 dropped_count 断言验证，不作为示例错误传播
+        let _ = sink.write(&record).await;
     }
 
     let m = sink.metrics();
@@ -245,12 +249,14 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
 
     print_section("5.3 等待 IO 线程处理并读取 metrics");
     // 轮询 metrics 直到 bytes_written > 0 且 flush_count >= 1，或超时 500ms
+    // 注意：async 上下文中必须用 tokio::time::sleep 让出执行权，
+    // std::thread::sleep 会阻塞 tokio worker 线程
     let start = std::time::Instant::now();
     let mut m = sink.metrics();
     while (m.bytes_written == 0 || m.flush_count == 0)
         && start.elapsed() < Duration::from_millis(500)
     {
-        std::thread::sleep(Duration::from_millis(10));
+        tokio::time::sleep(Duration::from_millis(10)).await;
         m = sink.metrics();
     }
 

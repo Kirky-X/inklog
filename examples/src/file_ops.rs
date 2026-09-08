@@ -14,7 +14,6 @@ use inklog::LogRecord;
 use inklog::LogSink;
 use inklog::chrono::Utc;
 use inklog::config::FileSinkConfig;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// 构造 FileSink 配置。
@@ -77,21 +76,25 @@ pub async fn write_level_records(sink: &dyn LogSink, levels: &[&str]) -> Result<
 ///
 /// `log_path` 用于定位日志所在目录（取其 parent）；如果目录不存在则返回 0。
 /// 单个文件删除失败不会中断整体清理，但会汇总到返回的 `Result` 中。
-pub fn cleanup_files(log_path: &str, prefix: &str) -> Result<usize> {
+///
+/// 全程使用 `tokio::fs` 异步 API，避免在 async 上下文中
+/// 调用同步文件 IO 阻塞 tokio worker 线程。
+pub async fn cleanup_files(log_path: &str, prefix: &str) -> Result<usize> {
     let log_dir = match Path::new(log_path).parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
     };
 
-    if !log_dir.exists() {
+    // 目录不存在则视为无可删文件
+    if tokio::fs::metadata(&log_dir).await.is_err() {
         return Ok(0);
     }
 
     let mut deleted = 0usize;
-    for entry in fs::read_dir(&log_dir)? {
-        let entry = entry?;
+    let mut entries = tokio::fs::read_dir(&log_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
         let file_name = entry.file_name().to_string_lossy().to_string();
-        if file_name.contains(prefix) && fs::remove_file(entry.path()).is_ok() {
+        if file_name.contains(prefix) && tokio::fs::remove_file(entry.path()).await.is_ok() {
             deleted += 1;
         }
     }
@@ -166,7 +169,7 @@ mod tests {
 
         // 文件应已被创建且包含内容
         assert!(log_path.exists(), "日志文件应存在");
-        let content = fs::read_to_string(&log_path).expect("读取文件失败");
+        let content = tokio::fs::read_to_string(&log_path).await.expect("读取文件失败");
         assert!(!content.is_empty(), "日志文件不应为空");
         for level in &levels {
             assert!(content.contains(level), "日志内容应包含级别 {}", level);
@@ -186,41 +189,46 @@ mod tests {
         assert_eq!(written, 0);
     }
 
-    #[test]
-    fn test_cleanup_files_removes_matching() {
+    #[tokio::test]
+    async fn test_cleanup_files_removes_matching() {
         // 验证：cleanup_files 只删除文件名包含 prefix 的文件，并返回正确数量。
         let dir = tempdir().expect("创建临时目录失败");
         let prefix = "inklog_test_cleanup_match";
         let match_a = dir.path().join(format!("{}_a.log", prefix));
         let match_b = dir.path().join(format!("{}_b.log", prefix));
         let nomatch = dir.path().join("other_file.log");
-        fs::write(&match_a, b"a").unwrap();
-        fs::write(&match_b, b"b").unwrap();
-        fs::write(&nomatch, b"c").unwrap();
+        tokio::fs::write(&match_a, b"a").await.unwrap();
+        tokio::fs::write(&match_b, b"b").await.unwrap();
+        tokio::fs::write(&nomatch, b"c").await.unwrap();
 
         // log_path 指向目录内任一文件即可（cleanup 取 parent）；anchor 自身不存在，故不计数。
         let anchor = dir.path().join(format!("{}.log", prefix));
-        let deleted = cleanup_files(anchor.to_str().unwrap(), prefix).expect("cleanup 失败");
+        let deleted = cleanup_files(anchor.to_str().unwrap(), prefix)
+            .await
+            .expect("cleanup 失败");
         assert_eq!(deleted, 2, "应删除 2 个匹配文件（match_a、match_b）");
         assert!(!match_a.exists());
         assert!(!match_b.exists());
         assert!(nomatch.exists(), "未匹配的文件不应被删除");
     }
 
-    #[test]
-    fn test_cleanup_files_no_match() {
+    #[tokio::test]
+    async fn test_cleanup_files_no_match() {
         // 验证：无匹配文件时返回 0，不报错。
         let dir = tempdir().expect("创建临时目录失败");
         let anchor = dir.path().join("anchor.log");
         let deleted = cleanup_files(anchor.to_str().unwrap(), "nonexistent_prefix_xyz")
+            .await
             .expect("cleanup 失败");
         assert_eq!(deleted, 0);
     }
 
-    #[test]
-    fn test_cleanup_files_missing_dir() {
+    #[tokio::test]
+    async fn test_cleanup_files_missing_dir() {
         // 验证：目录不存在时返回 0，不报错（fail-loud 的反面：缺目录视为无文件可删）。
-        let deleted = cleanup_files("/nonexistent/path/file.log", "any").expect("cleanup 失败");
+        let deleted = cleanup_files("/nonexistent/path/file.log", "any")
+            .await
+            .expect("cleanup 失败");
         assert_eq!(deleted, 0);
     }
 }

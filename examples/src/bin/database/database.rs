@@ -44,6 +44,21 @@ use inklog::config::{DatabaseDriver, DatabaseSinkConfig};
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog_examples::common::{print_section, print_separator};
 
+/// 转义 SQL 字符串字面量，防止 SQL 注入。
+///
+/// dbnexus 的 `execute_raw` 不支持占位符参数绑定，
+/// 因此与库内 `DatabaseSink`（src/integrations/infra/database.rs）的做法一致：
+/// 所有拼入 SQL 的字符串必须先经此函数转义。
+/// - ANSI 后端（SQLite/PostgreSQL/DuckDB）：将单引号 `'` 双写为 `''`
+/// - MySQL：额外转义反斜杠（MySQL 默认把 `\` 视为转义符）
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+fn escape_sql_string(s: &str, driver: &DatabaseDriver) -> String {
+    match driver {
+        DatabaseDriver::MySQL => s.replace('\\', "\\\\").replace('\'', "''"),
+        _ => s.replace('\'', "''"),
+    }
+}
+
 /// 创建临时权限配置文件
 ///
 /// 创建一个包含全权限配置的临时 YAML 文件，用于 dbnexus 权限系统。
@@ -126,6 +141,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             url: config.url.clone(),
             pool_config: dbnexus::foundation::config::PoolConfig {
                 max_connections: config.pool_size,
+                min_connections: 1,
                 ..Default::default()
             },
             permissions_path: Some(perm_path.to_string()),
@@ -189,12 +205,14 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         ];
 
         for (level, target, message) in test_logs {
+            // 所有插值字符串必须转义后再拼入 SQL，防止 SQL 注入
             let sql = format!(
-                "INSERT INTO logs (timestamp, level, target, message, thread_id) VALUES ('{}', '{}', '{}', '{}', 'main')",
-                Utc::now().to_rfc3339(),
-                level,
-                target,
-                message
+                "INSERT INTO logs (timestamp, level, target, message, thread_id) VALUES ('{}', '{}', '{}', '{}', '{}')",
+                escape_sql_string(&Utc::now().to_rfc3339(), &config.driver),
+                escape_sql_string(level, &config.driver),
+                escape_sql_string(target, &config.driver),
+                escape_sql_string(message, &config.driver),
+                escape_sql_string("main", &config.driver)
             );
             match session.execute_raw(&sql).await {
                 Ok(_) => println!("  ✓ [{}] {}", level, message),
@@ -262,6 +280,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             url: config.url.clone(),
             pool_config: dbnexus::foundation::config::PoolConfig {
                 max_connections: config.pool_size,
+                min_connections: 1,
                 ..Default::default()
             },
             permissions_path: Some(perm_path.to_string()),
@@ -330,15 +349,17 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
 
             let mut success_count = 0;
             for i in 0..levels.len() {
+                // 所有插值字符串必须转义后再拼入 SQL，防止 SQL 注入
+                let fields_json =
+                    format!(r#"{{"round":"{}","sequence":"{}"}}"#, round, i + 1);
                 let sql = format!(
-                    "INSERT INTO logs (timestamp, level, target, message, fields, thread_id) VALUES ('{}', '{}', '{}', '{}', '{{\"round\":\"{}\",\"sequence\":\"{}\"}}', 'worker-{}')",
-                    Utc::now().to_rfc3339(),
-                    levels[i],
-                    targets[i],
-                    messages[i],
-                    round,
-                    i + 1,
-                    round
+                    "INSERT INTO logs (timestamp, level, target, message, fields, thread_id) VALUES ('{}', '{}', '{}', '{}', '{}', '{}')",
+                    escape_sql_string(&Utc::now().to_rfc3339(), &config.driver),
+                    escape_sql_string(levels[i], &config.driver),
+                    escape_sql_string(targets[i], &config.driver),
+                    escape_sql_string(messages[i], &config.driver),
+                    escape_sql_string(&fields_json, &config.driver),
+                    escape_sql_string(&format!("worker-{}", round), &config.driver)
                 );
 
                 match session.execute_raw(&sql).await {
@@ -391,6 +412,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             url: "sqlite::memory:".to_string(),
             pool_config: dbnexus::foundation::config::PoolConfig {
                 max_connections: 2,
+                min_connections: 1,
                 ..Default::default()
             },
             permissions_path: Some(perm_path.to_string()),
@@ -451,12 +473,14 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         ];
 
         for (level, target, message) in &test_data {
+            // 本示例硬编码 SQLite，所有插值字符串转义后再拼入 SQL
             let sql = format!(
-                "INSERT INTO logs (timestamp, level, target, message, thread_id) VALUES ('{}', '{}', '{}', '{}', 'query-demo')",
-                Utc::now().to_rfc3339(),
-                level,
-                target,
-                message
+                "INSERT INTO logs (timestamp, level, target, message, thread_id) VALUES ('{}', '{}', '{}', '{}', '{}')",
+                escape_sql_string(&Utc::now().to_rfc3339(), &DatabaseDriver::SQLite),
+                escape_sql_string(level, &DatabaseDriver::SQLite),
+                escape_sql_string(target, &DatabaseDriver::SQLite),
+                escape_sql_string(message, &DatabaseDriver::SQLite),
+                escape_sql_string("query-demo", &DatabaseDriver::SQLite)
             );
             match session.execute_raw(&sql).await {
                 Ok(_) => {}

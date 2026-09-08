@@ -11,26 +11,51 @@
 //! # 运行
 //!
 //! ```bash
-//! cargo run --bin parquet_archive --features sqlite
+//! cargo run --bin parquet_archive --features sqlite,parquet
 //! ```
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 use inklog::LogRecord;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 use inklog::config::{DatabaseSinkConfig, ParquetConfig};
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 use inklog::sink::database::convert_logs_to_parquet;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 use inklog::tracing::Level;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 use inklog_examples::common::{print_section, print_separator};
 
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+#[cfg(not(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+)))]
 fn main() {
-    eprintln!("本示例需要 sqlite feature: cargo run --bin parquet_archive --features sqlite");
+    // convert_logs_to_parquet 的实际实现按 inklog feature = "parquet" 门控，
+    // 仅启用数据库 feature 时调用必然失败，因此本示例要求同时启用两者
+    eprintln!(
+        "本示例需要 parquet + 数据库 feature: cargo run --bin parquet_archive --features sqlite,parquet"
+    );
 }
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 fn main() {
     print_separator("inklog Parquet 归档示例");
 
@@ -43,7 +68,10 @@ fn main() {
 }
 
 /// 演示 ParquetConfig 配置字段
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 fn show_parquet_config() {
     print_section("示例 1：ParquetConfig 配置字段");
 
@@ -114,7 +142,10 @@ fn show_parquet_config() {
 }
 
 /// 演示 convert_logs_to_parquet() 实际调用
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 fn show_convert_logs_to_parquet() {
     print_section("示例 2：convert_logs_to_parquet() 实际调用");
 
@@ -176,7 +207,10 @@ fn show_convert_logs_to_parquet() {
 }
 
 /// 演示 DatabaseSinkConfig 中的 Parquet 配置
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 fn show_database_sink_with_parquet() {
     print_section("示例 3：DatabaseSinkConfig 集成 Parquet");
 
@@ -234,7 +268,10 @@ max_row_group_size = 20000"#
 }
 
 /// 演示 Parquet 归档工作流
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(all(
+    feature = "parquet",
+    any(feature = "sqlite", feature = "postgres", feature = "mysql")
+))]
 fn show_archive_workflow() {
     print_section("示例 4：Parquet 归档工作流");
 
