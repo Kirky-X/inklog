@@ -95,8 +95,9 @@ GEMINI.md
 CODEIUM.md
 AGENTS.md
 openspec/
-specmark/
-**/specmark/
+# specmark: 活动 changes/ 与锁文件可丢弃；archive/ 与 specs/ 为长期历史，需版本控制
+specmark/changes/
+specmark/.locks/
 .codenexus/
 **/.codenexus/
 strix_runs/
