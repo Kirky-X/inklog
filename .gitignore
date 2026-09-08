@@ -104,8 +104,12 @@ strix_runs/
 .worktrees/
 .gitnexus
 
-# --- Reviews / security scan artifacts (never tracked) ---
-reviews/
+# --- Reviews / security scan artifacts ---
+# 原始扫描输出（JSON/SARIF/JSONL）永不跟踪：含 secret 形态测试串，且会被
+# 下轮扫描自引用放大（93 -> 270 项的教训）；仅保留 *.md 人类可读报告
+reviews/*
+!reviews/*/
+!reviews/**/*.md
 .mimosa/
 
 # --- WorkBuddy AI local notes ---
@@ -189,3 +193,8 @@ docker-compose.test.yml
 # --- 缓存 / 进程文件 ---
 .cache/
 *.pid.lock
+
+# 安全扫描原始产物：含 secret 形态测试串且会被下轮扫描自引用放大（保留 *.md 报告）
+reviews/**
+!reviews/**/
+!reviews/**/*.md
