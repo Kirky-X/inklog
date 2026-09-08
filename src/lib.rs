@@ -248,6 +248,7 @@ pub use support::processing::{
 };
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,
+    create_validated_file, open_validated_file,
 };
 
 // Re-export underlying dependencies used in public API type signatures.

@@ -24,12 +24,12 @@ use zeroize::Zeroizing;
 ///
 /// # 返回值
 ///
-/// 返回 32 字节的加密密钥
+/// 返回 `Zeroizing` 包裹的 32 字节加密密钥，离开作用域时自动清零
 ///
 /// # 错误
 ///
 /// 如果环境变量未设置、密钥格式无效或长度不正确，返回错误
-pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
+pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogError> {
     // 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
     let env_value = Zeroizing::new(std::env::var(env_var).map_err(|_| {
         let mut args = fluent_bundle::FluentArgs::new();
@@ -39,11 +39,19 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
 
     let raw_bytes = env_value.as_bytes();
 
-    // 如果长度是32字节，尝试直接使用原始字节
+    // 如果长度是32字节，尝试直接使用原始字节。
+    // 注意语义歧义：32 字符的密码会走此分支被当作原始密钥而非 PBKDF2 派生。
+    // 该行为保留用于解密既有按此格式加密的文件；新部署建议使用
+    // Base64 编码的随机密钥，或长度不等于 32 字节的密码。
     if raw_bytes.len() == 32 {
+        tracing::warn!(
+            env = %env_var,
+            "32-byte input used directly as a raw encryption key; \
+             prefer a Base64-encoded random key or a password whose length is not 32"
+        );
         let mut result = [0u8; 32];
         result.copy_from_slice(raw_bytes);
-        return Ok(result);
+        return Ok(Zeroizing::new(result));
     }
 
     // 尝试解码 Base64 编码的密钥
@@ -51,7 +59,7 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
         if decoded.len() == 32 {
             let mut result = [0u8; 32];
             result.copy_from_slice(&decoded);
-            return Ok(result);
+            return Ok(Zeroizing::new(result));
         }
         // Base64 解码成功但长度不对，拒绝使用
         let mut args = fluent_bundle::FluentArgs::new();
@@ -65,7 +73,7 @@ pub fn get_encryption_key(env_var: &str) -> Result<[u8; 32], InklogError> {
     // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
     if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
         let (key, _salt) = derive_key_from_password(env_value.as_str(), None)?;
-        return Ok(key);
+        return Ok(Zeroizing::new(key));
     }
 
     // 密钥长度无效

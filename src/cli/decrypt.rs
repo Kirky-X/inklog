@@ -11,9 +11,11 @@ use inklog::sink::encryption::derive_key_from_password;
 use sha2::Digest as Sha256Digest;
 #[cfg(test)]
 use sha2::Sha256;
+#[cfg(test)]
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
 
 /// 检查路径中是否包含可疑字符或遍历模式（共享逻辑）
 fn check_path_syntax(path: &Path) -> Result<()> {
@@ -268,7 +270,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     file.read_to_end(&mut ciphertext)
         .with_context(|| inklog::i18n::tr("config-read_ciphertext_failed"))?;
 
-    let cipher = Aes256Gcm::new((&key).into());
+    let cipher = Aes256Gcm::new((&*key).into());
 
     let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
         let mut args = fluent_bundle::FluentArgs::new();
@@ -293,11 +295,12 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
 }
 
 pub fn decrypt_file_compatible(
-    input_path: &PathBuf,
-    output_path: &PathBuf,
+    input_path: &Path,
+    output_path: &Path,
     key_env: &str,
 ) -> Result<()> {
-    let mut file = File::open(input_path).with_context(|| {
+    // O_NOFOLLOW 打开：关闭校验后输入路径被替换为符号链接的竞态
+    let mut file = inklog::open_validated_file(input_path).with_context(|| {
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("path", input_path.display().to_string());
         inklog::i18n::tr_args("cli-decrypt-err-open", args)
@@ -344,7 +347,7 @@ pub fn decrypt_file_compatible(
         file.read_to_end(&mut ciphertext)
             .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-cipher"))?;
 
-        let cipher = Aes256Gcm::new((&key).into());
+        let cipher = Aes256Gcm::new((&*key).into());
         cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
             let mut args = fluent_bundle::FluentArgs::new();
             args.set("err", e.to_string());
@@ -369,7 +372,7 @@ pub fn decrypt_file_compatible(
         file.read_to_end(&mut ciphertext)
             .with_context(|| inklog::i18n::tr("cli-decrypt-err-read-cipher"))?;
 
-        let cipher = Aes256Gcm::new((&key).into());
+        let cipher = Aes256Gcm::new((&*key).into());
         cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
             let mut args = fluent_bundle::FluentArgs::new();
             args.set("err", e.to_string());
@@ -377,11 +380,14 @@ pub fn decrypt_file_compatible(
         })?
     };
 
-    let mut output_file = File::create(output_path).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
-        args.set("path", output_path.display().to_string());
-        inklog::i18n::tr_args("cli-decrypt-err-create", args)
-    })?;
+    // O_NOFOLLOW 创建：关闭校验后输出路径被替换为符号链接的竞态
+    let mut output_file = inklog::create_validated_file(output_path).with_context(
+        || {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("path", output_path.display().to_string());
+            inklog::i18n::tr_args("cli-decrypt-err-create", args)
+        },
+    )?;
 
     output_file
         .write_all(&plaintext)
@@ -390,7 +396,7 @@ pub fn decrypt_file_compatible(
     Ok(())
 }
 
-fn get_encryption_key_cli(env_var: &str) -> Result<[u8; 32]> {
+fn get_encryption_key_cli(env_var: &str) -> Result<Zeroizing<[u8; 32]>> {
     inklog::sink::encryption::get_encryption_key(env_var).map_err(|e| anyhow!("{}", e))
 }
 
@@ -428,13 +434,15 @@ pub fn decrypt_directory_compatible(
         inklog::i18n::tr_args("cli-decrypt-err-create-dir", args)
     })?;
 
-    // 验证已存在的输出目录路径安全
-    if let Err(e) = validate_file_path(output_dir, output_dir) {
+    // 输出目录自身不得为符号链接 — 防止符号链接绕过
+    if let Ok(metadata) = output_dir.symlink_metadata()
+        && metadata.file_type().is_symlink()
+    {
         let mut args = fluent_bundle::FluentArgs::new();
-        args.set("err", e.to_string());
+        args.set("path", output_dir.display().to_string());
         return Err(anyhow!(
             "{}",
-            inklog::i18n::tr_args("cli-decrypt-err-output-dir", args)
+            inklog::i18n::tr_args("cli-decrypt-err-symlink", args)
         ));
     }
 
@@ -453,6 +461,16 @@ pub fn decrypt_directory_compatible(
             if let Some(ext) = path.extension()
                 && ext == "enc"
             {
+                // 验证待解密文件相对其所在输入目录的包含关系（含符号链接检查）
+                if let Err(e) = validate_file_path(&path, input_dir) {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("path", path.display().to_string());
+                    args.set("err", e.to_string());
+                    eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-path-fail", args));
+                    failure_count += 1;
+                    continue;
+                }
+
                 let file_name = path.file_name().ok_or_else(|| {
                     let mut args = fluent_bundle::FluentArgs::new();
                     args.set("path", path.display().to_string());
@@ -547,17 +565,29 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
         inklog::i18n::tr_args("cli-decrypt-err-create-dir", args)
     })?;
 
-    // 验证已存在的输出目录路径安全
-    if let Err(e) = validate_file_path(output_dir, output_dir) {
+    // 输出目录自身不得为符号链接 — 防止符号链接绕过
+    if let Ok(metadata) = output_dir.symlink_metadata()
+        && metadata.file_type().is_symlink()
+    {
         let mut args = fluent_bundle::FluentArgs::new();
-        args.set("err", e.to_string());
+        args.set("path", output_dir.display().to_string());
         return Err(anyhow!(
             "{}",
-            inklog::i18n::tr_args("cli-decrypt-err-output-dir", args)
+            inklog::i18n::tr_args("cli-decrypt-err-symlink", args)
         ));
     }
 
     let _canonical_output = output_dir.canonicalize()?;
+
+    // validate_glob_pattern 已拒绝绝对模式，相对模式以 CWD 为基准目录，
+    // glob 展开结果不得逃逸出基准目录
+    let canonical_base = std::env::current_dir()
+        .and_then(|base| base.canonicalize())
+        .map_err(|e| {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("err", e.to_string());
+            anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-base", args))
+        })?;
 
     let paths = glob::glob(input_pattern)
         .map_err(|e| {
@@ -586,11 +616,19 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
             continue;
         }
 
-        // 验证 glob 展开的输入路径不含路径遍历 — 确保解析后的路径在安全范围内
-        if let Ok(canonical_input) = path.canonicalize() {
-            // 输入路径不应解析到输出目录之外（防止攻击者通过 glob 匹配任意文件）
-            // 注意：输入和输出通常是不同目录，这里只检查符号链接已被上方拦截
-            let _ = canonical_input; // canonicalize 成功即可，符号链接已在上方检查
+        // 验证 glob 展开的输入路径仍在基准目录内 — 展开逃逸（如经符号链接目录）时跳过
+        if let Ok(canonical_input) = path.canonicalize()
+            && !canonical_input.starts_with(&canonical_base)
+        {
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("path", path.display().to_string());
+            args.set("base", canonical_base.display().to_string());
+            eprintln!(
+                "{}",
+                inklog::i18n::tr_args("cli-decrypt-err-traversal-detail", args)
+            );
+            failure_count += 1;
+            continue;
         }
 
         let file_name = path.file_name().ok_or_else(|| {
@@ -764,7 +802,7 @@ mod tests {
         unsafe { std::env::set_var("TEST_ENCRYPTION_KEY", &key_base64) };
 
         let key = get_encryption_key_cli("TEST_ENCRYPTION_KEY").unwrap();
-        assert_eq!(key, test_key);
+        assert_eq!(*key, test_key);
 
         unsafe { std::env::remove_var("TEST_ENCRYPTION_KEY") };
     }
@@ -795,7 +833,7 @@ mod tests {
         unsafe { std::env::set_var("TEST_RAW_KEY", std::str::from_utf8(&raw_key).unwrap()) };
 
         let key = get_encryption_key_cli("TEST_RAW_KEY").unwrap();
-        assert_eq!(key, raw_key);
+        assert_eq!(*key, raw_key);
 
         unsafe { std::env::remove_var("TEST_RAW_KEY") };
     }
@@ -998,5 +1036,93 @@ mod tests {
             "error should mention symbolic links, got: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn test_batch_decrypt_skips_paths_outside_base_dir() {
+        // 相对 glob 模式以 CWD 为基准目录：经符号链接目录展开到基外的输入必须被跳过。
+        // 该测试会切换进程 CWD，需要独占运行。
+        static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _lock = CWD_LOCK.lock().unwrap();
+
+        let base_dir = tempfile::tempdir().unwrap();
+        let outside_dir = tempfile::tempdir().unwrap();
+        let output_dir = base_dir.path().join("decrypted");
+
+        let test_key = generate_test_key();
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::set_var("INKLOG_TEST_BATCH_BASE_KEY", &key_base64) };
+
+        // 基内合法加密文件
+        create_encrypted_file_v1(&base_dir.path().join("inside.enc"), b"inside", &test_key)
+            .unwrap();
+        // 基外文件，通过基内符号链接目录暴露给 glob（普通 glob 模式无法越过基准目录）
+        std::fs::write(outside_dir.path().join("outside.enc"), b"junk").unwrap();
+
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(base_dir.path()).unwrap();
+
+        let ok_result = batch_decrypt("*.enc", &output_dir, "INKLOG_TEST_BATCH_BASE_KEY");
+
+        #[cfg(unix)]
+        let escape_result = {
+            std::os::unix::fs::symlink(outside_dir.path(), base_dir.path().join("escape"))
+                .unwrap();
+            batch_decrypt("escape/*.enc", &output_dir, "INKLOG_TEST_BATCH_BASE_KEY")
+        };
+
+        std::env::set_current_dir(original_cwd).unwrap();
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::remove_var("INKLOG_TEST_BATCH_BASE_KEY") };
+
+        assert!(ok_result.is_ok(), "inside-base file should decrypt: {ok_result:?}");
+        assert!(output_dir.join("inside.log").exists());
+
+        #[cfg(unix)]
+        {
+            assert!(
+                escape_result.is_err(),
+                "out-of-base glob expansion should be skipped and reported"
+            );
+            assert!(!output_dir.join("outside.log").exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_directory_decrypt_validates_input_file_against_output_dir() {
+        // 目录模式：每个待解密文件须通过相对输出目录的校验，
+        // 符号链接输入文件必须被跳过，不影响其余文件解密
+        let base_dir = tempfile::tempdir().unwrap();
+        let input_dir = base_dir.path().to_path_buf();
+        let outside_dir = tempfile::tempdir().unwrap();
+
+        let test_key = generate_test_key();
+        let key_base64 = general_purpose::STANDARD.encode(test_key);
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::set_var("INKLOG_TEST_DIR_VALIDATE_KEY", &key_base64) };
+
+        create_encrypted_file_v1(&input_dir.join("good.enc"), b"good", &test_key).unwrap();
+        std::fs::write(outside_dir.path().join("secret.txt"), b"secret").unwrap();
+        std::os::unix::fs::symlink(
+            outside_dir.path().join("secret.txt"),
+            input_dir.join("evil.enc"),
+        )
+        .unwrap();
+
+        let result = decrypt_directory_compatible(
+            &input_dir,
+            &input_dir,
+            "INKLOG_TEST_DIR_VALIDATE_KEY",
+            false,
+        );
+
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::remove_var("INKLOG_TEST_DIR_VALIDATE_KEY") };
+
+        assert!(result.is_err(), "symlinked input file should be skipped");
+        assert!(input_dir.join("good.log").exists(), "regular file should decrypt");
+        assert!(!input_dir.join("evil.log").exists(), "symlinked input must not be decrypted");
     }
 }

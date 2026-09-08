@@ -166,7 +166,7 @@ fn encrypt_log_file(
 
     // 创建 AES-256-GCM 密码器
     let cipher =
-        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to create cipher: {}", e))?;
+        Aes256Gcm::new_from_slice(&*key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     // 生成随机 nonce
     let mut nonce_bytes = [0u8; 12];
@@ -328,7 +328,7 @@ fn decrypt_and_verify(
 
     // 创建密码器并解密
     let cipher =
-        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to create cipher: {}", e))?;
+        Aes256Gcm::new_from_slice(&*key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     let plaintext = cipher
         .decrypt(&nonce, ciphertext.as_ref())
@@ -401,15 +401,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. 生成临时密钥
     print_separator("生成临时加密密钥");
 
+    // 安全约束：密钥属于敏感凭据，不得以任何形式输出到 stdout
+    //（可能被终端回显、CI 日志或日志系统采集），仅通过环境变量传递
     let key = generate_temp_key();
-    println!("生成的临时密钥（Base64 编码）:");
-    println!("{}\n", key);
 
     // 设置环境变量
     let key_env = "LOG_ENCRYPTION_KEY";
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var(key_env, &key) };
-    println!("✓ 已设置环境变量: {}", key_env);
+    println!("✓ 临时密钥已生成并写入环境变量: {}", key_env);
+    println!("  （密钥内容不打印到 stdout，参见下方\"避免在日志中输出密钥\"）\n");
 
     // 2. 生成临时文件路径
     let plain_path = temp_file_path("plaintext");

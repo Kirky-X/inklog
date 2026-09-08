@@ -90,7 +90,7 @@ pub fn generate_temp_key() -> String {
 /// - AES 加密失败（极少见）。
 pub fn encrypt_log_file(plaintext_path: &str, encrypted_path: &str, key_env: &str) -> Result<()> {
     let key = inklog::support::io::sink::encryption::get_encryption_key(key_env)?;
-    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(key));
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(*key));
 
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
@@ -128,7 +128,7 @@ pub fn decrypt_file(encrypted_path: &str, key_env: &str) -> Result<String> {
     }
 
     let key = inklog::support::io::sink::encryption::get_encryption_key(key_env)?;
-    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(key));
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(*key));
     let nonce = Nonce::from(header.nonce);
 
     let mut file = std::fs::File::open(encrypted_path)?;

@@ -256,7 +256,9 @@ INKLOG_FILE_ROTATION_TIME=daily
 INKLOG_FILE_KEEP_FILES=30
 INKLOG_FILE_COMPRESS=true
 INKLOG_FILE_ENCRYPT=false
-INKLOG_FILE_ENCRYPTION_KEY=your-encryption-key-here
+# 生成 32 字节密钥: openssl rand -base64 32
+# 将生成的 Base64 密钥写入下方变量，再启用 INKLOG_FILE_ENCRYPT
+INKLOG_FILE_ENCRYPTION_KEY=<MUST_SET_BEFORE_USE>
 
 # Database sink
 INKLOG_DB_ENABLED=false
@@ -276,7 +278,8 @@ INKLOG_HTTP_ENABLED=false
 INKLOG_HTTP_PORT=9090
 
 # Decryption
-INKLOG_DECRYPT_KEY=your-decryption-key-here
+# 解密密钥须与加密时使用的密钥一致: openssl rand -base64 32
+INKLOG_DECRYPT_KEY=<MUST_SET_BEFORE_USE>
 "#;
 
     let output_file = if output_path.is_dir() {
@@ -348,6 +351,22 @@ mod tests {
         let content = std::fs::read_to_string(&output_path).unwrap();
         assert!(content.contains("INKLOG_LEVEL"));
         assert!(content.contains("INKLOG_DECRYPT_KEY"));
+    }
+
+    #[test]
+    fn test_generate_env_example_contains_no_usable_credentials() {
+        // 模板不得包含任何可直接使用的密钥字面量
+        let dir = tempdir().unwrap();
+        let output_path = dir.path().join(".env.example");
+        generate_env_example(&output_path).unwrap();
+        let content = std::fs::read_to_string(&output_path).unwrap();
+
+        assert!(!content.contains("your-encryption-key-here"));
+        assert!(!content.contains("your-decryption-key-here"));
+        // 密钥变量必须为显式占位，并附生成指令注释
+        assert!(content.contains("INKLOG_FILE_ENCRYPTION_KEY=<MUST_SET_BEFORE_USE>"));
+        assert!(content.contains("INKLOG_DECRYPT_KEY=<MUST_SET_BEFORE_USE>"));
+        assert!(content.contains("openssl rand -base64 32"));
     }
 
     #[test]
