@@ -205,7 +205,12 @@ impl std::convert::AsMut<InklogConfig> for InklogConfigAdapter {
 
 impl Default for InklogConfigAdapter {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| Self::from_config(InklogConfig::default()))
+        Self::new().unwrap_or_else(|e| {
+            tracing::warn!(
+                "InklogConfigAdapter::new failed, falling back to default config: {e}"
+            );
+            Self::from_config(InklogConfig::default())
+        })
     }
 }
 
@@ -765,6 +770,34 @@ mod tests {
         let adapter = InklogConfigAdapter::default();
         // 应该至少能获取到默认配置值
         assert_eq!(adapter.get_string("global.level"), Some("info".to_string()));
+    }
+
+    #[test]
+    fn test_adapter_default_falls_back_when_load_fails() {
+        // INKLOG_CONFIG_PATH 指向非法 TOML 时 new() 失败，
+        // Default 须回退到默认配置并以 warn 告知
+        static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _lock = ENV_MUTEX.lock().unwrap();
+
+        let temp = tempfile::tempdir().unwrap();
+        let bad_config = temp.path().join("bad.toml");
+        std::fs::write(&bad_config, "not [valid toml").unwrap();
+
+        // SAFETY: test-only env var mutation
+        unsafe {
+            std::env::set_var("INKLOG_CONFIG_PATH", bad_config.to_str().unwrap());
+        }
+        let adapter = InklogConfigAdapter::default();
+        // SAFETY: test-only env var mutation
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
+
+        assert_eq!(adapter.get_string("global.level"), Some("info".to_string()));
+        assert_eq!(
+            adapter.get_int("performance.worker_threads"),
+            Some(3)
+        );
     }
 
     #[test]

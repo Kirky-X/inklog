@@ -546,8 +546,10 @@ impl Database for DbNexusAdapter {
         let sqls: Vec<String> = records
             .iter()
             .map(|record| {
-                let timestamp = record.timestamp.to_rfc3339();
                 let driver = &self.driver;
+                // timestamp 同样过转义：rfc3339 输出虽受类型约束，
+                // 但拼入 SQL 前不得依赖调用方不变量（防纵深失效）
+                let timestamp = escape_sql_string(&record.timestamp.to_rfc3339(), driver);
                 let level = escape_sql_string(&record.level, driver);
                 let target = escape_sql_string(&record.target, driver);
                 let message = escape_sql_string(&record.message, driver);
@@ -1338,6 +1340,31 @@ mod tests {
             escape_sql_string("世界'it's", &DatabaseDriver::SQLite),
             "世界''it''s"
         );
+    }
+
+    /// timestamp 拼入 INSERT 前同样必须转义：含单引号/反斜杠的时间戳形状字符串
+    /// 不得破坏 SQL 字符串字面量边界。
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_escape_sql_string_timestamp_quote_and_backslash() {
+        // 含单引号与反斜杠的时间戳形状字符串
+        let ts = "2026-01-01T00:00:00'+00\\'00";
+
+        // ANSI 后端（SQLite/PostgreSQL/DuckDB）：单引号双写，反斜杠保持原样
+        let ansi = escape_sql_string(ts, &DatabaseDriver::PostgreSQL);
+        assert_eq!(ansi, "2026-01-01T00:00:00''+00\\''00");
+        // 拼入 VALUES 后字符串无法被提前闭合：剩余引号均已成对
+        let values = format!("INSERT INTO logs VALUES ('{}')", ansi);
+        assert_eq!(values.matches('\'').count() % 2, 0, "quotes must stay balanced");
+
+        // MySQL：反斜杠与单引号都转义，`\''` 序列不再可能逃逸
+        let mysql = escape_sql_string(ts, &DatabaseDriver::MySQL);
+        assert_eq!(mysql, "2026-01-01T00:00:00''+00\\\\''00");
     }
 
     /// diting MED-001 回归：MySQL 默认把反斜杠当转义符，

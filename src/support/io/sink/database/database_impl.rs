@@ -17,6 +17,7 @@ use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::Metrics;
+use crate::support::io::sink::LogSink;
 
 use super::{DatabaseSink, DatabaseSinkInner};
 
@@ -25,6 +26,11 @@ pub(super) const DEFAULT_FLUSH_INTERVAL_MS: u64 = 500;
 pub(super) const MIN_BATCH_SIZE: usize = 10;
 pub(super) const MAX_BATCH_SIZE: usize = 1000;
 pub(super) const ADAPTIVE_WINDOW_SIZE: usize = 10;
+
+/// Maximum number of records kept in the retry buffer. Beyond this bound the
+/// oldest buffered records are dropped so sustained DB failures cannot grow
+/// the buffer without limit.
+pub(super) const MAX_BUFFER_SIZE: usize = 65536;
 
 /// Maximum number of database worker connections, capped at `min(num_cpus, 4)`.
 /// Prevents resource exhaustion when pool_size is set too high.
@@ -84,7 +90,10 @@ impl DatabaseSink {
             path: PathBuf::from("logs/db_fallback.log"),
             ..Default::default()
         };
-        let fallback_sink = FileSink::new(fallback_config).ok();
+        let fallback_sink: Option<Arc<dyn LogSink + Send + Sync>> =
+            FileSink::new(fallback_config)
+                .ok()
+                .map(|s| Arc::new(s) as Arc<dyn LogSink + Send + Sync>);
 
         // 使用配置参数或默认值
         let batch_size = config
@@ -102,6 +111,7 @@ impl DatabaseSink {
             write_latencies: Vec::with_capacity(ADAPTIVE_WINDOW_SIZE),
             success_count: 0,
             failure_count: 0,
+            dropped_total: 0,
             metrics: None,
         };
 
@@ -142,6 +152,28 @@ impl DatabaseSink {
         inner.success_count = 0;
         inner.failure_count = 0;
     }
+
+    /// Enforce the retry buffer capacity bound: drop the oldest records on
+    /// overflow, bump the dropped counter and warn with the cumulative total.
+    pub(super) fn enforce_buffer_cap(inner: &mut DatabaseSinkInner) {
+        let overflow = inner.buffer.len().saturating_sub(MAX_BUFFER_SIZE);
+        if overflow == 0 {
+            return;
+        }
+        inner.buffer.drain(0..overflow);
+        inner.dropped_total += overflow as u64;
+        if let Some(ref m) = inner.metrics {
+            for _ in 0..overflow {
+                m.inc_logs_dropped();
+            }
+        }
+        tracing::warn!(
+            dropped = overflow,
+            dropped_total = inner.dropped_total,
+            capacity = MAX_BUFFER_SIZE,
+            "database sink buffer overflow, dropped oldest buffered records"
+        );
+    }
 }
 
 impl fmt::Display for DatabaseSink {
@@ -153,28 +185,31 @@ impl fmt::Display for DatabaseSink {
 #[async_trait]
 impl crate::support::io::sink::LogSink for DatabaseSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-        // Phase 1: under lock — check circuit breaker, push record, maybe swap buffers
-        let (records_to_flush, should_flush, circuit_open) = {
+        // Phase 1: under lock — mask record, check circuit breaker, push record, maybe swap buffers
+        let (circuit_open_record, records_to_flush, should_flush) = {
             let mut inner = self.inner.lock();
 
+            // diting MED-002：结构化字段（fields）同样需要脱敏——
+            // 序列化后统一过 masker，再反序列化还原，避免敏感字段明文落库。
+            // 脱敏先于 can_execute：熔断开启走 fallback 时写入的也必须是脱敏记录。
+            let masked_fields_json =
+                serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
+            let masked = self.masker.mask(&masked_fields_json);
+            let fields = serde_json::from_str::<
+                std::collections::HashMap<String, serde_json::Value>,
+            >(&masked)
+            .unwrap_or_else(|_| record.fields.clone());
+            let masked_record = LogRecord {
+                message: self.masker.mask(&record.message),
+                fields,
+                ..record.clone()
+            };
+
             if !inner.circuit_breaker.can_execute() {
-                (Vec::new(), false, true)
+                (Some(masked_record), Vec::new(), false)
             } else {
-                // diting MED-002：结构化字段（fields）同样需要脱敏——
-                // 序列化后统一过 masker，再反序列化还原，避免敏感字段明文落库。
-                let masked_fields_json =
-                    serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
-                let masked = self.masker.mask(&masked_fields_json);
-                let fields = serde_json::from_str::<
-                    std::collections::HashMap<String, serde_json::Value>,
-                >(&masked)
-                .unwrap_or_else(|_| record.fields.clone());
-                let masked_record = LogRecord {
-                    message: self.masker.mask(&record.message),
-                    fields,
-                    ..record.clone()
-                };
                 inner.buffer.push(masked_record);
+                Self::enforce_buffer_cap(&mut inner);
 
                 let should = inner.buffer.len() >= inner.current_batch_size
                     || inner.last_flush.elapsed()
@@ -187,19 +222,19 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
                     inner.flush_buffer = tmp;
                     inner.last_flush = Instant::now();
                     let records = std::mem::take(&mut inner.flush_buffer);
-                    (records, true, false)
+                    (None, records, true)
                 } else {
-                    (Vec::new(), false, false)
+                    (None, Vec::new(), false)
                 }
             }
         };
         // Lock released — no parking_lot MutexGuard held across await
 
-        // Circuit breaker open → fallback to file sink
-        if circuit_open {
+        // Circuit breaker open → fallback to file sink（写入脱敏后的记录）
+        if let Some(masked_record) = circuit_open_record {
             let fallback = self.inner.lock().fallback_sink.clone();
             if let Some(sink) = fallback
-                && let Err(e) = sink.write(record).await
+                && let Err(e) = sink.write(&masked_record).await
             {
                 let mut args = fluent_bundle::FluentArgs::new();
                 args.set("err", e.to_string());
@@ -237,26 +272,36 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
                             m.inc_sink_error();
                             m.update_sink_health("database", false, Some(e.to_string()));
                         }
-                        // Re-queue records for retry
-                        inner.buffer.extend(records_to_flush);
                         fallback = inner.fallback_sink.clone();
                     }
-                    // Fallback write outside lock
-                    if let Some(sink) = fallback
-                        && let Err(e) = sink.write(record).await
-                    {
-                        let mut args = fluent_bundle::FluentArgs::new();
-                        args.set("err", e.to_string());
-                        tracing::warn!(
-                            "{}",
-                            crate::i18n::tr_args("warn-fallback_write_failed", args)
-                        );
+                    // Fallback write outside lock：整批交给 fallback（记录已是脱敏版），
+                    // 仅 fallback 也失败（或缺失）的记录才重入队等待重试，避免重复提交。
+                    let mut failed_records: Vec<LogRecord> = Vec::new();
+                    match fallback {
+                        Some(sink) => {
+                            for r in &records_to_flush {
+                                if let Err(fe) = sink.write(r).await {
+                                    failed_records.push(r.clone());
+                                    let mut args = fluent_bundle::FluentArgs::new();
+                                    args.set("err", fe.to_string());
+                                    tracing::warn!(
+                                        "{}",
+                                        crate::i18n::tr_args("warn-fallback_write_failed", args)
+                                    );
+                                }
+                            }
+                        }
+                        None => failed_records.extend(records_to_flush.iter().cloned()),
+                    }
+                    if !failed_records.is_empty() {
+                        let mut inner = self.inner.lock();
+                        // Re-queue records for retry
+                        inner.buffer.extend(failed_records);
+                        Self::enforce_buffer_cap(&mut inner);
                     }
                     return Err(e);
                 }
             }
-        } else {
-            self.inner.lock().circuit_breaker.record_success();
         }
 
         Ok(())
@@ -334,6 +379,8 @@ impl DatabaseSink {
                     m.add_db_batch_records_total(written);
                     m.update_sink_health("database", true, None);
                 }
+                // 只有成功 flush 才计入断路器，缓冲写入不计
+                self.inner.lock().circuit_breaker.record_success();
                 Ok(())
             }
             Err(e) => {
@@ -346,6 +393,7 @@ impl DatabaseSink {
                 let mut retry_records = records;
                 retry_records.append(&mut inner.buffer);
                 inner.buffer = retry_records;
+                Self::enforce_buffer_cap(&mut inner);
                 Err(e)
             }
         }

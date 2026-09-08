@@ -102,7 +102,7 @@ pub(crate) use database_impl::effective_db_worker_limit;
     ),
     test
 ))]
-use database_impl::{ADAPTIVE_WINDOW_SIZE, MAX_BATCH_SIZE, MIN_BATCH_SIZE};
+use database_impl::{ADAPTIVE_WINDOW_SIZE, MAX_BATCH_SIZE, MAX_BUFFER_SIZE, MIN_BATCH_SIZE};
 
 /// DatabaseSink 的可变内部状态
 #[cfg(any(
@@ -118,12 +118,15 @@ struct DatabaseSinkInner {
     /// holds the records to be flushed outside the lock.
     flush_buffer: Vec<LogRecord>,
     last_flush: Instant,
-    fallback_sink: Option<FileSink>,
+    /// 降级 sink（trait 对象，测试可注入记录型 fake 以观测降级路径）
+    fallback_sink: Option<Arc<dyn crate::support::io::sink::LogSink + Send + Sync>>,
     circuit_breaker: CircuitBreaker,
     current_batch_size: usize,
     write_latencies: Vec<Duration>,
     success_count: usize,
     failure_count: usize,
+    /// 缓冲溢出时累计丢弃的记录数
+    dropped_total: u64,
     metrics: Option<Arc<Metrics>>,
 }
 
@@ -363,6 +366,43 @@ mod tests {
         }
     }
 
+    /// 记录型 fallback sink：捕获降级路径写入的 record，供断言脱敏与整批转发
+    struct RecordingFallbackSink {
+        records: std::sync::Mutex<Vec<LogRecord>>,
+    }
+
+    impl RecordingFallbackSink {
+        fn new() -> Self {
+            Self {
+                records: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn captured(&self) -> Vec<LogRecord> {
+            self.records.lock().unwrap().clone()
+        }
+
+        fn clear(&self) {
+            self.records.lock().unwrap().clear();
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::support::io::sink::LogSink for RecordingFallbackSink {
+        async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+            self.records.lock().unwrap().push(record.clone());
+            Ok(())
+        }
+
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
     /// 测试 flush 失败时返回错误
     #[tokio::test(flavor = "multi_thread")]
     async fn test_database_sink_flush_failure_returns_error() {
@@ -495,7 +535,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_circuit_breaker_open_routes_to_fallback_sink() {
         // FailingDatabase 触发 3 次 flush 失败 → circuit_breaker open
-        // 第 13 条 write：can_execute()=false → 走 fallback_sink → 返回 Ok
+        // fallback 成功时不重入队（每轮 10 条重新缓冲后才触发下一次 flush），
+        // 因此需要 30 条记录才能累积 3 次 flush 失败。
+        // 第 31 条 write：can_execute()=false → 走 fallback_sink → 返回 Ok
         let failing_db = Arc::new(FailingDatabase);
         let config = DatabaseSinkConfig {
             batch_size: 10,
@@ -503,12 +545,7 @@ mod tests {
         };
         let sink = DatabaseSink::new_with_config(failing_db, Some(config)).unwrap();
 
-        // 写入 12 条记录触发 3 次 flush 失败
-        // 第 1-9 条：buffer 增长，不 flush
-        // 第 10 条：buffer=10，flush 失败（failure #1），记录放回
-        // 第 11 条：buffer=11，flush 失败（failure #2），记录放回
-        // 第 12 条：buffer=12，flush 失败（failure #3），circuit_breaker open
-        for i in 0..12 {
+        for i in 0..30 {
             let record = LogRecord {
                 message: format!("cb-open-{}", i),
                 ..Default::default()
@@ -516,7 +553,13 @@ mod tests {
             let _ = sink.write(&record).await;
         }
 
-        // 第 13 条：circuit_breaker.can_execute()=false → fallback_sink → Ok
+        assert_eq!(
+            sink.inner.lock().circuit_breaker.state(),
+            crate::support::io::sink::CircuitState::Open,
+            "circuit breaker should be open after 3 flush failures"
+        );
+
+        // 第 31 条：circuit_breaker.can_execute()=false → fallback_sink → Ok
         let record = LogRecord {
             message: "after circuit open".to_string(),
             ..Default::default()
@@ -527,6 +570,209 @@ mod tests {
             "write after circuit open should route to fallback and return Ok, got: {:?}",
             result
         );
+    }
+
+    // ========================================================================
+    // 缓冲写入不得喂 success 给断路器：否则 flush 失败计数被清零，
+    // 持续缓冲写入可无限阻止熔断打开
+    // ========================================================================
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_buffered_writes_do_not_reset_circuit_breaker() {
+        let failing_db = Arc::new(FailingDatabase);
+        let config = DatabaseSinkConfig {
+            batch_size: 10,
+            ..Default::default()
+        };
+        let sink = DatabaseSink::new_with_config(failing_db, Some(config)).unwrap();
+
+        // 3 轮，每轮 9 条缓冲写入 + 1 条触发 flush（失败）。
+        // 缓冲写入不调用 record_success，失败计数得以累积到阈值 3。
+        for round in 0..3 {
+            for i in 0..9 {
+                let record = LogRecord {
+                    message: format!("cb-buffered-{}-{}", round, i),
+                    ..Default::default()
+                };
+                let _ = sink.write(&record).await;
+            }
+            let record = LogRecord {
+                message: format!("cb-flush-trigger-{}", round),
+                ..Default::default()
+            };
+            let _ = sink.write(&record).await;
+        }
+
+        assert_eq!(
+            sink.inner.lock().circuit_breaker.state(),
+            crate::support::io::sink::CircuitState::Open,
+            "circuit breaker should open after 3 flush failures despite interleaved buffered writes"
+        );
+    }
+
+    // ========================================================================
+    // 熔断开启走 fallback 时必须写入脱敏后的记录（而非原始记录）
+    // ========================================================================
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_circuit_open_fallback_receives_masked_record() {
+        let failing_db = Arc::new(FailingDatabase);
+        let config = DatabaseSinkConfig {
+            batch_size: 10,
+            ..Default::default()
+        };
+        let sink = DatabaseSink::new_with_config(failing_db, Some(config)).unwrap();
+        let recorder = Arc::new(RecordingFallbackSink::new());
+        sink.inner.lock().fallback_sink = Some(recorder.clone());
+
+        // 触发 3 次 flush 失败使熔断打开（每轮 10 条）
+        for i in 0..30 {
+            let record = LogRecord {
+                message: format!("cb-mask-warmup-{}", i),
+                ..Default::default()
+            };
+            let _ = sink.write(&record).await;
+        }
+        assert_eq!(
+            sink.inner.lock().circuit_breaker.state(),
+            crate::support::io::sink::CircuitState::Open
+        );
+        recorder.clear();
+
+        // 熔断开启后的写入：消息与字段都应已脱敏后再进 fallback
+        let mut fields = std::collections::HashMap::new();
+        fields.insert(
+            "email".to_string(),
+            serde_json::json!("mask-probe@example.com"),
+        );
+        let record = LogRecord {
+            message: "cb-mask-probe user mask-probe@example.com".to_string(),
+            fields,
+            ..Default::default()
+        };
+        let result = sink.write(&record).await;
+        assert!(
+            result.is_ok(),
+            "write after circuit open should succeed via fallback, got: {:?}",
+            result
+        );
+
+        let captured = recorder.captured();
+        assert_eq!(
+            captured.len(),
+            1,
+            "exactly the probe record should reach the fallback"
+        );
+        assert!(
+            !captured[0].message.contains("mask-probe@example.com"),
+            "fallback message should be masked, got: {}",
+            captured[0].message
+        );
+        let email_field = captured[0]
+            .fields
+            .get("email")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            !email_field.contains("mask-probe@example.com"),
+            "fallback field should be masked, got: {}",
+            email_field
+        );
+    }
+
+    // ========================================================================
+    // flush 失败时整批交给 fallback；fallback 成功则不重入队（避免重复提交）
+    // ========================================================================
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_flush_failure_fallback_success_no_requeue() {
+        let failing_db = Arc::new(FailingDatabase);
+        let config = DatabaseSinkConfig {
+            batch_size: 10,
+            ..Default::default()
+        };
+        let sink = DatabaseSink::new_with_config(failing_db, Some(config)).unwrap();
+        let recorder = Arc::new(RecordingFallbackSink::new());
+        sink.inner.lock().fallback_sink = Some(recorder.clone());
+
+        // 第 10 条触发 flush（失败），flush 失败应将错误传播给调用方
+        let mut last_result = Ok(());
+        for i in 0..10 {
+            let record = LogRecord {
+                message: format!("flush-fallback-{}", i),
+                ..Default::default()
+            };
+            last_result = sink.write(&record).await;
+        }
+        assert!(
+            last_result.is_err(),
+            "flush failure should propagate the error, got: {:?}",
+            last_result
+        );
+
+        // 整批 10 条都应进入 fallback
+        let captured = recorder.captured();
+        assert_eq!(captured.len(), 10, "the whole batch should reach the fallback");
+        assert_eq!(captured[0].message, "flush-fallback-0");
+        assert_eq!(captured[9].message, "flush-fallback-9");
+
+        // fallback 成功 → 不得重入队（避免下次 flush 重复提交）
+        assert!(
+            sink.inner.lock().buffer.is_empty(),
+            "records must not be re-queued when the fallback succeeded"
+        );
+    }
+
+    // ========================================================================
+    // 缓冲上限：超限丢弃最旧记录，递增 dropped 指标并累计计数
+    // ========================================================================
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_buffer_overflow_drops_oldest_and_increments_dropped_metric() {
+        let mock_db = Arc::new(MockDatabaseAdapter::new());
+        // batch_size 大于缓冲上限，确保写入只缓冲、不触发 flush
+        let config = DatabaseSinkConfig {
+            batch_size: MAX_BUFFER_SIZE + 10,
+            ..Default::default()
+        };
+        let sink = DatabaseSink::new_with_config(mock_db, Some(config)).unwrap();
+        let metrics = Arc::new(Metrics::new());
+        sink.set_metrics(metrics.clone()).await;
+
+        // 预填充缓冲区至上限
+        {
+            let mut inner = sink.inner.lock();
+            inner.buffer = (0..MAX_BUFFER_SIZE)
+                .map(|i| LogRecord {
+                    message: format!("old-{}", i),
+                    ..Default::default()
+                })
+                .collect();
+        }
+
+        // 再写 1 条：超出上限，最旧的记录应被丢弃
+        let record = LogRecord {
+            message: "new-arrived".to_string(),
+            ..Default::default()
+        };
+        let result = sink.write(&record).await;
+        assert!(result.is_ok());
+
+        {
+            let inner = sink.inner.lock();
+            assert_eq!(inner.buffer.len(), MAX_BUFFER_SIZE);
+            assert_eq!(
+                inner.buffer[0].message, "old-1",
+                "the oldest record (old-0) should be dropped first"
+            );
+            assert_eq!(
+                inner.buffer.last().unwrap().message,
+                "new-arrived",
+                "the newly written record should be kept at the tail"
+            );
+            assert_eq!(inner.dropped_total, 1);
+        }
+        assert_eq!(metrics.logs_dropped(), 1);
     }
 
     // ========================================================================
@@ -578,6 +824,7 @@ mod tests {
             write_latencies: Vec::new(),
             success_count: 0,
             failure_count: 0,
+            dropped_total: 0,
             metrics: None,
         }
     }
