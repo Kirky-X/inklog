@@ -137,6 +137,15 @@ impl LogSanitizer {
     ///    otherwise re-introduce sensitive content into the output after
     ///    redaction had already run, so redaction is positioned as the final
     ///    content transform.
+    ///
+    /// # Marker Idempotency Contract
+    ///
+    /// Step 3 is skipped entirely when the message already contains a
+    /// redaction/masking marker (`***REDACTED`、`***MASKED`、`[REDACTED]`):
+    /// the message is treated as already redacted by an upstream entry point
+    /// （`InklogError::safe_message` 或 `DataMasker::mask`），避免产生
+    /// REDACTED 套 REDACTED 的嵌套标记。注入防护不受短路影响——ANSI 剥离
+    /// 与 escape 转义仍然执行。
     pub fn sanitize(&self, message: &str) -> String {
         // Strip ANSI escape sequences before any other processing
         let mut result = self.strip_ansi(message).into_owned();
@@ -145,10 +154,14 @@ impl LogSanitizer {
             result = result.replace(from, to);
         }
 
-        for (pattern, replacement) in &self.sensitive_regexes {
-            result = pattern
-                .replace_all(&result, replacement.as_str())
-                .to_string();
+        // 标记幂等短路（契约见 doc）：已含脱敏/掩码标记的输入跳过敏感正则
+        // 再次脱敏；注入防护（ANSI 剥离、自定义替换、escape 转义）照常执行。
+        if !contains_redaction_marker(&result) {
+            for (pattern, replacement) in &self.sensitive_regexes {
+                result = pattern
+                    .replace_all(&result, replacement.as_str())
+                    .to_string();
+            }
         }
 
         match self.config.mode {
@@ -263,6 +276,27 @@ impl Default for LogSanitizer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// 已脱敏/已掩码标记（脱敏幂等契约）。
+///
+/// 三处脱敏入口共享同一分工与契约：
+/// - `InklogError::safe_message`（src/error.rs）：错误消息出口脱敏
+/// - [`LogSanitizer`]（本模块）：日志注入防护（CWE-117）与转义
+/// - `DataMasker::mask`（src/support/processing/masking.rs）：PII 掩码
+///
+/// 双开关叠加时同一条消息会先后经过多个入口。输入包含任一标记
+/// （`***REDACTED***`、`***MASKED***`、`[REDACTED]` 等，含各自变体前缀）
+/// 即视为已被上游处理过，入口必须短路跳过再次脱敏，避免产生
+/// REDACTED 套 REDACTED 的嵌套标记。
+pub(crate) const REDACTION_MARKERS: &[&str] =
+    &["***REDACTED", "***MASKED", "[REDACTED]"];
+
+/// 判断消息是否已包含脱敏/掩码标记（幂等短路判定）。
+pub(crate) fn contains_redaction_marker(message: &str) -> bool {
+    REDACTION_MARKERS
+        .iter()
+        .any(|marker| message.contains(marker))
 }
 
 #[cfg(test)]
@@ -556,5 +590,39 @@ mod tests {
         let result = sanitizer.sanitize("\x1b[31mERROR\x1b[0m");
         assert_eq!(result, "ERROR");
         assert!(!result.contains('\x1b'));
+    }
+
+    #[test]
+    fn test_sanitize_marker_idempotency() {
+        let sanitizer = LogSanitizer::new();
+
+        // 已含 ***MASKED*** 标记的输入：跳过敏感正则再次脱敏，标记原样保留
+        // （修复前 token=***MASKED*** 会被 token= 规则改写为 token=[REDACTED]）
+        let marked = "token=***MASKED***";
+        assert_eq!(
+            sanitizer.sanitize(marked),
+            marked,
+            "masking marker must pass through unchanged"
+        );
+
+        // 已脱敏消息再次进入本入口：幂等，不产生嵌套标记
+        let once = sanitizer.sanitize("user password=supersecret123 login");
+        assert!(once.contains("[REDACTED]"));
+        assert_eq!(
+            sanitizer.sanitize(&once),
+            once,
+            "re-sanitizing already redacted text must be a no-op"
+        );
+
+        // 短路只跳过脱敏：注入防护（换行转义）对标记输入仍然执行
+        let mixed = sanitizer.sanitize("password=[REDACTED]\nnext line");
+        assert!(
+            mixed.contains("[REDACTED]"),
+            "marker must be preserved, got: {mixed}"
+        );
+        assert!(
+            !mixed.contains('\n'),
+            "injection protection must still run for marked input"
+        );
     }
 }

@@ -253,7 +253,25 @@ impl DataMasker {
             .any(|pattern| pattern.is_match(field_name))
     }
 
+    /// Mask sensitive data in a log message.
+    ///
+    /// # 脱敏分工（three sanitization entry points）
+    ///
+    /// - 本方法：PII 掩码（邮箱、电话、卡号、密钥等）
+    /// - `InklogError::safe_message`（src/error.rs）：错误消息出口脱敏
+    /// - `validation::sanitize::LogSanitizer`：日志注入防护（CWE-117）与转义
+    ///
+    /// # 标记幂等契约
+    ///
+    /// 输入已含脱敏/掩码标记（`***REDACTED***`、`***MASKED***`、`[REDACTED]`）
+    /// 时视为已被上游处理，直接原样返回、不再套用规则——双开关叠加下不会
+    /// 产生 REDACTED 套 REDACTED 的嵌套标记。
     pub fn mask(&self, text: &str) -> String {
+        // 标记幂等短路（契约见 doc）
+        if crate::validation::sanitize::contains_redaction_marker(text) {
+            return text.to_string();
+        }
+
         #[cfg(feature = "fast-masking")]
         let mut result = {
             if let Some(ref ac) = self.ac_masker {
@@ -1276,6 +1294,32 @@ mod tests {
         let result = masker.mask(message);
         // The password should be masked or the message should change
         assert!(result.contains("REDACTED") || !result.contains("abcdefghijklmnopqrst"));
+    }
+
+    #[test]
+    fn test_mask_marker_idempotency() {
+        let masker = DataMasker::new();
+
+        // 已掩码消息再次进入本入口：幂等，不产生嵌套标记
+        let once = masker.mask("mypassword=abcdefghijklmnopqrst");
+        assert!(
+            once.contains("***REDACTED***"),
+            "first masking pass should mask the secret, got: {once}"
+        );
+        assert_eq!(
+            masker.mask(&once),
+            once,
+            "re-masking already masked text must be a no-op"
+        );
+
+        // 已含 ***MASKED*** / [REDACTED] 标记的输入（subscriber 脱敏或上游
+        // 掩码的产物）原样通过，不被再次改写
+        let marked = "token=***MASKED*** password=[REDACTED]";
+        assert_eq!(
+            masker.mask(marked),
+            marked,
+            "marked input must pass through unchanged"
+        );
     }
 
     #[test]

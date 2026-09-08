@@ -7,6 +7,7 @@ use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use crate::validation::PathValidatorConfig;
 use async_trait::async_trait;
 use crossbeam_channel;
 use parking_lot::Mutex;
@@ -72,6 +73,47 @@ pub struct ChannelBufferedFileSink {
 
 impl ChannelBufferedFileSink {
     pub fn new(config: ChannelBufferedConfig, template: LogTemplate) -> Result<Self, InklogError> {
+        // vuln-0002 对齐：与 FileSink.open_file_inner 相同的路径校验语义，
+        // 在 create_dir_all / open 之前拒绝路径遍历与敏感组件。
+        // 注意：deny_components 需与 src/support/io/sink/file.rs 保持一致。
+        let validator = crate::validation::PathValidator::with_config(PathValidatorConfig {
+            allow_absolute: true,
+            allow_symlinks: false,
+            deny_components: vec![
+                "..".to_string(),
+                ".git".to_string(),
+                ".ssh".to_string(),
+                ".env".to_string(),
+                "etc".to_string(),
+                "passwd".to_string(),
+                "shadow".to_string(),
+                ".bashrc".to_string(),
+                ".bash_profile".to_string(),
+                ".profile".to_string(),
+                ".zshrc".to_string(),
+                ".netrc".to_string(),
+                "id_rsa".to_string(),
+                "id_ed25519".to_string(),
+            ],
+            ..Default::default()
+        });
+        let validation_result = validator.validate(&config.base_config.path);
+        if !validation_result.valid {
+            let reason = validation_result
+                .error
+                .unwrap_or_else(|| "unknown".to_string());
+            let mut args = fluent_bundle::FluentArgs::new();
+            args.set("path", config.base_config.path.display().to_string());
+            args.set("reason", reason.clone());
+            tracing::warn!("{}", crate::i18n::tr_args("sink-file_reject_path", args));
+            let mut err_args = fluent_bundle::FluentArgs::new();
+            err_args.set("reason", reason);
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-unsafe_path_rejected",
+                err_args,
+            )));
+        }
+
         let (sender, receiver) = crossbeam_channel::bounded(config.channel_capacity);
         let file_path = config.base_config.path.clone();
         let file = Self::open_file(&file_path)?;
@@ -624,6 +666,41 @@ mod tests {
 
         // Verify the file exists
         assert!(nested_path.exists());
+    }
+
+    #[test]
+    fn test_new_rejects_path_traversal_components() {
+        // vuln-0002 对齐：含 `..` 组件的路径必须在构造期被拒绝
+        // （与 FileSink 的路径校验加固保持一致），返回构造错误而非静默打开
+        let dir = TempDir::new().unwrap();
+        let traversal_path = dir.path().join("..").join("escaped.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: traversal_path,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let result = ChannelBufferedFileSink::new(cfg, LogTemplate::default());
+        assert!(
+            result.is_err(),
+            "path with '..' component must be rejected at construction"
+        );
+
+        // 敏感组件（deny list）同样被拒绝
+        let sensitive_path = dir.path().join(".ssh").join("leak.log");
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: sensitive_path,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            ChannelBufferedFileSink::new(cfg, LogTemplate::default()).is_err(),
+            "path with denied component '.ssh' must be rejected at construction"
+        );
     }
 
     #[tokio::test]

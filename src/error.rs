@@ -44,6 +44,8 @@
 use std::sync::LazyLock;
 use thiserror::Error;
 
+use crate::validation::sanitize::contains_redaction_marker;
+
 /// Sensitive pattern redaction rules for error messages.
 /// Each tuple contains (pattern, replacement).
 const SENSITIVE_PATTERNS: &[(&str, &str)] = &[
@@ -139,6 +141,12 @@ fn compile_sensitive_patterns(patterns: &'static [(&'static str, &'static str)])
 /// Returns a borrowed reference when no patterns match (zero-allocation fast path).
 fn sanitize_message(msg: &str) -> std::borrow::Cow<'_, str> {
     use std::borrow::Cow;
+    // 标记幂等短路：已含脱敏/掩码标记（***REDACTED***、***MASKED***、
+    // [REDACTED] 等）的消息已被上游（subscriber 脱敏 / DataMasker 掩码）
+    // 处理过，不再重复套用，避免标记被改写或产生嵌套标记。
+    if contains_redaction_marker(msg) {
+        return Cow::Borrowed(msg);
+    }
     // Fast path: check if any pattern matches before allocating
     let mut has_match = false;
     for (re, _) in COMPILED_PATTERNS.iter() {
@@ -302,6 +310,18 @@ impl InklogError {
     ///
     /// This method is useful for logging and displaying errors to users
     /// where sensitive data (like passwords, keys, paths) should not be exposed.
+    ///
+    /// # 脱敏分工（three sanitization entry points）
+    ///
+    /// - 本方法：错误消息出口脱敏（错误被展示/记录时的最后一道防线）
+    /// - `validation::sanitize::LogSanitizer`：日志注入防护（CWE-117）与转义
+    /// - `processing::masking::DataMasker`：PII 掩码（邮箱、电话、卡号等）
+    ///
+    /// # 标记幂等契约
+    ///
+    /// 消息已含脱敏/掩码标记（`***REDACTED***`、`***MASKED***`、`[REDACTED]`）
+    /// 时视为已被上游处理，本方法原样返回、不再重复套用——与 subscriber 脱敏
+    /// / sink 掩码双开关叠加时不会产生 REDACTED 套 REDACTED 的嵌套标记。
     ///
     /// # Example
     ///
@@ -540,6 +560,26 @@ mod tests {
             !msg.contains("mysecretpassword") || msg.contains("***"),
             "Message: {}",
             msg
+        );
+    }
+
+    #[test]
+    fn test_safe_message_preserves_already_redacted_markers() {
+        // 标记幂等：已含 [REDACTED] 的消息不再重复套用
+        // （修复前 password=[REDACTED] 会被 password= 模式改写为 password=***）
+        let error = InklogError::ConfigError("password=[REDACTED]".to_string());
+        let msg = error.safe_message();
+        assert!(
+            msg.ends_with("password=[REDACTED]"),
+            "redaction marker must be preserved verbatim, got: {msg}"
+        );
+
+        // ***MASKED*** 标记同样不被改写
+        let error = InklogError::ConfigError("pwd=***MASKED***".to_string());
+        let msg = error.safe_message();
+        assert!(
+            msg.ends_with("pwd=***MASKED***"),
+            "masking marker must be preserved verbatim, got: {msg}"
         );
     }
 

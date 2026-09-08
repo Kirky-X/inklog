@@ -20,6 +20,16 @@ const FALLBACK_BUFFER_SIZE: usize = 100;
 /// Sampling rate for ERROR/FATAL logs when rate-limited: keep 1 in N.
 const ERROR_SAMPLING_RATE: u64 = 100;
 
+/// Fallback buffer 条目：记录 + 各 async 通道的投递状态。
+///
+/// `delivered[i] == true` 表示第 i 个 async 通道（0 = 主 async 通道，
+/// 1.. = `extra_async_senders` 通道）已成功收到该记录。flush 只向未成功
+/// 的通道补发，防止已成功通道上的记录被重复写出（重复日志）。
+struct FallbackEntry {
+    record: Arc<LogRecord>,
+    delivered: Vec<bool>,
+}
+
 /// High-performance logging subscriber with lock-free hot path.
 ///
 /// Uses crossbeam channels for both console and async sinks to eliminate
@@ -58,7 +68,7 @@ pub struct LoggerSubscriber {
     /// Timeout for async channel send (milliseconds)
     send_timeout_ms: u64,
     /// Fallback buffer for critical logs
-    fallback_buffer: Arc<Mutex<VecDeque<Arc<LogRecord>>>>,
+    fallback_buffer: Arc<Mutex<VecDeque<FallbackEntry>>>,
     /// Optional log sanitizer for preventing log injection (CWE-117)
     sanitizer: Option<Arc<LogSanitizer>>,
     /// Optional rate limiter for log throughput control
@@ -94,19 +104,20 @@ impl LoggerSubscriber {
         self
     }
 
-    /// Send a record to every configured async sink channel. Returns `true`
-    /// only when all sends succeed.
-    fn send_to_async_sinks(&self, record: &Arc<LogRecord>, timeout: Duration) -> bool {
-        let mut all_ok = self
-            .async_sender
-            .send_timeout(Arc::clone(record), timeout)
-            .is_ok();
+    /// Send a record to every configured async sink channel. Returns the
+    /// per-channel delivery status (`true` = delivered)，索引与
+    /// [`FallbackEntry::delivered`] 一致（0 = 主 async 通道）。
+    fn send_to_async_sinks(&self, record: &Arc<LogRecord>, timeout: Duration) -> Vec<bool> {
+        let mut delivered = Vec::with_capacity(1 + self.extra_async_senders.len());
+        delivered.push(
+            self.async_sender
+                .send_timeout(Arc::clone(record), timeout)
+                .is_ok(),
+        );
         for sender in &self.extra_async_senders {
-            if sender.send_timeout(Arc::clone(record), timeout).is_err() {
-                all_ok = false;
-            }
+            delivered.push(sender.send_timeout(Arc::clone(record), timeout).is_ok());
         }
-        all_ok
+        delivered
     }
 
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
@@ -186,7 +197,7 @@ impl LoggerSubscriber {
     pub fn try_flush_fallback(&self) {
         // 锁内仅取出待 flush 批量，循环发送在锁外执行，
         // 避免锁被持有 N × send_timeout
-        let batch: Vec<Arc<LogRecord>> = {
+        let batch: Vec<FallbackEntry> = {
             let mut buffer = self.fallback_buffer.lock();
             buffer.drain(..).collect()
         };
@@ -194,18 +205,46 @@ impl LoggerSubscriber {
             return;
         }
         let timeout = Duration::from_millis(self.send_timeout_ms);
-        let mut flushed = 0;
-        for record in &batch {
-            if !self.send_to_async_sinks(record, timeout) {
-                break;
+        let channel_count = 1 + self.extra_async_senders.len();
+        let mut undelivered: VecDeque<FallbackEntry> = VecDeque::new();
+        let mut stopped = false;
+        for mut entry in batch {
+            if stopped {
+                // flush 已中断：剩余记录按原顺序回填，不再尝试发送
+                undelivered.push_back(entry);
+                continue;
             }
-            flushed += 1;
+            // 只向尚未成功投递的通道补发；已成功的通道不再重发（抑制重复日志）
+            let mut complete = true;
+            for idx in 0..channel_count {
+                if entry.delivered.get(idx).copied().unwrap_or(false) {
+                    continue;
+                }
+                let sender = if idx == 0 {
+                    &self.async_sender
+                } else {
+                    &self.extra_async_senders[idx - 1]
+                };
+                if sender.send_timeout(Arc::clone(&entry.record), timeout).is_ok() {
+                    if idx < entry.delivered.len() {
+                        entry.delivered[idx] = true;
+                    }
+                } else {
+                    // 与既有语义一致：flush 中途失败即停止，未完成的记录回填
+                    complete = false;
+                    break;
+                }
+            }
+            if !complete {
+                undelivered.push_back(entry);
+                stopped = true;
+            }
         }
-        if flushed < batch.len() {
-            // flush 失败：未发出的记录按原顺序回填到队首
+        if !undelivered.is_empty() {
+            // flush 失败：未完成投递的记录（含已部分补发的）按原顺序回填到队首
             let mut buffer = self.fallback_buffer.lock();
-            for record in batch[flushed..].iter().rev() {
-                buffer.push_front(Arc::clone(record));
+            for entry in undelivered.into_iter().rev() {
+                buffer.push_front(entry);
             }
         }
     }
@@ -278,14 +317,16 @@ where
 
         // Slow path: Async sinks - use timeout for backpressure handling
         let timeout = Duration::from_millis(self.send_timeout_ms);
-        if !self.send_to_async_sinks(&record, timeout) {
-            // For critical logs, add to fallback buffer
+        let delivered = self.send_to_async_sinks(&record, timeout);
+        if delivered.iter().any(|ok| !ok) {
+            // For critical logs, add to fallback buffer（保留各通道投递状态，
+            // flush 时只补发未成功的通道）
             if Self::is_critical_level(&record.level) {
                 let mut buffer = self.fallback_buffer.lock();
                 if buffer.len() >= FALLBACK_BUFFER_SIZE {
                     buffer.pop_front();
                 }
-                buffer.push_back(record);
+                buffer.push_back(FallbackEntry { record, delivered });
             } else {
                 // Timeout on non-critical log: message is lost (send_timeout returns
                 // ownership but we have nowhere to buffer it). Only count as dropped,
@@ -464,10 +505,10 @@ mod tests {
             "test::fallback".to_string(),
             "fallback flush test".to_string(),
         ));
-        subscriber
-            .fallback_buffer
-            .lock()
-            .push_back(Arc::clone(&record));
+        subscriber.fallback_buffer.lock().push_back(FallbackEntry {
+            record,
+            delivered: vec![false],
+        });
 
         // 调用 try_flush_fallback，async channel 有容量 → send 成功 → pop_front
         subscriber.try_flush_fallback();
@@ -498,10 +539,10 @@ mod tests {
             "test::fallback".to_string(),
             "disconnect test".to_string(),
         ));
-        subscriber
-            .fallback_buffer
-            .lock()
-            .push_back(Arc::clone(&record));
+        subscriber.fallback_buffer.lock().push_back(FallbackEntry {
+            record,
+            delivered: vec![false],
+        });
 
         // 断开 async channel 的接收端 → send 返回 Disconnected → break
         drop(_async_rx);
@@ -530,9 +571,14 @@ mod tests {
                 "test::fallback".to_string(),
                 format!("fallback-order-{i}"),
             ));
-            subscriber.fallback_buffer.lock().push_back(record);
+            subscriber
+                .fallback_buffer
+                .lock()
+                .push_back(FallbackEntry {
+                    record,
+                    delivered: vec![false],
+                });
         }
-
         subscriber.try_flush_fallback();
 
         // 第一条已发出，剩余两条应按原顺序回填到队首
@@ -544,14 +590,116 @@ mod tests {
         let buffer = subscriber.fallback_buffer.lock();
         assert_eq!(buffer.len(), 2, "remaining records should be refilled");
         assert_eq!(
-            buffer.front().unwrap().message,
+            buffer.front().unwrap().record.message,
             "fallback-order-1",
             "refilled records must keep original order (front)"
         );
         assert_eq!(
-            buffer.back().unwrap().message,
+            buffer.back().unwrap().record.message,
             "fallback-order-2",
             "refilled records must keep original order (back)"
+        );
+    }
+
+    // =========================================================================
+    // fallback 重复抑制回归：按通道精确追踪投递状态，flush 只补发未成功
+    // 通道对应的记录；已成功通道不得被再次投递（重复日志）。
+    // =========================================================================
+
+    #[test]
+    fn test_on_event_partial_failure_records_per_channel_delivery() {
+        // 主 async 通道成功、extra 通道（rendezvous 容量 0）必然超时失败：
+        // ERROR 记录进入 fallback，且 delivered 状态应精确为 [true, false]
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let (extra_tx, _extra_rx) = bounded(0);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics)
+            .with_extra_async_sender(extra_tx)
+            .with_timeout(50);
+        // 在 layer 被 registry 消费前，先拿到 fallback_buffer 的 Arc clone
+        let fallback_buffer = Arc::clone(&layer.fallback_buffer);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::error!(target: "test::subscriber", message = "partial delivery");
+        });
+
+        // 主通道恰好收到一条（无重复）
+        assert!(
+            async_rx.try_recv().is_ok(),
+            "primary async channel should receive the record"
+        );
+        assert!(
+            async_rx.try_recv().is_err(),
+            "primary async channel must not receive duplicates"
+        );
+
+        // fallback 中该记录的投递状态精确为 [true, false]
+        let buffer = fallback_buffer.lock();
+        assert_eq!(
+            buffer.len(),
+            1,
+            "record should be buffered for the failed channel"
+        );
+        let entry = buffer.front().unwrap();
+        assert_eq!(
+            entry.delivered,
+            vec![true, false],
+            "delivery state must be tracked per channel"
+        );
+        assert_eq!(entry.record.message, "partial delivery");
+    }
+
+    #[test]
+    fn test_fallback_flush_only_resends_undelivered_channels() {
+        // 已投递通道（delivered[0]=true）在 flush 时不得重发；
+        // 未投递通道补发恰好一条，全部投递完成后条目移出 buffer
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        // rendezvous 通道：flush 的补发与接收线程会合后成功
+        let (extra_tx, extra_rx) = bounded(0);
+        let metrics = Arc::new(Metrics::new());
+
+        let subscriber = LoggerSubscriber::new(console_tx, async_tx, metrics)
+            .with_extra_async_sender(extra_tx)
+            .with_timeout(500);
+
+        subscriber.fallback_buffer.lock().push_back(FallbackEntry {
+            record: Arc::new(LogRecord::new(
+                tracing::Level::ERROR,
+                "test::fallback".to_string(),
+                "dup suppression".to_string(),
+            )),
+            delivered: vec![true, false],
+        });
+
+        // 接收线程先阻塞在 rendezvous channel 上，flush 的补发与其会合
+        let receiver = std::thread::spawn(move || {
+            extra_rx.recv_timeout(std::time::Duration::from_millis(2000))
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        subscriber.try_flush_fallback();
+
+        // 未成功通道收到恰好一条补发
+        let resent = receiver
+            .join()
+            .unwrap()
+            .expect("extra channel should receive the flushed record");
+        assert_eq!(resent.message, "dup suppression");
+
+        // 已成功通道不得收到重复记录
+        assert!(
+            async_rx.try_recv().is_err(),
+            "already-delivered channel must NOT receive a duplicate on flush"
+        );
+
+        // 全部通道投递完成后 buffer 清空
+        assert!(
+            subscriber.fallback_buffer.lock().is_empty(),
+            "fully delivered entry should be removed from the buffer"
         );
     }
 
@@ -838,13 +986,18 @@ mod tests {
             1,
             "fallback_buffer should contain exactly 1 record"
         );
-        let record = buffer_guard
+        let entry = buffer_guard
             .front()
             .expect("should have a record in fallback_buffer");
-        assert_eq!(record.level, "ERROR", "record level should be ERROR");
+        assert_eq!(entry.record.level, "ERROR", "record level should be ERROR");
         assert_eq!(
-            record.message, "critical timeout",
+            entry.record.message, "critical timeout",
             "record message should match"
+        );
+        assert_eq!(
+            entry.delivered,
+            vec![false],
+            "all async channels failed, delivery state should be [false]"
         );
         drop(buffer_guard);
 
