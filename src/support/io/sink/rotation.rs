@@ -268,7 +268,7 @@ impl RotationStrategy for CompositeRotation {
             let result = strategy.should_rotate(context);
             if result.should_rotate {
                 self.last_triggered
-                    .store(i, std::sync::atomic::Ordering::Relaxed);
+                    .store(i, std::sync::atomic::Ordering::Release);
                 return result;
             }
         }
@@ -282,7 +282,7 @@ impl RotationStrategy for CompositeRotation {
     fn generate_next_path(&self, base_path: &Path, context: &RotationContext) -> PathBuf {
         let idx = self
             .last_triggered
-            .load(std::sync::atomic::Ordering::Relaxed);
+            .load(std::sync::atomic::Ordering::Acquire);
         if let Some(strategy) = self.strategies.get(idx) {
             strategy.generate_next_path(base_path, context)
         } else {
@@ -324,7 +324,11 @@ pub fn parse_size(size_str: &str) -> Result<u64, String> {
         crate::i18n::tr_args("config-invalid_size_number", args)
     })?;
 
-    Ok(num * multiplier)
+    num.checked_mul(multiplier).ok_or_else(|| {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("num", num_str);
+        crate::i18n::tr_args("config-invalid_size_number", args)
+    })
 }
 
 #[cfg(test)]
@@ -590,6 +594,14 @@ mod tests {
     #[test]
     fn test_parse_size_invalid_number() {
         let result = parse_size("abcMB");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid size number"));
+    }
+
+    #[test]
+    fn test_parse_size_overflow_returns_err() {
+        // num * multiplier 溢出 u64 时应返回解析错误而非回绕
+        let result = parse_size("999999999999TB");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid size number"));
     }

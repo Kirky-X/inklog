@@ -58,14 +58,16 @@ pub trait Cache: Send + Sync {
 
     /// 删除缓存值
     ///
+    /// 采用 remove 语义，实现不应先 `exists` 预检再删除（消除 TOCTOU 竞态）。
+    ///
     /// # 参数
     ///
     /// * `key` - 缓存键
     ///
     /// # 返回
     ///
-    /// - `Ok(true)` - 键存在并已删除
-    /// - `Ok(false)` - 键不存在
+    /// - `Ok(true)` - 删除操作成功完成；remove 语义下键不存在同样视为成功。
+    ///   实现若能区分"键原本不存在"，可返回 `Ok(false)`
     /// - `Err(InklogError)` - 缓存访问失败
     async fn delete(&self, key: &str) -> Result<bool, InklogError>;
 
@@ -180,15 +182,9 @@ impl Cache for OxCacheAdapter {
     }
 
     async fn delete(&self, key: &str) -> Result<bool, InklogError> {
-        let existed = self.inner.exists(&key.to_string()).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
-            args.set("key", key.to_string());
-            args.set("err", e.to_string());
-            InklogError::CacheError(crate::i18n::tr_args("cache-exists_failed", args))
-        })?;
-        if !existed {
-            return Ok(false);
-        }
+        // 底层 delete 为 remove 语义（删除不存在的键同样成功），直接透传，
+        // 不做 exists 预检以消除 TOCTOU 竞态；后端无法区分键是否原本存在，
+        // 成功时统一返回 true
         self.inner.delete(&key.to_string()).await.map_err(|e| {
             let mut args = fluent_bundle::FluentArgs::new();
             args.set("key", key.to_string());
@@ -415,8 +411,8 @@ mod tests {
         assert!(cache.delete("key1").await.expect("delete failed"));
         assert!(!cache.exists("key1").await.expect("exists failed"));
         assert!(
-            !cache.delete("key1").await.expect("delete failed"),
-            "再次删除返回 false"
+            cache.delete("key1").await.expect("delete failed"),
+            "remove 语义：删除不存在的键同样成功"
         );
     }
 
@@ -747,8 +743,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_oxcache_adapter_delete_after_ttl_expiration() {
-        // 覆盖 delete 在键已过期（exists 返回 false）时返回 false 的路径
-        // 命中 OxCacheAdapter::delete 中 `if !exists { return false }` 分支
+        // 覆盖 delete 在键已过期（exists 返回 false）时的 remove 语义路径：
+        // 不做 exists 预检，直接删除，键不存在同样返回成功
         let cache = OxCacheAdapter::builder()
             .ttl(std::time::Duration::from_millis(80))
             .build()
@@ -762,11 +758,11 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
-        // 键已过期，exists 返回 false，delete 应短路返回 false
+        // 键已过期，delete 仍应成功完成（remove 语义）
         let deleted = cache.delete("ttl_delete_key").await.expect("delete failed");
         assert!(
-            !deleted,
-            "delete should return false for expired key (exists short-circuit)"
+            deleted,
+            "delete of an expired key should succeed under remove semantics"
         );
     }
 
@@ -910,25 +906,57 @@ mod tests {
 
     #[tokio::test]
     async fn test_oxcache_adapter_delete_nonexistent_after_set() {
-        // 覆盖 delete 在 exists=false 时返回 false 的路径（非 TTL 场景）
-        // 即 OxCacheAdapter::delete 中 `if !exists { return false }` 分支
+        // 覆盖 delete 的 remove 语义路径（无 exists 预检，无 TOCTOU）：
+        // 删除从未存在或已删除的键同样返回成功
         let cache = OxCacheAdapter::new().expect("Failed to create cache");
 
         // 从未设置过的键
         assert!(
-            !cache.delete("never_set_key").await.expect("delete failed"),
-            "delete on never-set key should return false"
+            cache.delete("never_set_key").await.expect("delete failed"),
+            "delete on never-set key should succeed under remove semantics"
         );
 
-        // 设置后删除，再删除应返回 false
+        // 设置后删除，再删除应同样成功
         cache
             .set("temp_key", "temp_value".to_string())
             .await
             .expect("Failed to set");
         assert!(cache.delete("temp_key").await.expect("delete failed"));
         assert!(
-            !cache.delete("temp_key").await.expect("delete failed"),
-            "delete on already-deleted key should return false"
+            cache.delete("temp_key").await.expect("delete failed"),
+            "delete on already-deleted key should succeed under remove semantics"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_oxcache_adapter_concurrent_delete_is_race_free() {
+        // 并发删除同一键：无 exists 预检的 remove 语义下不应有任何删除
+        // 因 TOCTOU 失败，所有请求都成功完成且键最终被移除
+        use std::sync::Arc;
+        use tokio::task;
+
+        let cache = Arc::new(OxCacheAdapter::new().expect("Failed to create cache"));
+        cache
+            .set("race_key", "v".to_string())
+            .await
+            .expect("Failed to set");
+
+        let mut handles = vec![];
+        for _ in 0..8 {
+            let c = Arc::clone(&cache);
+            handles.push(task::spawn(async move {
+                c.delete("race_key")
+                    .await
+                    .expect("concurrent delete should not fail")
+            }));
+        }
+        for handle in handles {
+            handle.await.expect("Task panicked");
+        }
+
+        assert!(
+            !cache.exists("race_key").await.expect("exists failed"),
+            "key should be gone after concurrent deletes"
         );
     }
 

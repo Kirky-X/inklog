@@ -132,7 +132,7 @@ impl ChannelBufferedFileSink {
             let mut batch = Vec::with_capacity(batch_size);
 
             loop {
-                if shutdown_flag.load(Ordering::Relaxed) {
+                if shutdown_flag.load(Ordering::Acquire) {
                     break;
                 }
 
@@ -182,15 +182,20 @@ impl ChannelBufferedFileSink {
             // Use try_recv() to avoid blocking after shutdown flag is set.
             while let Ok(entry) = receiver.try_recv() {
                 let mut file_guard = file.lock();
-                if let Some(writer) = file_guard.as_mut()
-                    && let Err(e) = writer.write_all(entry.as_bytes())
-                {
-                    tracing::error!(
-                        kind = %e.kind(),
-                        "ChannelBufferedFileSink: Write error during drain: {}",
-                        e
-                    );
-                    write_error_count.fetch_add(1, Ordering::Relaxed);
+                if let Some(writer) = file_guard.as_mut() {
+                    match writer.write_all(entry.as_bytes()) {
+                        Ok(()) => {
+                            bytes_written.fetch_add(entry.len(), Ordering::Relaxed);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                kind = %e.kind(),
+                                "ChannelBufferedFileSink: Write error during drain: {}",
+                                e
+                            );
+                            write_error_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
                 }
             }
 
@@ -220,11 +225,11 @@ impl ChannelBufferedFileSink {
 
         let handle = thread::spawn(move || {
             loop {
-                if shutdown_flag.load(Ordering::Relaxed) {
+                if shutdown_flag.load(Ordering::Acquire) {
                     break;
                 }
                 thread::sleep(StdDuration::from_millis(interval_ms));
-                if shutdown_flag.load(Ordering::Relaxed) {
+                if shutdown_flag.load(Ordering::Acquire) {
                     break;
                 }
                 let mut file_guard = file.lock();
@@ -248,18 +253,24 @@ impl ChannelBufferedFileSink {
     fn try_write(&self, record: &LogRecord) -> bool {
         let entry = self.template.render(record);
         match self.config.backpressure_strategy {
-            BackpressureStrategy::Block => match self.sender.send(entry) {
+            // Block 的重试等待由 async write 路径的 write_blocking 处理，
+            // 这里只做单次非阻塞尝试。
+            BackpressureStrategy::Block => match self.sender.try_send(entry) {
                 Ok(()) => true,
-                Err(_) => {
-                    self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                Err(crossbeam_channel::TrySendError::Full(_)) => false,
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    // Channel is dead; don't count as "dropped" since sink is shutting down
                     false
                 }
             },
             BackpressureStrategy::DropNewest => match self.sender.try_send(entry) {
                 Ok(()) => true,
-                Err(crossbeam_channel::TrySendError::Full(_))
-                | Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                Err(crossbeam_channel::TrySendError::Full(_)) => {
                     self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    // Channel is dead; don't count as "dropped" since sink is shutting down
                     false
                 }
             },
@@ -287,6 +298,28 @@ impl ChannelBufferedFileSink {
                     false
                 }
             },
+        }
+    }
+
+    /// Block 策略的 async 写入路径。
+    ///
+    /// 用 `try_send` + 短退避重试代替阻塞式 `sender.send()`：channel 满时
+    /// 让出线程休眠 1ms 后重试，避免卡死 tokio worker 线程。channel 断开
+    /// （sink 关闭中）时不计为丢弃，返回 false。
+    async fn write_blocking(&self, record: &LogRecord) -> bool {
+        let mut entry = self.template.render(record);
+        loop {
+            match self.sender.try_send(entry) {
+                Ok(()) => return true,
+                Err(crossbeam_channel::TrySendError::Full(returned)) => {
+                    entry = returned;
+                    tokio::time::sleep(StdDuration::from_millis(1)).await;
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    // Channel is dead; don't count as "dropped" since sink is shutting down
+                    return false;
+                }
+            }
         }
     }
 
@@ -326,7 +359,7 @@ impl ChannelBufferedFileSink {
     /// 同步 shutdown 内部实现（供 async shutdown 和 Drop 共用，避免 Drop 调用 async 方法）
     fn shutdown_inner(&self) -> Result<(), InklogError> {
         // Signal threads to stop
-        self.shutdown_flag.store(true, Ordering::Relaxed);
+        self.shutdown_flag.store(true, Ordering::Release);
 
         // Join threads to ensure all pending writes are completed
         {
@@ -347,7 +380,13 @@ impl ChannelBufferedFileSink {
 #[async_trait]
 impl LogSink for ChannelBufferedFileSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-        if !self.try_write(record) {
+        let sent = match self.config.backpressure_strategy {
+            BackpressureStrategy::Block => self.write_blocking(record).await,
+            BackpressureStrategy::DropNewest | BackpressureStrategy::DropOldest => {
+                self.try_write(record)
+            }
+        };
+        if !sent {
             let mut args = fluent_bundle::FluentArgs::new();
             args.set(
                 "count",
@@ -640,9 +679,9 @@ mod tests {
     }
 
     // ========================================================================
-    // try_write 错误分支覆盖（额外任务）
-    // 覆盖行 225-228（Block Disconnected）、247-248（DropOldest retry 失败）、
-    // 253-254（DropOldest Disconnected）、232-236（DropNewest Disconnected）
+    // try_write 错误分支覆盖
+    // Disconnected（channel 断开）在三种策略下都不计入 dropped_count，
+    // 写入返回 false；DropOldest retry 失败仍计入丢弃。
     // ========================================================================
 
     /// 辅助函数：创建 sink 并 shutdown，返回可变的 sink 以便替换内部字段
@@ -668,8 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_write_block_strategy_disconnected() {
-        // 覆盖 Block 策略下 sender.send() 返回 Err 的分支（行 225-228）
-        // send() 仅在所有 receiver 被 drop 时返回 Err
+        // Block 策略下 sender 断开：写入返回 false，不计 dropped_count
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("block_disconnected.log");
         let mut sink = make_shutdown_sink(BackpressureStrategy::Block, path).await;
@@ -687,16 +725,19 @@ mod tests {
             "Block strategy should return false when sender is disconnected"
         );
         let m = sink.metrics();
-        assert!(
-            m.dropped_count > 0,
-            "dropped_count should be incremented for disconnected Block, got: {}",
-            m.dropped_count
+        assert_eq!(
+            m.dropped_count, 0,
+            "dropped_count should NOT be incremented for disconnected (channel is dead, not 'dropped')"
         );
+        // async write 路径同样返回 Err 且不累计丢弃
+        assert!(sink.write(&record).await.is_err());
+        assert_eq!(sink.metrics().dropped_count, 0);
     }
 
     #[tokio::test]
     async fn test_try_write_drop_newest_strategy_disconnected() {
-        // 覆盖 DropNewest 策略下 try_send 返回 Disconnected 的分支（行 232-236）
+        // DropNewest 策略下 channel 断开：写入返回 false，不计 dropped_count
+        // （与 DropOldest 的 Disconnected 语义对齐）
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("drop_newest_disconnected.log");
         let mut sink = make_shutdown_sink(BackpressureStrategy::DropNewest, path).await;
@@ -712,11 +753,13 @@ mod tests {
             "DropNewest strategy should return false when sender is disconnected"
         );
         let m = sink.metrics();
-        assert!(
-            m.dropped_count > 0,
-            "dropped_count should be incremented for disconnected DropNewest, got: {}",
-            m.dropped_count
+        assert_eq!(
+            m.dropped_count, 0,
+            "dropped_count should NOT be incremented for disconnected (channel is dead, not 'dropped')"
         );
+        // async write 路径同样返回 Err 且不累计丢弃
+        assert!(sink.write(&record).await.is_err());
+        assert_eq!(sink.metrics().dropped_count, 0);
     }
 
     #[tokio::test]
@@ -822,6 +865,95 @@ mod tests {
         );
         let m = sink.metrics();
         assert_eq!(m.dropped_count, 0, "no drops expected for connected Block");
+    }
+
+    #[tokio::test]
+    async fn test_async_write_block_strategy_completes_when_channel_full() {
+        // Block 策略下 channel 满：async write 应通过退避重试完成，
+        // 而不是阻塞 OS 线程或返回错误
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("block_full.log");
+        let mut sink = make_shutdown_sink(BackpressureStrategy::Block, path).await;
+
+        // 替换为容量 1 且已满的 channel；50ms 后由测试线程腾出空间
+        let (tx, rx) = crossbeam_channel::bounded::<String>(1);
+        tx.send("filler".to_string()).expect("Failed to fill");
+        let old_sender = std::mem::replace(&mut sink.sender, tx);
+        let old_receiver = std::mem::replace(&mut sink.receiver, rx.clone());
+        drop(old_sender);
+        drop(old_receiver);
+
+        let drainer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            // 只取走 filler，为新记录腾出空间
+            let _ = rx.try_recv();
+        });
+
+        let start = std::time::Instant::now();
+        let record = make_record("block-full-retry");
+        sink.write(&record)
+            .await
+            .expect("async write should complete on a full channel via backoff retry");
+        assert!(
+            start.elapsed() >= std::time::Duration::from_millis(40),
+            "write should have waited for channel space through backoff retries"
+        );
+        drainer.join().unwrap();
+
+        // 新记录应已入队（filler 已被取走）
+        assert_eq!(sink.sender.len(), 1);
+    }
+
+    // 测试故意持有文件锁迫使 IO 线程阻塞、记录走 drain 路径；
+    // 持锁跨 await 只阻塞 IO 线程，异步写入走的是 channel，无死锁风险
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn test_drain_loop_counts_bytes_written() {
+        // shutdown 触发的 drain 循环中成功写入也应累计 bytes_written
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("drain_bytes.log");
+        let tmpl = LogTemplate::default();
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 16,
+            flush_interval_ms: 50,
+        };
+        let sink = ChannelBufferedFileSink::new(cfg, tmpl.clone()).unwrap();
+
+        // 先占住文件锁，使 IO 线程在写出批次时阻塞，
+        // 随后置 shutdown 标志再补发记录，迫使这部分记录走 drain 路径
+        let file_guard = sink.file.lock();
+        for i in 0..5 {
+            let rec = make_record(&format!("drain-first-{i}"));
+            sink.write(&rec).await.unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        sink.shutdown_flag.store(true, Ordering::Release);
+        let mut expected_bytes = 0usize;
+        for i in 0..5 {
+            let rec = make_record(&format!("drain-second-{i}"));
+            expected_bytes += tmpl.render(&rec).len();
+            sink.write(&rec).await.unwrap();
+        }
+        drop(file_guard);
+
+        sink.shutdown().await.unwrap();
+
+        let m = sink.metrics();
+        assert!(
+            m.bytes_written >= expected_bytes,
+            "drained writes should count towards bytes_written, got {} < {}",
+            m.bytes_written,
+            expected_bytes
+        );
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(data.contains("drain-second-4"));
     }
 
     // ========================================================================

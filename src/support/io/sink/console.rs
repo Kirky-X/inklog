@@ -149,12 +149,14 @@ impl LogSink for ConsoleSink {
         Ok(())
     }
 
+    /// Flush the stdout writer and stderr.
+    ///
+    /// The writer lock only guards a short, synchronous critical section;
+    /// never hold it across an `.await`. A poisoned lock is recovered via
+    /// `into_inner()` so flush still succeeds after a panicking writer.
     async fn flush(&self) -> Result<(), InklogError> {
         // Flush stdout writer
-        let mut writer = self
-            .writer
-            .lock()
-            .map_err(|_| InklogError::IoError(io::Error::other("Lock poisoned")))?;
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         writer.flush().map_err(InklogError::IoError)?;
         // Also flush stderr to ensure all output is written
         io::stderr().flush().map_err(InklogError::IoError)
@@ -803,6 +805,30 @@ mod tests {
         let (sink, _writer) = sink_with_test_writer(ConsoleSinkConfig::default());
         // shutdown delegates to flush, so it should succeed.
         assert!(sink.shutdown().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_log_sink_flush_recovers_from_poisoned_lock() {
+        // writer 锁中毒后 flush 应通过 into_inner 恢复并成功，
+        // 而不是返回 "Lock poisoned" 错误
+        let (sink, writer) = sink_with_test_writer(ConsoleSinkConfig::default());
+
+        // 中毒前写入一条记录，恢复后的 flush 应能刷出该内容
+        sink.write(&make_record("INFO", "before poison"))
+            .await
+            .unwrap();
+
+        let writer_arc = Arc::clone(&sink.writer);
+        let _ = std::thread::spawn(move || {
+            let _guard = writer_arc.lock().unwrap();
+            panic!("poison the writer mutex");
+        })
+        .join();
+        assert!(sink.writer.is_poisoned(), "mutex should be poisoned now");
+
+        // 中毒状态下 flush 仍应成功
+        assert!(sink.flush().await.is_ok());
+        assert!(writer.output().contains("before poison"));
     }
 
     // ========================================================================

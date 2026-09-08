@@ -127,6 +127,10 @@ impl CircuitBreaker {
     }
 
     /// 记录成功
+    ///
+    /// 只有 `HalfOpen` 态下累计到 `success_threshold` 的成功才会将断路器
+    /// 转回 `Closed`；`Open` 态下收到的成功被忽略（不改变状态），`Closed`
+    /// 态下成功重置失败计数。
     pub fn record_success(&self) {
         let mut inner = self.inner.lock();
         match inner.state {
@@ -138,9 +142,7 @@ impl CircuitBreaker {
                 }
             }
             CircuitState::Open => {
-                // 意外的成功，重置
-                inner.state = CircuitState::Closed;
-                inner.failure_count = 0;
+                // Open 态的成功不构成恢复探测，保持打开
             }
             CircuitState::Closed => {
                 // 成功，重置失败计数
@@ -292,16 +294,51 @@ mod tests {
 
     #[test]
     fn test_record_success_on_open_state() {
-        // Test the unexpected success on Open state - should reset to Closed
+        // Success received while Open must not close the circuit; only
+        // HalfOpen probes may transition back to Closed.
         let cb = CircuitBreaker::new(2, StdDuration::from_secs(60), 3);
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
 
-        // record_success on Open state should reset to Closed
+        // record_success on Open state is ignored
+        cb.record_success();
+        assert_eq!(cb.state(), CircuitState::Open);
+        assert_eq!(cb.failure_count(), 2);
+    }
+
+    #[test]
+    fn test_success_on_open_does_not_enable_execution() {
+        // After a success while Open, the circuit stays open and operations
+        // are still rejected until the timeout elapses.
+        let cb = CircuitBreaker::new(1, StdDuration::from_secs(60), 2);
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+
+        cb.record_success();
+        assert_eq!(cb.state(), CircuitState::Open);
+        assert!(!cb.can_execute());
+        assert_eq!(cb.failure_count(), 1);
+    }
+
+    #[test]
+    fn test_success_on_open_then_half_open_probe_recovers() {
+        // A success observed while Open must not consume the recovery path:
+        // after the timeout the breaker still transitions to HalfOpen and a
+        // probe success chain can close it.
+        let cb = CircuitBreaker::new(2, StdDuration::from_millis(100), 2);
+        cb.record_failure();
+        cb.record_failure();
+        cb.record_success(); // ignored while Open
+        assert_eq!(cb.state(), CircuitState::Open);
+
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(cb.can_execute()); // triggers transition to HalfOpen
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+
+        cb.record_success();
         cb.record_success();
         assert_eq!(cb.state(), CircuitState::Closed);
-        assert_eq!(cb.failure_count(), 0);
     }
 
     #[test]
