@@ -134,14 +134,9 @@ mod validation;
 // Internationalization — core feature, always compiled
 pub mod i18n;
 
-/// Global locale initializer — ensures translations are available.
-static _LOCALE_INIT: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
-    i18n::init_locale();
-});
-
 // Emit a clear compile error when the `kit` feature is enabled without any
 // database driver.  DbNexusAdapter and InklogModule require at least
-// one of sqlite / postgres / mysql to function.
+// one of sqlite / postgres / mysql / duckdb to function.
 #[cfg(all(
     feature = "kit",
     not(any(

@@ -67,10 +67,7 @@ impl LogAdapter {
             message: record.args().to_string(),
             file: record.file().map(|s| s.to_string()),
             line: record.line(),
-            thread_id: std::thread::current()
-                .name()
-                .unwrap_or("unknown")
-                .to_string(),
+            thread_id: format!("{:?}", std::thread::current().id()),
             fields: Default::default(),
         }
     }
@@ -92,27 +89,21 @@ impl log::Log for LogAdapter {
         let log_record = Arc::new(self.record_to_log_record(record));
 
         // Fast path: Console - lock-free try_send, drop on full to avoid blocking
-        match self.console_sender.try_send(Arc::clone(&log_record)) {
-            Ok(_) => {}
-            Err(crossbeam_channel::TrySendError::Full(_)) => {
-                self.metrics.inc_channel_blocked();
-                self.metrics.inc_logs_dropped();
-            }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                self.metrics.inc_logs_dropped();
-            }
-        }
+        let console_sent = self.console_sender.try_send(Arc::clone(&log_record));
 
         // Slow path: Async sinks (file, database, etc.) - drop on full to avoid blocking
-        match self.async_sender.try_send(log_record) {
-            Ok(_) => {}
-            Err(crossbeam_channel::TrySendError::Full(_)) => {
-                self.metrics.inc_channel_blocked();
-                self.metrics.inc_logs_dropped();
-            }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                self.metrics.inc_logs_dropped();
-            }
+        let async_sent = self.async_sender.try_send(log_record);
+
+        // 每条记录最多计一次丢弃，即使两个通道同时拒绝它；
+        // channel_blocked 仍按通道计数
+        if console_sent.is_err() || async_sent.is_err() {
+            self.metrics.inc_logs_dropped();
+        }
+        if let Err(crossbeam_channel::TrySendError::Full(_)) = console_sent {
+            self.metrics.inc_channel_blocked();
+        }
+        if let Err(crossbeam_channel::TrySendError::Full(_)) = async_sent {
+            self.metrics.inc_channel_blocked();
         }
     }
 
@@ -248,6 +239,29 @@ mod tests {
     }
 
     #[test]
+    fn test_record_to_log_record_thread_id_is_real_id() {
+        let (console_tx, _) = bounded(100);
+        let (async_tx, _) = bounded(100);
+        let adapter = LogAdapter::new(console_tx, async_tx, Arc::new(Metrics::new()));
+
+        let metadata = log::Metadata::builder()
+            .target("test::thread")
+            .level(Level::Info)
+            .build();
+        let record = log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!("thread id check"))
+            .build();
+
+        let log_record = adapter.record_to_log_record(&record);
+
+        // thread_id must carry the real thread id, not the thread name
+        let expected = format!("{:?}", std::thread::current().id());
+        assert_eq!(log_record.thread_id, expected);
+        assert!(expected.starts_with("ThreadId("));
+    }
+
+    #[test]
     fn test_log_adapter_handles_full_channel() {
         // Create channels with capacity 1
         let (console_tx, console_rx) = bounded(1);
@@ -274,8 +288,11 @@ mod tests {
         while console_rx.try_recv().is_ok() {}
         while async_rx.try_recv().is_ok() {}
 
-        // Channels of capacity 1 can hold at most 1 item; 4 items dropped (2 per channel)
-        assert_eq!(metrics.logs_dropped(), 8);
+        // Channels of capacity 1 hold at most 1 item each; the remaining
+        // 4 records fail on both channels but count as dropped only once
+        assert_eq!(metrics.logs_dropped(), 4);
+        // channel_blocked stays per-channel: 4 rejected records × 2 channels
+        assert_eq!(metrics.channel_blocked(), 8);
     }
 
     #[test]
@@ -397,8 +414,9 @@ mod tests {
         // Should not panic; disconnected console channel drops log and increments metric
         adapter.log(&record);
 
-        // Both channels are disconnected, so 2 drops (one per channel)
-        assert_eq!(metrics.logs_dropped(), 2);
+        // Both channels are disconnected, but the record is counted as
+        // dropped only once
+        assert_eq!(metrics.logs_dropped(), 1);
     }
 
     #[test]

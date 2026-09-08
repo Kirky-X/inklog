@@ -155,6 +155,34 @@ mod tests {
     }
 
     #[test]
+    fn test_format_timestamp_cached_output_consistent() {
+        // Repeated calls hit the per-thread formatter cache and must
+        // produce identical output; a second formatter instance for the
+        // same locale shares the cached entry.
+        let fmt = LogI18nFormatter::new("en-US").expect("en-US locale");
+        let first = fmt.format_timestamp(2026, 7, 11).expect("first call");
+        let second = fmt.format_timestamp(2026, 7, 11).expect("second call");
+        assert_eq!(first, second, "cached formatter must not change output");
+
+        let fmt2 = LogI18nFormatter::new("en-US").expect("en-US locale");
+        let other = fmt2.format_timestamp(2026, 7, 11).expect("other instance");
+        assert_eq!(first, other, "same locale must share the cached formatter");
+
+        // A different locale gets its own cache entry
+        let zh = LogI18nFormatter::new("zh-CN").expect("zh-CN locale");
+        let zh_result = zh.format_timestamp(2026, 7, 11).expect("zh call");
+        assert!(
+            zh_result.contains("2026"),
+            "zh-CN timestamp should contain year: got '{zh_result}'"
+        );
+        assert_eq!(
+            fmt.format_timestamp(2026, 7, 11).expect("en again"),
+            first,
+            "switching locales must not perturb cached entries"
+        );
+    }
+
+    #[test]
     fn test_format_log_level() {
         let fmt = LogI18nFormatter::new("en-US").expect("en-US locale");
         assert_eq!(

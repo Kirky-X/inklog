@@ -14,20 +14,30 @@
 
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
 use parking_lot::RwLock;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use unic_langid::LanguageIdentifier;
 
 /// Global locale manager state.
-/// Stores `FluentResource` (Send + Sync) instead of `FluentBundle`
-/// because `FluentBundle` contains non-Send memoizer internals.
+/// Parsed resources are leaked as `&'static` so each thread's bundle
+/// cache can hold bundles borrowing them; `FluentBundle` itself lives in
+/// the per-thread `BUNDLES` cache because it contains non-Send
+/// memoizer internals.
 static MANAGER: std::sync::OnceLock<RwLock<ManagerState>> = std::sync::OnceLock::new();
 
 struct ManagerState {
     locale: String,
     /// locale_tag → (resource_name → FluentResource)
-    resources: HashMap<String, HashMap<String, FluentResource>>,
+    resources: &'static HashMap<String, HashMap<String, FluentResource>>,
     /// Cached language identifiers per locale tag
-    lang_ids: HashMap<String, LanguageIdentifier>,
+    lang_ids: &'static HashMap<String, LanguageIdentifier>,
+}
+
+// Per-thread cache of locale tag → prebuilt bundle. Entries are keyed
+// by locale tag, so a locale switch simply misses and rebuilds.
+thread_local! {
+    static BUNDLES: RefCell<HashMap<String, FluentBundle<&'static FluentResource>>> =
+        RefCell::new(HashMap::new());
 }
 
 /// Initialize the global locale.
@@ -44,8 +54,9 @@ pub fn init_locale() {
         let (resources, lang_ids) = load_resources();
         RwLock::new(ManagerState {
             locale,
-            resources,
-            lang_ids,
+            // Leak so per-thread bundles can borrow the resources for 'static
+            resources: Box::leak(Box::new(resources)),
+            lang_ids: Box::leak(Box::new(lang_ids)),
         })
     });
 }
@@ -72,14 +83,14 @@ pub fn tr(id: &str) -> String {
 
 fn tr_impl(id: &str, args: Option<&FluentArgs<'_>>) -> String {
     init_locale();
-    let manager = MANAGER.get().unwrap().read();
+    let locale = current_locale();
 
     // Try current locale, then fallback to en
-    if let Some(result) = format_message(&manager, &manager.locale, id, args) {
+    if let Some(result) = format_message(&locale, id, args) {
         return result;
     }
-    if manager.locale != "en"
-        && let Some(result) = format_message(&manager, "en", id, args)
+    if locale != "en"
+        && let Some(result) = format_message("en", id, args)
     {
         return result;
     }
@@ -87,28 +98,32 @@ fn tr_impl(id: &str, args: Option<&FluentArgs<'_>>) -> String {
     id.to_string()
 }
 
-/// Create a temporary bundle and format a message.
-/// Bundle creation is cheap (just memoizer init); the heavy work
-/// (YAML/FTL parsing) was done at init time.
-fn format_message(
-    manager: &ManagerState,
-    locale: &str,
-    id: &str,
-    args: Option<&FluentArgs<'_>>,
-) -> Option<String> {
-    let res_map = manager.resources.get(locale)?;
-    let lang_id = manager.lang_ids.get(locale)?;
-    let mut bundle = FluentBundle::new(vec![lang_id.clone()]);
-    for resource in res_map.values() {
-        let _ = bundle.add_resource(resource);
-    }
-    let message = bundle.get_message(id)?;
-    let pattern = message.value()?;
-    let mut errors = vec![];
-    let result = bundle
-        .format_pattern(pattern, args, &mut errors)
-        .to_string();
-    Some(result)
+/// Format a message using the per-thread cached bundle for `locale`.
+/// Bundles are built once per (thread, locale); the heavy work
+/// (file I/O / FTL parsing) was done at init time.
+fn format_message(locale: &str, id: &str, args: Option<&FluentArgs<'_>>) -> Option<String> {
+    BUNDLES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.contains_key(locale) {
+            let manager = MANAGER.get().unwrap().read();
+            let res_map = manager.resources.get(locale)?;
+            let lang_id = manager.lang_ids.get(locale)?;
+            let mut bundle: FluentBundle<&'static FluentResource> =
+                FluentBundle::new(vec![lang_id.clone()]);
+            for resource in res_map.values() {
+                let _ = bundle.add_resource(resource);
+            }
+            cache.insert(locale.to_string(), bundle);
+        }
+        let bundle = cache.get(locale)?;
+        let message = bundle.get_message(id)?;
+        let pattern = message.value()?;
+        let mut errors = vec![];
+        let result = bundle
+            .format_pattern(pattern, args, &mut errors)
+            .to_string();
+        Some(result)
+    })
 }
 
 fn resolve_locale() -> String {
@@ -122,17 +137,17 @@ fn resolve_locale() -> String {
 
     // 1. Environment variable (highest priority)
     if let Ok(locale) = std::env::var("INKLOG_LOCALE") {
-        let locale = locale.trim().to_string();
-        if !locale.is_empty() && is_valid_locale(&locale) {
-            return locale;
+        let locale = locale.trim();
+        if !locale.is_empty() && is_valid_locale(locale) {
+            return normalize_locale(locale);
         }
     }
 
     // 2. System locale detection
     if let Some(sys_locale) = sys_locale::get_locale() {
-        let sys_locale = sys_locale.trim().to_string();
-        if !sys_locale.is_empty() && is_valid_locale(&sys_locale) {
-            return sys_locale;
+        let sys_locale = sys_locale.trim();
+        if !sys_locale.is_empty() && is_valid_locale(sys_locale) {
+            return normalize_locale(sys_locale);
         }
     }
 
@@ -140,19 +155,33 @@ fn resolve_locale() -> String {
     "en".to_string()
 }
 
-/// Check if a locale string is a valid BCP-47 language tag.
+/// Normalize a locale string to the BCP-47 tag shape used by the
+/// `locales/` directory: strip any modifier (`@`) and codeset (`.`)
+/// suffix, then convert underscores to hyphens
+/// (e.g. `"zh_CN.UTF-8"` → `"zh-CN"`).
+fn normalize_locale(locale: &str) -> String {
+    locale
+        .split('@')
+        .next()
+        .unwrap_or(locale)
+        .split('.')
+        .next()
+        .unwrap_or(locale)
+        .replace('_', "-")
+}
+
+/// Check if a locale string resolves to a valid BCP-47 language tag.
 ///
-/// Rejects POSIX locale names like `"C"`, `"POSIX"`, or `"en_US.UTF-8"`
-/// that `sys-locale` may return on some platforms.
+/// Accepts POSIX-style locale names like `"en_US.UTF-8"` (normalized to
+/// `"en"`) that `sys-locale` may return on some platforms, while
+/// rejecting non-locale values like `"C"` or `"POSIX"`.
 fn is_valid_locale(locale: &str) -> bool {
     // Reject known non-BCP-47 values
     if matches!(locale, "C" | "POSIX") {
         return false;
     }
-    // Strip encoding suffix (e.g. "en_US.UTF-8" → "en_US")
-    let tag = locale.split('.').next().unwrap_or(locale);
-    // Validate as a BCP-47 language identifier
-    tag.parse::<LanguageIdentifier>().is_ok()
+    // Normalize, then validate as a BCP-47 language identifier
+    normalize_locale(locale).parse::<LanguageIdentifier>().is_ok()
 }
 
 fn load_resources() -> (
@@ -300,6 +329,64 @@ mod tests {
             if current_locale() == "en" {
                 assert_eq!(result, expected_en, "tr({}) en mismatch", key);
             }
+        }
+    }
+
+    #[test]
+    fn test_normalize_locale() {
+        assert_eq!(normalize_locale("en"), "en");
+        assert_eq!(normalize_locale("zh-CN"), "zh-CN");
+        // POSIX-style names: underscore → hyphen, codeset and modifier stripped
+        assert_eq!(normalize_locale("zh_CN"), "zh-CN");
+        assert_eq!(normalize_locale("en_US.UTF-8"), "en-US");
+        assert_eq!(normalize_locale("zh_CN.utf8"), "zh-CN");
+        assert_eq!(normalize_locale("en_US@euro"), "en-US");
+        assert_eq!(normalize_locale("en_US.UTF-8@euro"), "en-US");
+    }
+
+    #[test]
+    fn test_is_valid_locale_accepts_posix_style() {
+        assert!(is_valid_locale("zh_CN"));
+        assert!(is_valid_locale("en_US.UTF-8"));
+        assert!(is_valid_locale("zh_CN@pinyin"));
+        assert!(is_valid_locale("en"));
+        assert!(!is_valid_locale("C"));
+        assert!(!is_valid_locale("POSIX"));
+        assert!(!is_valid_locale("not a locale!!"));
+    }
+
+    #[test]
+    fn test_posix_style_locale_hits_resources() {
+        init_locale();
+        // zh_CN normalizes to a locales/ directory that is hit directly
+        assert_eq!(normalize_locale("zh_CN.UTF-8"), "zh-CN");
+        assert_eq!(
+            format_message("zh-CN", "log_level-name_info", None).as_deref(),
+            Some("信息")
+        );
+        // en_US.UTF-8 normalizes to en-US (no dedicated directory); the
+        // same fallback chain tr() uses then resolves it to en resources
+        let locale = normalize_locale("en_US.UTF-8");
+        assert_eq!(locale, "en-US");
+        let translated = format_message(&locale, "log_level-name_info", None)
+            .or_else(|| format_message("en", "log_level-name_info", None));
+        assert_eq!(translated.as_deref(), Some("INFO"));
+    }
+
+    #[test]
+    fn test_bundle_cache_keeps_locales_separate() {
+        init_locale();
+        // Repeated lookups exercise cached bundles; a locale switch must
+        // not leak translations across cache entries.
+        for _ in 0..3 {
+            assert_eq!(
+                format_message("en", "log_level-name_warn", None).as_deref(),
+                Some("WARN")
+            );
+            assert_eq!(
+                format_message("zh-CN", "log_level-name_warn", None).as_deref(),
+                Some("警告")
+            );
         }
     }
 }

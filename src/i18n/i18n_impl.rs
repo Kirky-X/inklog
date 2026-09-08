@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
+use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use icu::collator::Collator;
@@ -16,6 +19,14 @@ use icu::plurals::{PluralCategory, PluralRules, PluralRulesOptions};
 use writeable::Writeable;
 
 use super::{I18nError, LogI18nFormatter};
+
+// Per-thread cache of locale tag → date formatter. DateTimeFormatter
+// construction loads locale data; entries are keyed by locale tag so
+// distinct locales each get their own formatter.
+thread_local! {
+    static TIMESTAMP_FORMATTERS: RefCell<HashMap<String, DateTimeFormatter<YMD>>> =
+        RefCell::new(HashMap::new());
+}
 
 /// Map a [`PluralCategory`] to its capitalized CLDR name (e.g. `"One"`, `"Other"`).
 fn plural_category_name(category: PluralCategory) -> &'static str {
@@ -121,14 +132,23 @@ impl LogI18nFormatter {
         let time = Time::try_new(0, 0, 0, 0).map_err(|e| I18nError::DateError(e.to_string()))?;
         let datetime = DateTime { date, time };
 
-        // DateTimeFormatter construction is non-trivial (loads locale data).
-        // In a hot-path scenario, consider caching this on the struct.
-        // For now it is constructed per call since format_timestamp is
-        // typically called at low frequency (log formatting, not per-record).
-        let dtf = DateTimeFormatter::try_new(self.locale.clone().into(), YMD::medium())
-            .map_err(|e| I18nError::FormatError(e.to_string()))?;
-        let formatted = dtf.format(&datetime);
-        Ok(formatted.write_to_string().into_owned())
+        let locale_key = self.locale.to_string();
+        TIMESTAMP_FORMATTERS.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let dtf = match cache.entry(locale_key) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    let dtf = DateTimeFormatter::try_new(
+                        self.locale.clone().into(),
+                        YMD::medium(),
+                    )
+                    .map_err(|e| I18nError::FormatError(e.to_string()))?;
+                    entry.insert(dtf)
+                }
+            };
+            let formatted = dtf.format(&datetime);
+            Ok(formatted.write_to_string().into_owned())
+        })
     }
 
     /// Normalize a log level string to uppercase canonical form
