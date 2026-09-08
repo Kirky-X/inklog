@@ -103,6 +103,32 @@ pub struct TlsConfig {
     pub key_path: String,
 }
 
+impl TlsConfig {
+    /// Validate TLS settings.
+    ///
+    /// Both paths must be non-empty and point to existing files, so a
+    /// misconfigured HTTPS server fails at configuration time instead of at
+    /// first connection.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.cert_path.is_empty() {
+            return Err("tls.cert_path is empty".to_string());
+        }
+        if self.key_path.is_empty() {
+            return Err("tls.key_path is empty".to_string());
+        }
+        if !std::path::Path::new(&self.cert_path).is_file() {
+            return Err(format!(
+                "tls.cert_path \"{}\" does not exist",
+                self.cert_path
+            ));
+        }
+        if !std::path::Path::new(&self.key_path).is_file() {
+            return Err(format!("tls.key_path \"{}\" does not exist", self.key_path));
+        }
+        Ok(())
+    }
+}
+
 // ============================================================================
 // HttpErrorMode - HTTP server error handling mode
 // ============================================================================
@@ -151,5 +177,59 @@ mod tests {
     fn test_http_error_mode_default() {
         let mode = HttpErrorMode::default();
         assert!(matches!(mode, HttpErrorMode::Strict));
+    }
+
+    #[test]
+    fn test_tls_config_validate_rejects_empty_paths() {
+        let tls = TlsConfig {
+            cert_path: String::new(),
+            key_path: "/tmp/key.pem".to_string(),
+        };
+        let err = tls.validate().unwrap_err();
+        assert!(err.contains("cert_path"), "unexpected error: {err}");
+
+        let tls = TlsConfig {
+            cert_path: "/tmp/cert.pem".to_string(),
+            key_path: String::new(),
+        };
+        let err = tls.validate().unwrap_err();
+        assert!(err.contains("key_path"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_tls_config_validate_rejects_missing_files() {
+        let tls = TlsConfig {
+            cert_path: "/nonexistent/cert.pem".to_string(),
+            key_path: "/nonexistent/key.pem".to_string(),
+        };
+        let err = tls.validate().unwrap_err();
+        assert!(err.contains("cert_path"), "unexpected error: {err}");
+
+        let dir = tempfile::tempdir().unwrap();
+        let cert = dir.path().join("cert.pem");
+        std::fs::write(&cert, "-----BEGIN CERTIFICATE-----").unwrap();
+
+        // 证书存在但密钥缺失
+        let tls = TlsConfig {
+            cert_path: cert.to_string_lossy().to_string(),
+            key_path: dir.path().join("missing.pem").to_string_lossy().to_string(),
+        };
+        let err = tls.validate().unwrap_err();
+        assert!(err.contains("key_path"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_tls_config_validate_accepts_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let cert = dir.path().join("cert.pem");
+        let key = dir.path().join("key.pem");
+        std::fs::write(&cert, "-----BEGIN CERTIFICATE-----").unwrap();
+        std::fs::write(&key, "-----BEGIN PRIVATE KEY-----").unwrap();
+
+        let tls = TlsConfig {
+            cert_path: cert.to_string_lossy().to_string(),
+            key_path: key.to_string_lossy().to_string(),
+        };
+        assert!(tls.validate().is_ok());
     }
 }

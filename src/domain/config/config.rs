@@ -6,10 +6,12 @@ use crate::InklogError;
 use serde::{Deserialize, Serialize};
 
 use super::console::ConsoleSinkConfig;
+use super::database::DatabaseDriver;
 use super::database::DatabaseSinkConfig;
 use super::file_sink::FileSinkConfig;
 use super::global::GlobalConfig;
 use super::http::HttpServerConfig;
+use super::performance::MAX_CHANNEL_CAPACITY;
 use super::performance::PerformanceConfig;
 
 // Re-export HttpErrorMode for env override match in this file
@@ -45,6 +47,39 @@ pub struct InklogConfig {
 
 fn default_console_sink() -> Option<ConsoleSinkConfig> {
     Some(ConsoleSinkConfig::default())
+}
+
+/// Decode `%XX` percent-encoding so path validation cannot be bypassed with
+/// encoded traversal, backslashes, or control characters. Invalid escape
+/// sequences are kept as-is.
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut decoded: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Some(high) = (bytes[i + 1] as char).to_digit(16)
+            && let Some(low) = (bytes[i + 2] as char).to_digit(16)
+        {
+            decoded.push(((high * 16) + low) as u8);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+/// An HTTP path override is safe when the percent-decoded value starts with
+/// `/` and contains no traversal, backslashes, or control characters.
+fn is_safe_http_path(value: &str) -> bool {
+    let decoded = percent_decode(value);
+    decoded.starts_with('/')
+        && !decoded.contains("..")
+        && !decoded.contains('\\')
+        && !decoded.chars().any(char::is_control)
 }
 
 impl Default for InklogConfig {
@@ -159,7 +194,8 @@ impl InklogConfig {
         }
         if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_METRICS_PATH") {
             // Validate HTTP path: must start with '/' and contain no traversal
-            if val.starts_with('/') && !val.contains("..") && !val.contains('\0') {
+            // (checked on the percent-decoded value to catch encoded variants)
+            if is_safe_http_path(&val) {
                 let http_config = config.http_server.get_or_insert_with(Default::default);
                 http_config.metrics_path = val;
             } else {
@@ -174,7 +210,8 @@ impl InklogConfig {
         }
         if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_HEALTH_PATH") {
             // Validate HTTP path: must start with '/' and contain no traversal
-            if val.starts_with('/') && !val.contains("..") && !val.contains('\0') {
+            // (checked on the percent-decoded value to catch encoded variants)
+            if is_safe_http_path(&val) {
                 let http_config = config.http_server.get_or_insert_with(Default::default);
                 http_config.health_path = val;
             } else {
@@ -289,12 +326,15 @@ impl InklogConfig {
                     args.set("err", e.to_string());
                     InklogError::ConfigError(crate::i18n::tr_args("config-read_failed", args))
                 })?;
-                let config: Self = toml::from_str(&content).map_err(|e| {
+                let mut config: Self = toml::from_str(&content).map_err(|e| {
                     let mut args = fluent_bundle::FluentArgs::new();
                     args.set("path", path_opt.clone());
                     args.set("err", e.to_string());
                     InklogError::ConfigError(crate::i18n::tr_args("config-parse_failed", args))
                 })?;
+                // 配置加载完成的构造出口：先规范化可修正项，再执行硬校验
+                config.normalize();
+                config.validate()?;
                 return Ok(config);
             }
         }
@@ -342,12 +382,19 @@ impl InklogConfig {
     ///
     /// Unlike `validate()` which returns errors, this method adjusts values
     /// in-place with warnings. Call before `validate()` to auto-fix common
-    /// misconfigurations.
+    /// misconfigurations. Problems that cannot be auto-corrected are logged
+    /// here and surface as errors from `validate()`.
     pub fn normalize(&mut self) {
-        self.global.validate();
-        self.performance.validate();
-        if let Some(ref mut db) = self.database_sink {
-            db.validate();
+        if let Err(e) = self.global.validate() {
+            tracing::warn!("{e}");
+        }
+        if let Err(e) = self.performance.validate() {
+            tracing::warn!("{e}");
+        }
+        if let Some(ref mut db) = self.database_sink
+            && let Err(e) = db.validate()
+        {
+            tracing::warn!("{e}");
         }
         if let Some(ref mut console) = self.console_sink {
             console.validate();
@@ -363,6 +410,12 @@ impl InklogConfig {
         if self.performance.channel_capacity == 0 {
             return Err(InklogError::ConfigError(crate::i18n::tr(
                 "config-channel_capacity_zero",
+            )));
+        }
+        if self.performance.channel_capacity > MAX_CHANNEL_CAPACITY {
+            return Err(InklogError::ConfigError(format!(
+                "channel_capacity {} exceeds maximum {MAX_CHANNEL_CAPACITY}",
+                self.performance.channel_capacity
             )));
         }
         if self.performance.worker_threads == 0 {
@@ -405,16 +458,34 @@ impl InklogConfig {
                     "config-file_batch_size_zero",
                 )));
             }
+            file.validate()
+                .map_err(InklogError::ConfigError)?;
+        }
+
+        // --- Database sink ---
+        if let Some(ref db) = self.database_sink
+            && db.enabled
+            && db.driver != DatabaseDriver::SQLite
+            && db.pool_size == 0
+        {
+            return Err(InklogError::ConfigError(format!(
+                "database_sink.pool_size must be at least 1 for the {} driver, got 0",
+                db.driver
+            )));
         }
 
         // --- HTTP server ---
         if let Some(ref http) = self.http_server
             && http.enabled
-            && http.port == 0
         {
-            return Err(InklogError::ConfigError(crate::i18n::tr(
-                "config-http_port_zero",
-            )));
+            if http.port == 0 {
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "config-http_port_zero",
+                )));
+            }
+            if let Some(ref tls) = http.tls {
+                tls.validate().map_err(InklogError::ConfigError)?;
+            }
         }
 
         // --- Console sink stderr_levels ---
@@ -438,7 +509,13 @@ impl std::str::FromStr for InklogConfig {
     type Err = toml::de::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        toml::from_str(s)
+        let mut config: Self = toml::from_str(s)?;
+        config.normalize();
+        config.validate().map_err(|e| {
+            use serde::de::Error as _;
+            toml::de::Error::custom(e.to_string())
+        })?;
+        Ok(config)
     }
 }
 
@@ -1044,5 +1121,215 @@ level = "debug"
             std::env::remove_var("INKLOG_FILE_SINK_PATH");
             std::env::remove_var("INKLOG_FILE_SINK_MAX_SIZE");
         }
+    }
+
+    #[test]
+    fn test_percent_decode() {
+        assert_eq!(percent_decode("/%2E%2E/etc"), "/../etc");
+        assert_eq!(percent_decode("/a%5Cb"), "/a\\b");
+        assert_eq!(percent_decode("/a%0Ab"), "/a\nb");
+        // 非法转义序列按原样保留
+        assert_eq!(percent_decode("%zz"), "%zz");
+        assert_eq!(percent_decode("%2"), "%2");
+        assert_eq!(percent_decode("%2z"), "%2z");
+        assert_eq!(percent_decode("/plain/path"), "/plain/path");
+    }
+
+    #[test]
+    fn test_apply_env_overrides_http_path_encoded_traversal_rejected() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/%2E%2E/etc/passwd");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        // 解码后为 "/../etc/passwd"，必须被拒绝
+        assert!(config.http_server.is_none());
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_METRICS_PATH");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_http_path_encoded_backslash_rejected() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/a%5Cb");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        // 解码后含 '\'，必须被拒绝
+        assert!(config.http_server.is_none());
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_HEALTH_PATH");
+        }
+    }
+
+    #[test]
+    fn test_apply_env_overrides_http_path_encoded_control_char_rejected() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/metrics%0A");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        // 解码后含控制字符，必须被拒绝
+        assert!(config.http_server.is_none());
+        unsafe {
+            std::env::remove_var("INKLOG_HTTP_SERVER_METRICS_PATH");
+        }
+    }
+
+    #[test]
+    fn test_validate_rejects_oversized_channel_capacity() {
+        let mut config = InklogConfig::default();
+        config.performance.channel_capacity = MAX_CHANNEL_CAPACITY + 1;
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("channel_capacity"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_zero_pool_size_non_sqlite_db() {
+        let mut config = InklogConfig::default();
+        config.database_sink = Some(DatabaseSinkConfig {
+            enabled: true,
+            driver: DatabaseDriver::PostgreSQL,
+            pool_size: 0,
+            ..Default::default()
+        });
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("pool_size"),
+            "unexpected error: {err}"
+        );
+
+        // SQLite 不受此守卫约束（validate 会强制为 1）
+        let mut config = InklogConfig::default();
+        config.database_sink = Some(DatabaseSinkConfig {
+            enabled: true,
+            driver: DatabaseDriver::SQLite,
+            pool_size: 0,
+            ..Default::default()
+        });
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_file_sink_invalid_max_size_rejected() {
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            path: std::path::PathBuf::from("logs/test.log"),
+            max_size: "INVALID".to_string(),
+            ..Default::default()
+        });
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("max_size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_file_sink_encrypt_requires_existing_env() {
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            path: std::path::PathBuf::from("logs/test.log"),
+            encrypt: true,
+            encryption_key_env: Some("INKLOG_TEST_CONFIG_ENCRYPT_KEY".to_string()),
+            ..Default::default()
+        });
+
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::remove_var("INKLOG_TEST_CONFIG_ENCRYPT_KEY") };
+        assert!(config.validate().is_err());
+
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::set_var("INKLOG_TEST_CONFIG_ENCRYPT_KEY", "test-key") };
+        assert!(config.validate().is_ok());
+
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::remove_var("INKLOG_TEST_CONFIG_ENCRYPT_KEY") };
+    }
+
+    #[test]
+    fn test_validate_http_tls_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let cert = dir.path().join("cert.pem");
+        let key = dir.path().join("key.pem");
+        std::fs::write(&cert, "-----BEGIN CERTIFICATE-----").unwrap();
+        std::fs::write(&key, "-----BEGIN PRIVATE KEY-----").unwrap();
+
+        // 证书/密钥文件缺失时拒绝
+        let mut config = InklogConfig::default();
+        config.http_server = Some(HttpServerConfig {
+            enabled: true,
+            tls: Some(crate::config::http::TlsConfig {
+                cert_path: "/nonexistent/cert.pem".to_string(),
+                key_path: key.to_string_lossy().to_string(),
+            }),
+            ..Default::default()
+        });
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("cert_path"),
+            "unexpected error: {err}"
+        );
+
+        // 文件齐备时通过
+        let mut config = InklogConfig::default();
+        config.http_server = Some(HttpServerConfig {
+            enabled: true,
+            tls: Some(crate::config::http::TlsConfig {
+                cert_path: cert.to_string_lossy().to_string(),
+                key_path: key.to_string_lossy().to_string(),
+            }),
+            ..Default::default()
+        });
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_from_search_paths_rejects_invalid_config_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("invalid.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[global]
+level = "verbose"
+"#,
+        )
+        .unwrap();
+
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
+        }
+        let result = InklogConfig::from_search_paths();
+        unsafe {
+            std::env::remove_var("INKLOG_CONFIG_PATH");
+        }
+        assert!(result.is_err(), "config with invalid level must be rejected");
+        assert!(
+            result.unwrap_err().to_string().contains("Invalid log level"),
+            "expected invalid log level error"
+        );
+    }
+
+    #[test]
+    fn test_from_str_rejects_invalid_values() {
+        // channel_capacity = 0 无法自动修正，必须报错
+        let result: Result<InklogConfig, _> =
+            "[performance]\nchannel_capacity = 0\n".parse();
+        assert!(result.is_err());
+
+        // 非法日志级别必须报错
+        let result: Result<InklogConfig, _> = "[global]\nlevel = \"verbose\"\n".parse();
+        assert!(result.is_err());
     }
 }

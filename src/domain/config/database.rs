@@ -271,12 +271,21 @@ impl DatabaseSinkConfig {
     ///
     /// - When using SQLite, `pool_size` is overridden to 1 since SQLite
     ///   only supports a single writer connection.
+    /// - Rejects zero `pool_size` for non-SQLite drivers, which would leave
+    ///   the sink without any connection.
     /// - Rejects zero `batch_size` and `flush_interval_ms` to prevent
     ///   busy-loops or panics at runtime.
     /// - Validates `compression_level` is within the valid zstd range (1–22).
-    pub fn validate(&mut self) {
-        if self.driver == DatabaseDriver::SQLite && self.pool_size != 1 {
-            self.pool_size = 1;
+    pub fn validate(&mut self) -> Result<(), String> {
+        if self.driver == DatabaseDriver::SQLite {
+            if self.pool_size != 1 {
+                self.pool_size = 1;
+            }
+        } else if self.pool_size == 0 {
+            return Err(format!(
+                "pool_size must be at least 1 for the {} driver, got 0",
+                self.driver
+            ));
         }
         if self.batch_size == 0 {
             tracing::warn!("{}", crate::i18n::tr("warn-db_batch_size_zero"));
@@ -291,6 +300,7 @@ impl DatabaseSinkConfig {
             tracing::warn!("{}", crate::i18n::tr("warn-db_compression_level_clamp"));
             self.parquet_config.compression_level = 3;
         }
+        Ok(())
     }
 }
 
@@ -303,7 +313,7 @@ mod tests {
         let mut config = DatabaseSinkConfig::default();
         config.driver = DatabaseDriver::SQLite;
         config.pool_size = 10;
-        config.validate();
+        config.validate().unwrap();
         assert_eq!(config.pool_size, 1, "SQLite pool_size must be 1");
     }
 
@@ -312,11 +322,38 @@ mod tests {
         let mut config = DatabaseSinkConfig::default();
         config.driver = DatabaseDriver::PostgreSQL;
         config.pool_size = 10;
-        config.validate();
+        config.validate().unwrap();
         assert_eq!(
             config.pool_size, 10,
             "non-SQLite pool_size should be unchanged"
         );
+    }
+
+    #[test]
+    fn test_non_sqlite_pool_size_zero_rejected() {
+        for driver in [
+            DatabaseDriver::PostgreSQL,
+            DatabaseDriver::MySQL,
+            DatabaseDriver::DuckDB,
+        ] {
+            let mut config = DatabaseSinkConfig::default();
+            config.driver = driver.clone();
+            config.pool_size = 0;
+            let err = config.validate().unwrap_err();
+            assert!(
+                err.contains("pool_size"),
+                "driver {driver}: unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_sqlite_pool_size_zero_still_clamped() {
+        let mut config = DatabaseSinkConfig::default();
+        config.driver = DatabaseDriver::SQLite;
+        config.pool_size = 0;
+        config.validate().unwrap();
+        assert_eq!(config.pool_size, 1);
     }
 
     #[test]
@@ -424,7 +461,7 @@ mod tests {
     fn test_validate_batch_size_zero() {
         let mut config = DatabaseSinkConfig::default();
         config.batch_size = 0;
-        config.validate();
+        config.validate().unwrap();
         assert_eq!(config.batch_size, 100);
     }
 
@@ -432,7 +469,7 @@ mod tests {
     fn test_validate_flush_interval_zero() {
         let mut config = DatabaseSinkConfig::default();
         config.flush_interval_ms = 0;
-        config.validate();
+        config.validate().unwrap();
         assert_eq!(config.flush_interval_ms, 500);
     }
 
@@ -440,7 +477,7 @@ mod tests {
     fn test_validate_compression_level_clamp() {
         let mut config = DatabaseSinkConfig::default();
         config.parquet_config.compression_level = 99;
-        config.validate();
+        config.validate().unwrap();
         assert_eq!(config.parquet_config.compression_level, 3);
     }
 
@@ -448,7 +485,7 @@ mod tests {
     fn test_validate_compression_level_zero() {
         let mut config = DatabaseSinkConfig::default();
         config.parquet_config.compression_level = 0;
-        config.validate();
+        config.validate().unwrap();
         assert_eq!(config.parquet_config.compression_level, 3);
     }
 

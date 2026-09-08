@@ -170,7 +170,9 @@ impl FileSinkConfig {
     ///
     /// Checks:
     /// - `compression_level` is in valid range (1..=22 for zstd, 1..=9 for gzip)
-    /// - If `encrypt` is true, `encryption_key_env` must be `Some`
+    /// - `max_size` and `max_total_size` are parseable size strings
+    /// - If `encrypt` is true, `encryption_key_env` must be `Some` and the
+    ///   referenced environment variable must exist
     pub fn validate(&self) -> Result<(), String> {
         if self.compression_level < 1 || self.compression_level > 22 {
             return Err(format!(
@@ -178,11 +180,54 @@ impl FileSinkConfig {
                 self.compression_level
             ));
         }
-        if self.encrypt && self.encryption_key_env.is_none() {
-            return Err("encrypt is enabled but encryption_key_env is not set".to_string());
+        parse_config_size(&self.max_size)
+            .map_err(|e| format!("max_size \"{}\": {e}", self.max_size))?;
+        parse_config_size(&self.max_total_size)
+            .map_err(|e| format!("max_total_size \"{}\": {e}", self.max_total_size))?;
+        if self.encrypt {
+            match self.encryption_key_env.as_ref() {
+                None => {
+                    return Err("encrypt is enabled but encryption_key_env is not set".to_string());
+                }
+                Some(env_name) if std::env::var(env_name).is_err() => {
+                    return Err(format!(
+                        "encrypt is enabled but environment variable \"{env_name}\" is not set"
+                    ));
+                }
+                Some(_) => {}
+            }
         }
         Ok(())
     }
+}
+
+/// Parse a size string (e.g. `"100MB"`, `"1GB"`, `"512KB"`, bare bytes) with
+/// the same rules as the runtime size parser, so invalid values can be
+/// rejected at configuration time instead of silently falling back.
+fn parse_config_size(size_str: &str) -> Result<u64, String> {
+    let size_str = size_str.trim().to_uppercase();
+
+    let (multiplier, suffix_len): (u64, usize) = if size_str.ends_with("TB") {
+        (1024 * 1024 * 1024 * 1024, 2)
+    } else if size_str.ends_with("GB") {
+        (1024 * 1024 * 1024, 2)
+    } else if size_str.ends_with("MB") {
+        (1024 * 1024, 2)
+    } else if size_str.ends_with("KB") {
+        (1024, 2)
+    } else if size_str.ends_with("B") {
+        (1, 1)
+    } else {
+        (1, 0)
+    };
+
+    let num_str = &size_str[..size_str.len() - suffix_len];
+    let num: u64 = num_str
+        .parse()
+        .map_err(|_| format!("\"{num_str}\" is not a valid size number"))?;
+
+    num.checked_mul(multiplier)
+        .ok_or_else(|| format!("\"{size_str}\" overflows u64"))
 }
 
 #[cfg(test)]
@@ -209,7 +254,63 @@ mod tests {
         config.encryption_key_env = None;
         assert!(config.validate().is_err());
 
-        config.encryption_key_env = Some("MY_KEY".to_string());
+        // 引用的环境变量真实存在才允许 encrypt = true
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::remove_var("INKLOG_TEST_FILE_SINK_KEY_ENV") };
+        config.encryption_key_env = Some("INKLOG_TEST_FILE_SINK_KEY_ENV".to_string());
+        assert!(config.validate().is_err());
+
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::set_var("INKLOG_TEST_FILE_SINK_KEY_ENV", "test-key") };
         assert!(config.validate().is_ok());
+
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::remove_var("INKLOG_TEST_FILE_SINK_KEY_ENV") };
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid_size_strings() {
+        let mut config = FileSinkConfig::default();
+
+        config.max_size = "INVALID".to_string();
+        assert!(config.validate().is_err());
+
+        config.max_size = String::new();
+        assert!(config.validate().is_err());
+
+        config.max_size = "10XB".to_string();
+        assert!(config.validate().is_err());
+
+        config.max_size = "100MB".to_string();
+        config.max_total_size = "no-size".to_string();
+        assert!(config.validate().is_err());
+
+        config.max_total_size = "1GB".to_string();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_size_strings() {
+        let mut config = FileSinkConfig::default();
+        for size in ["100", "512KB", "100MB", "1GB", "2TB", " 5MB "] {
+            config.max_size = size.to_string();
+            config.max_total_size = size.to_string();
+            assert!(
+                config.validate().is_ok(),
+                "size \"{size}\" should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_config_size() {
+        assert_eq!(parse_config_size("100").unwrap(), 100);
+        assert_eq!(parse_config_size("1KB").unwrap(), 1024);
+        assert_eq!(parse_config_size("100MB").unwrap(), 100 * 1024 * 1024);
+        assert_eq!(parse_config_size("1GB").unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(parse_config_size("  5MB  ").unwrap(), 5 * 1024 * 1024);
+        assert!(parse_config_size("invalid").is_err());
+        assert!(parse_config_size("").is_err());
+        assert!(parse_config_size("99999999999999999999TB").is_err());
     }
 }

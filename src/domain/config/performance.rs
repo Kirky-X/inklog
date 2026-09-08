@@ -98,6 +98,10 @@ fn default_max_capacity() -> usize {
     50000
 }
 
+/// Upper bound for `channel_capacity`. Values beyond this would allocate
+/// unbounded buffers and are treated as configuration errors.
+pub(crate) const MAX_CHANNEL_CAPACITY: usize = 100_000_000;
+
 impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
@@ -121,7 +125,14 @@ impl PerformanceConfig {
     /// - Percentage thresholds are within 0–100
     /// - `min_capacity <= max_capacity`
     /// - `shrink_threshold_percent < expand_threshold_percent`
-    pub fn validate(&mut self) {
+    /// - `channel_capacity` does not exceed [`MAX_CHANNEL_CAPACITY`]
+    pub fn validate(&mut self) -> Result<(), String> {
+        if self.channel_capacity > MAX_CHANNEL_CAPACITY {
+            return Err(format!(
+                "channel_capacity {} exceeds maximum {MAX_CHANNEL_CAPACITY}",
+                self.channel_capacity
+            ));
+        }
         self.expand_threshold_percent = self.expand_threshold_percent.min(100);
         self.shrink_threshold_percent = self.shrink_threshold_percent.min(100);
 
@@ -146,6 +157,7 @@ impl PerformanceConfig {
             tracing::warn!("{}", crate::i18n::tr("warn-rate_limit_zero"));
             self.rate_limit = None;
         }
+        Ok(())
     }
 }
 
@@ -196,7 +208,7 @@ mod tests {
         let mut cfg = PerformanceConfig::default();
         cfg.expand_threshold_percent = 150;
         cfg.shrink_threshold_percent = 50;
-        cfg.validate();
+        cfg.validate().unwrap();
         // 150 clamped to 100; shrink 50 < expand 100, no reset
         assert_eq!(cfg.expand_threshold_percent, 100);
         assert_eq!(cfg.shrink_threshold_percent, 50);
@@ -207,7 +219,7 @@ mod tests {
         let mut cfg = PerformanceConfig::default();
         cfg.min_capacity = 99999;
         cfg.max_capacity = 100;
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.min_capacity, 100);
         assert_eq!(cfg.max_capacity, 99999);
     }
@@ -217,16 +229,29 @@ mod tests {
         let mut cfg = PerformanceConfig::default();
         cfg.shrink_threshold_percent = 80;
         cfg.expand_threshold_percent = 50;
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.shrink_threshold_percent, default_shrink_threshold());
         assert_eq!(cfg.expand_threshold_percent, default_expand_threshold());
+    }
+
+    #[test]
+    fn test_validate_rejects_oversized_channel_capacity() {
+        let mut cfg = PerformanceConfig::default();
+        cfg.channel_capacity = MAX_CHANNEL_CAPACITY + 1;
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("channel_capacity"), "unexpected error: {err}");
+
+        // 上限值本身合法
+        let mut cfg = PerformanceConfig::default();
+        cfg.channel_capacity = MAX_CHANNEL_CAPACITY;
+        assert!(cfg.validate().is_ok());
     }
 
     #[test]
     fn test_validate_rate_limit_zero_reset_to_none() {
         let mut cfg = PerformanceConfig::default();
         cfg.rate_limit = Some(0);
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.rate_limit, None);
     }
 
@@ -234,7 +259,7 @@ mod tests {
     fn test_validate_rate_limit_positive_preserved() {
         let mut cfg = PerformanceConfig::default();
         cfg.rate_limit = Some(10000);
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.rate_limit, Some(10000));
     }
 
@@ -242,7 +267,7 @@ mod tests {
     fn test_validate_rate_limit_none_unchanged() {
         let mut cfg = PerformanceConfig::default();
         cfg.rate_limit = None;
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.rate_limit, None);
     }
 }

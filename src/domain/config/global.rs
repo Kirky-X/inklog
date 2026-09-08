@@ -175,12 +175,17 @@ impl Default for GlobalConfig {
 }
 
 impl GlobalConfig {
-    /// Validate fallback backoff parameters.
+    /// Validate and adjust the configuration.
     ///
-    /// Ensures:
-    /// - `fallback_initial_delay_ms <= fallback_max_delay_ms`
-    /// - `fallback_max_retries > 0`
-    pub fn validate(&mut self) {
+    /// # Behavior
+    ///
+    /// Some invalid values are corrected **in place** with a `tracing::warn!`
+    /// for each adjustment:
+    /// - `fallback_initial_delay_ms` is clamped to `fallback_max_delay_ms`
+    /// - `fallback_max_retries == 0` is reset to `1`
+    ///
+    /// An invalid `level` cannot be corrected safely and returns `Err`.
+    pub fn validate(&mut self) -> Result<(), String> {
         if self.fallback_initial_delay_ms > self.fallback_max_delay_ms {
             tracing::warn!("{}", crate::i18n::tr("warn-delay_clamp"));
             self.fallback_initial_delay_ms = self.fallback_max_delay_ms;
@@ -189,6 +194,14 @@ impl GlobalConfig {
             tracing::warn!("{}", crate::i18n::tr("warn-fallback_retries_zero"));
             self.fallback_max_retries = 1;
         }
+        if !self.level.is_empty() && !crate::LogLevel::is_valid_level(&self.level) {
+            return Err(format!(
+                "invalid log level \"{}\", expected one of: {}",
+                self.level,
+                crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -213,7 +226,7 @@ mod tests {
         let mut cfg = GlobalConfig::default();
         cfg.fallback_initial_delay_ms = 99999;
         cfg.fallback_max_delay_ms = 5000;
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.fallback_initial_delay_ms, 5000);
     }
 
@@ -221,7 +234,7 @@ mod tests {
     fn test_validate_resets_zero_retries() {
         let mut cfg = GlobalConfig::default();
         cfg.fallback_max_retries = 0;
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.fallback_max_retries, 1);
     }
 
@@ -231,8 +244,36 @@ mod tests {
         cfg.fallback_initial_delay_ms = 1000;
         cfg.fallback_max_delay_ms = 60000;
         cfg.fallback_max_retries = 3;
-        cfg.validate();
+        cfg.validate().unwrap();
         assert_eq!(cfg.fallback_initial_delay_ms, 1000);
         assert_eq!(cfg.fallback_max_retries, 3);
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid_level() {
+        let mut cfg = GlobalConfig::default();
+        cfg.level = "verbose".to_string();
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("verbose"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_levels() {
+        for level in ["trace", "debug", "info", "warn", "error", "fatal", "INFO"] {
+            let mut cfg = GlobalConfig::default();
+            cfg.level = level.to_string();
+            assert!(
+                cfg.validate().is_ok(),
+                "level '{level}' should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_allows_empty_level() {
+        // 空 level 交由上层加载逻辑决定默认值，此处不视为非法
+        let mut cfg = GlobalConfig::default();
+        cfg.level = String::new();
+        assert!(cfg.validate().is_ok());
     }
 }
