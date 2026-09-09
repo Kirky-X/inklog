@@ -4344,7 +4344,14 @@ mod tests {
                 // root 下权限被绕过，压缩成功——清理产物
                 let _ = std::fs::remove_file(log_path.with_extension("zst"));
             }
-            other => panic!("expected IoError or Ok, got: {:?}", other),
+            other => panic!(
+                "expected IoError or Ok, got: {}",
+                other
+                    .as_ref()
+                    .err()
+                    .map(|e| e.safe_message())
+                    .unwrap_or_else(|| "Ok".to_string())
+            ),
         }
     }
 
@@ -4395,7 +4402,14 @@ mod tests {
             Ok(_) => {
                 let _ = std::fs::remove_file(&output_path);
             }
-            other => panic!("expected IoError or Ok, got: {:?}", other),
+            other => panic!(
+                "expected IoError or Ok, got: {}",
+                other
+                    .as_ref()
+                    .err()
+                    .map(|e| e.safe_message())
+                    .unwrap_or_else(|| "Ok".to_string())
+            ),
         }
     }
 
@@ -4436,7 +4450,14 @@ mod tests {
                 // root 下 rename 成功——清理轮转产物
                 let _ = std::fs::remove_file(log_path);
             }
-            other => panic!("expected IoError or Ok, got: {:?}", other),
+            other => panic!(
+                "expected IoError or Ok, got: {}",
+                other
+                    .as_ref()
+                    .err()
+                    .map(|e| e.safe_message())
+                    .unwrap_or_else(|| "Ok".to_string())
+            ),
         }
     }
 

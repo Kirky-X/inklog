@@ -795,6 +795,14 @@ impl Drop for LoggerManager {
 #[cfg(test)]
 #[allow(deprecated)] // 覆盖 deprecated 入口 with_dependencies 的既有行为测试
 mod tests {
+
+    /// 断言消息中的响应体预览：剥离控制字符并截断，避免外部内容直入
+    /// 测试日志（CodeQL CWE-117）。
+    #[cfg(feature = "http")]
+    fn body_preview(body: &str) -> String {
+        body.chars().filter(|c| !c.is_control()).take(160).collect()
+    }
+
     use super::*;
     use chrono::Utc;
 
@@ -2000,7 +2008,7 @@ worker_threads = 1
         assert!(
             body.contains("# HELP") && body.contains("inklog_"),
             "metrics response should be in Prometheus format, got: {}",
-            body
+            body_preview(&body)
         );
         let _ = manager.shutdown();
     }
@@ -2286,7 +2294,7 @@ worker_threads = 1
         assert!(
             body.contains("Invalid token"),
             "response should indicate invalid token, got: {}",
-            body
+            body_preview(&body)
         );
         let _ = manager.shutdown();
         unsafe {
@@ -2323,7 +2331,7 @@ worker_threads = 1
         assert!(
             body.contains("Missing or invalid Authorization header"),
             "response should indicate missing header, got: {}",
-            body
+            body_preview(&body)
         );
         let _ = manager.shutdown();
         unsafe {
@@ -2383,7 +2391,7 @@ worker_threads = 1
         assert!(
             body.contains("IP not in whitelist"),
             "response should indicate IP rejection, got: {}",
-            body
+            body_preview(&body)
         );
         let _ = manager.shutdown();
     }
