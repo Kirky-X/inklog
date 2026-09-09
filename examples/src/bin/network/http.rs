@@ -65,6 +65,14 @@ use inklog::tokio::time::sleep;
 use inklog::{Metrics, SinkStatus};
 use inklog_examples::common::{print_section, print_separator};
 use std::collections::HashMap;
+
+/// 外部响应内容打印前统一脱敏 + 截断（CodeQL CWE-117：外部输入直入
+/// stdout 可伪造日志行；示例应演示正确姿势）。
+fn safe_body_preview(body: &str) -> String {
+    use inklog::LogSanitizer;
+    let sanitized = LogSanitizer::new().sanitize(body);
+    sanitized.chars().filter(|c| !c.is_control()).take(400).collect()
+}
 use std::time::Duration;
 
 /// 启动随机端口 HTTP 服务器
@@ -455,7 +463,7 @@ async fn health_endpoint(port: u16) -> Result<()> {
     // 读取并解析响应体
     println!("\n响应内容 (JSON):\n");
     let json: serde_json::Value = serde_json::from_str(&body)?;
-    println!("{}", serde_json::to_string_pretty(&json)?);
+    println!("{}", safe_body_preview(&serde_json::to_string_pretty(&json)?));
 
     // 验证响应结构
     assert!(
@@ -501,7 +509,7 @@ async fn metrics_endpoint(port: u16) -> Result<()> {
     println!("Content-Type: {}", content_type);
 
     print_section("Prometheus 格式指标输出");
-    println!("{}", body);
+    println!("{}", safe_body_preview(&body));
 
     // 验证关键指标存在（uptime_seconds 只在运行时间 > 0 时输出）
     assert!(
