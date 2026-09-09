@@ -1114,7 +1114,7 @@ impl LoggerBuilder {
                 ));
             }
 
-            LoggerManager::with_dependencies(deps).await
+            LoggerManager::build_with_deps(deps).await
         } else {
             // 纯配置模式
             LoggerManager::with_config(self.config).await

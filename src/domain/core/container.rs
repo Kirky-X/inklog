@@ -259,6 +259,11 @@ impl InklogContainer {
     ///
     /// 成功返回 `Ok(LoggerManager)`，失败返回 `Err(InklogError)`
     ///
+    /// # Deprecated
+    ///
+    /// DI 入口已收敛：请改用 [`LoggerManager::builder()`]（唯一推荐入口），
+    /// 本方法仅为兼容保留，行为为转发到同一构建逻辑。
+    ///
     /// # 示例
     ///
     /// ```ignore
@@ -267,6 +272,7 @@ impl InklogContainer {
     ///
     /// // logger 使用容器中共享的 cache 和 config
     /// ```
+    #[deprecated(since = "0.3.0", note = "use LoggerManager::builder() instead")]
     pub async fn create_logger(&self) -> Result<LoggerManager, InklogError> {
         let deps = LoggerDependencies {
             cache: Some(Arc::clone(&self.cache)),
@@ -280,7 +286,7 @@ impl InklogContainer {
             database: self.database.clone(),
         };
 
-        LoggerManager::with_dependencies(deps).await
+        LoggerManager::build_with_deps(deps).await
     }
 
     /// 获取共享的缓存实例
@@ -669,6 +675,7 @@ mod tests {
     /// 使用 serial 宏确保测试顺序执行，避免全局状态冲突。
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
+    #[allow(deprecated)] // 覆盖 deprecated 入口 create_logger 的既有行为测试
     async fn test_container_create_logger() {
         let container = InklogContainer::builder()
             .cache(Arc::new(

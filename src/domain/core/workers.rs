@@ -39,9 +39,8 @@ pub(crate) struct WorkerParams {
     pub(crate) control_rx: Receiver<SinkControlMessage>,
     pub(crate) control_tx: Sender<SinkControlMessage>,
     pub(crate) metrics: Arc<Metrics>,
-    /// Mutex 保护的是 sink 句柄（`Arc<dyn LogSink>`）而非 sink 本体：
-    /// 锁内只做句柄克隆，异步写必须在锁外执行（MutexGuard 不得横跨 block_on）
-    pub(crate) console_sink: Arc<Mutex<Arc<dyn LogSink>>>,
+    /// Console sink（生产中从不被替换，直接共享句柄，无锁）
+    pub(crate) console_sink: Arc<dyn LogSink>,
     /// 同上：锁内仅克隆 `Option<Arc<dyn LogSink>>`，异步写在锁外执行
     pub(crate) error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>>,
     pub(crate) effective_capacity: Arc<AtomicUsize>,
@@ -196,26 +195,330 @@ fn factory_retry_initial_backoff() -> Duration {
     FACTORY_RETRY_INITIAL_BACKOFF
 }
 
-/// sink 工厂持续失败（worker 无 sink 可用）期间到达记录的降级处理：
-/// 尽力写入 error sink 保留内容，并递增 failed/dropped 指标与 sink 健康状态，
-/// 绝不无声丢弃。锁内仅取句柄，异步写在锁外执行（与热路径约定一致）。
-fn record_sink_unavailable(
-    runtime_handle: &tokio::runtime::Handle,
-    error_sink: &Arc<Mutex<Option<Arc<dyn LogSink>>>>,
-    metrics: &Metrics,
-    record: &Arc<LogRecord>,
-    sink_name: &str,
-) {
-    metrics.inc_sink_error();
-    metrics.inc_logs_dropped();
-    metrics.update_sink_health(
-        sink_name,
-        false,
-        Some("sink unavailable: factory keeps failing".to_string()),
-    );
-    let error_sink_handle = error_sink.lock().ok().and_then(|guard| guard.clone());
-    if let Some(error_sink) = error_sink_handle {
-        let _ = runtime_handle.block_on(async { error_sink.write(record).await });
+/// sink 写失败重试上限（含首次写入）：达到该次数后计 sink_error、
+/// 健康置 false 并降级写 console。
+const WRITE_MAX_ATTEMPTS: u32 = 3;
+
+/// 同类 sink worker 间的静态差异：健康/降级记录使用的名字与文案 key。
+struct SinkWorkerDescriptor {
+    /// 健康状态与降级记录使用的 sink 名
+    name: &'static str,
+    /// 日志文案中的 sink 标签
+    label: &'static str,
+    /// error.log 记录的 target
+    error_target: &'static str,
+    /// 手动恢复（控制消息）文案 key
+    recovery_received_key: &'static str,
+    recovered_key: &'static str,
+    recovery_failed_key: &'static str,
+    /// 自动恢复文案 key
+    auto_recovery_key: &'static str,
+    auto_recovery_ok_key: &'static str,
+}
+
+const FILE_SINK_WORKER: SinkWorkerDescriptor = SinkWorkerDescriptor {
+    name: "file",
+    label: "File",
+    error_target: "inklog::file_sink",
+    recovery_received_key: "sink-file_recovery_received",
+    recovered_key: "sink-file_recovered",
+    recovery_failed_key: "sink-file_recovery_failed",
+    auto_recovery_key: "sink-file_auto_recovery",
+    auto_recovery_ok_key: "sink-file_auto_recovery_ok",
+};
+
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
+const DB_SINK_WORKER: SinkWorkerDescriptor = SinkWorkerDescriptor {
+    name: "database",
+    label: "Database",
+    error_target: "inklog::database_sink",
+    recovery_received_key: "sink-db_recovery_received",
+    recovered_key: "sink-db_recovered",
+    recovery_failed_key: "sink-db_recovery_failed",
+    auto_recovery_key: "sink-db_auto_recovery",
+    auto_recovery_ok_key: "sink-db_auto_recovery_ok",
+};
+
+/// sink 工厂的动态引用（初始创建/工厂重试/恢复共用）。
+type SinkFactory<'a> = &'a mut dyn FnMut() -> Result<Box<dyn LogSink>, InklogError>;
+
+/// 跨记录维护的写失败状态（驱动重试计数与自动恢复判定）。
+#[derive(Default)]
+struct FailureState {
+    consecutive_failures: u32,
+    last_failure_time: Option<Instant>,
+}
+
+/// 单个 sink worker 的跨记录可变状态。
+struct SinkWorkerState {
+    /// 当前 sink；None 表示降级模式（工厂持续失败）
+    sink: Option<Box<dyn LogSink>>,
+    failures: FailureState,
+    /// 工厂重试退避（1s 起指数翻倍，上限 30s）
+    factory_backoff: Duration,
+    last_factory_attempt: Instant,
+}
+
+/// sink worker 共享上下文：drain/主循环共用的重试、降级与恢复逻辑。
+struct SinkWorker<'a> {
+    desc: &'static SinkWorkerDescriptor,
+    runtime_handle: &'a tokio::runtime::Handle,
+    metrics: &'a Metrics,
+    console_sink: &'a Arc<dyn LogSink>,
+    error_sink: &'a Arc<Mutex<Option<Arc<dyn LogSink>>>>,
+}
+
+/// 记录从产生到被处理的延迟。
+fn record_age(record: &LogRecord) -> Duration {
+    Utc::now()
+        .signed_duration_since(record.timestamp)
+        .to_std()
+        .unwrap_or(Duration::ZERO)
+}
+
+impl SinkWorker<'_> {
+    /// 初始创建 sink；失败进入降级模式（指数退避持续重试工厂，
+    /// 期间到达的记录写入 error sink 并计为 failed），worker 保持存活。
+    fn create_initial_state(&self, create_sink: SinkFactory<'_>) -> SinkWorkerState {
+        let sink = match create_sink() {
+            Ok(sink) => Some(sink),
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "{} sink factory failed on startup; entering degraded retry mode (exponential backoff: 1s doubling up to 30s, retrying indefinitely); records arriving during retry are forwarded to the error sink and counted as failed",
+                    self.desc.label
+                );
+                self.metrics
+                    .update_sink_health(self.desc.name, false, Some(e.to_string()));
+                None
+            }
+        };
+        SinkWorkerState {
+            sink,
+            failures: FailureState::default(),
+            factory_backoff: factory_retry_initial_backoff(),
+            last_factory_attempt: Instant::now(),
+        }
+    }
+
+    /// 处理单条记录：记录延迟；降级模式保底写 error sink；
+    /// 否则带重试写入，最终失败后触发自动恢复。
+    fn handle_record(
+        &self,
+        state: &mut SinkWorkerState,
+        record: &Arc<LogRecord>,
+        create_sink: SinkFactory<'_>,
+    ) {
+        self.metrics.record_latency(record_age(record));
+
+        // 降级模式（工厂持续失败）：无 sink 可写——保底到
+        // error sink 并计为 failed，绝不无声丢弃
+        let Some(sink) = state.sink.as_mut() else {
+            self.handle_sink_unavailable(record);
+            return;
+        };
+
+        let write_succeeded = self.write_with_retry(sink, record, &mut state.failures);
+        if !write_succeeded {
+            self.maybe_auto_recover(&mut state.failures, sink, create_sink);
+        }
+    }
+
+    /// 降级模式（工厂持续失败）下到达记录的降级处理：
+    /// 尽力写入 error sink 保留内容，并递增 failed/dropped 指标与 sink 健康状态，
+    /// 绝不无声丢弃。锁内仅取句柄，异步写在锁外执行（与热路径约定一致）。
+    fn handle_sink_unavailable(&self, record: &Arc<LogRecord>) {
+        self.metrics.inc_sink_error();
+        self.metrics.inc_logs_dropped();
+        self.metrics.update_sink_health(
+            self.desc.name,
+            false,
+            Some("sink unavailable: factory keeps failing".to_string()),
+        );
+        let error_sink_handle = self.error_sink.lock().ok().and_then(|guard| guard.clone());
+        if let Some(error_sink) = error_sink_handle {
+            let _ = self
+                .runtime_handle
+                .block_on(async { error_sink.write(record).await });
+        }
+    }
+
+    /// 单条记录的带重试写入；返回是否最终成功。
+    /// 契约：最多 3 次尝试，失败间隔 sleep(10ms×attempt)；第 3 次失败后
+    /// 计 sink_error、健康置 false 并降级写 console。
+    fn write_with_retry(
+        &self,
+        sink: &mut Box<dyn LogSink>,
+        record: &Arc<LogRecord>,
+        failures: &mut FailureState,
+    ) -> bool {
+        let mut attempts = 0;
+        while attempts < WRITE_MAX_ATTEMPTS {
+            match self.runtime_handle.block_on(async { sink.write(record).await }) {
+                Ok(_) => {
+                    self.metrics.inc_logs_written();
+                    self.metrics.update_sink_health(self.desc.name, true, None);
+                    failures.consecutive_failures = 0;
+                    failures.last_failure_time = None;
+                    return true;
+                }
+                Err(e) => {
+                    attempts += 1;
+                    failures.consecutive_failures += 1;
+                    failures.last_failure_time = Some(Instant::now());
+
+                    self.write_error_log(&e);
+
+                    if attempts == WRITE_MAX_ATTEMPTS {
+                        self.metrics.inc_sink_error();
+                        self.metrics
+                            .update_sink_health(self.desc.name, false, Some(e.to_string()));
+                        self.fallback_to_console(record);
+                    } else {
+                        thread::sleep(Duration::from_millis(10 * attempts as u64));
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 写 error.log。锁内仅取句柄，异步写在锁外执行。
+    fn write_error_log(&self, error: &InklogError) {
+        let error_sink_handle = self.error_sink.lock().ok().and_then(|guard| guard.clone());
+        let Some(error_sink) = error_sink_handle else {
+            return;
+        };
+        let error_record = LogRecord {
+            timestamp: Utc::now(),
+            level: "ERROR".to_string(),
+            target: self.desc.error_target.to_string(),
+            message: format!("{} sink error: {}", self.desc.label, error),
+            fields: Default::default(),
+            file: None,
+            line: None,
+            thread_id: thread::current().name().unwrap_or("unknown").to_string(),
+        };
+        let _ = self
+            .runtime_handle
+            .block_on(async { error_sink.write(&error_record).await });
+    }
+
+    /// 重试耗尽后的 console 降级。
+    fn fallback_to_console(&self, record: &Arc<LogRecord>) {
+        let _ = self
+            .runtime_handle
+            .block_on(async { self.console_sink.write(record).await });
+    }
+
+    /// 写失败后的自动恢复触发（连续失败 > 5 且距上次失败 > 60s）。
+    fn maybe_auto_recover(
+        &self,
+        failures: &mut FailureState,
+        sink: &mut Box<dyn LogSink>,
+        create_sink: SinkFactory<'_>,
+    ) {
+        if !should_auto_recover(failures.consecutive_failures, failures.last_failure_time) {
+            return;
+        }
+        tracing::warn!("{}", crate::i18n::tr(self.desc.auto_recovery_key));
+        if let Ok(new_sink) = create_sink() {
+            *sink = new_sink;
+            failures.consecutive_failures = 0;
+            failures.last_failure_time = None;
+            self.metrics.update_sink_health(self.desc.name, true, None);
+            tracing::info!("{}", crate::i18n::tr(self.desc.auto_recovery_ok_key));
+        }
+    }
+
+    /// 处理一条控制消息（每次循环迭代最多一条，与主循环节奏一致）。
+    fn handle_control_message(
+        &self,
+        state: &mut SinkWorkerState,
+        msg: &SinkControlMessage,
+        create_sink: SinkFactory<'_>,
+    ) {
+        match classify_control_message(msg, self.desc.name) {
+            ControlAction::Recover => {
+                tracing::info!("{}", crate::i18n::tr(self.desc.recovery_received_key));
+                if let Ok(new_sink) = create_sink() {
+                    state.sink = Some(new_sink);
+                    state.factory_backoff = factory_retry_initial_backoff();
+                    state.failures.consecutive_failures = 0;
+                    state.failures.last_failure_time = None;
+                    self.metrics.update_sink_health(self.desc.name, true, None);
+                    tracing::info!("{}", crate::i18n::tr(self.desc.recovered_key));
+                } else {
+                    tracing::error!("{}", crate::i18n::tr(self.desc.recovery_failed_key));
+                }
+            }
+            ControlAction::Status => {
+                // Status is already tracked in metrics
+            }
+            ControlAction::Ignore => {}
+        }
+    }
+
+    /// 降级模式下按指数退避重试工厂（1s→2s→…上限 30s），持续重试而非放弃。
+    /// 用时间判断而非 sleep，循环保持即时响应 shutdown 与控制消息；
+    /// 放在 recv 之前，降级路径跳过记录处理时也不会跳过重试。
+    fn retry_factory_if_due(&self, state: &mut SinkWorkerState, create_sink: SinkFactory<'_>) {
+        if state.sink.is_some() || state.last_factory_attempt.elapsed() < state.factory_backoff {
+            return;
+        }
+        match create_sink() {
+            Ok(new_sink) => {
+                state.sink = Some(new_sink);
+                state.factory_backoff = factory_retry_initial_backoff();
+                self.metrics.update_sink_health(self.desc.name, true, None);
+                tracing::info!(
+                    "{} sink factory succeeded after retry; worker resumed normal writes",
+                    self.desc.label
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    next_retry_in_ms = state.factory_backoff.as_millis() as u64,
+                    "{} sink factory retry failed; keeping the worker alive and retrying with exponential backoff",
+                    self.desc.label
+                );
+                state.factory_backoff = (state.factory_backoff * 2).min(FACTORY_RETRY_MAX_BACKOFF);
+            }
+        }
+        state.last_factory_attempt = Instant::now();
+    }
+
+    /// shutdown 后的排水：限时尽力写完 channel 剩余记录，最后 shutdown sink。
+    fn drain(
+        &self,
+        state: &mut SinkWorkerState,
+        receiver: &Receiver<Arc<LogRecord>>,
+        timeout: Duration,
+        create_sink: SinkFactory<'_>,
+    ) {
+        let deadline = Instant::now() + timeout;
+        while let Ok(record) = receiver.try_recv() {
+            self.handle_record(state, &record, create_sink);
+            if Instant::now() > deadline {
+                break;
+            }
+        }
+        if let Some(sink) = state.sink.as_ref() {
+            let _ = self.runtime_handle.block_on(async { sink.shutdown().await });
+        }
+    }
+
+    /// 空闲超时：flush sink 缓冲（降级模式下无 sink 可 flush）。
+    fn flush_idle(&self, state: &SinkWorkerState) {
+        if let Some(sink) = state.sink.as_ref() {
+            let _ = self.runtime_handle.block_on(async { sink.flush().await });
+        }
     }
 }
 
@@ -286,32 +589,13 @@ impl LoggerManager {
                         // Drain with 5s timeout (console is fast)
                         let deadline = Instant::now() + Duration::from_secs(5);
                         while let Ok(record) = console_receiver.try_recv() {
-                            let latency = Utc::now()
-                                .signed_duration_since(record.timestamp)
-                                .to_std()
-                                .unwrap_or(Duration::ZERO);
-                            metrics_console.record_latency(latency);
+                            metrics_console.record_latency(record_age(&record));
 
-                            // Hot path: use try_lock to avoid blocking.
-                            // 锁内仅克隆 sink 句柄，异步写在锁外执行，
-                            // 避免MutexGuard 横跨 block_on
-                            let sink = console_sink_console
-                                .try_lock()
-                                .ok()
-                                .map(|guard| Arc::clone(&*guard));
-                            match sink {
-                                Some(sink) => {
-                                    if runtime_handle
-                                        .block_on(async { sink.write(&record).await })
-                                        .is_err()
-                                    {
-                                        metrics_console.inc_sink_error();
-                                    }
-                                }
-                                None => {
-                                    // Lock contention detected, increment metric and skip
-                                    metrics_console.inc_lock_contention();
-                                }
+                            if runtime_handle
+                                .block_on(async { console_sink_console.write(&record).await })
+                                .is_err()
+                            {
+                                metrics_console.inc_sink_error();
                             }
 
                             if Instant::now() > deadline {
@@ -324,39 +608,22 @@ impl LoggerManager {
                     // Process console logs with timeout
                     match console_receiver.recv_timeout(Duration::from_millis(100)) {
                         Ok(record) => {
-                            let latency = Utc::now()
-                                .signed_duration_since(record.timestamp)
-                                .to_std()
-                                .unwrap_or(Duration::ZERO);
-                            metrics_console.record_latency(latency);
+                            metrics_console.record_latency(record_age(&record));
 
-                            // Hot path: use try_lock to avoid blocking.
-                            // 锁内仅克隆 sink 句柄，异步写在锁外执行，
-                            // 避免MutexGuard 横跨 block_on
-                            let sink = console_sink_console
-                                .try_lock()
-                                .ok()
-                                .map(|guard| Arc::clone(&*guard));
-                            match sink {
-                                Some(sink) => {
-                                    if runtime_handle
-                                        .block_on(async { sink.write(&record).await })
-                                        .is_err()
-                                    {
-                                        metrics_console.inc_sink_error();
-                                        metrics_console.update_sink_health(
-                                            "console",
-                                            false,
-                                            Some("Write error".to_string()),
-                                        );
-                                    } else {
-                                        metrics_console.inc_logs_written();
-                                        metrics_console.update_sink_health("console", true, None);
-                                    }
+                            match runtime_handle
+                                .block_on(async { console_sink_console.write(&record).await })
+                            {
+                                Ok(_) => {
+                                    metrics_console.inc_logs_written();
+                                    metrics_console.update_sink_health("console", true, None);
                                 }
-                                None => {
-                                    // Lock contention detected, increment metric and skip
-                                    metrics_console.inc_lock_contention();
+                                Err(_) => {
+                                    metrics_console.inc_sink_error();
+                                    metrics_console.update_sink_health(
+                                        "console",
+                                        false,
+                                        Some("Write error".to_string()),
+                                    );
                                 }
                             }
                         }
@@ -386,327 +653,47 @@ impl LoggerManager {
                 if let Some(cfg) = file_config
                     && cfg.enabled
                 {
-                    // 工厂启动失败不再让 worker 直接退出（否则主体无 sink 可写、
-                    // 上游通道填满后记录被静默丢弃）：进入降级模式——error 日志
+                    // 工厂启动失败不退出 worker：进入降级模式（见
+                    // create_initial_state / retry_factory_if_due）——error 日志
                     // + 指数退避持续重试工厂，期间到达的记录写入 error sink 并
-                    // 计为 failed（见循环内的 record_sink_unavailable 与重试块）。
-                    let mut sink: Option<Box<dyn LogSink>> = match file_sink_factory() {
-                        Ok(sink) => Some(sink),
-                        Err(e) => {
-                            tracing::error!(
-                                error = %e,
-                                "File sink factory failed on startup; entering degraded retry mode (exponential backoff: 1s doubling up to 30s, retrying indefinitely); records arriving during retry are forwarded to the error sink and counted as failed"
-                            );
-                            metrics_file.update_sink_health("file", false, Some(e.to_string()));
-                            None
-                        }
+                    // 计为 failed（handle_sink_unavailable），绝不无声丢弃。
+                    let worker = SinkWorker {
+                        desc: &FILE_SINK_WORKER,
+                        runtime_handle: &runtime_handle,
+                        metrics: &metrics_file,
+                        console_sink: &console_sink_file,
+                        error_sink: &error_sink_file,
                     };
-                    let mut consecutive_failures = 0;
-                    #[allow(unused_assignments)]
-                    let mut last_failure_time = None::<Instant>;
-                    let mut factory_backoff = factory_retry_initial_backoff();
-                    let mut last_factory_attempt = Instant::now();
+                    let mut create_sink = || file_sink_factory();
+                    let mut state = worker.create_initial_state(&mut create_sink);
 
                     loop {
                         // Check for shutdown
                         if shutdown_file.try_recv().is_ok() {
                             // Drain with 30s timeout
-                            let deadline = Instant::now() + Duration::from_secs(30);
-                            while let Ok(record) = rx_file.try_recv() {
-                                let latency = Utc::now()
-                                    .signed_duration_since(record.timestamp)
-                                    .to_std()
-                                    .unwrap_or(Duration::ZERO);
-                                metrics_file.record_latency(latency);
-
-                                // 降级模式（工厂持续失败）：无 sink 可写——保底到
-                                // error sink 并计为 failed，绝不无声丢弃
-                                let Some(sink) = sink.as_mut() else {
-                                    record_sink_unavailable(
-                                        &runtime_handle,
-                                        &error_sink_file,
-                                        &metrics_file,
-                                        &record,
-                                        "file",
-                                    );
-                                    if Instant::now() > deadline {
-                                        break;
-                                    }
-                                    continue;
-                                };
-
-                                // Retry logic
-                                let mut attempts = 0;
-                                let mut write_succeeded = false;
-                                while attempts < 3 {
-                                    match runtime_handle
-                                        .block_on(async { sink.write(&record).await })
-                                    {
-                                        Ok(_) => {
-                                            metrics_file.inc_logs_written();
-                                            metrics_file.update_sink_health("file", true, None);
-                                            consecutive_failures = 0;
-                                            last_failure_time = None;
-                                            write_succeeded = true;
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            attempts += 1;
-                                            consecutive_failures += 1;
-                                            last_failure_time = Some(Instant::now());
-
-                                            // Log error to error.log
-                                            // 锁内仅取句柄，异步写在锁外执行
-                                            let error_sink_handle = error_sink_file
-                                                .lock()
-                                                .ok()
-                                                .and_then(|guard| guard.clone());
-                                            if let Some(error_sink) = error_sink_handle {
-                                                let error_record = LogRecord {
-                                                    timestamp: Utc::now(),
-                                                    level: "ERROR".to_string(),
-                                                    target: "inklog::file_sink".to_string(),
-                                                    message: format!("File sink error: {}", e),
-                                                    fields: Default::default(),
-                                                    file: None,
-                                                    line: None,
-                                                    thread_id: thread::current()
-                                                        .name()
-                                                        .unwrap_or("unknown")
-                                                        .to_string(),
-                                                };
-                                                let _ = runtime_handle.block_on(async {
-                                                    error_sink.write(&error_record).await
-                                                });
-                                            }
-
-                                            if attempts == 3 {
-                                                metrics_file.inc_sink_error();
-                                                metrics_file.update_sink_health(
-                                                    "file",
-                                                    false,
-                                                    Some(e.to_string()),
-                                                );
-                                                // Fallback to console（与 console 热路径一致：
-                                                // try_lock 争用时递增指标并跳过）
-                                                let cs = console_sink_file
-                                                    .try_lock()
-                                                    .ok()
-                                                    .map(|guard| Arc::clone(&*guard));
-                                                if let Some(cs) = cs {
-                                                    let _ = runtime_handle.block_on(async {
-                                                        cs.write(&record).await
-                                                    });
-                                                } else {
-                                                    metrics_file.inc_lock_contention();
-                                                }
-                                            } else {
-                                                thread::sleep(Duration::from_millis(
-                                                    10 * attempts as u64,
-                                                ));
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Auto-recovery trigger（与 DB worker 的 drain 循环保持一致）
-                                if !write_succeeded
-                                    && should_auto_recover(consecutive_failures, last_failure_time)
-                                {
-                                    tracing::warn!("{}", crate::i18n::tr("sink-file_auto_recovery"));
-                                    if let Ok(new_sink) = file_sink_factory() {
-                                        *sink = new_sink;
-                                        consecutive_failures = 0;
-                                        metrics_file.update_sink_health("file", true, None);
-                                        tracing::info!(
-                                            "{}",
-                                            crate::i18n::tr("sink-file_auto_recovery_ok")
-                                        );
-                                    }
-                                }
-
-                                if Instant::now() > deadline {
-                                    break;
-                                }
-                            }
-                            if let Some(sink) = sink.as_ref() {
-                                let _ = runtime_handle.block_on(async { sink.shutdown().await });
-                            }
+                            worker.drain(&mut state, &rx_file, Duration::from_secs(30), &mut create_sink);
                             break;
                         }
 
                         // Check for control messages
                         if let Ok(control_msg) = control_rx_file.try_recv() {
-                            match classify_control_message(&control_msg, "file") {
-                                ControlAction::Recover => {
-                                    tracing::info!(
-                                        "{}",
-                                        crate::i18n::tr("sink-file_recovery_received")
-                                    );
-                                    if let Ok(new_sink) = file_sink_factory() {
-                                        sink = Some(new_sink);
-                                        factory_backoff = factory_retry_initial_backoff();
-                                        consecutive_failures = 0;
-                                        last_failure_time = None;
-                                        metrics_file.update_sink_health("file", true, None);
-                                        tracing::info!(
-                                            "{}",
-                                            crate::i18n::tr("sink-file_recovered")
-                                        );
-                                    } else {
-                                        tracing::error!(
-                                            "{}",
-                                            crate::i18n::tr("sink-file_recovery_failed")
-                                        );
-                                    }
-                                }
-                                ControlAction::Status => {
-                                    // Status is already tracked in metrics
-                                }
-                                ControlAction::Ignore => {}
-                            }
+                            worker.handle_control_message(&mut state, &control_msg, &mut create_sink);
                         }
 
-                        // 降级模式：工厂持续失败时的指数退避重试（1s→2s→…上限 30s），
-                        // 持续重试而非放弃。用时间判断而非 sleep，循环保持即时响应
-                        // shutdown 与控制消息；放在 recv 之前，降级路径 continue
-                        // 跳过记录处理时也不会跳过重试。
-                        if sink.is_none() && last_factory_attempt.elapsed() >= factory_backoff {
-                            match file_sink_factory() {
-                                Ok(new_sink) => {
-                                    sink = Some(new_sink);
-                                    factory_backoff = factory_retry_initial_backoff();
-                                    metrics_file.update_sink_health("file", true, None);
-                                    tracing::info!(
-                                        "File sink factory succeeded after retry; worker resumed normal writes"
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        error = %e,
-                                        next_retry_in_ms = factory_backoff.as_millis() as u64,
-                                        "File sink factory retry failed; keeping the worker alive and retrying with exponential backoff"
-                                    );
-                                    factory_backoff =
-                                        (factory_backoff * 2).min(FACTORY_RETRY_MAX_BACKOFF);
-                                }
+                        // 降级模式：工厂重试放在 recv 之前，跳过记录处理时也不会跳过重试
+                        worker.retry_factory_if_due(&mut state, &mut create_sink);
+
+                        match rx_file.recv_timeout(Duration::from_millis(100)) {
+                            Ok(record) => {
+                                worker.handle_record(&mut state, &record, &mut create_sink);
                             }
-                            last_factory_attempt = Instant::now();
-                        }
-
-                        if let Ok(record) = rx_file.recv_timeout(Duration::from_millis(100)) {
-                            let latency = Utc::now()
-                                .signed_duration_since(record.timestamp)
-                                .to_std()
-                                .unwrap_or(Duration::ZERO);
-                            metrics_file.record_latency(latency);
-
-                            // 降级模式（工厂持续失败）：无 sink 可写——保底到
-                            // error sink 并计为 failed，绝不无声丢弃
-                            let Some(sink) = sink.as_mut() else {
-                                record_sink_unavailable(
-                                    &runtime_handle,
-                                    &error_sink_file,
-                                    &metrics_file,
-                                    &record,
-                                    "file",
-                                );
-                                continue;
-                            };
-
-                            // Retry logic with recovery detection
-                            let mut attempts = 0;
-                            let mut write_succeeded = false;
-                            while attempts < 3 {
-                                match runtime_handle.block_on(async { sink.write(&record).await }) {
-                                    Ok(_) => {
-                                        metrics_file.inc_logs_written();
-                                        metrics_file.update_sink_health("file", true, None);
-                                        consecutive_failures = 0;
-                                        last_failure_time = None;
-                                        write_succeeded = true;
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        attempts += 1;
-                                        consecutive_failures += 1;
-                                        last_failure_time = Some(Instant::now());
-
-                                        // Log error to error.log
-                                        // 锁内仅取句柄，异步写在锁外执行
-                                        let error_sink_handle = error_sink_file
-                                            .lock()
-                                            .ok()
-                                            .and_then(|guard| guard.clone());
-                                        if let Some(error_sink) = error_sink_handle {
-                                            let error_record = LogRecord {
-                                                timestamp: Utc::now(),
-                                                level: "ERROR".to_string(),
-                                                target: "inklog::file_sink".to_string(),
-                                                message: format!("File sink error: {}", e),
-                                                fields: Default::default(),
-                                                file: None,
-                                                line: None,
-                                                thread_id: thread::current()
-                                                    .name()
-                                                    .unwrap_or("unknown")
-                                                    .to_string(),
-                                            };
-                                            let _ = runtime_handle.block_on(async {
-                                                error_sink.write(&error_record).await
-                                            });
-                                        }
-
-                                        if attempts == 3 {
-                                            metrics_file.inc_sink_error();
-                                            metrics_file.update_sink_health(
-                                                "file",
-                                                false,
-                                                Some(e.to_string()),
-                                            );
-                                            // Fallback to console（与 console 热路径一致：
-                                            // try_lock 争用时递增指标并跳过）
-                                            let cs = console_sink_file
-                                                .try_lock()
-                                                .ok()
-                                                .map(|guard| Arc::clone(&*guard));
-                                            if let Some(cs) = cs {
-                                                let _ = runtime_handle.block_on(async {
-                                                    cs.write(&record).await
-                                                });
-                                            } else {
-                                                metrics_file.inc_lock_contention();
-                                            }
-                                        } else {
-                                            thread::sleep(Duration::from_millis(
-                                                10 * attempts as u64,
-                                            ));
-                                        }
-                                    }
-                                }
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                                // Timeout, flush buffer
+                                worker.flush_idle(&state);
                             }
-
-                            // Auto-recovery trigger
-                            if !write_succeeded
-                                && should_auto_recover(consecutive_failures, last_failure_time)
-                            {
-                                tracing::warn!("{}", crate::i18n::tr("sink-file_auto_recovery"));
-                                if let Ok(new_sink) = file_sink_factory() {
-                                    *sink = new_sink;
-                                    consecutive_failures = 0;
-                                    last_failure_time = None;
-                                    metrics_file.update_sink_health("file", true, None);
-                                    tracing::info!(
-                                        "{}",
-                                        crate::i18n::tr("sink-file_auto_recovery_ok")
-                                    );
-                                }
-                            }
-                        } else {
-                            // Timeout, flush buffer（降级模式下无 sink 可 flush）
-                            if let Some(sink) = sink.as_ref() {
-                                let _ = runtime_handle.block_on(async { sink.flush().await });
-                            }
+                            // 记录发送端全部丢弃且通道已空：worker 退出而非空转
+                            // （否则 tokio Runtime drop 等待 blocking 任务时永久挂死）
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                         }
                     }
                 }
@@ -758,368 +745,57 @@ impl LoggerManager {
         ))]
         let handle_db = {
             let runtime_handle = runtime_handle.clone();
-            tokio::task::spawn_blocking(
-                #[allow(unused_assignments)]
-                move || {
-                    metrics_db.active_workers.inc();
-                    if let Some(cfg) = db_config
-                        && cfg.enabled
-                        && let Some(ref db) = database
-                        && let Some(rx_db) = db_receiver
-                    {
-                        // Clone once before the loop for recovery use
-                        let db_for_recovery = db.clone();
-                        // 同 file worker：工厂启动失败进入降级模式（error 日志 +
-                        // 指数退避持续重试，期间记录写入 error sink 并计为 failed），
-                        // 不再静默跳过 worker 主体。下面的裸块保持既有作用域与缩进。
-                        let mut sink: Option<Box<dyn LogSink>> =
-                            match db_sink_factory(db.clone(), metrics_db.clone()) {
-                                Ok(sink) => Some(sink),
-                                Err(e) => {
-                                    tracing::error!(
-                                        error = %e,
-                                        "Database sink factory failed on startup; entering degraded retry mode (exponential backoff: 1s doubling up to 30s, retrying indefinitely); records arriving during retry are forwarded to the error sink and counted as failed"
-                                    );
-                                    metrics_db.update_sink_health(
-                                        "database",
-                                        false,
-                                        Some(e.to_string()),
-                                    );
-                                    None
-                                }
-                            };
-                        {
-                            let mut consecutive_failures = 0;
-                            #[allow(unused_assignments)]
-                            let mut last_failure_time = None::<Instant>;
-                            let mut factory_backoff = factory_retry_initial_backoff();
-                            let mut last_factory_attempt = Instant::now();
+            tokio::task::spawn_blocking(move || {
+                metrics_db.active_workers.inc();
+                // database 依赖由调用方（build_detached，async 上下文）保证有效
+                if let Some(cfg) = db_config
+                    && cfg.enabled
+                    && let Some(ref db) = database
+                    && let Some(rx_db) = db_receiver
+                {
+                    let worker = SinkWorker {
+                        desc: &DB_SINK_WORKER,
+                        runtime_handle: &runtime_handle,
+                        metrics: &metrics_db,
+                        console_sink: &console_sink_db,
+                        error_sink: &error_sink_db,
+                    };
+                    let mut create_sink = || db_sink_factory(db.clone(), metrics_db.clone());
+                    let mut state = worker.create_initial_state(&mut create_sink);
 
-                            loop {
-                                if shutdown_db.try_recv().is_ok() {
-                                    // Drain with 30s timeout
-                                    let deadline = Instant::now() + Duration::from_secs(30);
-                                    while let Ok(record) = rx_db.try_recv() {
-                                        let latency = Utc::now()
-                                            .signed_duration_since(record.timestamp)
-                                            .to_std()
-                                            .unwrap_or(Duration::ZERO);
-                                        metrics_db.record_latency(latency);
+                    loop {
+                        // Check for shutdown
+                        if shutdown_db.try_recv().is_ok() {
+                            // Drain with 30s timeout
+                            worker.drain(&mut state, &rx_db, Duration::from_secs(30), &mut create_sink);
+                            break;
+                        }
 
-                                        // 降级模式（工厂持续失败）：无 sink 可写——
-                                        // 保底到 error sink 并计为 failed，绝不无声丢弃
-                                        let Some(sink) = sink.as_mut() else {
-                                            record_sink_unavailable(
-                                                &runtime_handle,
-                                                &error_sink_db,
-                                                &metrics_db,
-                                                &record,
-                                                "database",
-                                            );
-                                            if Instant::now() > deadline {
-                                                break;
-                                            }
-                                            continue;
-                                        };
+                        // Check for control messages
+                        if let Ok(control_msg) = control_rx_db.try_recv() {
+                            worker.handle_control_message(&mut state, &control_msg, &mut create_sink);
+                        }
 
-                                        // Retry logic
-                                        let mut attempts = 0;
-                                        let mut write_succeeded = false;
-                                        let write_result: Result<(), InklogError> = runtime_handle
-                                            .block_on(async { sink.write(&record).await });
-                                        match write_result {
-                                            Ok(_) => {
-                                                metrics_db.inc_logs_written();
-                                                metrics_db
-                                                    .update_sink_health("database", true, None);
-                                                consecutive_failures = 0;
-                                                last_failure_time = None;
-                                                write_succeeded = true;
-                                            }
-                                            Err(ref e) => {
-                                                attempts += 1;
-                                                consecutive_failures += 1;
-                                                last_failure_time = Some(Instant::now());
+                        // 降级模式：工厂重试放在 recv 之前，跳过记录处理时也不会跳过重试
+                        worker.retry_factory_if_due(&mut state, &mut create_sink);
 
-                                                // Log error to error.log
-                                                // 锁内仅取句柄，异步写在锁外执行
-                                                let error_sink_handle = error_sink_db
-                                                    .lock()
-                                                    .ok()
-                                                    .and_then(|guard| guard.clone());
-                                                if let Some(error_sink) = error_sink_handle {
-                                                    let error_record = LogRecord {
-                                                        timestamp: Utc::now(),
-                                                        level: "ERROR".to_string(),
-                                                        target: "inklog::database_sink".to_string(),
-                                                        message: format!(
-                                                            "Database sink error: {}",
-                                                            e
-                                                        ),
-                                                        fields: Default::default(),
-                                                        file: None,
-                                                        line: None,
-                                                        thread_id: thread::current()
-                                                            .name()
-                                                            .unwrap_or("unknown")
-                                                            .to_string(),
-                                                    };
-                                                    let _ = runtime_handle.block_on(async {
-                                                        error_sink.write(&error_record).await
-                                                    });
-                                                }
-
-                                                if attempts == 3 {
-                                                    metrics_db.inc_sink_error();
-                                                    let error_msg = format!("{e}");
-                                                    metrics_db.update_sink_health(
-                                                        "database",
-                                                        false,
-                                                        Some(error_msg),
-                                                    );
-                                                    // Fallback to console（与 console 热路径一致：
-                                                    // try_lock 争用时递增指标并跳过）
-                                                    let cs = console_sink_db
-                                                        .try_lock()
-                                                        .ok()
-                                                        .map(|guard| Arc::clone(&*guard));
-                                                    if let Some(cs) = cs {
-                                                        let _ = runtime_handle.block_on(async {
-                                                            cs.write(&record).await
-                                                        });
-                                                    } else {
-                                                        metrics_db.inc_lock_contention();
-                                                    }
-                                                } else {
-                                                    thread::sleep(Duration::from_millis(
-                                                        10 * attempts as u64,
-                                                    ));
-                                                }
-                                            }
-                                        }
-
-                                        // Auto-recovery trigger
-                                        if !write_succeeded
-                                            && should_auto_recover(
-                                                consecutive_failures,
-                                                last_failure_time,
-                                            )
-                                        {
-                                            tracing::warn!(
-                                                "{}",
-                                                crate::i18n::tr("sink-db_auto_recovery")
-                                            );
-                                            if let Ok(new_sink) = db_sink_factory(
-                                                db_for_recovery.clone(),
-                                                metrics_db.clone(),
-                                            ) {
-                                                *sink = new_sink;
-                                                consecutive_failures = 0;
-                                                metrics_db
-                                                    .update_sink_health("database", true, None);
-                                                tracing::info!(
-                                                    "{}",
-                                                    crate::i18n::tr("sink-db_auto_recovery_ok")
-                                                );
-                                            }
-                                        }
-
-                                        if Instant::now() > deadline {
-                                            break;
-                                        }
-                                    }
-                                    if let Some(sink) = sink.as_ref() {
-                                        let _ = runtime_handle
-                                            .block_on(async { sink.shutdown().await });
-                                    }
-                                    break;
-                                }
-
-                                // Check for control messages
-                                if let Ok(control_msg) = control_rx_db.try_recv() {
-                                    match classify_control_message(&control_msg, "database") {
-                                        ControlAction::Recover => {
-                                            tracing::info!(
-                                                "{}",
-                                                crate::i18n::tr("sink-db_recovery_received")
-                                            );
-                                            if let Ok(new_sink) = db_sink_factory(
-                                                db_for_recovery.clone(),
-                                                metrics_db.clone(),
-                                            ) {
-                                                sink = Some(new_sink);
-                                                factory_backoff =
-                                                    factory_retry_initial_backoff();
-                                                consecutive_failures = 0;
-                                                last_failure_time = None;
-                                                metrics_db
-                                                    .update_sink_health("database", true, None);
-                                                tracing::info!(
-                                                    "{}",
-                                                    crate::i18n::tr("sink-db_recovered")
-                                                );
-                                            } else {
-                                                tracing::error!(
-                                                    "{}",
-                                                    crate::i18n::tr("sink-db_recovery_failed")
-                                                );
-                                            }
-                                        }
-                                        ControlAction::Status => {
-                                            // Status is already tracked in metrics
-                                        }
-                                        ControlAction::Ignore => {}
-                                    }
-                                }
-
-                                // 降级模式：工厂持续失败时的指数退避重试（1s→2s→…上限 30s），
-                                // 持续重试而非放弃。用时间判断而非 sleep，循环保持即时响应
-                                // shutdown 与控制消息；放在 recv 之前，降级路径 continue
-                                // 跳过记录处理时也不会跳过重试。
-                                if sink.is_none()
-                                    && last_factory_attempt.elapsed() >= factory_backoff
-                                {
-                                    match db_sink_factory(
-                                        db_for_recovery.clone(),
-                                        metrics_db.clone(),
-                                    ) {
-                                        Ok(new_sink) => {
-                                            sink = Some(new_sink);
-                                            factory_backoff = factory_retry_initial_backoff();
-                                            metrics_db.update_sink_health("database", true, None);
-                                            tracing::info!(
-                                                "Database sink factory succeeded after retry; worker resumed normal writes"
-                                            );
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(
-                                                error = %e,
-                                                next_retry_in_ms =
-                                                    factory_backoff.as_millis() as u64,
-                                                "Database sink factory retry failed; keeping the worker alive and retrying with exponential backoff"
-                                            );
-                                            factory_backoff = (factory_backoff * 2)
-                                                .min(FACTORY_RETRY_MAX_BACKOFF);
-                                        }
-                                    }
-                                    last_factory_attempt = Instant::now();
-                                }
-
-                                if let Ok(record) = rx_db.recv_timeout(Duration::from_millis(100)) {
-                                    let latency = Utc::now()
-                                        .signed_duration_since(record.timestamp)
-                                        .to_std()
-                                        .unwrap_or(Duration::ZERO);
-                                    metrics_db.record_latency(latency);
-
-                                    // 降级模式（工厂持续失败）：无 sink 可写——保底到
-                                    // error sink 并计为 failed，绝不无声丢弃
-                                    let Some(sink) = sink.as_mut() else {
-                                        record_sink_unavailable(
-                                            &runtime_handle,
-                                            &error_sink_db,
-                                            &metrics_db,
-                                            &record,
-                                            "database",
-                                        );
-                                        continue;
-                                    };
-
-                                    // Retry logic
-                                    let mut attempts = 0;
-                                    let mut write_succeeded = false;
-                                    let write_result: Result<(), InklogError> = runtime_handle
-                                        .block_on(async { sink.write(&record).await });
-                                    match write_result {
-                                        Ok(_) => {
-                                            metrics_db.inc_logs_written();
-                                            metrics_db.update_sink_health("database", true, None);
-                                            consecutive_failures = 0;
-                                            last_failure_time = None;
-                                            write_succeeded = true;
-                                        }
-                                        Err(ref e) => {
-                                            attempts += 1;
-                                            consecutive_failures += 1;
-                                            last_failure_time = Some(Instant::now());
-
-                                            if attempts == 3 {
-                                                metrics_db.inc_sink_error();
-                                                let error_msg = format!("{e}");
-                                                metrics_db.update_sink_health(
-                                                    "database",
-                                                    false,
-                                                    Some(error_msg),
-                                                );
-
-                                                // Fallback chain: DB -> File -> Console
-                                                // （与 console 热路径一致：try_lock 争用时
-                                                // 递增指标并跳过）
-                                                let cs = console_sink_db
-                                                    .try_lock()
-                                                    .ok()
-                                                    .map(|guard| Arc::clone(&*guard));
-                                                if let Some(cs) = cs {
-                                                    let _ = runtime_handle.block_on(async {
-                                                        cs.write(&record).await
-                                                    });
-                                                } else {
-                                                    metrics_db.inc_lock_contention();
-                                                }
-                                            } else {
-                                                thread::sleep(Duration::from_millis(
-                                                    10 * attempts as u64,
-                                                ));
-                                            }
-                                        }
-                                    }
-
-                                    // Auto-recovery trigger
-                                    if !write_succeeded
-                                        && should_auto_recover(
-                                            consecutive_failures,
-                                            last_failure_time,
-                                        )
-                                    {
-                                        tracing::warn!(
-                                            "{}",
-                                            crate::i18n::tr("sink-db_auto_recovery")
-                                        );
-                                        if let Ok(new_sink) = db_sink_factory(
-                                            db_for_recovery.clone(),
-                                            metrics_db.clone(),
-                                        ) {
-                                            *sink = new_sink;
-                                            consecutive_failures = 0;
-                                            metrics_db.update_sink_health("database", true, None);
-                                            tracing::info!(
-                                                "{}",
-                                                crate::i18n::tr("sink-db_auto_recovery_ok")
-                                            );
-                                        }
-                                    }
-                                } else {
-                                    // Timeout, flush buffer（降级模式下无 sink 可 flush）
-                                    if let Some(sink) = sink.as_ref() {
-                                        let _ =
-                                            runtime_handle.block_on(async { sink.flush().await });
-                                    }
-                                }
+                        match rx_db.recv_timeout(Duration::from_millis(100)) {
+                            Ok(record) => {
+                                worker.handle_record(&mut state, &record, &mut create_sink);
                             }
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                                // Timeout, flush buffer
+                                worker.flush_idle(&state);
+                            }
+                            // 同 file worker：发送端全部丢弃且通道已空时退出
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                         }
                     }
-                    metrics_db.active_workers.dec();
-                },
-            )
+                }
+                metrics_db.active_workers.dec();
+            })
         };
 
-        #[cfg(not(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        )))]
-        let _handle_db = tokio::task::spawn_blocking(|| {});
 
         // Health Check Thread
         let (shutdown_tx_health, shutdown_health) = bounded(1);
@@ -1131,8 +807,14 @@ impl LoggerManager {
             let check_interval = Duration::from_secs(1);
 
             loop {
-                if shutdown_health.recv_timeout(check_interval).is_ok() {
-                    break;
+                match shutdown_health.recv_timeout(check_interval) {
+                    // 正常 shutdown 信号
+                    Ok(_) => break,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    // 发送端已全部丢弃（如 manager 未调 shutdown 即被丢弃）：
+                    // 必须退出，否则 recv_timeout 立即返回 Disconnected，
+                    // 本线程全速空转且 tokio Runtime drop 永久等待
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 }
 
                 // Active recovery logic with control channel
@@ -1466,7 +1148,7 @@ mod tests {
 
     // ========================================================================
     // Console worker 并发回归测试：多任务并发写 console sink 不死锁/不 panic，
-    // 所有 worker 在 shutdown 广播后均能终止（MutexGuard 不得横跨 block_on）
+    // 所有 worker 在 shutdown 广播后均能终止
     // ========================================================================
 
     #[test]
@@ -1483,12 +1165,10 @@ mod tests {
         let (control_tx, control_rx) = bounded(10);
         let metrics = Arc::new(Metrics::new());
         let effective_capacity = Arc::new(AtomicUsize::new(2048));
-        let console_sink: Arc<Mutex<Arc<dyn LogSink>>> = Arc::new(Mutex::new(Arc::new(
-            crate::support::io::ConsoleSink::new(
-                config.console_sink.clone().unwrap_or_default(),
-                crate::LogTemplate::new(&config.global.format),
-            ),
-        ) as Arc<dyn LogSink>));
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            config.console_sink.clone().unwrap_or_default(),
+            crate::LogTemplate::new(&config.global.format),
+        )) as Arc<dyn LogSink>;
         let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
 
         let params = WorkerParams {
@@ -1589,7 +1269,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn test_file_worker_failing_factory_counts_failed_and_stays_alive() {
+    fn test_file_worker_failing_factory_counts_failed_and_exits_on_sender_drop() {
         // 注入毫秒级退避，避免测试等待真实的秒级退避
         FACTORY_RETRY_INITIAL_BACKOFF_MS.store(20, Ordering::Relaxed);
 
@@ -1611,12 +1291,10 @@ mod tests {
         let (control_tx, control_rx) = bounded(10);
         let metrics = Arc::new(Metrics::new());
         let effective_capacity = Arc::new(AtomicUsize::new(100));
-        let console_sink: Arc<Mutex<Arc<dyn LogSink>>> = Arc::new(Mutex::new(Arc::new(
-            crate::support::io::ConsoleSink::new(
-                config.console_sink.clone().unwrap_or_default(),
-                crate::LogTemplate::new(&config.global.format),
-            ),
-        ) as Arc<dyn LogSink>));
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            config.console_sink.clone().unwrap_or_default(),
+            crate::LogTemplate::new(&config.global.format),
+        )) as Arc<dyn LogSink>;
         let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
 
         let params = WorkerParams {
@@ -1697,10 +1375,16 @@ mod tests {
             "records arriving while the factory fails must be counted as dropped, got: {}",
             metrics.logs_dropped()
         );
-        // 2) worker 保持存活继续重试（未因工厂失败而退出）
+        // 2) 记录发送端全部丢弃且通道排空后，worker 应在有限时间内退出
+        //    （即使工厂仍在失败）——而非空转驻留；tokio Runtime drop 会等待
+        //    blocking 任务，空转驻留会让整个测试进程永久挂死
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !handles[1].is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
         assert!(
-            !handles[1].is_finished(),
-            "file worker must stay alive while the factory keeps failing"
+            handles[1].is_finished(),
+            "file worker must exit after all record senders are dropped, even with a failing factory"
         );
 
         // 3) shutdown 语义不变：降级模式下广播后所有 worker 均终止
@@ -1726,5 +1410,180 @@ mod tests {
 
         // 恢复测试钩子，避免影响其他测试
         FACTORY_RETRY_INITIAL_BACKOFF_MS.store(0, Ordering::Relaxed);
+    }
+
+    // ========================================================================
+    // 漂移修复回归：db worker 主循环写失败分支必须与 drain 路径一致地写
+    // error.log（"Database sink error: ..."），重试耗尽后计 sink_error。
+    // ========================================================================
+
+    /// 捕获写入内容的 error sink（验证 error.log 记录）。
+    /// 仅 db worker 测试使用，随其 cfg 门控。
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    struct CapturingSink {
+        messages: Mutex<Vec<String>>,
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    #[async_trait::async_trait]
+    impl LogSink for CapturingSink {
+        async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+            self.messages.lock().unwrap().push(record.message.clone());
+            Ok(())
+        }
+
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    /// 写入必然失败的 db sink（模拟运行期写库失败）。
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    struct FailingDbSink;
+
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    #[async_trait::async_trait]
+    impl LogSink for FailingDbSink {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            Err(InklogError::DatabaseError {
+                message: "mock db write failure".to_string(),
+                source: None,
+            })
+        }
+
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
+    #[test]
+    fn test_db_worker_write_failure_writes_error_log_in_main_loop() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to build test runtime");
+
+        let mut config = InklogConfig::default();
+        // db worker 主体受 db_config.enabled 守卫，必须显式启用才会进入主循环
+        config.database_sink = Some(crate::domain::config::DatabaseSinkConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        let (_file_tx, file_rx) = bounded::<Arc<LogRecord>>(100);
+        let (_console_tx, console_rx) = bounded::<Arc<LogRecord>>(100);
+        let (db_tx, db_rx) = bounded::<Arc<LogRecord>>(100);
+        let (control_tx, control_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let effective_capacity = Arc::new(AtomicUsize::new(100));
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            config.console_sink.clone().unwrap_or_default(),
+            crate::LogTemplate::new(&config.global.format),
+        )) as Arc<dyn LogSink>;
+        let captured = Arc::new(CapturingSink {
+            messages: Mutex::new(Vec::new()),
+        });
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> =
+            Arc::new(Mutex::new(Some(captured.clone() as Arc<dyn LogSink>)));
+
+        let params = WorkerParams {
+            config,
+            receiver: file_rx,
+            console_receiver: console_rx,
+            control_rx,
+            control_tx,
+            metrics: metrics.clone(),
+            console_sink,
+            error_sink,
+            effective_capacity,
+            file_sink_factory: Box::new(|| {
+                Err(InklogError::ConfigError("unused in test".to_string()))
+            }),
+            db_sink_factory: Box::new(|_db, _metrics| Ok(Box::new(FailingDbSink) as Box<dyn LogSink>)),
+            database: Some(Arc::new(crate::integrations::MockDatabaseAdapter::new())
+                as Arc<dyn crate::integrations::Database>),
+            db_receiver: Some(db_rx),
+        };
+
+        let (handles, shutdown_txs) = runtime
+            .block_on(async { LoggerManager::start_workers(params).expect("start workers") });
+
+        // 向 db channel 投递 N 条记录：主循环写失败应计 sink_error 并写 error.log
+        const N: u64 = 3;
+        for i in 0..N {
+            let record = Arc::new(LogRecord {
+                timestamp: Utc::now(),
+                level: "INFO".to_string(),
+                target: "db::write_failure".to_string(),
+                message: format!("db write failure record {i}"),
+                fields: Default::default(),
+                file: None,
+                line: None,
+                thread_id: "test".to_string(),
+            });
+            db_tx.send(record).expect("send db record");
+        }
+        drop(db_tx);
+
+        // 等待 worker 完成 3 次重试并计数（退避 10ms+20ms/条）
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while metrics.sink_errors() < N && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        // 1) 重试耗尽后计 sink_error（含 db 主循环，与 file worker 一致）
+        assert!(
+            metrics.sink_errors() >= N,
+            "db main-loop write failures must be counted as sink errors, got: {}",
+            metrics.sink_errors()
+        );
+        // 2) error.log 与 drain 路径一致：主循环失败分支写入 "Database sink error: ..."
+        //    （每次失败尝试各写一条，N 条记录 × 3 次尝试）
+        let error_messages = captured.messages.lock().unwrap();
+        assert!(
+            error_messages.len() >= N as usize,
+            "db main-loop failures must write error.log, got: {}",
+            error_messages.len()
+        );
+        assert!(
+            error_messages
+                .iter()
+                .all(|m| m.starts_with("Database sink error: ")),
+            "error.log records must come from the database sink failure path, got: {:?}",
+            *error_messages
+        );
+        drop(error_messages);
+
+        // 3) shutdown 语义不变
+        for tx in &shutdown_txs {
+            let _ = tx.send_timeout((), Duration::from_secs(2));
+        }
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut all_finished = true;
+        for handle in handles {
+            while !handle.is_finished() {
+                if Instant::now() > deadline {
+                    all_finished = false;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            handle.abort();
+        }
+        assert!(all_finished, "workers must terminate after shutdown");
     }
 }

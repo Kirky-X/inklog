@@ -88,7 +88,7 @@ pub struct LoggerManager {
 impl LoggerManager {
     pub async fn new() -> Result<Self, InklogError> {
         // 经过 DI 路径创建默认实例，行为与 builder().build() 一致
-        Self::with_dependencies(LoggerDependencies::default()).await
+        Self::build_with_deps(LoggerDependencies::default()).await
     }
 
     /// 完全依赖注入模式创建 LoggerManager
@@ -104,23 +104,11 @@ impl LoggerManager {
     ///
     /// 成功返回 `Ok(LoggerManager)`，失败返回 `Err(InklogError)`
     ///
-    /// # 示例
+    /// # Deprecated
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
-    /// use inklog::{LoggerManager, LoggerDependencies};
-    /// use inklog::infrastructure::{MockCache, MockConfig};
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let deps = LoggerDependencies {
-    ///         cache: Some(Arc::new(MockCache::new())),
-    ///         config: Some(Arc::new(MockConfig::new())),
-    ///     };
-    ///     let logger = LoggerManager::with_dependencies(deps).await?;
-    ///     Ok(())
-    /// }
-    /// ```
+    /// DI 入口已收敛：请改用 [`LoggerManager::builder()`]（唯一推荐入口），
+    /// 本方法仅为兼容保留，行为为直接转发到内部构建逻辑。
+    #[deprecated(since = "0.3.0", note = "use LoggerManager::builder() instead")]
     pub async fn with_dependencies(deps: LoggerDependencies) -> Result<Self, InklogError> {
         Self::build_with_deps(deps).await
     }
@@ -128,7 +116,7 @@ impl LoggerManager {
     /// 使用依赖注入构建 LoggerManager
     ///
     /// 内部方法，处理依赖解析和默认值填充。
-    async fn build_with_deps(deps: LoggerDependencies) -> Result<Self, InklogError> {
+    pub(crate) async fn build_with_deps(deps: LoggerDependencies) -> Result<Self, InklogError> {
         // 如果提供了 Config trait 实现，从中获取 InklogConfig
         // 否则使用默认配置加载流程
         let config = if let Some(ref config_provider) = deps.config {
@@ -400,12 +388,10 @@ impl LoggerManager {
             (None, None)
         };
 
-        let console_sink: Arc<Mutex<Arc<dyn LogSink>>> = Arc::new(Mutex::new(Arc::new(
-            ConsoleSink::new(
-                config.console_sink.clone().unwrap_or_default(),
-                LogTemplate::new(&config.global.format),
-            ),
-        ) as Arc<dyn LogSink>));
+        let console_sink: Arc<dyn LogSink> = Arc::new(ConsoleSink::new(
+            config.console_sink.clone().unwrap_or_default(),
+            LogTemplate::new(&config.global.format),
+        ));
 
         // Initialize tracing subscriber with console_sender channel
         let primary_async_sender = if file_enabled {
@@ -807,6 +793,7 @@ impl Drop for LoggerManager {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // 覆盖 deprecated 入口 with_dependencies 的既有行为测试
 mod tests {
     use super::*;
     use chrono::Utc;
