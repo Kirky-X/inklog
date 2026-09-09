@@ -78,15 +78,27 @@ pub struct GlobalConfig {
     #[serde(default = "default_global_format")]
     pub format: String,
 
-    /// Enable sensitive data masking.
+    /// Enable the log sanitizer: CWE-117 injection escaping (newlines/control
+    /// characters) plus message-level sensitive-data redaction, applied by the
+    /// tracing subscriber before records enter any sink.
     ///
-    /// When enabled, sensitive patterns (passwords, API keys, credit cards, etc.)
-    /// are automatically replaced with `[REDACTED]` placeholders.
+    /// 推荐新名 `sanitizer_enabled`；旧名 `masking_enabled` 为兼容别名，
+    /// 继续接受（serde alias），序列化时始终输出旧名。
+    ///
+    /// # 三个易混淆开关的分工
+    ///
+    /// - **sanitizer**（本字段，推荐名 `sanitizer_enabled`）：注入转义与消息
+    ///   脱敏，作用于 subscriber 入口（全局）。
+    /// - **pii_masking**（`console_sink` / `file_sink` 的 `masking_enabled`，
+    ///   推荐名 `pii_masking_enabled`）：结构化 PII 掩码（邮箱、手机号、证件/
+    ///   银行卡号、敏感字段名），作用于 sink 输出前。
+    /// - **safe_message**（`InklogError::safe_message`，error.rs 的
+    ///   SENSITIVE_PATTERNS）：错误消息出口脱敏，独立于以上两个开关。
     ///
     /// # Default
     ///
     /// `true` - Masking enabled by default for security.
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", alias = "sanitizer_enabled")]
     pub masking_enabled: bool,
 
     /// Enable automatic fallback on sink failures.
@@ -275,5 +287,36 @@ mod tests {
         let mut cfg = GlobalConfig::default();
         cfg.level = String::new();
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_deserialize_masking_enabled_legacy_and_alias_keys() {
+        // 旧键名 `masking_enabled`：既有配置文件必须继续解析（兼容别名）
+        let legacy: GlobalConfig =
+            toml::from_str("level = \"info\"\nmasking_enabled = false\n").unwrap();
+        assert!(!legacy.masking_enabled);
+
+        // 新键名 `sanitizer_enabled`（推荐写法，serde alias）解析到同一字段
+        let renamed: GlobalConfig =
+            toml::from_str("level = \"info\"\nsanitizer_enabled = false\n").unwrap();
+        assert!(!renamed.masking_enabled);
+    }
+
+    #[test]
+    fn test_serialize_emits_legacy_masking_enabled_key() {
+        // 序列化始终输出旧键名，保证既有配置消费者/生成器不受影响
+        let cfg = GlobalConfig {
+            masking_enabled: false,
+            ..Default::default()
+        };
+        let rendered = toml::to_string(&cfg).unwrap();
+        assert!(
+            rendered.contains("masking_enabled = false"),
+            "serialized TOML must keep the legacy key, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("sanitizer_enabled"),
+            "alias must not be emitted on serialization, got: {rendered}"
+        );
     }
 }

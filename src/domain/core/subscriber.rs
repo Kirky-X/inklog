@@ -141,18 +141,9 @@ impl LoggerSubscriber {
         level == "ERROR" || level == "FATAL"
     }
 
-    /// 敏感键判定，与 `LogRecord::is_sensitive_key`
-    /// （src/domain/types/log_record.rs，crate 内非 pub）等价：
-    /// 该方法未提供 pub 接口，无法直接引用，故按同一模式列表在此实现，
-    /// 两处需保持一致。
-    fn is_sensitive_key(key: &str) -> bool {
-        const SENSITIVE_KEY_PATTERNS: &[&str] =
-            &["password", "token", "secret", "key", "credential", "auth"];
-        let key_lower = key.to_lowercase();
-        SENSITIVE_KEY_PATTERNS
-            .iter()
-            .any(|pattern| key_lower.contains(*pattern))
-    }
+    // 敏感键判定不再有本地副本：统一引用 `LogRecord::is_sensitive_key`
+    // （src/domain/types/log_record.rs，pub(crate) 单一事实源），
+    // 避免手工同步两份模式表导致的安全行为分叉。
 
     /// Sanitize a log record's message and fields values, recursing into
     /// nested objects and arrays so strings under sensitive keys are not
@@ -178,7 +169,7 @@ impl LoggerSubscriber {
             }
             Value::Object(map) => {
                 for (nested_key, nested_value) in map.iter_mut() {
-                    if Self::is_sensitive_key(nested_key) {
+                    if LogRecord::is_sensitive_key(nested_key) {
                         // 敏感键：直接脱敏其字符串值
                         if let Value::String(s) = nested_value {
                             *s = sanitizer.sanitize(s);
@@ -812,6 +803,30 @@ mod tests {
             &serde_json::json!(42),
             "non-string values must not be modified"
         );
+    }
+
+    // =========================================================================
+    // 敏感键判定单一事实源（diting R3）：subscriber 的 sanitizer 路径直接引用
+    // `LogRecord::is_sensitive_key`（token 边界语义），本测试钉住该语义，
+    // 防止有人再引入按子串匹配的本地副本（子串匹配会把 "author" 误判为敏感）。
+    // =========================================================================
+
+    #[test]
+    fn test_is_sensitive_key_matches_log_record_canonical_semantics() {
+        // 敏感键（与 log_record.rs 的 token 边界判定一致）
+        for key in ["password", "api_key", "auth_token", "secret"] {
+            assert!(
+                LogRecord::is_sensitive_key(key),
+                "'{key}' must be judged sensitive by the canonical implementation"
+            );
+        }
+        // 非敏感键（子串匹配会误判 "author" 含 "auth"，token 边界判定不会）
+        for key in ["primary_key", "author"] {
+            assert!(
+                !LogRecord::is_sensitive_key(key),
+                "'{key}' must NOT be judged sensitive by the canonical implementation"
+            );
+        }
     }
 
     // NOTE: parking_lot::Mutex 不支持 poison，无需测试毒化恢复

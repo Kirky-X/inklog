@@ -53,12 +53,27 @@ pub struct ConsoleSinkConfig {
     #[serde(default = "default_stderr_levels")]
     pub stderr_levels: Vec<String>,
 
-    /// Enable sensitive data masking for console output.
+    /// Enable PII masking for console output: structured PII (emails, phone
+    /// numbers, ID/bank card numbers) and values under sensitive field names
+    /// are masked before the record is written to stdout/stderr.
     ///
-    /// Defaults to `true` for security consistency with [`GlobalConfig`](super::GlobalConfig).
-    /// When enabled, PII patterns (emails, phone numbers, etc.) are
-    /// automatically redacted from console log output.
-    #[serde(default = "default_true")]
+    /// 推荐新名 `pii_masking_enabled`；旧名 `masking_enabled` 为兼容别名，
+    /// 继续接受（serde alias），序列化时始终输出旧名。
+    ///
+    /// # 三个易混淆开关的分工
+    ///
+    /// - **sanitizer**（`global.masking_enabled`，推荐名 `sanitizer_enabled`）：
+    ///   注入转义与消息脱敏，作用于 subscriber 入口（全局）。
+    /// - **pii_masking**（本字段，推荐名 `pii_masking_enabled`）：结构化 PII
+    ///   掩码，作用于本 sink 输出前。
+    /// - **safe_message**（`InklogError::safe_message`，error.rs 的
+    ///   SENSITIVE_PATTERNS）：错误消息出口脱敏，独立于以上两个开关。
+    ///
+    /// # Default
+    ///
+    /// `true` - Masking enabled by default for security consistency with
+    /// [`GlobalConfig`](super::GlobalConfig).
+    #[serde(default = "default_true", alias = "pii_masking_enabled")]
     pub masking_enabled: bool,
 
     /// Output format: text (template-based) or JSON (NDJSON).
@@ -191,5 +206,36 @@ mod tests {
             ..Default::default()
         };
         assert!(cfg.invalid_stderr_levels().is_empty());
+    }
+
+    #[test]
+    fn test_deserialize_masking_enabled_legacy_and_alias_keys() {
+        // 旧键名 `masking_enabled`：既有配置文件必须继续解析（兼容别名）
+        let legacy: ConsoleSinkConfig =
+            toml::from_str("masking_enabled = false\n").unwrap();
+        assert!(!legacy.masking_enabled);
+
+        // 新键名 `pii_masking_enabled`（推荐写法，serde alias）解析到同一字段
+        let renamed: ConsoleSinkConfig =
+            toml::from_str("pii_masking_enabled = false\n").unwrap();
+        assert!(!renamed.masking_enabled);
+    }
+
+    #[test]
+    fn test_serialize_emits_legacy_masking_enabled_key() {
+        // 序列化始终输出旧键名，保证既有配置消费者/生成器不受影响
+        let cfg = ConsoleSinkConfig {
+            masking_enabled: false,
+            ..Default::default()
+        };
+        let rendered = toml::to_string(&cfg).unwrap();
+        assert!(
+            rendered.contains("masking_enabled = false"),
+            "serialized TOML must keep the legacy key, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("pii_masking_enabled"),
+            "alias must not be emitted on serialization, got: {rendered}"
+        );
     }
 }

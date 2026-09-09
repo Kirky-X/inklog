@@ -292,7 +292,11 @@ impl LogRecord {
     /// (case-insensitive, camelCase-aware). Substring matches are
     /// intentionally not counted, so "author" does not trigger "auth"
     /// and "authorizer" does not trigger "auth" either.
-    const SENSITIVE_KEY_PATTERNS: &[&str] = &[
+    ///
+    /// Crate-wide single source of truth for sensitive-key judgment: the
+    /// subscriber sanitizer path (`LoggerSubscriber`) shares this table via
+    /// [`Self::is_sensitive_key`] instead of keeping its own copy.
+    pub(crate) const SENSITIVE_KEY_PATTERNS: &[&str] = &[
         "password",
         "passwd",
         "pwd",
@@ -309,7 +313,10 @@ impl LogRecord {
     /// (e.g. `api_key`, `secret-key`, `accessKey`). Generic qualifiers such as
     /// `primary` or `index` are intentionally absent, so `primary_key` and
     /// `index_key` are not masked.
-    const SENSITIVE_KEY_QUALIFIERS: &[&str] = &[
+    ///
+    /// Crate-wide single source of truth, shared with the subscriber sanitizer
+    /// path via [`Self::is_sensitive_key`].
+    pub(crate) const SENSITIVE_KEY_QUALIFIERS: &[&str] = &[
         "api",
         "access",
         "secret",
@@ -357,7 +364,11 @@ impl LogRecord {
     /// - `"author"` 不匹配（`auth` 不是完整 token，避免误判）
     /// - `"api_key"` 匹配（敏感限定词 + `key`）
     /// - `"primary_key"` 不匹配（`primary` 不是敏感限定词）
-    fn is_sensitive_key(key: &str) -> bool {
+    ///
+    /// Crate-wide single source of truth（`pub(crate)`）：所有需要敏感键判定的
+    /// 模块（`mask_sensitive_fields`、`LoggerSubscriber` 的 sanitizer 路径等）
+    /// 统一引用本实现，禁止再复制本地副本（DRY，防安全行为分叉）。
+    pub(crate) fn is_sensitive_key(key: &str) -> bool {
         // 无分隔符的单段键（如 "PASSWORD"、"pAsSwOrD"、"apiKey"）：
         // 驼峰切分会把交替大小写撕碎，先按小写整体比对
         if !key.chars().any(|c| !c.is_ascii_alphanumeric()) {
