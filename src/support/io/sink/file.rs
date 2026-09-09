@@ -9,7 +9,6 @@ use super::CircuitBreaker;
 use super::DiskCheckable;
 use super::LogSink;
 use super::Rotatable;
-use super::{RotationStrategy, SizeBasedRotation, TimeBasedRotation};
 use crate::DataMasker;
 use crate::FileSinkConfig;
 use crate::InklogError;
@@ -76,8 +75,6 @@ struct FileSinkInner {
     timer_handle: Option<thread::JoinHandle<()>>,
     /// 清理定时器句柄
     cleanup_timer_handle: Option<thread::JoinHandle<()>>,
-    /// 轮转策略
-    rotation_strategy: Box<dyn RotationStrategy>,
 }
 
 /// 文件日志接收器
@@ -133,21 +130,6 @@ impl FileSink {
         let rotation_timer = Arc::new(parking_lot::Mutex::new(Instant::now()));
         let last_rotation = Instant::now();
 
-        // Create rotation strategy based on config
-        let rotation_strategy: Box<dyn RotationStrategy> = {
-            let max_size = Self::parse_size(&config.max_size).unwrap_or(100 * 1024 * 1024);
-            let size_strategy = SizeBasedRotation::new(max_size);
-            let time_strategy = TimeBasedRotation::from_interval_string(&config.rotation_time)
-                .unwrap_or_else(|_| {
-                    TimeBasedRotation::from_interval_string("daily")
-                        .expect("hardcoded 'daily' interval is valid")
-                });
-            Box::new(crate::support::io::sink::CompositeRotation::new(vec![
-                Box::new(size_strategy),
-                Box::new(time_strategy),
-            ]))
-        };
-
         let inner = FileSinkInner {
             current_file: None,
             current_size: 0,
@@ -162,7 +144,6 @@ impl FileSink {
             timer_handle: None,
             rotation_timer: Some(rotation_timer.clone()),
             cleanup_timer_handle: None,
-            rotation_strategy,
         };
 
         let sink = Self {
@@ -1178,9 +1159,6 @@ impl FileSink {
                         timer_handle: None,
                         rotation_timer: None,
                         cleanup_timer_handle: None,
-                        rotation_strategy: Box::new(
-                            crate::support::io::sink::CompositeRotation::new(vec![]),
-                        ),
                     };
                     let sink = FileSink {
                         config,
@@ -1231,9 +1209,6 @@ impl FileSink {
                         timer_handle: None,
                         rotation_timer: None,
                         cleanup_timer_handle: None,
-                        rotation_strategy: Box::new(
-                            crate::support::io::sink::CompositeRotation::new(vec![]),
-                        ),
                     };
                     let sink = FileSink {
                         config,
@@ -1578,7 +1553,6 @@ impl Clone for FileSink {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
-            rotation_strategy: self.inner.read().rotation_strategy.clone_boxed(),
         };
 
         Self {
@@ -1636,7 +1610,6 @@ mod tests {
             timer_handle: None,
             rotation_timer: None,
             cleanup_timer_handle: None,
-            rotation_strategy: Box::new(crate::support::io::sink::CompositeRotation::new(vec![])),
         };
 
         FileSink {

@@ -170,7 +170,6 @@ impl ChannelBufferedFileSink {
         let batch_size = self.config.flush_batch_size;
 
         let handle = thread::spawn(move || {
-            #[allow(clippy::await_holding_lock)]
             let mut batch = Vec::with_capacity(batch_size);
 
             loop {

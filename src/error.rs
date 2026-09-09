@@ -258,6 +258,36 @@ impl InklogError {
         }
     }
 
+    /// Returns the i18n message key and the raw (unsanitized) detail message
+    /// for this error variant.
+    ///
+    /// Shared extraction for [`Self::localized_message`] and
+    /// [`Self::safe_message`], which differ only in whether the detail is
+    /// passed through [`sanitize_message`] before formatting.
+    fn i18n_key_and_detail(&self) -> (&'static str, std::borrow::Cow<'_, str>) {
+        use std::borrow::Cow;
+        match self {
+            InklogError::ConfigError(msg) => ("error-config_error", Cow::Borrowed(msg)),
+            InklogError::IoError(e) => ("error-io_error", Cow::Owned(e.to_string())),
+            InklogError::SerializationError(e) => {
+                ("error-serialization_error", Cow::Owned(e.to_string()))
+            }
+            InklogError::DatabaseError { message, .. } => {
+                ("error-database_error", Cow::Borrowed(message))
+            }
+            InklogError::CacheError(msg) => ("error-cache_error", Cow::Borrowed(msg)),
+            InklogError::EncryptionError { message, .. } => {
+                ("error-encryption_error", Cow::Borrowed(message))
+            }
+            InklogError::Shutdown(msg) => ("error-shutdown_error", Cow::Borrowed(msg)),
+            InklogError::ChannelError(msg) => ("error-channel_error", Cow::Borrowed(msg)),
+            InklogError::CompressionError(msg) => ("error-compression_error", Cow::Borrowed(msg)),
+            InklogError::RuntimeError(msg) => ("error-runtime_error", Cow::Borrowed(msg)),
+            InklogError::HttpServerError(msg) => ("error-http_server_error", Cow::Borrowed(msg)),
+            InklogError::Unknown(msg) => ("error-unknown_error", Cow::Borrowed(msg)),
+        }
+    }
+
     /// Returns a localized error message using the current locale.
     ///
     /// The error type prefix is translated according to the active locale,
@@ -266,44 +296,8 @@ impl InklogError {
     ///
     /// Note: `safe_message()` and `localized_message()` are independent paths.
     pub fn localized_message(&self) -> String {
-        match self {
-            InklogError::ConfigError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-config_error"), msg)
-            }
-            InklogError::IoError(e) => {
-                format!("{}: {}", crate::i18n::tr("error-io_error"), e)
-            }
-            InklogError::SerializationError(e) => {
-                format!("{}: {}", crate::i18n::tr("error-serialization_error"), e)
-            }
-            InklogError::DatabaseError { message, .. } => {
-                format!("{}: {}", crate::i18n::tr("error-database_error"), message)
-            }
-            InklogError::CacheError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-cache_error"), msg)
-            }
-            InklogError::EncryptionError { message, .. } => {
-                format!("{}: {}", crate::i18n::tr("error-encryption_error"), message)
-            }
-            InklogError::Shutdown(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-shutdown_error"), msg)
-            }
-            InklogError::ChannelError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-channel_error"), msg)
-            }
-            InklogError::CompressionError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-compression_error"), msg)
-            }
-            InklogError::RuntimeError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-runtime_error"), msg)
-            }
-            InklogError::HttpServerError(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-http_server_error"), msg)
-            }
-            InklogError::Unknown(msg) => {
-                format!("{}: {}", crate::i18n::tr("error-unknown_error"), msg)
-            }
-        }
+        let (key, detail) = self.i18n_key_and_detail();
+        format!("{}: {}", crate::i18n::tr(key), detail)
     }
 
     /// Returns a sanitized error message that does not contain sensitive information.
@@ -339,92 +333,8 @@ impl InklogError {
         // NOT included in safe_message output. Only the top-level message field
         // is sanitized and displayed. This prevents sensitive data in wrapped
         // errors from leaking through the error chain.
-        match self {
-            InklogError::ConfigError(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-config_error"),
-                    sanitize_message(msg)
-                )
-            }
-            InklogError::IoError(e) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-io_error"),
-                    sanitize_message(&e.to_string())
-                )
-            }
-            InklogError::SerializationError(e) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-serialization_error"),
-                    sanitize_message(&e.to_string())
-                )
-            }
-            InklogError::DatabaseError { message, .. } => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-database_error"),
-                    sanitize_message(message)
-                )
-            }
-            InklogError::CacheError(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-cache_error"),
-                    sanitize_message(msg)
-                )
-            }
-            InklogError::EncryptionError { message, .. } => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-encryption_error"),
-                    sanitize_message(message)
-                )
-            }
-            InklogError::Shutdown(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-shutdown_error"),
-                    sanitize_message(msg)
-                )
-            }
-            InklogError::ChannelError(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-channel_error"),
-                    sanitize_message(msg)
-                )
-            }
-            InklogError::CompressionError(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-compression_error"),
-                    sanitize_message(msg)
-                )
-            }
-            InklogError::RuntimeError(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-runtime_error"),
-                    sanitize_message(msg)
-                )
-            }
-            InklogError::HttpServerError(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-http_server_error"),
-                    sanitize_message(msg)
-                )
-            }
-            InklogError::Unknown(msg) => {
-                format!(
-                    "{}: {}",
-                    crate::i18n::tr("error-unknown_error"),
-                    sanitize_message(msg)
-                )
-            }
-        }
+        let (key, detail) = self.i18n_key_and_detail();
+        format!("{}: {}", crate::i18n::tr(key), sanitize_message(&detail))
     }
 }
 
