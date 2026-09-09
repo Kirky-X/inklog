@@ -54,6 +54,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))),
         ..Default::default()
     };
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    #[allow(deprecated)]
     let _logger = LoggerManager::with_dependencies(deps).await?;
     println!("   - Logger 创建成功!");
 
@@ -91,8 +94,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )))
         .build()?;
 
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    #[allow(deprecated)]
     let _logger1 = container.create_logger().await?;
     println!("   - Logger 1 创建成功");
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    #[allow(deprecated)]
     let _logger2 = container.create_logger().await?;
     println!("   - Logger 2 创建成功");
     println!("   - 两个 Logger 共享相同的 cache 和 config 实例");
@@ -173,6 +182,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .database(Arc::new(MockDatabaseAdapter::new()))
         .build()?;
 
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    #[allow(deprecated)]
     let _logger = container.create_logger().await?;
     println!("   - 使用 Mock 依赖创建 Logger 成功!");
 
