@@ -63,6 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1.4 银行卡号脱敏
     print_section("1.4 银行卡号脱敏");
+    // 注意：此处为演示刻意打印原始卡号以对照脱敏效果，使用的是公开测试号。
+    // 生产代码严禁将真实 PII 原文写入日志或 stdout。
     let bank_card = "6222021234567890123";
     let masked_card = masker.mask(bank_card);
     println!("原始银行卡: {}", bank_card);
