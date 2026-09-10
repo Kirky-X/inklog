@@ -96,7 +96,6 @@ use dbnexus::ConnectionPool;
     feature = "postgres",
     feature = "mysql",
     feature = "duckdb",
-    test,
     feature = "test-utils"
 ))]
 use dbnexus::database::PoolStatus;
