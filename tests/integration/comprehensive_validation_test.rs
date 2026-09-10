@@ -91,6 +91,7 @@ async fn test_comprehensive_real_data_writing() {
             channel_capacity: 20000,
             ..Default::default()
         },
+        ..Default::default()
     };
 
     let (logger, subscriber, filter) = LoggerManager::build_detached(
