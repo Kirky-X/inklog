@@ -1087,9 +1087,7 @@ dependencies = [
 
 [[package]]
 name = "dbnexus"
-version = "0.6.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d80dbd65e741f68c0ba55011adcfc583fa94fd75709e8c67d99fac98b856f178"
+version = "0.6.0-rc.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1122,9 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "dbnexus-macros"
-version = "0.6.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44e0970a8df0764b4df4ed10d0bf1192fc2344a3a38f899d8124a4e69cb79c16"
+version = "0.6.0-rc.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2365,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "inklog"
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -2427,7 +2423,7 @@ dependencies = [
 
 [[package]]
 name = "inklog-examples"
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2972,9 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "oxcache"
-version = "0.5.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a554d0bfa5cf5fe2b70718d46c19de465dc95615a08e704efa7bce302052cf51"
+version = "0.5.0-rc.4"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4606,9 +4600,7 @@ dependencies = [
 
 [[package]]
 name = "trait-kit"
-version = "0.5.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42ac2757a63f328830f85ba42387a06ee475791dbf260cb9107014c5969dab1"
+version = "0.5.0-rc.3"
 
 [[package]]
 name = "try-lock"
