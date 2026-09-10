@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.3] - 2026-09-10
+
+### Added
+
+- **可配置日志门面**：新增 `init_inklog_logger()` 与 `init_inklog_logger_with_config(config)` 便捷初始化函数，进程级单例语义（重复初始化返回明确错误）
+- **Per-crate target 级别预设**：`InklogConfig` 新增 `target_levels: HashMap<String, String>` 字段，按 crate target 设置独立日志级别，合并到 EnvFilter（优先级低于 RUST_LOG、高于全局默认）
+- **dbnexus 池指标接入**：`DbNexusAdapter` 新增 `pool_status()` 透传连接池状态快照；`Metrics` 新增 `record_pool_metrics(total, active, idle)` 方法及对应 Prometheus 导出（`inklog_db_pool_total/active/idle`）
+
+### Changed
+
+- **kit feature 显式包含 `trait-kit/observer`**：消除编译定时炸弹（下游项目不再依赖传递依赖意外启用 observer）
+- **oxcache 死使能清理**：移除零消费的 `macros`/`serialization`/`metrics`/`batch` feature，仅保留 `memory`
+- **dbnexus 死使能清理**：移除 `failover`/`replica-routing` feature（`with_full_config` 硬编码 `None`，无行为）
+- 依赖升级：dbnexus → 0.6.0-rc.3、oxcache → 0.5.0-rc.4、trait-kit → 0.5.0-rc.3
+
 ## [0.3.0-rc.2] - 2026-09-03
 
 ### ⚠️ BREAKING CHANGES

@@ -95,6 +95,15 @@ use dbnexus::ConnectionPool;
     feature = "sqlite",
     feature = "postgres",
     feature = "mysql",
+    feature = "duckdb",
+    test,
+    feature = "test-utils"
+))]
+use dbnexus::database::PoolStatus;
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
     feature = "duckdb"
 ))]
 use dbnexus::database::pool::DbPool;
@@ -245,8 +254,6 @@ impl DbNexusAdapter {
             warmup_retries: 3,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
-            failover_config: None,
-            replica_config: None,
         };
 
         // 使用 DbPool::with_config 创建连接池
@@ -330,6 +337,14 @@ impl DbNexusAdapter {
     /// 获取表名
     pub fn table_name(&self) -> &str {
         &self.table_name
+    }
+
+    /// T041：透传底层连接池的状态快照（含池指标）。
+    ///
+    /// 返回 `PoolStatus { total, active, idle, ... }`，可由监控 worker
+    /// 周期采样后汇入 `Metrics::record_pool_metrics`。
+    pub fn pool_status(&self) -> PoolStatus {
+        self.pool.status()
     }
 
     /// 确保日志表存在，若不存在则自动创建。
@@ -862,8 +877,6 @@ mod tests {
             warmup_retries: 5,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
-            failover_config: None,
-            replica_config: None,
         };
 
         let pool = DbPool::with_config(config)
@@ -950,8 +963,6 @@ mod tests {
             warmup_retries: 5,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
-            failover_config: None,
-            replica_config: None,
         };
 
         let pool = DbPool::with_config(config)

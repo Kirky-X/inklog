@@ -325,6 +325,11 @@ pub struct Metrics {
     pub(crate) db_batch_size: Gauge,
     pub(crate) pool_hit_rate: GaugeF64,
 
+    // T041: dbnexus pool gauges (sampled via DbNexusAdapter::pool_metrics)
+    pub(crate) db_pool_total: Gauge,
+    pub(crate) db_pool_active: Gauge,
+    pub(crate) db_pool_idle: Gauge,
+
     // Sink Health
     pub(crate) sink_health: Mutex<HashMap<String, SinkHealth>>,
 }
@@ -347,6 +352,9 @@ impl Default for Metrics {
             active_workers: Gauge::new(0),
             db_batch_size: Gauge::new(0),
             pool_hit_rate: GaugeF64::new(0.0),
+            db_pool_total: Gauge::new(0),
+            db_pool_active: Gauge::new(0),
+            db_pool_idle: Gauge::new(0),
             sink_health: Mutex::new(HashMap::new()),
         }
     }
@@ -460,6 +468,17 @@ impl Metrics {
         self.total_latency_us.fetch_add(micros, Ordering::Relaxed);
         self.latency_count.fetch_add(1, Ordering::Relaxed);
         self.latency_histogram.record(micros);
+    }
+
+    /// T041: Record database pool metrics sampled from `DbNexusAdapter`.
+    ///
+    /// Updates the `db_pool_total`, `db_pool_active`, and `db_pool_idle` gauges.
+    /// Call this periodically from a health monitoring worker to expose pool
+    /// utilisation via Prometheus `/metrics`.
+    pub fn record_pool_metrics(&self, total: u64, active: u64, idle: u64) {
+        self.db_pool_total.set(total as i64);
+        self.db_pool_active.set(active as i64);
+        self.db_pool_idle.set(idle as i64);
     }
 
     /// Updates the health status of a sink component.
@@ -698,6 +717,19 @@ impl Metrics {
             "inklog_pool_hit_rate {}\n",
             self.pool_hit_rate.get()
         ));
+
+        // T041: dbnexus pool gauges
+        s.push_str("# HELP inklog_db_pool_total Total database connections\n");
+        s.push_str("# TYPE inklog_db_pool_total gauge\n");
+        s.push_str(&format!("inklog_db_pool_total {}\n", self.db_pool_total.get()));
+
+        s.push_str("# HELP inklog_db_pool_active Active database connections\n");
+        s.push_str("# TYPE inklog_db_pool_active gauge\n");
+        s.push_str(&format!("inklog_db_pool_active {}\n", self.db_pool_active.get()));
+
+        s.push_str("# HELP inklog_db_pool_idle Idle database connections\n");
+        s.push_str("# TYPE inklog_db_pool_idle gauge\n");
+        s.push_str(&format!("inklog_db_pool_idle {}\n", self.db_pool_idle.get()));
 
         //
         s.push_str("# HELP inklog_sink_healthy Sink health status (1=healthy, 0=unhealthy)\n");
@@ -2100,6 +2132,38 @@ mod metrics_tests {
             entry.consecutive_failures,
             num_threads * increments_per_thread,
             "no failure updates should be lost"
+        );
+    }
+
+    /// T041: record_pool_metrics 更新 gauge 并在 Prometheus 导出中可见。
+    #[test]
+    fn test_record_pool_metrics_updates_gauges_and_prometheus() {
+        let metrics = Metrics::new();
+
+        // Initially zero
+        assert_eq!(metrics.db_pool_total.get(), 0);
+        assert_eq!(metrics.db_pool_active.get(), 0);
+        assert_eq!(metrics.db_pool_idle.get(), 0);
+
+        // Record some pool metrics
+        metrics.record_pool_metrics(10, 3, 7);
+        assert_eq!(metrics.db_pool_total.get(), 10);
+        assert_eq!(metrics.db_pool_active.get(), 3);
+        assert_eq!(metrics.db_pool_idle.get(), 7);
+
+        // Verify Prometheus export contains pool metrics
+        let prom = metrics.export_prometheus();
+        assert!(
+            prom.contains("inklog_db_pool_total 10"),
+            "prometheus export should contain pool total, got: {prom}"
+        );
+        assert!(
+            prom.contains("inklog_db_pool_active 3"),
+            "prometheus export should contain pool active, got: {prom}"
+        );
+        assert!(
+            prom.contains("inklog_db_pool_idle 7"),
+            "prometheus export should contain pool idle, got: {prom}"
         );
     }
 }

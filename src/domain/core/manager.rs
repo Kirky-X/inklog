@@ -423,6 +423,7 @@ impl LoggerManager {
         // Filter — use EnvFilter to support RUST_LOG per-module filtering
         // Configured level serves as the global default; RUST_LOG overrides
         // specific modules (e.g. RUST_LOG=nebulaid=debug,hyper=warn).
+        // T040: target_levels from config are merged between global level and RUST_LOG.
         let level = config
             .global
             .level
@@ -435,11 +436,16 @@ impl LoggerManager {
             tracing::Level::WARN => "warn",
             tracing::Level::ERROR => "error",
         };
+        // Build base filter string: global level + per-crate target presets
+        let mut base_filter = level_str.to_string();
+        for (target, target_level) in &config.target_levels {
+            base_filter.push_str(&format!(",{target}={target_level}"));
+        }
         let filter = match std::env::var("RUST_LOG") {
             Ok(val) if !val.is_empty() => {
-                tracing_subscriber::filter::EnvFilter::new(format!("{},{}", level_str, val))
+                tracing_subscriber::filter::EnvFilter::new(format!("{base_filter},{val}"))
             }
-            _ => tracing_subscriber::filter::EnvFilter::new(level_str),
+            _ => tracing_subscriber::filter::EnvFilter::new(base_filter),
         };
 
         // Create error sink for logging system errors
@@ -2743,6 +2749,43 @@ worker_threads = 1
             filter_str.contains("info"),
             "EnvFilter should fall back to 'info' for invalid level, got: {}",
             filter_str
+        );
+
+        let _ = manager.shutdown();
+    }
+
+    /// T040: target_levels 配置项正确合并到 EnvFilter 字符串。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_detached_target_levels_in_filter() {
+        use std::collections::HashMap;
+
+        let mut config = InklogConfig::default();
+        config.target_levels = HashMap::from([
+            ("hyper".into(), "warn".into()),
+            ("my_crate".into(), "debug".into()),
+        ]);
+
+        let (manager, _subscriber, filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            None,
+        )
+        .await
+        .expect("build_detached should succeed");
+
+        let filter_str = filter.to_string();
+        assert!(
+            filter_str.contains("hyper=warn"),
+            "EnvFilter should contain target level 'hyper=warn', got: {filter_str}"
+        );
+        assert!(
+            filter_str.contains("my_crate=debug"),
+            "EnvFilter should contain target level 'my_crate=debug', got: {filter_str}"
         );
 
         let _ = manager.shutdown();

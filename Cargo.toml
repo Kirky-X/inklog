@@ -13,7 +13,7 @@ resolver = "2"
 members = [".", "examples"]
 
 [workspace.package]
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Kirky.X"]
@@ -36,7 +36,7 @@ tempfile = { version = "3.27", default-features = false }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
-dbnexus = { version = "0.6.0-rc.2", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+dbnexus = { version = "0.6.0-rc.3", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry"] }
 
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "compression", "parquet"]
@@ -67,7 +67,7 @@ http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob"]
 # trait-kit lifecycle/observability integration for DbNexusAdapter and InklogModule.
 # Requires at least one database backend feature (sqlite/postgres/mysql/duckdb).
-kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit"]
+kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit", "trait-kit/observer"]
 # Zstd compression support for rotated log files (optional to avoid zstd-sys
 # symbol conflicts with downstream projects that bundle their own zstd).
 compression = ["dep:zstd"]
@@ -93,7 +93,7 @@ regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.2", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+trait-kit = { version = "0.5.0-rc.3", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -103,7 +103,7 @@ axum-server = { version = "0.8", default-features = false, features = ["tls-rust
 is-terminal = { version = "0.4", default-features = false }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
-oxcache = { version = "0.5.0-rc.2", default-features = false, features = ["macros", "memory", "serialization", "metrics", "batch"] }
+oxcache = { version = "0.5.0-rc.4", default-features = false, features = ["memory"] }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
@@ -196,3 +196,11 @@ strip = true
 
 [profile.bench]
 inherits = "release"
+
+# ============================================================================
+# Local development patches (rc3 hardening)
+# ============================================================================
+[patch.crates-io]
+dbnexus = { path = "../dbnexus" }
+oxcache = { path = "../oxcache" }
+trait-kit = { path = "../trait-kit" }

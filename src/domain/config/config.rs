@@ -4,6 +4,7 @@
 
 use crate::InklogError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use super::console::ConsoleSinkConfig;
 use super::database::DatabaseDriver;
@@ -43,6 +44,13 @@ pub struct InklogConfig {
     pub performance: PerformanceConfig,
     #[serde(default)]
     pub http_server: Option<HttpServerConfig>,
+    /// Per-crate target level presets (e.g. `{"hyper" = "warn", "my_crate" = "debug"}`).
+    ///
+    /// These are merged into the `EnvFilter` alongside the global level and
+    /// `RUST_LOG` overrides. Target-level entries have lower priority than
+    /// `RUST_LOG` but higher than the global default.
+    #[serde(default)]
+    pub target_levels: HashMap<String, String>,
 }
 
 fn default_console_sink() -> Option<ConsoleSinkConfig> {
@@ -124,6 +132,7 @@ impl Default for InklogConfig {
             database_sink: None,
             performance: PerformanceConfig::default(),
             http_server: None,
+            target_levels: HashMap::new(),
         }
     }
 }

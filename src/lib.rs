@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-#![doc(html_root_url = "https://docs.rs/inklog/0.3.0-rc.2")]
+#![doc(html_root_url = "https://docs.rs/inklog/0.3.0-rc.3")]
 #![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 
 //! # inklog - 企业级 Rust 日志基础设施
@@ -266,3 +266,83 @@ pub use chrono;
 pub use serde;
 pub use tokio;
 pub use tracing;
+
+// ============================================================================
+// T040: Convenience init functions with singleton semantics
+// ============================================================================
+
+use std::sync::OnceLock;
+
+/// Global sentinel for singleton init semantics.
+static INIT_SENTINEL: OnceLock<()> = OnceLock::new();
+
+/// Initialize the inklog logger with default configuration.
+///
+/// This is a convenience wrapper around [`LoggerManager::with_config`] that
+/// installs the tracing subscriber globally and enforces **singleton
+/// semantics**: calling this function more than once returns
+/// `Err(InklogError::ConfigError)` instead of silently re-initializing.
+///
+/// For custom configuration, use [`init_inklog_logger_with_config`].
+///
+/// # Errors
+///
+/// Returns `Err` if the logger has already been initialized in this process,
+/// or if configuration loading / subscriber installation fails.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     inklog::init_inklog_logger().await?;
+///     tracing::info!("logger is ready");
+///     Ok(())
+/// }
+/// ```
+pub async fn init_inklog_logger() -> Result<(), InklogError> {
+    init_inklog_logger_with_config(InklogConfig::default()).await
+}
+
+/// Initialize the inklog logger with explicit configuration.
+///
+/// Singleton semantics: the first call installs the global subscriber;
+/// subsequent calls return `Err(InklogError::ConfigError)` regardless of
+/// whether the config differs.
+///
+/// # Errors
+///
+/// - `InklogError::ConfigError` if already initialized (singleton violation)
+/// - Propagates errors from [`LoggerManager::with_config`]
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use inklog::{InklogConfig, init_inklog_logger_with_config};
+/// use std::collections::HashMap;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let mut config = InklogConfig::default();
+///     config.target_levels = HashMap::from([
+///         ("hyper".into(), "warn".into()),
+///         ("my_crate".into(), "debug".into()),
+///     ]);
+///     init_inklog_logger_with_config(config).await?;
+///     Ok(())
+/// }
+/// ```
+pub async fn init_inklog_logger_with_config(config: InklogConfig) -> Result<(), InklogError> {
+    INIT_SENTINEL.set(()).map_err(|_| {
+        InklogError::ConfigError(
+            "inklog logger already initialized; init_inklog_logger() is a singleton — \
+             only the first call succeeds"
+                .into(),
+        )
+    })?;
+    let _manager = LoggerManager::with_config(config).await?;
+    // LoggerManager::with_config already installs the global tracing subscriber
+    // and log crate logger. We intentionally leak `_manager` (it is kept alive
+    // for the process lifetime via the global subscriber).
+    Ok(())
+}

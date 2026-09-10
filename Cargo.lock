@@ -2983,7 +2983,6 @@ dependencies = [
  "icu",
  "moka",
  "once_cell",
- "oxcache_macros",
  "serde",
  "serde_json",
  "serde_stacker",
@@ -2991,17 +2990,6 @@ dependencies = [
  "trait-kit",
  "uuid",
  "writeable",
-]
-
-[[package]]
-name = "oxcache_macros"
-version = "0.5.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc439e1fffa60bf11666e5b8ab3d2ef382ba9d9dc9ee322a0ce00941824cfcd8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.5",
 ]
 
 [[package]]
