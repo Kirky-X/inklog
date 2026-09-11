@@ -54,6 +54,8 @@ pub fn create_log_record(level: &str, message: &str, target: &str) -> LogRecord 
         file: None,
         line: None,
         thread_id: "main".to_string(),
+        trace_id: None,
+        span_id: None,
     }
 }
 

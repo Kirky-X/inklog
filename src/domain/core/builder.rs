@@ -57,6 +57,12 @@ pub struct LoggerDependencies {
     /// 如果未提供，LoggerManager 将从文件系统加载配置。
     pub config: Option<Arc<dyn Config>>,
 
+    /// 动态注册的第三方 sink（T501）
+    ///
+    /// 经 [`LoggerBuilder::add_sink`] 注册；每个 sink 获得独立 channel 与
+    /// 通用 SinkWorker，第三方 Sink 零核心改动接入。
+    pub custom_sinks: Vec<Arc<dyn crate::LogSink>>,
+
     /// 数据库依赖（可选，仅当启用 dbnexus feature 时）
     ///
     /// 用于日志记录的持久化存储。
@@ -75,7 +81,8 @@ impl std::fmt::Debug for LoggerDependencies {
         let mut builder = f.debug_struct("LoggerDependencies");
         builder
             .field("cache", &self.cache.as_ref().map(|_| "Arc<dyn Cache>"))
-            .field("config", &self.config.as_ref().map(|_| "Arc<dyn Config>"));
+            .field("config", &self.config.as_ref().map(|_| "Arc<dyn Config>"))
+            .field("custom_sinks", &self.custom_sinks.len());
         #[cfg(any(
             feature = "sqlite",
             feature = "postgres",
@@ -170,6 +177,40 @@ mod tests {
     fn test_builder_http_port_valid() {
         let builder = LoggerBuilder::new().http_port(8080);
         assert!(builder.validation_errors.is_empty());
+    }
+
+    // === T501: add_sink 累积注册 ===
+
+    #[test]
+    fn test_builder_add_sink_accumulates_and_upcasts() {
+        use crate::InklogError;
+        use crate::LogRecord;
+        use async_trait::async_trait;
+
+        struct NoopSink;
+
+        #[async_trait]
+        impl crate::support::io::LogSink for NoopSink {
+            async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+                Ok(())
+            }
+            async fn flush(&self) -> Result<(), InklogError> {
+                Ok(())
+            }
+            async fn shutdown(&self) -> Result<(), InklogError> {
+                Ok(())
+            }
+        }
+
+        // 以 Arc<dyn AsyncSink>（文档签名）注册
+        let sink: std::sync::Arc<dyn crate::support::io::sink::AsyncSink> =
+            std::sync::Arc::new(NoopSink);
+        let builder = LoggerBuilder::new().add_sink(sink);
+        assert_eq!(builder.deps.custom_sinks.len(), 1);
+        // 上转型为 Arc<dyn LogSink> 后可用（AsyncSink 为 LogSink 子 trait）
+        let as_log_sink: std::sync::Arc<dyn crate::support::io::LogSink> =
+            builder.deps.custom_sinks[0].clone();
+        let _ = as_log_sink;
     }
 
     #[tokio::test]
@@ -1054,6 +1095,36 @@ impl LoggerBuilder {
         self
     }
 
+    // === 动态 Sink 注册（T501） ===
+
+    /// 注册第三方 sink（T501 动态 Sink 注册）。
+    ///
+    /// 每个 `add_sink` 注册的 sink 获得独立的记录 channel（与内置 file/db
+    /// worker 的 MPMC 通道隔离，互不抢占）和一条通用 SinkWorker 消费线程，
+    /// 语义与内置 sink worker 对齐（延迟计量、写失败重试 3 次、降级 console、
+    /// 关停排水）。第三方 Sink 只需实现 [`LogSink`]（即 `Arc<dyn AsyncSink>`），
+    /// 零核心改动接入。
+    ///
+    /// # Arguments
+    ///
+    /// * `sink` - 实现 `LogSink` 的第三方 sink 实例
+    ///
+    /// # Example
+    /// ```ignore
+    /// use std::sync::Arc;
+    ///
+    /// let logger = LoggerManager::builder()
+    ///     .add_sink(Arc::new(MyWebhookSink::new()))
+    ///     .build()
+    ///     .await?;
+    /// ```
+    pub fn add_sink(mut self, sink: Arc<dyn crate::support::io::sink::AsyncSink>) -> Self {
+        // Trait upcasting: dyn AsyncSink → dyn LogSink（AsyncSink 为 LogSink 子 trait）
+        let sink: Arc<dyn crate::LogSink> = sink;
+        self.deps.custom_sinks.push(sink);
+        self
+    }
+
     /// 构建 LoggerManager 实例
     ///
     /// 根据配置和注入的依赖创建 LoggerManager。
@@ -1073,48 +1144,48 @@ impl LoggerBuilder {
         }
 
         // 如果有任何注入的依赖，使用 with_dependencies
-        let has_deps = self.deps.cache.is_some() || self.deps.config.is_some() || {
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
-            {
-                self.deps.database.is_some()
-            }
-            #[cfg(not(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            )))]
-            {
-                false
-            }
-        };
+        let has_deps = self.deps.cache.is_some()
+            || self.deps.config.is_some()
+            || !self.deps.custom_sinks.is_empty()
+            || {
+                #[cfg(any(
+                    feature = "sqlite",
+                    feature = "postgres",
+                    feature = "mysql",
+                    feature = "duckdb"
+                ))]
+                {
+                    self.deps.database.is_some()
+                }
+                #[cfg(not(any(
+                    feature = "sqlite",
+                    feature = "postgres",
+                    feature = "mysql",
+                    feature = "duckdb"
+                )))]
+                {
+                    false
+                }
+            };
 
         if has_deps {
             // 有依赖注入，使用 with_dependencies
             // 但需要先把 config 中的配置应用到 deps.config
-            let mut deps = self.deps;
-
-            // 如果注入了 Config trait，将 InklogConfig 的值应用到它
-            // 注意：这里我们不覆盖已注入的 config，因为用户明确注入了
-            // 但我们可以保留 self.config 用于其他配置项
 
             // 如果没有注入 config，但有其他注入，我们需要创建一个包含 self.config 的 deps
-            if deps.config.is_none() {
+            if self.deps.config.is_none() {
                 // 将 self.config 通过 InklogConfigAdapter 注入
                 // 这允许 mixed mode 正常工作
+                let mut deps = self.deps;
                 deps.config = Some(Arc::new(
                     crate::integrations::infra::InklogConfigAdapter::from_config(
                         self.config.clone(),
                     ),
                 ));
+                return LoggerManager::build_with_deps(deps).await;
             }
 
-            LoggerManager::build_with_deps(deps).await
+            LoggerManager::build_with_deps(self.deps).await
         } else {
             // 纯配置模式
             LoggerManager::with_config(self.config).await

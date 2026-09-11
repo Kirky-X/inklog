@@ -9,6 +9,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+
 use std::fs;
 use tempfile::TempDir;
 
@@ -213,4 +214,186 @@ fn test_cli_no_args_fails() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("Usage").or(predicate::str::contains("usage")));
+}
+
+// ============================================================================
+// T505/T510: query 子命令 —— 检索、--json 与退出码契约
+// ============================================================================
+
+#[test]
+fn test_cli_query_exit_code_0_with_matches() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = dir.path().join("app.log");
+    fs::write(
+        &log,
+        "2026-09-11T01:00:00.123Z [INFO] app::boot - started\n\
+         2026-09-11T02:00:00.000Z [ERROR] app::db - connection refused\n",
+    )
+    .expect("write log");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.args([
+        "--json",
+        "query",
+        "--path",
+        log.to_str().unwrap(),
+        "--level",
+        "error",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::starts_with("["));
+    // JSON 数组可被 serde 解析且含目标记录
+    let out = Command::cargo_bin("inklog-cli")
+        .unwrap()
+        .env("INKLOG_LOCALE", "en")
+        .args([
+            "--json",
+            "query",
+            "--path",
+            log.to_str().unwrap(),
+            "--level",
+            "error",
+        ])
+        .output()
+        .unwrap();
+    let output = String::from_utf8_lossy(&out.stdout).to_string();
+    let parsed: serde_json::Value =
+        serde_json::from_str(output.trim()).expect("query --json must emit a JSON array");
+    let arr = parsed.as_array().expect("must be an array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["level"], "ERROR");
+    assert_eq!(arr[0]["message"], "connection refused");
+}
+
+#[test]
+fn test_cli_query_exit_code_2_without_matches() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = dir.path().join("app.log");
+    fs::write(&log, "2026-09-11T01:00:00.000Z [INFO] a - ok\n").expect("write log");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.args([
+        "query",
+        "--path",
+        log.to_str().unwrap(),
+        "--grep",
+        "no-such-keyword",
+    ])
+    .assert()
+    .failure()
+    .code(2)
+    .stdout(predicate::str::is_empty().not().or(predicate::str::is_empty()));
+}
+
+#[test]
+fn test_cli_query_text_output_and_grep() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = dir.path().join("app.log");
+    fs::write(
+        &log,
+        "2026-09-11T02:00:00.000Z [WARN] app::net - slow upstream\n",
+    )
+    .expect("write log");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.args(["query", "--path", log.to_str().unwrap(), "--grep", "slow"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("WARN")
+                .and(predicate::str::contains("slow upstream"))
+                .and(predicate::str::contains("app::net")),
+        );
+}
+
+#[test]
+fn test_cli_query_missing_path_errors() {
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.args(["query"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("path").or(predicate::str::contains("Error")));
+}
+
+// ============================================================================
+// T510: 全子命令 --json 机器可读输出
+// ============================================================================
+
+#[test]
+fn test_cli_validate_json_output() {
+    let dir = TempDir::new().expect("tempdir");
+    let config_path = dir.path().join("valid.toml");
+    fs::write(
+        &config_path,
+        r#"
+[global]
+level = "info"
+"#,
+    )
+    .expect("write config");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.args(["--json", "validate", "-c", config_path.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"status\":\"ok\""));
+}
+
+#[test]
+fn test_cli_validate_json_invalid_config_exit_1() {
+    let dir = TempDir::new().expect("tempdir");
+    let config_path = dir.path().join("invalid.toml");
+    fs::write(
+        &config_path,
+        r#"
+[global]
+level = "not-a-level"
+"#,
+    )
+    .expect("write config");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.args(["--json", "validate", "-c", config_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::contains("\"status\":\"invalid\""));
+}
+
+#[test]
+fn test_cli_generate_json_output() {
+    let dir = TempDir::new().expect("tempdir");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.current_dir(dir.path());
+    cmd.args(["--json", "generate", "-o", dir.path().to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\":\"generate\""));
+}
+
+#[test]
+fn test_cli_decrypt_json_error_is_machine_readable() {
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env("INKLOG_DECRYPT_KEY", "0123456789abcdef0123456789abcdef");
+    cmd.args([
+        "--json",
+        "decrypt",
+        "-i",
+        "/nonexistent/inklog/file.enc",
+    ])
+    .assert()
+    .failure()
+    .code(1)
+    .stderr(predicate::str::contains("\"status\":\"error\""));
 }

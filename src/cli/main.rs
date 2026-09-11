@@ -6,6 +6,7 @@ use std::path::PathBuf;
 mod cli_impl;
 mod decrypt;
 mod generate;
+mod query;
 mod validate;
 
 pub use cli_impl::run_cli;
@@ -16,6 +17,11 @@ pub use cli_impl::run_cli;
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "inklog - Enterprise-grade Rust logging infrastructure CLI", long_about = None)]
 struct Cli {
+    /// T510：机器可读 JSON 输出（全子命令）
+    #[arg(long, global = true)]
+    #[arg(help = "Emit machine-readable JSON output")]
+    json: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -75,6 +81,39 @@ enum Commands {
         #[arg(help = "Check system prerequisites instead of config file")]
         prerequisites: bool,
     },
+
+    #[command(name = "query")]
+    #[command(about = "Search local log files by time range/level/keyword (unpacks encrypted/compressed archives)")]
+    Query {
+        #[arg(long = "path")]
+        #[arg(help = "Log file or directory to search (recursive; repeatable)")]
+        path: Vec<PathBuf>,
+
+        #[arg(long)]
+        #[arg(help = "Only records at/after this time (RFC3339, e.g. 2026-09-11T00:00:00Z)")]
+        since: Option<String>,
+
+        #[arg(long)]
+        #[arg(help = "Only records at/before this time (RFC3339)")]
+        until: Option<String>,
+
+        #[arg(long)]
+        #[arg(help = "Minimum level: trace/debug/info/warn/error/fatal")]
+        level: Option<String>,
+
+        #[arg(long)]
+        #[arg(help = "Substring filter applied to message and target")]
+        grep: Option<String>,
+
+        #[arg(long, default_value = "1000")]
+        #[arg(help = "Maximum number of records to return (0 = unlimited)")]
+        limit: usize,
+
+        #[arg(long, env = "INKLOG_DECRYPT_KEY")]
+        #[arg(help = "Environment variable name holding the decryption key for .enc files")]
+        #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        key_env: Option<String>,
+    },
 }
 
 /// Configuration template type for the generate command.
@@ -98,9 +137,10 @@ impl std::fmt::Display for ConfigType {
 }
 
 fn main() {
-    if let Err(e) = run_cli() {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
+    // 退出码契约（T505/T510）：0 = 成功/有匹配，1 = 错误，2 = 无匹配/校验失败
+    let code = run_cli();
+    if code != 0 {
+        std::process::exit(code);
     }
 }
 

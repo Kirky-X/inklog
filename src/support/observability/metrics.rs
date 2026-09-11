@@ -48,6 +48,8 @@
 //! | `inklog_latency_p50_us` | Gauge | P50 延迟（微秒）|
 //! | `inklog_latency_p95_us` | Gauge | P95 延迟（微秒）|
 //! | `inklog_latency_p99_us` | Gauge | P99 延迟（微秒）|
+//! | `inklog_write_latency_us_bucket{le=...}` | Histogram | 写入延迟原生直方图桶（累计；T514）|
+//! | `inklog_write_latency_us_sum` / `_count` | Histogram | 写入延迟总和与总数（T514）|
 //! | `inklog_sink_healthy` | Gauge | Sink 健康状态 |
 //! | `inklog_uptime_seconds` | Gauge | 运行时间（秒）|
 
@@ -703,6 +705,33 @@ impl Metrics {
         s.push_str(&format!(
             "inklog_latency_p99_us {}\n",
             self.latency_histogram.p99()
+        ));
+
+        // T514：Prometheus 原生 histogram 导出（bucket/sum/count），服务端可
+        // histogram_quantile 跨实例聚合分位；旧 p50/p95/p99 gauge 保留过渡。
+        s.push_str("# HELP inklog_write_latency_us Write latency distribution in microseconds\n");
+        s.push_str("# TYPE inklog_write_latency_us histogram\n");
+        let snapshot = self.latency_histogram.snapshot();
+        let bounds = self.latency_histogram.bounds();
+        let mut cumulative = 0u64;
+        for (i, &bound) in bounds.iter().enumerate() {
+            cumulative += snapshot[i];
+            s.push_str(&format!(
+                "inklog_write_latency_us_bucket{{le=\"{bound}\"}} {cumulative}\n"
+            ));
+        }
+        // 溢出桶（> 最大边界）
+        cumulative += snapshot[bounds.len()];
+        s.push_str(&format!(
+            "inklog_write_latency_us_bucket{{le=\"+Inf\"}} {cumulative}\n"
+        ));
+        s.push_str(&format!(
+            "inklog_write_latency_us_sum {}\n",
+            self.total_latency_us.load(Ordering::Relaxed)
+        ));
+        s.push_str(&format!(
+            "inklog_write_latency_us_count {}\n",
+            self.latency_count.load(Ordering::Relaxed)
         ));
 
         // Always emit uptime metric (even during the first second)
@@ -2165,5 +2194,43 @@ mod metrics_tests {
             prom.contains("inklog_db_pool_idle 7"),
             "prometheus export should contain pool idle, got: {prom}"
         );
+    }
+}
+
+// ============================================================================
+// T514: 原生直方图导出
+// ============================================================================
+
+#[cfg(test)]
+mod histogram_export_tests {
+    use super::*;
+
+    #[test]
+    fn test_native_histogram_export_buckets_sum_count() {
+        let metrics = Metrics::new();
+        // 3 条：100us、2ms、20ms → 桶 1000/5000/50000 各 1
+        metrics.record_latency(Duration::from_micros(100));
+        metrics.record_latency(Duration::from_millis(2));
+        metrics.record_latency(Duration::from_millis(20));
+
+        let out = metrics.export_prometheus();
+        assert!(out.contains("# TYPE inklog_write_latency_us histogram"));
+        // 累计桶语义：le=1000 → 1；le=5000 → 2；le=10000 → 2；le=50000 → 3
+        assert!(out.contains("inklog_write_latency_us_bucket{le=\"1000\"} 1"));
+        assert!(out.contains("inklog_write_latency_us_bucket{le=\"5000\"} 2"));
+        assert!(out.contains("inklog_write_latency_us_bucket{le=\"10000\"} 2"));
+        assert!(out.contains("inklog_write_latency_us_bucket{le=\"50000\"} 3"));
+        assert!(out.contains("inklog_write_latency_us_bucket{le=\"+Inf\"} 3"));
+        // sum ≈ 100us + 2000us + 20000us = 22100us（各桶时钟开销允许微小误差）
+        let sum_line = out
+            .lines()
+            .find(|l| l.starts_with("inklog_write_latency_us_sum "))
+            .unwrap();
+        let sum: u64 = sum_line.split_whitespace().last().unwrap().parse().unwrap();
+        assert!(
+            (22_100..=22_200).contains(&sum),
+            "sum must reflect recorded latencies, got {sum}"
+        );
+        assert!(out.contains("inklog_write_latency_us_count 3"));
     }
 }

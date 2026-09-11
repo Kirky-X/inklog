@@ -10,7 +10,12 @@
 //! - 归档测试 (unit::archive)
 //! - CLI测试 (unit::cli)
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 mod unit;
 
 // Allow unused imports for conditional compilation with different features
@@ -31,7 +36,12 @@ use tempfile::TempDir;
 
 // ============ 配置单元测试 (unit::config) ============
 
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+#[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+)))]
 #[test]
 fn test_config_validation() {
     let config = InklogConfig::default();
@@ -42,7 +52,12 @@ fn test_config_validation() {
     assert!(invalid_config.validate().is_err());
 }
 
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+#[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+)))]
 #[test]
 fn test_builder() {
     let _logger = LoggerManager::builder()
@@ -54,7 +69,12 @@ fn test_builder() {
 
 // ============ 输出端单元测试 (unit::sink) ============
 
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+#[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+)))]
 #[tokio::test]
 async fn test_console_sink_format() {
     let config = ConsoleSinkConfig {
@@ -67,7 +87,12 @@ async fn test_console_sink_format() {
     assert!(sink.write(&record).await.is_ok());
 }
 
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+#[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+)))]
 #[tokio::test]
 async fn test_file_sink_rotation() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");

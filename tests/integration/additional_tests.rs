@@ -67,6 +67,8 @@ fn test_file_sink_long_message() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     let result = futures::executor::block_on(sink.write(&record));
     assert!(result.is_ok());
@@ -92,6 +94,8 @@ fn test_file_sink_unicode_message() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     let result = futures::executor::block_on(sink.write(&record));
     assert!(result.is_ok());
@@ -119,6 +123,8 @@ fn test_file_sink_different_levels() {
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         let result = futures::executor::block_on(sink.write(&record));
         assert!(result.is_ok());
@@ -144,6 +150,8 @@ fn test_file_sink_with_fields() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     record
         .fields
@@ -192,6 +200,8 @@ async fn test_database_sink_disabled() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     // enabled=false 仅为配置标记：sink 构造与写入路径不受影响
     let result = sink.write(&record).await;
@@ -212,6 +222,8 @@ async fn test_database_sink_message_count() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     sink.write(&record).await.unwrap();
     sink.flush().await.unwrap();
@@ -240,6 +252,8 @@ async fn test_database_sink_write_single() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     let result = sink.write(&record).await;
     assert!(result.is_ok());
@@ -269,6 +283,8 @@ fn test_console_sink_disabled() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     let result = futures::executor::block_on(sink.write(&record));
     assert!(result.is_ok());
@@ -307,6 +323,8 @@ fn test_console_sink_write_unicode() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     let result = futures::executor::block_on(sink.write(&record));
     assert!(result.is_ok());
@@ -334,6 +352,8 @@ fn test_console_sink_different_levels() {
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         let result = futures::executor::block_on(sink.write(&record));
         assert!(result.is_ok());
@@ -457,7 +477,12 @@ async fn test_manager_health_status_after_logging() {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await
@@ -506,7 +531,12 @@ async fn test_manager_block_strategy_high_load_sampling() {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await
@@ -595,7 +625,12 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await
@@ -984,6 +1019,8 @@ fn test_log_record_creation() {
         file: Some("test.rs".to_string()),
         line: Some(42),
         thread_id: "test-thread".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     assert_eq!(record.level, "INFO");
     assert_eq!(record.message, "Test message");
@@ -1000,6 +1037,8 @@ fn test_log_record_with_fields() {
         file: None,
         line: None,
         thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
     };
     record
         .fields

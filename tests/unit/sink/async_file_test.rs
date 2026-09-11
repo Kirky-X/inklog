@@ -111,6 +111,8 @@ mod async_file_test {
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         
         // 写入
@@ -157,6 +159,8 @@ mod async_file_test {
                 file: None,
                 line: None,
                 thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
             };
             
             let result = sink.write(&record);
@@ -220,6 +224,8 @@ mod async_file_test {
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         
         sink.write(&record).ok();
@@ -266,6 +272,8 @@ mod async_file_test {
                 file: None,
                 line: None,
                 thread_id: "perf".to_string(),
+                trace_id: None,
+                span_id: None,
             };
             
             sink.write(&record).ok();
@@ -314,6 +322,8 @@ mod async_file_test {
                 file: None,
                 line: None,
                 thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
             };
             
             sink.write(&record).ok();
@@ -355,6 +365,8 @@ mod async_file_test {
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         
         // 尝试写入（可能在背压时失败）

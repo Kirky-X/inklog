@@ -55,6 +55,8 @@ async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
             file: None,
             line: None,
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await?;
     }
@@ -103,6 +105,8 @@ async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
             file: None,
             line: None,
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await?;
     }
@@ -165,6 +169,8 @@ async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
             file: None,
             line: None,
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await?;
     }

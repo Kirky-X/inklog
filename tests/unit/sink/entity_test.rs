@@ -4,7 +4,12 @@
 //!
 //! 自 0.2.0 起，entity 模块仅导出 `TABLE_NAME` 常量（ORM 已替换为 dbnexus 原生 SQL）。
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 mod entity_tests {
     use inklog::sink::entity::TABLE_NAME;
 

@@ -38,7 +38,12 @@ mod large_volume {
 
         let (logger, subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
             None,
         )
         .await

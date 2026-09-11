@@ -6,7 +6,7 @@ use crate::support::processing::RateLimiter;
 use crate::validation::sanitize::LogSanitizer;
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
-use serde_json::Value;
+use serde_json::value;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -141,6 +141,39 @@ impl LoggerSubscriber {
         level == "ERROR" || level == "FATAL"
     }
 
+    /// T504：从当前 tracing span 上下文提取 trace_id/span_id。
+    ///
+    /// - `span_id` = 事件所在 span 的 16 位小写 hex id；
+    /// - `trace_id` 优先取事件/span 已显式记录的 `trace_id` 字段（与
+    ///   OpenTelemetry / tracing-opentelemetry 注入兼容），否则沿 parent 链
+    ///   找到根 span，以其 id 派生 32 位小写 hex（同一条 trace 内一致）；
+    /// - 事件在任意 span 之外时两字段保持 `None`（热路径零成本直通）。
+    fn extract_trace_context<S>(ctx: &Context<'_, S>, record: &mut LogRecord)
+    where
+        S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    {
+        let current = ctx.current_span();
+        let Some(id) = current.id() else {
+            return;
+        };
+        record.span_id = Some(format!("{:016x}", id.into_u64()));
+
+        // 事件字段显式携带的 trace_id 优先
+        if let Some(value::Value::String(explicit)) = record.fields.get("trace_id") {
+            record.trace_id = Some(explicit.clone());
+        }
+        if record.trace_id.is_none() {
+            let trace_id = ctx.span(&id).and_then(|span| {
+                span.scope().last().map(|root| format!("{:032x}", root.id().into_u64()))
+            });
+            record.trace_id = trace_id;
+        }
+        // 事件字段显式携带的 span_id 覆盖派生值（与 OTel 语义对齐）
+        if let Some(value::Value::String(explicit)) = record.fields.get("span_id") {
+            record.span_id = Some(explicit.clone());
+        }
+    }
+
     // 敏感键判定不再有本地副本：统一引用 `LogRecord::is_sensitive_key`
     // （src/domain/types/log_record.rs，pub(crate) 单一事实源），
     // 避免手工同步两份模式表导致的安全行为分叉。
@@ -159,19 +192,19 @@ impl LoggerSubscriber {
 
     /// 递归脱敏字段值：字符串值一律 sanitize；Object 按键递归（敏感键的
     /// 字符串值同样被脱敏，不再被跳过）；Array 逐元素递归。
-    fn sanitize_field_value(sanitizer: &LogSanitizer, value: &mut Value) {
+    fn sanitize_field_value(sanitizer: &LogSanitizer, value: &mut value::Value) {
         match value {
-            Value::String(s) => *s = sanitizer.sanitize(s),
-            Value::Array(items) => {
+            value::Value::String(s) => *s = sanitizer.sanitize(s),
+            value::Value::Array(items) => {
                 for item in items.iter_mut() {
                     Self::sanitize_field_value(sanitizer, item);
                 }
             }
-            Value::Object(map) => {
+            value::Value::Object(map) => {
                 for (nested_key, nested_value) in map.iter_mut() {
                     if LogRecord::is_sensitive_key(nested_key) {
                         // 敏感键：直接脱敏其字符串值
-                        if let Value::String(s) = nested_value {
+                        if let value::Value::String(s) = nested_value {
                             *s = sanitizer.sanitize(s);
                         } else {
                             Self::sanitize_field_value(sanitizer, nested_value);
@@ -264,10 +297,12 @@ impl Drop for LoggerSubscriber {
 
 impl<S> Layer<S> for LoggerSubscriber
 where
-    S: Subscriber,
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let mut record = LogRecord::from_event(event);
+        // T504：从当前 span 上下文提取 trace_id/span_id（未启用 span 时零成本直通）
+        Self::extract_trace_context(&ctx, &mut record);
 
         // Rate limiting check (before sanitization to save work on dropped logs)
         if let Some(ref limiter) = self.rate_limiter
@@ -332,6 +367,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use crossbeam_channel::bounded;
     use serial_test::serial;
     use tracing::subscriber::with_default;
@@ -1153,6 +1189,125 @@ mod tests {
             (1..=5).contains(&error_count),
             "expected ~1 sampled ERROR through rate limiter, got {}",
             error_count
+        );
+    }
+}
+
+// ============================================================================
+// T504: 追踪 ID 关联 —— span 上下文提取与输出
+// ============================================================================
+
+#[cfg(test)]
+mod trace_context_tests {
+    use super::*;
+    use crossbeam_channel::bounded;
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::prelude::*;
+
+    /// 构建 (registry, console_rx)：从 console 通道读取 LoggerSubscriber
+    /// 提取后的记录（trace 上下文在 on_event 中注入）。
+    type TestSubscriber = tracing_subscriber::layer::Layered<
+        LoggerSubscriber,
+        tracing_subscriber::Registry,
+    >;
+
+    fn setup() -> (
+        TestSubscriber,
+        crossbeam_channel::Receiver<Arc<LogRecord>>,
+    ) {
+        let (console_tx, console_rx) = bounded(100);
+        let (async_tx, _async_rx) = bounded(100);
+        let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()));
+        (tracing_subscriber::registry().with(layer), console_rx)
+    }
+
+    #[test]
+    fn test_event_inside_span_gets_trace_and_span_ids() {
+        let (subscriber, console_rx) = setup();
+
+        with_default(subscriber, || {
+            let span = tracing::info_span!("handler", request = "r-1");
+            let _guard = span.enter();
+            tracing::info!(target: "t504", message = "inside span");
+            tracing::info!(target: "t504", message = "still inside");
+        });
+
+        let r1 = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let r2 = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let (s1, s2) = (r1.span_id.clone().expect("span_id"), r2.span_id.clone().expect("span_id"));
+        assert_eq!(s1, s2, "same span must share span_id");
+        assert_eq!(s1.len(), 16, "span_id must be 16-char hex");
+        let (t1, t2) = (r1.trace_id.clone().expect("trace_id"), r2.trace_id.clone().expect("trace_id"));
+        assert_eq!(t1, t2, "same span must share trace_id");
+        assert_eq!(t1.len(), 32, "trace_id must be 32-char hex");
+        assert_ne!(t1, s1, "trace_id must not equal span_id (root derivation)");
+    }
+
+    #[test]
+    fn test_child_span_shares_root_trace_id() {
+        let (subscriber, console_rx) = setup();
+
+        with_default(subscriber, || {
+            let root = tracing::info_span!("root");
+            let _root_guard = root.enter();
+            tracing::info!(target: "t504", message = "at root");
+            let child = tracing::info_span!("child");
+            let _child_guard = child.enter();
+            tracing::info!(target: "t504", message = "at child");
+        });
+
+        let root = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let child = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let root_trace = root.trace_id.clone().expect("root trace_id");
+        let child_trace = child.trace_id.clone().expect("child trace_id");
+        assert_eq!(
+            root_trace, child_trace,
+            "child span must inherit the root span's trace_id"
+        );
+        assert_ne!(
+            root.span_id, child.span_id,
+            "different spans must have different span_ids"
+        );
+    }
+
+    #[test]
+    fn test_event_outside_span_has_no_trace_ids() {
+        let (subscriber, console_rx) = setup();
+
+        with_default(subscriber, || {
+            tracing::info!(target: "t504", message = "no span");
+        });
+
+        let record = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        assert!(record.trace_id.is_none(), "no span → trace_id None");
+        assert!(record.span_id.is_none(), "no span → span_id None");
+    }
+
+    #[test]
+    fn test_explicit_trace_fields_override_derivation() {
+        let (subscriber, console_rx) = setup();
+
+        with_default(subscriber, || {
+            let span = tracing::info_span!("otel-ish");
+            let _guard = span.enter();
+            tracing::info!(
+                target: "t504",
+                message = "explicit",
+                trace_id = "0af7651916cd43dd8448eb211c80319c",
+                span_id = "b7ad6b7169203331"
+            );
+        });
+
+        let record = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            record.trace_id.as_deref(),
+            Some("0af7651916cd43dd8448eb211c80319c"),
+            "explicit trace_id field must win (OTel compatibility)"
+        );
+        assert_eq!(
+            record.span_id.as_deref(),
+            Some("b7ad6b7169203331"),
+            "explicit span_id field must win (OTel compatibility)"
         );
     }
 }

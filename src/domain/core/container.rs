@@ -277,6 +277,7 @@ impl InklogContainer {
         let deps = LoggerDependencies {
             cache: Some(Arc::clone(&self.cache)),
             config: Some(Arc::clone(&self.config)),
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",

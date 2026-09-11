@@ -71,12 +71,107 @@ pub(crate) struct WorkerParams {
         feature = "duckdb"
     ))]
     pub(crate) db_receiver: Option<Receiver<Arc<LogRecord>>>,
+    /// 动态注册的第三方 sink（T501）：每项拥有独立 channel 接收端，
+    /// 由通用 SinkWorker 消费。每个条目独立命名用于健康上报。
+    pub(crate) custom_sinks: Vec<CustomSinkEntry>,
+}
+
+/// T501：动态注册 sink 的 worker 条目。
+pub(crate) struct CustomSinkEntry {
+    /// 健康上报与指标使用的 sink 名（"custom-N"）
+    pub(crate) name: String,
+    /// 第三方 sink 实例（零核心改动接入）
+    pub(crate) sink: Arc<dyn LogSink>,
+    /// 该 sink 专属 channel 的接收端
+    pub(crate) receiver: Receiver<Arc<LogRecord>>,
 }
 
 /// `start_workers` 返回值类型别名，避免 clippy `type_complexity` 警告。
 /// 第一项为 worker 线程句柄，第二项为每个 worker 对应的 shutdown 信号 sender。
 pub(crate) type WorkerStartResult =
     Result<(Vec<tokio::task::JoinHandle<()>>, Vec<Sender<()>>), InklogError>;
+
+/// 自定义 sink 写失败重试上限（与内置 worker 的 WRITE_MAX_ATTEMPTS 一致）。
+const CUSTOM_SINK_WRITE_ATTEMPTS: u32 = 3;
+
+/// T501：通用 SinkWorker 主循环，消费动态注册 sink 的专属 channel。
+///
+/// 语义与内置 file/db worker 对齐：
+/// - 记录产生→处理的延迟计入 metrics；
+/// - 写失败重试（最多 3 次，间隔 10ms×attempt），重试耗尽计 sink_error 并
+///   降级写 console，绝不无声丢弃；
+/// - shutdown 信号后限时排水，最后 flush + shutdown sink；
+/// - channel 断开（所有发送端丢弃）且排空后 worker 退出。
+pub(crate) fn run_custom_sink_worker(
+    runtime_handle: &tokio::runtime::Handle,
+    metrics: &Metrics,
+    console_sink: &Arc<dyn LogSink>,
+    entry: &CustomSinkEntry,
+    receiver: &Receiver<Arc<LogRecord>>,
+    shutdown: &Receiver<()>,
+) {
+    loop {
+        if shutdown.try_recv().is_ok() {
+            // Drain with 5s timeout
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while let Ok(record) = receiver.try_recv() {
+                metrics.record_latency(record_age(&record));
+                let _ = runtime_handle.block_on(async { entry.sink.write(&record).await });
+                if Instant::now() > deadline {
+                    break;
+                }
+            }
+            let _ = runtime_handle.block_on(async { entry.sink.flush().await });
+            let _ = runtime_handle.block_on(async { entry.sink.shutdown().await });
+            break;
+        }
+
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(record) => {
+                metrics.record_latency(record_age(&record));
+                let mut written = false;
+                for attempt in 1..=CUSTOM_SINK_WRITE_ATTEMPTS {
+                    match runtime_handle.block_on(async { entry.sink.write(&record).await }) {
+                        Ok(_) => {
+                            metrics.inc_logs_written();
+                            metrics.update_sink_health(&entry.name, true, None);
+                            written = true;
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                attempt,
+                                "custom sink '{}' write failed",
+                                entry.name
+                            );
+                            if attempt == CUSTOM_SINK_WRITE_ATTEMPTS {
+                                metrics.inc_sink_error();
+                                metrics.update_sink_health(
+                                    &entry.name,
+                                    false,
+                                    Some(e.to_string()),
+                                );
+                                let _ = runtime_handle
+                                    .block_on(async { console_sink.write(&record).await });
+                            } else {
+                                thread::sleep(Duration::from_millis(10 * attempt as u64));
+                            }
+                        }
+                    }
+                }
+                let _ = written;
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                // Idle tick: flush buffered records periodically
+                let _ = runtime_handle.block_on(async { entry.sink.flush().await });
+            }
+            // 记录发送端全部丢弃且通道已空：worker 退出（与内置 worker 一致，
+            // 避免 tokio Runtime drop 等待 blocking 任务时永久挂死）
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
 
 // ============================================================================
 // Extracted pure functions (testable without runtime/threads)
@@ -403,6 +498,8 @@ impl SinkWorker<'_> {
             file: None,
             line: None,
             thread_id: thread::current().name().unwrap_or("unknown").to_string(),
+            trace_id: None,
+            span_id: None,
         };
         let _ = self
             .runtime_handle
@@ -557,6 +654,7 @@ impl LoggerManager {
                 feature = "duckdb"
             ))]
             db_receiver,
+            custom_sinks,
         } = params;
         let file_config = config.file_sink.clone();
         #[cfg(any(
@@ -797,6 +895,31 @@ impl LoggerManager {
         };
 
 
+        // T501: dynamic third-party sinks — one generic SinkWorker per entry,
+        // each consuming its own dedicated channel (no MPMC contention with
+        // the built-in file/db workers).
+        let mut custom_handles = Vec::with_capacity(custom_sinks.len());
+        let mut custom_shutdown_txs = Vec::with_capacity(custom_sinks.len());
+        for entry in custom_sinks {
+            let (shutdown_tx, shutdown_rx) = bounded(1);
+            let metrics_custom = metrics.clone();
+            let console_sink_custom = console_sink.clone();
+            let runtime_handle_custom = runtime_handle.clone();
+            custom_handles.push(tokio::task::spawn_blocking(move || {
+                metrics_custom.active_workers.inc();
+                run_custom_sink_worker(
+                    &runtime_handle_custom,
+                    &metrics_custom,
+                    &console_sink_custom,
+                    &entry,
+                    &entry.receiver,
+                    &shutdown_rx,
+                );
+                metrics_custom.active_workers.dec();
+            }));
+            custom_shutdown_txs.push(shutdown_tx);
+        }
+
         // Health Check Thread
         let (shutdown_tx_health, shutdown_health) = bounded(1);
         let metrics_health = metrics.clone();
@@ -899,14 +1022,15 @@ impl LoggerManager {
             feature = "mysql",
             feature = "duckdb"
         ))]
-        let handles = vec![handle_console, handle_file, handle_db, handle_health];
+        let mut handles = vec![handle_console, handle_file, handle_db, handle_health];
         #[cfg(not(any(
             feature = "sqlite",
             feature = "postgres",
             feature = "mysql",
             feature = "duckdb"
         )))]
-        let handles = vec![handle_console, handle_file, handle_health];
+        let mut handles = vec![handle_console, handle_file, handle_health];
+        handles.extend(custom_handles);
 
         // shutdown_txs 与 handles 一一对应，保持 cfg 一致性
         #[cfg(any(
@@ -915,7 +1039,7 @@ impl LoggerManager {
             feature = "mysql",
             feature = "duckdb"
         ))]
-        let shutdown_txs = vec![
+        let mut shutdown_txs = vec![
             shutdown_tx_console,
             shutdown_tx_file,
             shutdown_tx_db,
@@ -927,7 +1051,8 @@ impl LoggerManager {
             feature = "mysql",
             feature = "duckdb"
         )))]
-        let shutdown_txs = vec![shutdown_tx_console, shutdown_tx_file, shutdown_tx_health];
+        let mut shutdown_txs = vec![shutdown_tx_console, shutdown_tx_file, shutdown_tx_health];
+        shutdown_txs.extend(custom_shutdown_txs);
 
         Ok((handles, shutdown_txs))
     }
@@ -1207,6 +1332,7 @@ mod tests {
                 feature = "duckdb"
             ))]
             db_receiver: None,
+            custom_sinks: Vec::new(),
         };
 
         let (handles, shutdown_txs) = runtime
@@ -1228,6 +1354,8 @@ mod tests {
                             file: None,
                             line: None,
                             thread_id: "test".to_string(),
+                            trace_id: None,
+                            span_id: None,
                         });
                         if tx.send(record).is_err() {
                             break;
@@ -1336,6 +1464,7 @@ mod tests {
                 feature = "duckdb"
             ))]
             db_receiver: None,
+            custom_sinks: Vec::new(),
         };
 
         let (handles, shutdown_txs) = runtime
@@ -1353,6 +1482,8 @@ mod tests {
                 file: None,
                 line: None,
                 thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
             });
             file_tx.send(record).expect("send record");
         }
@@ -1517,6 +1648,7 @@ mod tests {
             database: Some(Arc::new(crate::integrations::MockDatabaseAdapter::new())
                 as Arc<dyn crate::integrations::Database>),
             db_receiver: Some(db_rx),
+            custom_sinks: Vec::new(),
         };
 
         let (handles, shutdown_txs) = runtime
@@ -1534,6 +1666,8 @@ mod tests {
                 file: None,
                 line: None,
                 thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
             });
             db_tx.send(record).expect("send db record");
         }
@@ -1585,5 +1719,192 @@ mod tests {
             handle.abort();
         }
         assert!(all_finished, "workers must terminate after shutdown");
+    }
+}
+
+// =========================================================================
+// T501: 通用 SinkWorker（动态注册 sink）单元测试
+// =========================================================================
+
+#[cfg(test)]
+mod custom_sink_worker_tests {
+    use super::*;
+    use parking_lot::Mutex;
+
+    /// 捕获写入内容的内存 sink（第三方 sink 的测试替身）。
+    struct MemorySink {
+        records: Mutex<Vec<String>>,
+        fail_times: AtomicUsize,
+    }
+
+    impl MemorySink {
+        fn new(fail_times: usize) -> Self {
+            Self {
+                records: Mutex::new(Vec::new()),
+                fail_times: AtomicUsize::new(fail_times),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LogSink for MemorySink {
+        async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+            if self.fail_times.load(Ordering::SeqCst) > 0 {
+                self.fail_times.fetch_sub(1, Ordering::SeqCst);
+                return Err(InklogError::ConfigError("transient failure".to_string()));
+            }
+            self.records.lock().push(record.message.clone());
+            Ok(())
+        }
+
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_custom_sink_worker_consumes_records_and_drains_on_shutdown() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let sink = Arc::new(MemorySink::new(0));
+        let (tx, rx) = bounded::<Arc<LogRecord>>(100);
+        let entry = CustomSinkEntry {
+            name: "custom-0".to_string(),
+            sink: sink.clone() as Arc<dyn LogSink>,
+            receiver: rx,
+        };
+        let (_shutdown_tx, shutdown_rx) = bounded(1);
+        let metrics = Arc::new(Metrics::new());
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            Default::default(),
+            crate::LogTemplate::new("{timestamp} [{level}] {target} - {message}"),
+        )) as Arc<dyn LogSink>;
+
+        let handle = {
+            let metrics = metrics.clone();
+            let console = console_sink.clone();
+            let runtime_handle = runtime.handle().clone();
+            thread::spawn(move || {
+                run_custom_sink_worker(
+                    &runtime_handle,
+                    &metrics,
+                    &console,
+                    &entry,
+                    &entry.receiver,
+                    &shutdown_rx,
+                );
+            })
+        };
+
+        // 投递 3 条记录
+        for i in 0..3 {
+            tx.send(Arc::new(LogRecord {
+                timestamp: Utc::now(),
+                level: "INFO".to_string(),
+                target: "custom::sink".to_string(),
+                message: format!("custom record {i}"),
+                fields: Default::default(),
+                file: None,
+                line: None,
+                thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
+                ..Default::default()
+            }))
+            .unwrap();
+        }
+
+        // 等待消费
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while sink.records.lock().len() < 3 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(sink.records.lock().len(), 3, "all records must be written");
+        assert!(metrics.logs_written() >= 3, "writes must be counted");
+
+        // 记录发送端全部丢弃且通道排空 → worker 退出（Disconnected 路径）
+        drop(tx);
+        drop(_shutdown_tx);
+        handle.join().expect("worker must exit cleanly");
+    }
+
+    #[test]
+    fn test_custom_sink_worker_retries_and_falls_back_to_console() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        // 前 3 次写失败（单条记录的 3 次重试全部耗尽）→ 计 sink_error 并降级 console
+        let sink = Arc::new(MemorySink::new(3));
+        let (tx, rx) = bounded::<Arc<LogRecord>>(10);
+        let entry = CustomSinkEntry {
+            name: "custom-fail".to_string(),
+            sink: sink.clone() as Arc<dyn LogSink>,
+            receiver: rx,
+        };
+        let (_shutdown_tx, shutdown_rx) = bounded::<()>(1);
+        let metrics = Arc::new(Metrics::new());
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            Default::default(),
+            crate::LogTemplate::new("t"),
+        )) as Arc<dyn LogSink>;
+
+        {
+            let metrics = metrics.clone();
+            let console = console_sink.clone();
+            let runtime_handle = runtime.handle().clone();
+            thread::spawn(move || {
+                run_custom_sink_worker(
+                    &runtime_handle,
+                    &metrics,
+                    &console,
+                    &entry,
+                    &entry.receiver,
+                    &shutdown_rx,
+                );
+            });
+        }
+
+        tx.send(Arc::new(LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "custom::fail".to_string(),
+            message: "doomed record".to_string(),
+            fields: Default::default(),
+            file: None,
+            line: None,
+            thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
+            ..Default::default()
+        }))
+        .unwrap();
+
+        // 等待重试耗尽（10ms + 20ms 间隔）
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while metrics.sink_errors() < 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            metrics.sink_errors() >= 1,
+            "exhausted retries must count a sink error"
+        );
+        assert_eq!(
+            sink.records.lock().len(),
+            0,
+            "record must not be written after all attempts failed"
+        );
+
+        drop(tx);
     }
 }

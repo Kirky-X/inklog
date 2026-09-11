@@ -19,9 +19,16 @@ pub mod encryption;
 ))]
 pub mod entity;
 pub mod file;
+pub mod middleware;
+#[cfg(feature = "net-sink")]
+pub mod net;
+#[cfg(feature = "otlp")]
+pub mod otlp;
 pub mod registry;
 pub mod ring_buffered_file;
+pub mod rate_limit;
 pub mod rotation;
+pub mod sampling;
 
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 #[cfg(feature = "compression")]
@@ -43,10 +50,30 @@ pub use rotation::{
     CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,
     TimeBasedRotation,
 };
+pub use rate_limit::{NoOpRateLimit, RateLimitedSink, SinkRateLimit, SinkWriteOutcome, TokenBucketRateLimit};
+pub use middleware::{
+    EnrichMiddleware, LevelFilterMiddleware, MiddlewareChain, MiddlewareSink, MiddlewareVerdict,
+    RecordMiddleware,
+};
+#[cfg(feature = "net-sink")]
+pub use net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
+#[cfg(feature = "otlp")]
+pub use otlp::{OtlpConfig, OtlpSink};
+pub use sampling::{Sampler, SamplingSink};
 
 use crate::InklogError;
 use crate::LogRecord;
 use async_trait::async_trait;
+
+/// Async sink registration port (T501: dynamic sink registration).
+///
+/// Third-party sinks implement [`LogSink`] (all methods async) and are
+/// registered via [`crate::LoggerBuilder::add_sink`] as `Arc<dyn AsyncSink>`.
+/// Every `LogSink` implementor automatically implements `AsyncSink` through a
+/// blanket impl, so third-party sinks need zero core changes to plug in.
+pub trait AsyncSink: LogSink {}
+
+impl<T: LogSink + ?Sized> AsyncSink for T {}
 
 /// Log sink trait for writing log records to various destinations.
 ///

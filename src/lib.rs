@@ -164,6 +164,22 @@ pub mod domain;
 // Support layer
 pub mod support;
 
+// T514：Sink 中间件链
+pub use support::io::sink::middleware::{
+    EnrichMiddleware, LevelFilterMiddleware, MiddlewareChain, MiddlewareSink, MiddlewareVerdict,
+    RecordMiddleware,
+};
+#[cfg(feature = "otlp")]
+pub use support::io::sink::otlp::{OtlpConfig, OtlpSink};
+
+// T513：网络转发 sink（net-sink feature）
+#[cfg(feature = "net-sink")]
+pub use support::io::sink::net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
+
+// T509：KMS 密钥提供者（kms feature）
+#[cfg(feature = "kms")]
+pub use support::security::{ConfersKeyProvider, EnvKeyProvider, KeyProvider, VaultTransitConfig, vault_transit_provider};
+
 // Sink trait and type re-exports for public API completeness
 #[cfg(feature = "compression")]
 pub use support::io::sink::ZstdCompression;
@@ -176,11 +192,13 @@ pub use support::io::sink::ring_buffered_file::{
 #[cfg(feature = "gzip")]
 pub use support::io::sink::GzipCompression;
 pub use support::io::sink::{
-    CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation, CompressionStrategy,
-    DiskCheckable, FileSinkFactory, LogSink, NoCompression, Rotatable, RotationContext,
-    RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry, SizeBasedRotation,
-    TimeBasedRotation,
+    AsyncSink, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
+    CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, NoOpRateLimit,
+    RateLimitedSink, Rotatable, RotationContext, RotationResult, RotationStrategy, Sampler,
+    SamplingSink, SinkFactory, SinkMetadata, SinkRegistry, SinkRateLimit, SizeBasedRotation,
+    TimeBasedRotation, TokenBucketRateLimit,
 };
+pub use support::io::sink::SinkWriteOutcome;
 
 // Re-export masking for benchmarks
 pub use support::processing::masking;

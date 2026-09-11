@@ -80,6 +80,21 @@ pub struct LogRecord {
 
     /// Thread ID where the log was emitted (e.g., "ThreadId(1)").
     pub thread_id: String,
+
+    /// Distributed trace id (T504), extracted from the current tracing span.
+    ///
+    /// Format: 32-char lowercase hex (W3C Trace Context compatible width).
+    /// When no OpenTelemetry layer is installed the value is derived from the
+    /// id of the root span of the current span chain; events emitted outside
+    /// any span carry `None`.
+    #[serde(default)]
+    pub trace_id: Option<String>,
+
+    /// Span id of the span the event was emitted in (T504).
+    ///
+    /// Format: 16-char lowercase hex; `None` when outside any span.
+    #[serde(default)]
+    pub span_id: Option<String>,
 }
 
 impl Default for LogRecord {
@@ -93,6 +108,8 @@ impl Default for LogRecord {
             file: None,
             line: None,
             thread_id: String::new(),
+            trace_id: None,
+            span_id: None,
         }
     }
 }
@@ -138,6 +155,8 @@ impl LogRecord {
         self.file = None;
         self.line = None;
         self.thread_id.clear();
+        self.trace_id = None;
+        self.span_id = None;
     }
 
     /// Creates a new log record with the specified level, target, and message.
@@ -179,6 +198,8 @@ impl LogRecord {
             file: None,
             line: None,
             thread_id: format!("{:?}", std::thread::current().id()),
+            trace_id: None,
+            span_id: None,
         }
     }
 
@@ -1315,5 +1336,45 @@ mod tests {
             record.fields.get("password").unwrap(),
             &Value::String("***MASKED***".to_string())
         );
+    }
+}
+
+// ============================================================================
+// T504: trace_id/span_id 字段与序列化兼容
+// ============================================================================
+
+#[cfg(test)]
+mod trace_id_tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialize_old_json_without_trace_fields() {
+        // 旧版本序列化的记录（无 trace_id/span_id）必须可反序列化（serde default）
+        let old = r#"{"timestamp":"2026-01-01T00:00:00Z","level":"INFO","target":"a","message":"m","fields":{},"file":null,"line":null,"thread_id":"ThreadId(1)"}"#;
+        let record: LogRecord = serde_json::from_str(old).expect("old JSON must deserialize");
+        assert!(record.trace_id.is_none());
+        assert!(record.span_id.is_none());
+    }
+
+    #[test]
+    fn test_trace_fields_serialize_roundtrip() {
+        let mut record = LogRecord::new(Level::INFO, "t".to_string(), "m".to_string());
+        record.trace_id = Some("a".repeat(32));
+        record.span_id = Some("b".repeat(16));
+        let json = serde_json::to_string(&record).unwrap();
+        let back: LogRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.trace_id.as_deref(), Some(record.trace_id.as_deref().unwrap()));
+        assert_eq!(back.span_id.as_deref(), Some(record.span_id.as_deref().unwrap()));
+    }
+
+    #[test]
+    fn test_new_and_reset_clear_trace_fields() {
+        let mut record = LogRecord::new(Level::INFO, "t".to_string(), "m".to_string());
+        record.trace_id = Some("x".to_string());
+        record.span_id = Some("y".to_string());
+        record.reset();
+        assert!(record.trace_id.is_none() && record.span_id.is_none());
+        let fresh = LogRecord::new(Level::INFO, "t".to_string(), "m".to_string());
+        assert!(fresh.trace_id.is_none() && fresh.span_id.is_none());
     }
 }

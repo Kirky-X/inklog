@@ -108,6 +108,8 @@ impl FromStr for OutputFormat {
 ///     file: None,
 ///     line: None,
 ///     thread_id: "main".to_string(),
+///     trace_id: None,
+///     span_id: None,
 /// };
 ///
 /// let output = template.render(&record);
@@ -133,6 +135,8 @@ enum Placeholder {
     File,
     Line,
     ThreadId,
+    TraceId,
+    SpanId,
     Fields,
     Literal(String),
 }
@@ -227,6 +231,8 @@ impl LogTemplate {
                         "file" => placeholders.push(Placeholder::File),
                         "line" => placeholders.push(Placeholder::Line),
                         "thread_id" => placeholders.push(Placeholder::ThreadId),
+                        "trace_id" => placeholders.push(Placeholder::TraceId),
+                        "span_id" => placeholders.push(Placeholder::SpanId),
                         "fields" => placeholders.push(Placeholder::Fields),
                         _ => {
                             placeholders.push(Placeholder::Literal(format!("{{{}}}", current)));
@@ -292,6 +298,8 @@ impl LogTemplate {
     /// | `{file}` | `record.file` | Renders as empty string if `None` |
     /// | `{line}` | `record.line` | Renders as empty string if `None` |
     /// | `{thread_id}` | `record.thread_id` | Always present (required field) |
+    /// | `{trace_id}` | `record.trace_id` | Renders as empty string if `None` |
+    /// | `{span_id}` | `record.span_id` | Renders as empty string if `None` |
     /// | `{fields}` | `record.fields` | Renders as empty string if empty |
     ///
     /// # Examples
@@ -312,6 +320,8 @@ impl LogTemplate {
     ///     file: None,
     ///     line: None,
     ///     thread_id: "main".to_string(),
+    ///     trace_id: None,
+    ///     span_id: None,
     /// };
     ///
     /// let output = template.render(&record);
@@ -351,6 +361,17 @@ impl LogTemplate {
                 }
                 Placeholder::ThreadId => {
                     result.push_str(&record.thread_id);
+                }
+                // T504：追踪 ID 占位符；无 span 上下文时渲染为空串（与 {file} 一致）
+                Placeholder::TraceId => {
+                    if let Some(ref trace_id) = record.trace_id {
+                        result.push_str(trace_id);
+                    }
+                }
+                Placeholder::SpanId => {
+                    if let Some(ref span_id) = record.span_id {
+                        result.push_str(span_id);
+                    }
                 }
                 Placeholder::Fields => {
                     if !record.fields.is_empty() {
@@ -402,6 +423,8 @@ mod tests {
             file: Some("/path/to/test.rs".to_string()),
             line: Some(42),
             thread_id: "abc123".to_string(),
+            trace_id: None,
+            span_id: None,
         }
     }
 
@@ -728,5 +751,43 @@ mod tests {
         )]);
         let output = template.render(&record);
         assert!(output.contains("raw_note=as-is value"), "Output: {}", output);
+    }
+}
+
+// ============================================================================
+// T504: 追踪 ID 占位符渲染
+// ============================================================================
+
+#[cfg(test)]
+mod trace_placeholder_tests {
+    use super::*;
+    use chrono::Utc;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_trace_placeholders_render_when_present() {
+        let template = LogTemplate::new("{timestamp} [{level}] {trace_id}/{span_id} {message}");
+        let record = LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "t".to_string(),
+            message: "hello".to_string(),
+            fields: HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "main".to_string(),
+            trace_id: Some("0af7651916cd43dd8448eb211c80319c".to_string()),
+            span_id: Some("b7ad6b7169203331".to_string()),
+        };
+        let out = template.render(&record);
+        assert!(out.contains("0af7651916cd43dd8448eb211c80319c/b7ad6b7169203331"));
+    }
+
+    #[test]
+    fn test_trace_placeholders_render_empty_when_none() {
+        let template = LogTemplate::new("[{level}] {trace_id}/{span_id} {message}");
+        let record = LogRecord::new(tracing::Level::INFO, "t".to_string(), "hello".to_string());
+        let out = template.render(&record);
+        assert_eq!(out, "[INFO] / hello", "None trace ids must render as empty strings");
     }
 }

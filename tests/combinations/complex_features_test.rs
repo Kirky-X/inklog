@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: MIT
 // 复杂特性组合测试
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 #[cfg(test)]
 mod complex_features {
     use inklog::config::DatabaseDriver;

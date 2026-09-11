@@ -100,6 +100,8 @@ impl LogAdapter {
             file: record.file().map(|s| s.to_string()),
             line: record.line(),
             thread_id: format!("{:?}", std::thread::current().id()),
+            trace_id: None,
+            span_id: None,
             fields: Default::default(),
         }
     }

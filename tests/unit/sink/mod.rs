@@ -4,5 +4,10 @@
 //!
 //! 测试各种日志输出端（文件、控制台、数据库等）
 
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 mod entity_test;
