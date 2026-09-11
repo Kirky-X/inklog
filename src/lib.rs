@@ -177,10 +177,12 @@ pub use support::io::sink::ring_buffered_file::{
 pub use support::io::sink::GzipCompression;
 pub use support::io::sink::{
     AsyncSink, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
-    CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, Rotatable,
-    RotationContext, RotationResult, RotationStrategy, Sampler, SamplingSink, SinkFactory,
-    SinkMetadata, SinkRegistry, SizeBasedRotation, TimeBasedRotation,
+    CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, NoOpRateLimit,
+    RateLimitedSink, Rotatable, RotationContext, RotationResult, RotationStrategy, Sampler,
+    SamplingSink, SinkFactory, SinkMetadata, SinkRegistry, SinkRateLimit, SizeBasedRotation,
+    TimeBasedRotation, TokenBucketRateLimit,
 };
+pub use support::io::sink::SinkWriteOutcome;
 
 // Re-export masking for benchmarks
 pub use support::processing::masking;

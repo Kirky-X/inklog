@@ -21,6 +21,7 @@ pub mod entity;
 pub mod file;
 pub mod registry;
 pub mod ring_buffered_file;
+pub mod rate_limit;
 pub mod rotation;
 pub mod sampling;
 
@@ -44,6 +45,7 @@ pub use rotation::{
     CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,
     TimeBasedRotation,
 };
+pub use rate_limit::{NoOpRateLimit, RateLimitedSink, SinkRateLimit, SinkWriteOutcome, TokenBucketRateLimit};
 pub use sampling::{Sampler, SamplingSink};
 
 use crate::InklogError;

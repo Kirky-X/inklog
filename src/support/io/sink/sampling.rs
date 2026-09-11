@@ -15,12 +15,16 @@
 //!
 //! ```
 //! use inklog::support::io::sink::sampling::{SamplingSink, Sampler};
-//! use inklog::support::io::ConsoleSink;
+//! use inklog::support::io::{ConsoleSink, LogSink};
+//! use inklog::LogTemplate;
 //! use std::sync::Arc;
 //!
 //! let sampler = Sampler::new("info", 10, vec!["critical".to_string()]).unwrap();
-//! let inner: Arc<inklog::LogSink> = Arc::new(ConsoleSink::default());
-//! let sink: Arc<inklog::LogSink> = Arc::new(SamplingSink::new(inner, Arc::new(sampler)));
+//! let inner: Arc<dyn inklog::LogSink> = Arc::new(ConsoleSink::new(
+//!     Default::default(),
+//!     LogTemplate::new("{timestamp} [{level}] {message}"),
+//! ));
+//! let sink: Arc<dyn inklog::LogSink> = Arc::new(SamplingSink::new(inner, Arc::new(sampler)));
 //! ```
 
 use std::sync::Arc;
