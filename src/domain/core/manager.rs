@@ -88,6 +88,9 @@ pub struct LoggerManager {
     /// T502：级别热调执行器，包装 `reload::Handle<EnvFilter, Registry>::reload`。
     /// `None` 表示构建路径未提供 reload 能力。
     level_reloader: Option<LevelReloader>,
+    /// T512：ops 事件广播通道（每个启用的 sink 通道一个发送端：
+    /// file/db 通道 + 各自定义 sink 通道），`publish_ops_event` 逐一投递。
+    ops_senders: Vec<Sender<Arc<LogRecord>>>,
 }
 
 /// T502：EnvFilter 热换装闭包类型（隐藏 `reload::Handle` 的具体类型参数）。
@@ -559,6 +562,16 @@ impl LoggerManager {
             (None, None)
         };
 
+        // T512：ops 事件广播通道 = 启用的 file 通道 + 启用的 db 通道 + 全部自定义通道
+        let mut ops_senders: Vec<Sender<Arc<LogRecord>>> = Vec::new();
+        if file_enabled {
+            ops_senders.push(sender.clone());
+        }
+        if db_enabled {
+            ops_senders.push(db_sender.clone().expect("db sender"));
+        }
+        ops_senders.extend(custom_senders.iter().cloned());
+
         let console_sink: Arc<dyn LogSink> = Arc::new(ConsoleSink::new(
             config.console_sink.clone().unwrap_or_default(),
             LogTemplate::new(&config.global.format),
@@ -802,6 +815,7 @@ impl LoggerManager {
             database: None,
             level_state,
             level_reloader: Some(level_reloader),
+            ops_senders,
         };
 
         Ok((manager, subscriber, filter, filter_layer))
@@ -945,6 +959,25 @@ impl LoggerManager {
             Some(t) => tracing::info!(target = t, level = %normalized, "target log level changed at runtime"),
         }
         Ok(())
+    }
+
+    /// 发布内部审计/运维事件（T512）。
+    ///
+    /// 事件转换为结构化记录（`target = "inklog::ops"`）后广播到每个启用的
+    /// sink 通道（T501 的 per-sink 通道体系：file/db + 自定义），供告警与
+    /// 事后审计。通道满/关闭时静默丢弃并计 `channel_blocked`——事件通道
+    /// 不得反压主链路。
+    pub fn publish_ops_event(&self, kind: &str, sink: Option<&str>, detail: serde_json::Value) {
+        let event = crate::support::ops_event::InklogOpsEvent::now(kind, sink, detail);
+        let record = Arc::new(event.to_log_record());
+        for sender in &self.ops_senders {
+            if sender
+                .send_timeout(Arc::clone(&record), Duration::from_millis(100))
+                .is_err()
+            {
+                self.metrics.inc_channel_blocked();
+            }
+        }
     }
 
     /// 查询当前级别指令集的 EnvFilter 字符串表示（T502 调试用）。
