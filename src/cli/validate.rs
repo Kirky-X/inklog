@@ -4,10 +4,25 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
+// T510：--json 模式下抑制人类可读输出（文本模式行为不变）
+static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_quiet_output(quiet: bool) {
+    QUIET.store(quiet, std::sync::atomic::Ordering::Relaxed);
+}
+
+macro_rules! vprintln {
+    ($($arg:tt)*) => {
+        if !QUIET.load(std::sync::atomic::Ordering::Relaxed) {
+            ::std::println!($($arg)*);
+        }
+    };
+}
+
 pub fn validate_config(config_path: &PathBuf) -> Result<()> {
     let mut args = fluent_bundle::FluentArgs::new();
     args.set("path", config_path.display().to_string());
-    println!("{}", inklog::i18n::tr_args("cli-validate-validating", args));
+    vprintln!("{}", inklog::i18n::tr_args("cli-validate-validating", args));
 
     if !config_path.exists() {
         let mut args = fluent_bundle::FluentArgs::new();
@@ -24,7 +39,7 @@ pub fn validate_config(config_path: &PathBuf) -> Result<()> {
 
     validate_toml_content(&content, config_path)?;
 
-    println!("{}", inklog::i18n::tr("cli-validate-valid"));
+    vprintln!("{}", inklog::i18n::tr("cli-validate-valid"));
     Ok(())
 }
 
@@ -85,7 +100,7 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("level", level_str.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-global-level", args)
         );
@@ -102,7 +117,7 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("len", format_str.len().to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-global-format", args)
         );
@@ -121,7 +136,7 @@ fn validate_console_sink(console: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("enabled", enabled.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-console-enabled", args)
         );
@@ -149,7 +164,7 @@ fn validate_console_sink(console: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("count", levels.len().to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-console-stderr", args)
         );
@@ -168,7 +183,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("enabled", enabled.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-file-enabled", args)
         );
@@ -185,7 +200,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("path", path_str.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-file-path", args)
         );
@@ -204,7 +219,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("size", size_str.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-file-max-size", args)
         );
@@ -282,7 +297,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
 
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("env", env_name.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-file-encrypt-key", args)
         );
@@ -303,7 +318,7 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("n", n.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-perf-capacity", args)
         );
@@ -320,7 +335,7 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("n", n.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-perf-threads", args)
         );
@@ -345,7 +360,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("enabled", enabled.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-db-enabled", args)
         );
@@ -374,7 +389,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("driver", driver_str.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-db-driver", args)
         );
@@ -392,7 +407,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
         validate_database_url(url_str)?;
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("len", url_str.len().to_string());
-        println!("  {}", inklog::i18n::tr_args("cli-validate-db-url", args));
+        vprintln!("  {}", inklog::i18n::tr_args("cli-validate-db-url", args));
     }
 
     if let Some(pool_size) = db.get("pool_size")
@@ -475,7 +490,7 @@ fn validate_http_server(http: &toml::Table) -> Result<()> {
         }
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("n", n.to_string());
-        println!(
+        vprintln!(
             "  {}",
             inklog::i18n::tr_args("cli-validate-http-port", args)
         );
@@ -559,45 +574,45 @@ fn parse_size(size_str: &str) -> Result<()> {
 }
 
 pub fn check_prerequisites() -> anyhow::Result<()> {
-    println!("{}\n", inklog::i18n::tr("cli-prereq-checking"));
+    vprintln!("{}\n", inklog::i18n::tr("cli-prereq-checking"));
 
     let mut missing_critical = Vec::new();
 
-    println!("  {}", inklog::i18n::tr("cli-prereq-rust"));
+    vprintln!("  {}", inklog::i18n::tr("cli-prereq-rust"));
     let rust_output = Command::new("rustc")
         .arg("--version")
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     match &rust_output {
-        Some(v) => println!("    {}", v),
+        Some(v) => vprintln!("    {}", v),
         None => {
-            println!("    {}", inklog::i18n::tr("cli-prereq-not-found"));
+            vprintln!("    {}", inklog::i18n::tr("cli-prereq-not-found"));
             missing_critical.push("rustc");
         }
     }
 
-    println!("  {}", inklog::i18n::tr("cli-prereq-cargo"));
+    vprintln!("  {}", inklog::i18n::tr("cli-prereq-cargo"));
     let cargo_output = Command::new("cargo")
         .arg("--version")
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     match &cargo_output {
-        Some(v) => println!("    {}", v),
+        Some(v) => vprintln!("    {}", v),
         None => {
-            println!("    {}", inklog::i18n::tr("cli-prereq-not-found"));
+            vprintln!("    {}", inklog::i18n::tr("cli-prereq-not-found"));
             missing_critical.push("cargo");
         }
     }
 
-    println!("\n  {}", inklog::i18n::tr("cli-prereq-optional"));
+    vprintln!("\n  {}", inklog::i18n::tr("cli-prereq-optional"));
     let openssl_ok = Command::new("openssl")
         .arg("version")
         .output()
         .is_ok_and(|o| o.status.success());
     if openssl_ok {
-        println!("    {}", inklog::i18n::tr("cli-prereq-openssl-ok"));
+        vprintln!("    {}", inklog::i18n::tr("cli-prereq-openssl-ok"));
     } else {
         eprintln!("    {}", inklog::i18n::tr("cli-prereq-openssl-miss"));
     }
@@ -607,12 +622,12 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
         .output()
         .is_ok_and(|o| o.status.success());
     if zstd_ok {
-        println!("    {}", inklog::i18n::tr("cli-prereq-zstd-ok"));
+        vprintln!("    {}", inklog::i18n::tr("cli-prereq-zstd-ok"));
     } else {
         eprintln!("    {}", inklog::i18n::tr("cli-prereq-zstd-miss"));
     }
 
-    println!("\n  {}", inklog::i18n::tr("cli-prereq-config-check"));
+    vprintln!("\n  {}", inklog::i18n::tr("cli-prereq-config-check"));
 
     #[cfg(unix)]
     let home_config = std::path::PathBuf::from("/etc/inklog/config.toml");
@@ -632,7 +647,7 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     if home_config.exists() {
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("path", home_config.display().to_string());
-        println!("    {}", inklog::i18n::tr_args("cli-prereq-sys-ok", args));
+        vprintln!("    {}", inklog::i18n::tr_args("cli-prereq-sys-ok", args));
     } else {
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("path", home_config.display().to_string());
@@ -642,7 +657,7 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     if local_config.exists() {
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("path", local_config.display().to_string());
-        println!("    {}", inklog::i18n::tr_args("cli-prereq-local-ok", args));
+        vprintln!("    {}", inklog::i18n::tr_args("cli-prereq-local-ok", args));
     } else {
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("path", local_config.display().to_string());
@@ -655,13 +670,13 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     if config_example.exists() {
         let mut args = fluent_bundle::FluentArgs::new();
         args.set("path", config_example.display().to_string());
-        println!(
+        vprintln!(
             "    {}",
             inklog::i18n::tr_args("cli-prereq-example-ok", args)
         );
     }
 
-    println!("\n{}", inklog::i18n::tr("cli-prereq-done"));
+    vprintln!("\n{}", inklog::i18n::tr("cli-prereq-done"));
 
     if !missing_critical.is_empty() {
         let mut args = fluent_bundle::FluentArgs::new();

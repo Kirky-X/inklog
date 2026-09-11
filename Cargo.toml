@@ -132,6 +132,7 @@ sys-locale = { version = "0.3", default-features = false }
 aho-corasick = { version = "1.0", default-features = false, features = ["std", "perf-literal"], optional = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tempfile = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["async_tokio"] }
 serial_test = { version = "4.0", default-features = false }

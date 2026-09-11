@@ -4,4 +4,5 @@
 
 pub mod io;
 pub mod observability;
+pub mod query;
 pub mod processing;
