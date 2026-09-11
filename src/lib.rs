@@ -164,6 +164,10 @@ pub mod domain;
 // Support layer
 pub mod support;
 
+// T509：KMS 密钥提供者（kms feature）
+#[cfg(feature = "kms")]
+pub use support::security::{ConfersKeyProvider, EnvKeyProvider, KeyProvider, VaultTransitConfig, vault_transit_provider};
+
 // Sink trait and type re-exports for public API completeness
 #[cfg(feature = "compression")]
 pub use support::io::sink::ZstdCompression;

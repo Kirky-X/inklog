@@ -8,3 +8,5 @@ pub mod observability;
 pub mod ops_event;
 pub mod query;
 pub mod processing;
+#[cfg(feature = "kms")]
+pub mod security;

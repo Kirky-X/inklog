@@ -85,6 +85,8 @@ dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
 # T508：confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
 # 级别/轮转参数（confers 依赖层级合法：inklog → confers）。
 config-confers = ["dep:confers", "confers/toml", "confers/watch"]
+# T509：KMS 密钥提供者——confers AsyncKeyProvider 适配 + Vault transit MVP
+kms = ["dep:confers", "confers/encryption", "confers/cloud-kms"]
 
 [dependencies]
 log = { workspace = true }
