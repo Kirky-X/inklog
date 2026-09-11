@@ -96,7 +96,12 @@ async fn test_comprehensive_real_data_writing() {
 
     let (logger, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await
@@ -299,7 +304,12 @@ async fn test_dynamic_configuration_changes() {
     // 创建初始日志器（build_detached + 线程级 set_default，避免进程级全局竞争）
     let (logger1, subscriber1, filter1) = LoggerManager::build_detached(
         initial_config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await
@@ -335,7 +345,12 @@ async fn test_dynamic_configuration_changes() {
     // 创建新日志器（模拟配置热更新；guard2 遮蔽 guard1，日志切换到新 logger）
     let (logger2, subscriber2, filter2) = LoggerManager::build_detached(
         updated_config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await

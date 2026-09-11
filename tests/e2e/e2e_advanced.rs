@@ -3492,6 +3492,13 @@ mod custom_sink_e2e {
 
         let (manager, subscriber, filter) = LoggerManager::build_detached_with_sinks(
             config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            None,
             vec![custom.clone() as Arc<dyn LogSink>],
         )
         .await
@@ -3554,6 +3561,13 @@ mod ops_event_e2e {
 
         let (manager, subscriber, filter) = LoggerManager::build_detached_with_sinks(
             config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            None,
             vec![custom.clone() as std::sync::Arc<dyn LogSink>],
         )
         .await

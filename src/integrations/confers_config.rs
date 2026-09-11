@@ -232,7 +232,7 @@ mod tests {
 
         let applied = Arc::new(AtomicUsize::new(0));
         let applied_for_cb = applied.clone();
-        let mut watcher = ConfersConfigWatcher::spawn(
+        let watcher = ConfersConfigWatcher::spawn(
             path.clone(),
             50,
             move |values| {

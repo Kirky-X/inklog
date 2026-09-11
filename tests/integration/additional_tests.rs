@@ -477,7 +477,12 @@ async fn test_manager_health_status_after_logging() {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await
@@ -526,7 +531,12 @@ async fn test_manager_block_strategy_high_load_sampling() {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await
@@ -615,7 +625,12 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
 
     let (manager, subscriber, filter) = LoggerManager::build_detached(
         config,
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
         None,
     )
     .await

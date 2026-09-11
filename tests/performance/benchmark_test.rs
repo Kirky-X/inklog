@@ -43,7 +43,12 @@ mod performance_test {
 
         let (_logger, subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await
@@ -102,7 +107,12 @@ mod performance_test {
         // 线程级 set_default 对全部并发任务生效
         let (_logger, subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await
@@ -164,7 +174,12 @@ mod performance_test {
 
         let (_logger, subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await
@@ -231,7 +246,12 @@ mod performance_test {
 
         let (_logger, subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await
@@ -260,7 +280,11 @@ mod performance_test {
 
     #[tokio::test]
     async fn test_batch_write_performance() {
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql"
+))]
         {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("batch_test.db");
@@ -309,7 +333,12 @@ mod performance_test {
             }
         }
 
-        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+        #[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+)))]
         {
             println!("Skipping test: requires --features \"dbnexus\"");
         }
@@ -319,7 +348,11 @@ mod performance_test {
 
     #[tokio::test]
     async fn test_connection_pool_performance() {
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+        #[cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql"
+))]
         {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("pool_test.db");
@@ -383,7 +416,12 @@ mod performance_test {
             }
         }
 
-        #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+        #[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+)))]
         {
             println!("Skipping test: requires --features \"dbnexus\"");
         }
@@ -419,7 +457,12 @@ mod performance_test {
 
         let (_logger, subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
             None,
         )
         .await

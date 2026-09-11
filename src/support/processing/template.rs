@@ -108,6 +108,8 @@ impl FromStr for OutputFormat {
 ///     file: None,
 ///     line: None,
 ///     thread_id: "main".to_string(),
+///     trace_id: None,
+///     span_id: None,
 /// };
 ///
 /// let output = template.render(&record);
@@ -318,6 +320,8 @@ impl LogTemplate {
     ///     file: None,
     ///     line: None,
     ///     thread_id: "main".to_string(),
+    ///     trace_id: None,
+    ///     span_id: None,
     /// };
     ///
     /// let output = template.render(&record);
