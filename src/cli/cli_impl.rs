@@ -163,16 +163,17 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
                 }
                 Err(e) => {
                     if args.json {
+                        let status = if config_path.exists() { "invalid" } else { "error" };
                         println!(
                             "{}",
                             serde_json::json!({
                                 "command": "validate",
                                 "config": config_path.display().to_string(),
-                                "status": "invalid",
+                                "status": status,
                                 "message": e.to_string(),
                             })
                         );
-                        // 校验失败属"发现问题"而非执行错误 → 退出码 1
+                        // validate 的失败（无效/错误）统一退出码 1
                         Ok(1)
                     } else {
                         Err(e)
@@ -202,5 +203,124 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             };
             query::run_query(&qargs)
         }
+    }
+}
+
+// ============================================================================
+// T510: 全子命令 --json + 稳定退出码（0/1/2）契约单测
+// ============================================================================
+
+#[cfg(test)]
+mod exit_code_tests {
+    use super::*;
+    use std::fs;
+
+    fn cli(json: bool, command: Commands) -> Cli {
+        Cli { json, command }
+    }
+
+    fn tempdir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn test_validate_valid_config_exit_0() {
+        let dir = tempdir();
+        let cfg = dir.path().join("valid.toml");
+        fs::write(&cfg, "[global]\nlevel = \"info\"\n").unwrap();
+        let code = run_with_args(cli(
+            false,
+            Commands::Validate {
+                config: Some(cfg),
+                prerequisites: false,
+            },
+        ))
+        .unwrap();
+        assert_eq!(code, 0, "valid config must exit 0");
+    }
+
+    #[test]
+    fn test_validate_invalid_config_json_exit_1() {
+        let dir = tempdir();
+        let cfg = dir.path().join("invalid.toml");
+        fs::write(&cfg, "[global]\nlevel = \"not-a-level\"\n").unwrap();
+        let code = run_with_args(cli(
+            true,
+            Commands::Validate {
+                config: Some(cfg),
+                prerequisites: false,
+            },
+        ))
+        .unwrap();
+        assert_eq!(code, 1, "invalid config must exit 1 (found problem, not an error)");
+    }
+
+    #[test]
+    fn test_validate_missing_config_json_status_error_exit_1() {
+        let code = run_with_args(cli(
+            true,
+            Commands::Validate {
+                config: Some(PathBuf::from("/nonexistent/inklog/config.toml")),
+                prerequisites: false,
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            code, 1,
+            "validate failures (invalid/error) unify on exit code 1; JSON status distinguishes"
+        );
+    }
+
+    #[test]
+    fn test_generate_exit_0() {
+        let dir = tempdir();
+        let code = run_with_args(cli(
+            true,
+            Commands::Generate {
+                output: Some(dir.path().to_path_buf()),
+                config_type: super::super::ConfigType::Minimal,
+                env_example: false,
+            },
+        ))
+        .unwrap();
+        assert_eq!(code, 0);
+        // 模板确实落盘
+        assert!(fs::read_dir(dir.path()).unwrap().count() > 0);
+    }
+
+    #[test]
+    fn test_decrypt_missing_input_is_error() {
+        let code = run_with_args(cli(
+            true,
+            Commands::Decrypt {
+                input: PathBuf::from("/nonexistent/inklog/file.enc"),
+                output: None,
+                key_env: "INKLOG_DECRYPT_KEY".to_string(),
+                recursive: false,
+                batch: false,
+            },
+        ));
+        assert!(code.is_err(), "missing input is an error (run_cli maps it to exit 1)");
+    }
+
+    #[test]
+    fn test_query_no_matches_exit_2_via_run_with_args() {
+        let dir = tempdir();
+        let log = dir.path().join("app.log");
+        fs::write(&log, "2026-09-11T01:00:00.000Z [INFO] a - ok\n").unwrap();
+        let code = run_with_args(cli(
+            true,
+            Commands::Query {
+                path: vec![log],
+                since: None,
+                until: None,
+                level: None,
+                grep: Some("no-such-keyword".to_string()),
+                limit: 100,
+                key_env: None,
+            },
+        ))
+        .unwrap();
+        assert_eq!(code, 2, "no matches must exit 2");
     }
 }
