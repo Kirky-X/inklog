@@ -164,6 +164,10 @@ pub mod domain;
 // Support layer
 pub mod support;
 
+// T513：网络转发 sink（net-sink feature）
+#[cfg(feature = "net-sink")]
+pub use support::io::sink::net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
+
 // T509：KMS 密钥提供者（kms feature）
 #[cfg(feature = "kms")]
 pub use support::security::{ConfersKeyProvider, EnvKeyProvider, KeyProvider, VaultTransitConfig, vault_transit_provider};

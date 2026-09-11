@@ -87,6 +87,8 @@ dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
 config-confers = ["dep:confers", "confers/toml", "confers/watch"]
 # T509：KMS 密钥提供者——confers AsyncKeyProvider 适配 + Vault transit MVP
 kms = ["dep:confers", "confers/encryption", "confers/cloud-kms"]
+# T513：网络转发 Sink——TCP（可 TLS，rustls 客户端）+ UDP，断线缓冲重连
+net-sink = ["dep:rustls"]
 
 [dependencies]
 log = { workspace = true }
@@ -136,6 +138,7 @@ unic-langid = { version = "0.9", default-features = false }
 intl-memoizer = { version = "0.5", default-features = false }
 sys-locale = { version = "0.3", default-features = false }
 aho-corasick = { version = "1.0", default-features = false, features = ["std", "perf-literal"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

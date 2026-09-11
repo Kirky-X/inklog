@@ -19,6 +19,8 @@ pub mod encryption;
 ))]
 pub mod entity;
 pub mod file;
+#[cfg(feature = "net-sink")]
+pub mod net;
 pub mod registry;
 pub mod ring_buffered_file;
 pub mod rate_limit;
@@ -46,6 +48,8 @@ pub use rotation::{
     TimeBasedRotation,
 };
 pub use rate_limit::{NoOpRateLimit, RateLimitedSink, SinkRateLimit, SinkWriteOutcome, TokenBucketRateLimit};
+#[cfg(feature = "net-sink")]
+pub use net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
 pub use sampling::{Sampler, SamplingSink};
 
 use crate::InklogError;
