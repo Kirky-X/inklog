@@ -531,6 +531,50 @@ fn detect_driver_from_url(url: &str) -> DatabaseDriver {
     }
 }
 
+/// T514：批量插入参数化（预编译语句）——DuckDB 路径的语句/参数构建。
+///
+/// 所有记录共用**同一段预编译 SQL 文本**（占位符 `?`），每条记录的列值经
+/// `DuckValue` 绑定传递——数据库不会把参数解析为 SQL 代码，从根本上消除
+/// 转义拼接路径（含引号/反斜杠/Unicode 注入向量均按字面量落库）。
+/// 非duckdb 后端维持转义路径（dbnexus 尚未提供通用参数化批量接口）。
+#[cfg(feature = "duckdb")]
+pub(crate) fn build_duckdb_param_statements(
+    records: &[LogRecord],
+    table_name: &str,
+) -> Vec<(String, Vec<dbnexus::database::DuckValue>)> {
+    use dbnexus::database::DuckValue;
+
+    let sql = format!(
+        "INSERT INTO {table_name} (timestamp, level, target, message, fields, file, line, thread_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    records
+        .iter()
+        .map(|record| {
+            let fields_json =
+                serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
+            let params = vec![
+                DuckValue::Text(record.timestamp.to_rfc3339()),
+                DuckValue::Text(record.level.clone()),
+                DuckValue::Text(record.target.clone()),
+                DuckValue::Text(record.message.clone()),
+                DuckValue::Text(fields_json),
+                record
+                    .file
+                    .as_ref()
+                    .map(|f| DuckValue::Text(f.clone()))
+                    .unwrap_or(DuckValue::Null),
+                record
+                    .line
+                    .map(|l| DuckValue::BigInt(l as i64))
+                    .unwrap_or(DuckValue::Null),
+                DuckValue::Text(record.thread_id.clone()),
+            ];
+            (sql.clone(), params)
+        })
+        .collect()
+}
+
 #[cfg(any(
     feature = "sqlite",
     feature = "postgres",
@@ -555,6 +599,29 @@ impl Database for DbNexusAdapter {
                 source: Some(Box::new(e)),
             }
         })?;
+
+        // T514：DuckDB 后端走参数化批量（预编译语句 + 绑定参数），消除转义拼接
+        #[cfg(feature = "duckdb")]
+        if self.driver == crate::DatabaseDriver::DuckDB {
+            let statements = build_duckdb_param_statements(records, &self.table_name);
+            session
+                .execute_duckdb_transaction(statements)
+                .await
+                .map_err(|e| {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("err", e.to_string());
+                    InklogError::DatabaseError {
+                        message: crate::i18n::tr_args("db-batch_insert_failed", args),
+                        source: Some(Box::new(e)),
+                    }
+                })?;
+            tracing::debug!(
+                table = %self.table_name,
+                count = records.len(),
+                "Database batch insert succeeded (parameterized)"
+            );
+            return Ok(records.len());
+        }
 
         // 构建所有记录的 INSERT SQL 语句
         let sqls: Vec<String> = records
@@ -1485,5 +1552,62 @@ mod tests {
 
         let _ = std::fs::remove_file(&perm_path);
         let _ = std::fs::remove_file(&db_path);
+    }
+}
+
+// ============================================================================
+// T514: 批量插入参数化（DuckDB 预编译语句）构建器单测
+// ============================================================================
+
+#[cfg(all(test, feature = "duckdb"))]
+mod param_batch_tests {
+    use super::*;
+
+    #[test]
+    fn test_param_statements_share_prepared_sql_and_bind_values() {
+        let mut record = LogRecord::new(
+            tracing::Level::WARN,
+            "db::param".to_string(),
+            "it's got \"quotes\" and \\backslash\\ and unicode 你好".to_string(),
+        );
+        record.file = Some("src/db.rs".to_string());
+        record.line = Some(42);
+        record
+            .fields
+            .insert("k".to_string(), serde_json::json!({"n": 1}));
+
+        let statements = build_duckdb_param_statements(&[record.clone(), record.clone()], "app_logs");
+
+        assert_eq!(statements.len(), 2);
+        // 预编译语句：全部记录共用同一段 SQL 文本
+        assert_eq!(statements[0].0, statements[1].0);
+        assert!(
+            statements[0]
+                .0
+                .starts_with("INSERT INTO app_logs (timestamp, level, target, message, fields, file, line, thread_id)"),
+            "SQL must target the configured table"
+        );
+        assert!(
+            !statements[0].0.contains("it's"),
+            "values must NOT be inlined into SQL"
+        );
+        // 8 个占位符 ↔ 8 个绑定参数
+        assert_eq!(statements[0].0.matches('?').count(), 8);
+        assert_eq!(statements[0].1.len(), 8);
+        // 绑定值保留原始字面量（不转义）
+        use dbnexus::database::DuckValue;
+        let params = &statements[0].1;
+        assert!(
+            matches!(&params[3], DuckValue::Text(t) if t.contains("it's")),
+            "message must be bound verbatim"
+        );
+        assert!(matches!(&params[6], DuckValue::BigInt(42)));
+        // NULL 列
+        let mut no_source = record;
+        no_source.file = None;
+        no_source.line = None;
+        let statements = build_duckdb_param_statements(std::slice::from_ref(&no_source), "t");
+        assert!(matches!(statements[0].1[5], DuckValue::Null));
+        assert!(matches!(statements[0].1[6], DuckValue::Null));
     }
 }

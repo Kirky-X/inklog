@@ -164,6 +164,14 @@ pub mod domain;
 // Support layer
 pub mod support;
 
+// T514：Sink 中间件链
+pub use support::io::sink::middleware::{
+    EnrichMiddleware, LevelFilterMiddleware, MiddlewareChain, MiddlewareSink, MiddlewareVerdict,
+    RecordMiddleware,
+};
+#[cfg(feature = "otlp")]
+pub use support::io::sink::otlp::{OtlpConfig, OtlpSink};
+
 // T513：网络转发 sink（net-sink feature）
 #[cfg(feature = "net-sink")]
 pub use support::io::sink::net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};

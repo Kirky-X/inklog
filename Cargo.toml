@@ -89,6 +89,8 @@ config-confers = ["dep:confers", "confers/toml", "confers/watch"]
 kms = ["dep:confers", "confers/encryption", "confers/cloud-kms"]
 # T513：网络转发 Sink——TCP（可 TLS，rustls 客户端）+ UDP，断线缓冲重连
 net-sink = ["dep:rustls"]
+# T514：OTLP 日志导出 MVP（OTLP/HTTP JSON，手写传输，无新增依赖）
+otlp = []
 
 [dependencies]
 log = { workspace = true }

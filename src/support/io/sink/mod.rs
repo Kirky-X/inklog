@@ -19,8 +19,11 @@ pub mod encryption;
 ))]
 pub mod entity;
 pub mod file;
+pub mod middleware;
 #[cfg(feature = "net-sink")]
 pub mod net;
+#[cfg(feature = "otlp")]
+pub mod otlp;
 pub mod registry;
 pub mod ring_buffered_file;
 pub mod rate_limit;
@@ -48,8 +51,14 @@ pub use rotation::{
     TimeBasedRotation,
 };
 pub use rate_limit::{NoOpRateLimit, RateLimitedSink, SinkRateLimit, SinkWriteOutcome, TokenBucketRateLimit};
+pub use middleware::{
+    EnrichMiddleware, LevelFilterMiddleware, MiddlewareChain, MiddlewareSink, MiddlewareVerdict,
+    RecordMiddleware,
+};
 #[cfg(feature = "net-sink")]
 pub use net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
+#[cfg(feature = "otlp")]
+pub use otlp::{OtlpConfig, OtlpSink};
 pub use sampling::{Sampler, SamplingSink};
 
 use crate::InklogError;
