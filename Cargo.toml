@@ -44,7 +44,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\", \"fast-masking\"))"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\", \"fast-masking\", \"dbnexus-audit\", \"config-confers\", \"kms\", \"net-sink\", \"otlp\"))"] }
 
 [lints]
 workspace = true
@@ -79,6 +79,9 @@ gzip = ["dep:flate2"]
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 # Aho-Corasick multi-pattern masking acceleration.
 fast-masking = ["dep:aho-corasick"]
+# T503：dbnexus AuditStorage 端口适配器（审计事件 → inklog DB sink 落库）。
+# 不含数据库驱动，可与任一后端 feature 组合。
+dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
 
 [dependencies]
 log = { workspace = true }
