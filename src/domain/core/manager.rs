@@ -83,6 +83,73 @@ pub struct LoggerManager {
         feature = "duckdb"
     ))]
     database: Option<Arc<dyn Database>>,
+    /// T502：当前级别指令集，`set_level` 在此之上做 upsert 后重建 EnvFilter 热换装。
+    level_state: Mutex<LevelDirectives>,
+    /// T502：级别热调执行器，包装 `reload::Handle<EnvFilter, Registry>::reload`。
+    /// `None` 表示构建路径未提供 reload 能力。
+    level_reloader: Option<LevelReloader>,
+}
+
+/// T502：EnvFilter 热换装闭包类型（隐藏 `reload::Handle` 的具体类型参数）。
+type LevelReloader = Arc<
+    dyn Fn(tracing_subscriber::filter::EnvFilter) -> Result<(), String> + Send + Sync,
+>;
+
+/// T502：reload 换装层类型（`S = Registry`：与 `with_config_and_sinks` 中
+/// 先挂 filter、再挂 subscriber 的组合顺序对应）。
+type ReloadFilterLayer =
+    tracing_subscriber::reload::Layer<tracing_subscriber::filter::EnvFilter, tracing_subscriber::Registry>;
+
+/// T502：级别指令集状态与 `set_level` 的 upsert/重建逻辑。
+#[derive(Debug, Clone)]
+pub(crate) struct LevelDirectives {
+    /// 全局默认级别
+    global: String,
+    /// per-target 级别（如 `("hyper", "warn")` → `hyper=warn`）
+    targets: Vec<(String, String)>,
+    /// RUST_LOG 提供的原始附加指令（`set_level` 重建时原样保留）
+    extra_raw: Option<String>,
+}
+
+impl LevelDirectives {
+    pub(crate) fn new(global: String, targets: Vec<(String, String)>, extra_raw: Option<String>) -> Self {
+        Self { global, targets, extra_raw }
+    }
+
+    /// upsert 一条级别指令（None target 覆盖全局，Some 覆盖同 target 或追加）。
+    pub(crate) fn upsert(&mut self, target: Option<&str>, level: &str) {
+        match target {
+            None => self.global = level.to_string(),
+            Some(t) => {
+                if let Some(slot) = self.targets.iter_mut().find(|(name, _)| name == t) {
+                    slot.1 = level.to_string();
+                } else {
+                    self.targets.push((t.to_string(), level.to_string()));
+                }
+            }
+        }
+    }
+
+    /// 合成 EnvFilter 指令字符串：全局级别在前，target 指令随后，RUST_LOG 附加殿后。
+    pub(crate) fn to_filter_string(&self) -> String {
+        let mut s = self.global.clone();
+        for (target, level) in &self.targets {
+            s.push_str(&format!(",{target}={level}"));
+        }
+        if let Some(raw) = &self.extra_raw {
+            if !raw.is_empty() {
+                s.push(',');
+                s.push_str(raw);
+            }
+        }
+        s
+    }
+}
+
+/// T502：级别指令集 → EnvFilter 指令字符串（全局级别在前，target 指令在后）。
+#[cfg(test)]
+pub(crate) fn directives_to_filter_string(directives: &LevelDirectives) -> String {
+    directives.to_filter_string()
 }
 
 impl LoggerManager {
@@ -282,7 +349,7 @@ impl LoggerManager {
             "Logger manager initialized"
         );
 
-        let (manager, subscriber, filter) = Self::build_detached_with_sinks(
+        let (manager, subscriber, _filter_compat, filter_layer) = Self::build_detached_full(
             config.clone(),
             #[cfg(any(
                 feature = "sqlite",
@@ -295,8 +362,12 @@ impl LoggerManager {
         )
         .await?;
 
-        // 1. 安装 tracing subscriber
-        let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+        // 1. 安装 tracing subscriber。
+        // T502：filter_layer（reload 包装）先于 subscriber 挂载——与其构造处的
+        // `S = Registry` 类型标注一致；组合顺序对过滤语义无影响。
+        let registry = tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(subscriber);
         // `SetGlobalDefaultError` 的唯一含义是"全局 subscriber 已被设置"——通常是宿主
         // 应用已先行安装。属良性条件：tracing 事件会流向已安装的 subscriber，降级为
         // debug 与下方 log logger 处理保持一致，避免噪音。
@@ -416,6 +487,42 @@ impl LoggerManager {
         ),
         InklogError,
     > {
+        let (manager, subscriber, filter, _filter_layer) = Self::build_detached_full(
+            config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            database,
+            custom_sinks,
+        )
+        .await?;
+        Ok((manager, subscriber, filter))
+    }
+
+    /// T502 完整构建路径：额外返回 reload 换装层（供 `with_config_and_sinks`
+    /// 安装到全局 registry，使 [`Self::set_level`] 热调即时生效）。
+    pub(crate) async fn build_detached_full(
+        config: InklogConfig,
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
+        database: Option<Arc<dyn Database>>,
+        custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
+    ) -> Result<
+        (
+            Self,
+            LoggerSubscriber,
+            tracing_subscriber::filter::EnvFilter,
+            ReloadFilterLayer,
+        ),
+        InklogError,
+    > {
         let metrics = Arc::new(Metrics::new());
         let (sender, receiver) = bounded(config.performance.channel_capacity);
         let (console_sender, console_receiver) = bounded(config.performance.channel_capacity);
@@ -519,6 +626,26 @@ impl LoggerManager {
             }
             _ => tracing_subscriber::filter::EnvFilter::new(base_filter),
         };
+
+        // T502：EnvFilter 以 reload::Layer 包装，支持运行时 set_level 热换装。
+        // 兼容路径返回的 EnvFilter 是同一指令集的克隆（供测试/调用方断言字符串）；
+        // 真正安装到 registry 的是 filter_layer。
+        let (filter_layer, reload_handle): (ReloadFilterLayer, _) =
+            tracing_subscriber::reload::Layer::new(filter.clone());
+        let level_reloader: LevelReloader = Arc::new(move |new_filter| {
+            reload_handle
+                .reload(new_filter)
+                .map_err(|e| format!("level reload failed: {e}"))
+        });
+        let level_state = Mutex::new(LevelDirectives::new(
+            level_str.to_string(),
+            config
+                .target_levels
+                .iter()
+                .map(|(t, l)| (t.clone(), l.clone()))
+                .collect(),
+            std::env::var("RUST_LOG").ok().filter(|v| !v.is_empty()),
+        ));
 
         // Create error sink for logging system errors
         let error_sink_config = FileSinkConfig {
@@ -673,9 +800,11 @@ impl LoggerManager {
                 feature = "duckdb"
             ))]
             database: None,
+            level_state,
+            level_reloader: Some(level_reloader),
         };
 
-        Ok((manager, subscriber, filter))
+        Ok((manager, subscriber, filter, filter_layer))
     }
 
     pub fn builder() -> LoggerBuilder {
@@ -762,6 +891,68 @@ impl LoggerManager {
 
     pub fn effective_channel_capacity(&self) -> usize {
         self.effective_capacity.load(Ordering::Acquire)
+    }
+
+    /// 运行时日志级别热调整（T502）。
+    ///
+    /// 在当前级别指令集之上做 upsert 后重建 `EnvFilter`，并经
+    /// `tracing_subscriber::reload` 热换装——进程内即时生效，无需重启。
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - `None` 调整全局默认级别；`Some(target)` 调整特定模块/target
+    ///   的级别（优先级高于全局默认、低于 `RUST_LOG`）
+    /// * `level` - 目标级别（trace/debug/info/warn/error/fatal，大小写不敏感）
+    ///
+    /// # Errors
+    ///
+    /// 非法级别名返回 `InklogError::ConfigError`，指令集保持不变。
+    ///
+    /// # Example
+    /// ```ignore
+    /// manager.set_level(None, "debug")?;            // 全局调到 debug
+    /// manager.set_level(Some("hyper"), "warn")?;    // hyper 模块单独 warn
+    /// ```
+    pub fn set_level(&self, target: Option<&str>, level: &str) -> Result<(), InklogError> {
+        if !crate::LogLevel::is_valid_level(level) {
+            return Err(InklogError::ConfigError(format!(
+                "Invalid log level '{}'. Valid levels: {}",
+                level,
+                crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
+            )));
+        }
+        let normalized = level.to_ascii_lowercase();
+        let new_filter = {
+            let mut state = self
+                .level_state
+                .lock()
+                .expect("level_state mutex poisoned");
+            state.upsert(target, &normalized);
+            tracing_subscriber::filter::EnvFilter::new(state.to_filter_string())
+        };
+        if let Some(reloader) = &self.level_reloader {
+            // reload 失败仅意味着没有存活的已安装层（如 build_detached 测试路径
+            // 未安装全局 subscriber）——指令集已更新，不视为错误。
+            if let Err(e) = reloader(new_filter) {
+                tracing::warn!(
+                    error = %e,
+                    "set_level: no live installed filter to swap (detached build?); directives updated anyway"
+                );
+            }
+        }
+        match target {
+            None => tracing::info!(level = %normalized, "log level changed at runtime"),
+            Some(t) => tracing::info!(target = t, level = %normalized, "target log level changed at runtime"),
+        }
+        Ok(())
+    }
+
+    /// 查询当前级别指令集的 EnvFilter 字符串表示（T502 调试用）。
+    pub fn current_level_filter_string(&self) -> String {
+        self.level_state
+            .lock()
+            .expect("level_state mutex poisoned")
+            .to_filter_string()
     }
 
     pub fn channel_len(&self) -> usize {
@@ -3304,5 +3495,177 @@ worker_threads = 1
         );
 
         let _ = manager.shutdown();
+    }
+}
+
+// ============================================================================
+// T502: 运行时级别热调 —— 指令集 upsert/重建 + reload 换装过滤行为
+// ============================================================================
+
+#[cfg(test)]
+mod set_level_tests {
+    use super::*;
+
+    #[test]
+    fn test_level_directives_upsert_and_render() {
+        let mut d = LevelDirectives::new(
+            "info".to_string(),
+            vec![("hyper".to_string(), "warn".to_string())],
+            None,
+        );
+        assert_eq!(directives_to_filter_string(&d), "info,hyper=warn");
+
+        // 全局覆盖
+        d.upsert(None, "debug");
+        assert_eq!(directives_to_filter_string(&d), "debug,hyper=warn");
+        // 新 target 追加
+        d.upsert(Some("my_crate"), "trace");
+        assert_eq!(
+            directives_to_filter_string(&d),
+            "debug,hyper=warn,my_crate=trace"
+        );
+        // 已有 target 覆盖（不重复追加）
+        d.upsert(Some("hyper"), "error");
+        assert_eq!(
+            directives_to_filter_string(&d),
+            "debug,hyper=error,my_crate=trace"
+        );
+        assert_eq!(d.targets.len(), 2, "upsert must not duplicate targets");
+    }
+
+    #[test]
+    fn test_level_directives_preserves_rust_log_extra() {
+        let mut d = LevelDirectives::new(
+            "info".to_string(),
+            Vec::new(),
+            Some("nebulaid=debug,hyper=warn".to_string()),
+        );
+        d.upsert(None, "error");
+        assert_eq!(
+            directives_to_filter_string(&d),
+            "error,nebulaid=debug,hyper=warn",
+            "RUST_LOG extra directives must survive set_level rebuilds"
+        );
+    }
+
+    /// 核心行为验证：reload 换装后过滤行为立即变化（与 set_level 使用的
+    /// 同一机制：reload::Layer 包装 EnvFilter + Handle::reload）。
+    #[test]
+    fn test_reload_filter_changes_filtering_immediately() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tracing::subscriber::with_default;
+        use tracing_subscriber::prelude::*;
+
+        // 事件捕获层
+        struct CountingLayer(std::sync::Arc<AtomicUsize>);
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CountingLayer {
+            fn on_event(
+                &self,
+                _event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let counter = std::sync::Arc::new(AtomicUsize::new(0));
+        let filter = tracing_subscriber::filter::EnvFilter::new("info");
+        let (filter_layer, reload_handle): (ReloadFilterLayer, _) =
+            tracing_subscriber::reload::Layer::new(filter);
+        // filter_layer 先挂（S = Registry），与生产组合顺序一致
+        let registry = tracing_subscriber::registry()
+            .with(filter_layer)
+            .with(CountingLayer(counter.clone()));
+
+        with_default(registry, || {
+            // 初始 info：debug 被过滤，info 通过
+            tracing::debug!(target: "t502", message = "debug before");
+            assert_eq!(counter.load(Ordering::SeqCst), 0, "debug must be filtered");
+            tracing::info!(target: "t502", message = "info before");
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+            // 热调到 error：info 立即被过滤
+            reload_handle
+                .reload(tracing_subscriber::filter::EnvFilter::new("error"))
+                .expect("reload");
+            tracing::info!(target: "t502", message = "info after");
+            assert_eq!(
+                counter.load(Ordering::SeqCst),
+                1,
+                "info must be filtered immediately after set to error"
+            );
+
+            // 热调到 debug：debug 立即通过
+            reload_handle
+                .reload(tracing_subscriber::filter::EnvFilter::new("debug"))
+                .expect("reload");
+            tracing::debug!(target: "t502", message = "debug after");
+            assert_eq!(
+                counter.load(Ordering::SeqCst),
+                2,
+                "debug must pass immediately after set to debug"
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn test_manager_set_level_updates_directives_and_validates() {
+        let mut config = InklogConfig::default();
+        config.global.level = "info".to_string();
+        config.target_levels.insert("hyper".to_string(), "warn".to_string());
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
+        let (manager, _subscriber, filter) = LoggerManager::build_detached(config, None).await.unwrap();
+        #[cfg(not(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        )))]
+        let (manager, _subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
+
+        // 初始指令集 = 全局 + target_levels
+        assert_eq!(
+            manager.current_level_filter_string(),
+            "info,hyper=warn",
+            "initial directives must mirror the config"
+        );
+        // EnvFilter Display 会重排指令顺序，做语义等价比较
+        let rendered = filter.to_string();
+        assert!(
+            rendered.contains("hyper=warn") && rendered.contains("info"),
+            "EnvFilter must carry global level + target directive, got: {rendered}"
+        );
+
+        // 全局调级
+        manager.set_level(None, "debug").unwrap();
+        assert_eq!(manager.current_level_filter_string(), "debug,hyper=warn");
+
+        // per-target 调级（新增）
+        manager.set_level(Some("my_crate"), "trace").unwrap();
+        assert_eq!(
+            manager.current_level_filter_string(),
+            "debug,hyper=warn,my_crate=trace"
+        );
+
+        // per-target 调级（覆盖）
+        manager.set_level(Some("hyper"), "error").unwrap();
+        assert_eq!(
+            manager.current_level_filter_string(),
+            "debug,hyper=error,my_crate=trace"
+        );
+
+        // 非法级别：报错且指令集不变
+        let err = manager.set_level(Some("hyper"), "not-a-level").unwrap_err();
+        assert!(err.to_string().contains("Invalid log level"));
+        assert_eq!(
+            manager.current_level_filter_string(),
+            "debug,hyper=error,my_crate=trace",
+            "failed set_level must leave directives unchanged"
+        );
     }
 }
