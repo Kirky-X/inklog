@@ -201,6 +201,7 @@ impl LoggerManager {
         // 注意：cache 和 database 依赖传递给 LoggerManager 内部使用
         // 它们可以通过 LoggerManager 传递给需要的服务（如 DatabaseSink）
         let cache = deps.cache;
+        let custom_sinks = deps.custom_sinks;
         #[cfg(any(
             feature = "sqlite",
             feature = "postgres",
@@ -210,7 +211,7 @@ impl LoggerManager {
         let database = deps.database;
 
         // 使用解析后的配置调用现有的构建逻辑
-        let (mut manager, _subscriber, _filter) = Self::build_detached(
+        let (mut manager, _subscriber, _filter) = Self::build_detached_with_sinks(
             config,
             #[cfg(any(
                 feature = "sqlite",
@@ -219,6 +220,7 @@ impl LoggerManager {
                 feature = "duckdb"
             ))]
             database.clone(),
+            custom_sinks,
         )
         .await?;
 
@@ -262,6 +264,15 @@ impl LoggerManager {
     /// }
     /// ```
     pub async fn with_config(config: InklogConfig) -> Result<Self, InklogError> {
+        Self::with_config_and_sinks(config, Vec::new()).await
+    }
+
+    /// 使用给定配置创建 LoggerManager 并注册动态第三方 sink（T501），
+    /// 随后安装全局 tracing/log 前端。语义与 [`Self::with_config`] 一致。
+    pub(crate) async fn with_config_and_sinks(
+        config: InklogConfig,
+        custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
+    ) -> Result<Self, InklogError> {
         // Security audit: Log logger initialization
         #[cfg(feature = "http")]
         tracing::info!(
@@ -271,7 +282,7 @@ impl LoggerManager {
             "Logger manager initialized"
         );
 
-        let (manager, subscriber, filter) = Self::build_detached(
+        let (manager, subscriber, filter) = Self::build_detached_with_sinks(
             config.clone(),
             #[cfg(any(
                 feature = "sqlite",
@@ -280,6 +291,7 @@ impl LoggerManager {
                 feature = "duckdb"
             ))]
             None,
+            custom_sinks,
         )
         .await?;
 
@@ -368,11 +380,63 @@ impl LoggerManager {
         ),
         InklogError,
     > {
+        Self::build_detached_with_sinks(
+            config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            database,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// 构建 LoggerManager 但不安装全局订阅者，并注册动态第三方 sink（T501）。
+    ///
+    /// 每个注册的 sink 获得独立 channel（`extra_async_senders` 通道）与一条
+    /// 通用 SinkWorker 消费线程，第三方 Sink 零核心改动接入。
+    pub async fn build_detached_with_sinks(
+        config: InklogConfig,
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
+        database: Option<Arc<dyn Database>>,
+        custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
+    ) -> Result<
+        (
+            Self,
+            LoggerSubscriber,
+            tracing_subscriber::filter::EnvFilter,
+        ),
+        InklogError,
+    > {
         let metrics = Arc::new(Metrics::new());
         let (sender, receiver) = bounded(config.performance.channel_capacity);
         let (console_sender, console_receiver) = bounded(config.performance.channel_capacity);
         let (control_tx, control_rx) = bounded(10); // Control channel for recovery commands
         let effective_capacity = Arc::new(AtomicUsize::new(config.performance.channel_capacity));
+
+        // T501：动态 sink 各自获得独立 channel；若内置异步 sink（file/db）全部
+        // 关闭，首个自定义 sink 的通道兼任主 async 通道（承担 fallback 补发语义），
+        // 不再重复加入 extras，避免该 sink 收到重复记录。
+        let mut custom_channels: Vec<(
+            String,
+            Arc<dyn LogSink>,
+            crossbeam_channel::Receiver<Arc<LogRecord>>,
+        )> = Vec::with_capacity(custom_sinks.len());
+        let mut custom_senders: Vec<crossbeam_channel::Sender<Arc<LogRecord>>> =
+            Vec::with_capacity(custom_sinks.len());
+        for (idx, sink) in custom_sinks.into_iter().enumerate() {
+            let (tx, rx) = bounded(config.performance.channel_capacity);
+            custom_senders.push(tx);
+            custom_channels.push((format!("custom-{idx}"), sink, rx));
+        }
 
         // 每个启用的异步 sink 拥有独立 channel，避免 MPMC 单接收者语义导致
         // 记录只被一个 worker 消费（其余 sink 数据缺失）。
@@ -396,6 +460,8 @@ impl LoggerManager {
         // Initialize tracing subscriber with console_sender channel
         let primary_async_sender = if file_enabled {
             sender.clone()
+        } else if let Some(first_custom) = custom_senders.first().cloned() {
+            first_custom
         } else {
             db_sender
                 .clone()
@@ -406,6 +472,12 @@ impl LoggerManager {
             primary_async_sender,
             metrics.clone(),
         );
+        // T501：每个动态 sink 通道加入 extras；当首个自定义通道兼任主 async
+        // 通道（file/db 全关）时跳过它，防止重复投递。
+        let custom_extra_offset = usize::from(!file_enabled && !db_enabled);
+        for extra in custom_senders.iter().skip(custom_extra_offset) {
+            subscriber = subscriber.with_extra_async_sender(extra.clone());
+        }
         if file_enabled && db_enabled {
             subscriber = subscriber.with_extra_async_sender(db_sender.clone().expect("db sender"));
         }
@@ -566,6 +638,14 @@ impl LoggerManager {
                 feature = "duckdb"
             ))]
             db_receiver,
+            custom_sinks: custom_channels
+                .into_iter()
+                .map(|(name, sink, receiver)| super::workers::CustomSinkEntry {
+                    name,
+                    sink,
+                    receiver,
+                })
+                .collect(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -1089,6 +1169,7 @@ mod tests {
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: None,
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -1111,6 +1192,7 @@ mod tests {
         let deps = LoggerDependencies {
             cache: Some(Arc::clone(&cache)),
             config: None,
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -1154,6 +1236,7 @@ mod tests {
         let deps = LoggerDependencies {
             cache: None,
             config: None,
+            custom_sinks: Vec::new(),
             database: Some(Arc::clone(&database)),
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -1176,6 +1259,7 @@ mod tests {
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -2475,6 +2559,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -2515,6 +2600,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -2571,6 +2657,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -2602,6 +2689,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: Some(Arc::new(mock_config)),
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -2643,6 +2731,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: None,
             config: None,
+            custom_sinks: Vec::new(),
             database: Some(Arc::new(MockDatabaseAdapter::new())),
         };
 
@@ -3007,6 +3096,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: None,
+            custom_sinks: Vec::new(),
             database: Some(Arc::new(MockDatabaseAdapter::new())),
         };
         let debug_str = format!("{:?}", deps);
@@ -3038,6 +3128,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
+            custom_sinks: Vec::new(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -3072,6 +3163,7 @@ worker_threads = 1
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
+            custom_sinks: Vec::new(),
             database: Some(Arc::new(MockDatabaseAdapter::new())),
         };
 

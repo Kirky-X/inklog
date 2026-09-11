@@ -3434,3 +3434,102 @@ mod multi_component_e2e {
         let _ = content;
     }
 }
+
+// ============================================================================
+// T501: 动态 Sink 注册 e2e —— 自定义内存 sink 零核心改动接入
+// ============================================================================
+
+mod custom_sink_e2e {
+    use super::*;
+    use async_trait::async_trait;
+    use inklog::{InklogConfig, LoggerManager};
+    use std::sync::Arc;
+    use parking_lot::Mutex;
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::prelude::*;
+
+    /// 第三方自定义内存 sink（测试替身）：仅实现 LogSink 即可接入。
+    struct MemorySink {
+        records: Mutex<Vec<String>>,
+    }
+
+    impl MemorySink {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                records: Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl LogSink for MemorySink {
+        async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+            self.records.lock().push(format!(
+                "{}|{}|{}",
+                record.level, record.target, record.message
+            ));
+            Ok(())
+        }
+
+        async fn flush(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_custom_memory_sink_revents_via_add_sink_pipeline() {
+        let custom = MemorySink::new();
+        let config = InklogConfig {
+            // console/file 均关：验证纯自定义 sink 也能收全量记录
+            console_sink: None,
+            file_sink: None,
+            ..Default::default()
+        };
+
+        let (manager, subscriber, filter) = LoggerManager::build_detached_with_sinks(
+            config,
+            vec![custom.clone() as Arc<dyn LogSink>],
+        )
+        .await
+        .expect("build_detached_with_sinks");
+
+        let registry = tracing_subscriber::registry()
+            .with(subscriber)
+            .with(filter);
+
+        with_default(registry, || {
+            tracing::info!(target: "custom::e2e", message = "hello custom sink");
+            tracing::warn!(target: "custom::e2e", message = "warn record");
+        });
+
+        // worker 异步消费，限时等待两条记录
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while custom.records.lock().len() < 2 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let records = custom.records.lock();
+        assert!(
+            records.len() >= 2,
+            "custom sink must receive records via the generic SinkWorker, got: {:?}",
+            *records
+        );
+        assert!(
+            records.iter().any(|r| r.contains("hello custom sink")),
+            "custom sink must receive the info record, got: {:?}",
+            *records
+        );
+        assert!(
+            records.iter().any(|r| r.contains("warn record")),
+            "custom sink must receive the warn record, got: {:?}",
+            *records
+        );
+        drop(records);
+
+        manager.shutdown().expect("shutdown");
+    }
+}

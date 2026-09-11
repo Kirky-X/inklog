@@ -176,10 +176,10 @@ pub use support::io::sink::ring_buffered_file::{
 #[cfg(feature = "gzip")]
 pub use support::io::sink::GzipCompression;
 pub use support::io::sink::{
-    CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation, CompressionStrategy,
-    DiskCheckable, FileSinkFactory, LogSink, NoCompression, Rotatable, RotationContext,
-    RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry, SizeBasedRotation,
-    TimeBasedRotation,
+    AsyncSink, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
+    CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, Rotatable,
+    RotationContext, RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry,
+    SizeBasedRotation, TimeBasedRotation,
 };
 
 // Re-export masking for benchmarks

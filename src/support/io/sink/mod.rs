@@ -48,6 +48,16 @@ use crate::InklogError;
 use crate::LogRecord;
 use async_trait::async_trait;
 
+/// Async sink registration port (T501: dynamic sink registration).
+///
+/// Third-party sinks implement [`LogSink`] (all methods async) and are
+/// registered via [`crate::LoggerBuilder::add_sink`] as `Arc<dyn AsyncSink>`.
+/// Every `LogSink` implementor automatically implements `AsyncSink` through a
+/// blanket impl, so third-party sinks need zero core changes to plug in.
+pub trait AsyncSink: LogSink {}
+
+impl<T: LogSink + ?Sized> AsyncSink for T {}
+
 /// Log sink trait for writing log records to various destinations.
 ///
 /// All methods use `&self` instead of `&mut self` to support interior mutability
