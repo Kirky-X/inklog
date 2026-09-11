@@ -82,6 +82,9 @@ fast-masking = ["dep:aho-corasick"]
 # T503：dbnexus AuditStorage 端口适配器（审计事件 → inklog DB sink 落库）。
 # 不含数据库驱动，可与任一后端 feature 组合。
 dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
+# T508：confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
+# 级别/轮转参数（confers 依赖层级合法：inklog → confers）。
+config-confers = ["dep:confers", "confers/toml", "confers/watch"]
 
 [dependencies]
 log = { workspace = true }
@@ -97,6 +100,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 trait-kit = { version = "0.5.0-rc.3", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+confers = { version = "0.6.0-rc.3", default-features = false, features = ["toml", "watch"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -205,6 +209,7 @@ inherits = "release"
 # Local development patches (rc3 hardening)
 # ============================================================================
 [patch.crates-io]
+confers = { path = "../confers" }
 dbnexus = { path = "../dbnexus" }
 oxcache = { path = "../oxcache" }
 trait-kit = { path = "../trait-kit" }
