@@ -1965,6 +1965,8 @@ worker_threads = 1
             file: None,
             line: None,
             thread_id: "test-thread".to_string(),
+            trace_id: None,
+            span_id: None,
         });
         manager
             .sender
@@ -2006,6 +2008,8 @@ worker_threads = 1
                 file: None,
                 line: None,
                 thread_id: "test-thread".to_string(),
+                trace_id: None,
+                span_id: None,
             });
             manager.sender.send(record).expect("Failed to send record");
         }
@@ -2076,6 +2080,8 @@ worker_threads = 1
             file: None,
             line: None,
             thread_id: "test-thread".to_string(),
+            trace_id: None,
+            span_id: None,
         });
         // 发送到 console 通道（console worker 消费）
         manager
@@ -2815,6 +2821,8 @@ worker_threads = 1
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         });
         manager
             .sender
@@ -3141,6 +3149,8 @@ worker_threads = 1
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         });
         manager.sender.send(record).expect("Failed to send record");
 
@@ -3167,6 +3177,8 @@ worker_threads = 1
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
         });
         manager.sender.send(record2).expect("Failed to send record");
 

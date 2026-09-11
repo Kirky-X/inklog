@@ -498,6 +498,8 @@ impl SinkWorker<'_> {
             file: None,
             line: None,
             thread_id: thread::current().name().unwrap_or("unknown").to_string(),
+            trace_id: None,
+            span_id: None,
         };
         let _ = self
             .runtime_handle
@@ -1352,6 +1354,8 @@ mod tests {
                             file: None,
                             line: None,
                             thread_id: "test".to_string(),
+                            trace_id: None,
+                            span_id: None,
                         });
                         if tx.send(record).is_err() {
                             break;
@@ -1478,6 +1482,8 @@ mod tests {
                 file: None,
                 line: None,
                 thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
             });
             file_tx.send(record).expect("send record");
         }
@@ -1660,6 +1666,8 @@ mod tests {
                 file: None,
                 line: None,
                 thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
             });
             db_tx.send(record).expect("send db record");
         }
@@ -1807,6 +1815,8 @@ mod custom_sink_worker_tests {
                 file: None,
                 line: None,
                 thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
                 ..Default::default()
             }))
             .unwrap();
@@ -1874,6 +1884,8 @@ mod custom_sink_worker_tests {
             file: None,
             line: None,
             thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
             ..Default::default()
         }))
         .unwrap();

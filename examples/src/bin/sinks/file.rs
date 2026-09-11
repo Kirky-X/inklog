@@ -84,6 +84,8 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
             file: Some(file!().to_string()),
             line: Some(line!()),
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await?;
     }
@@ -153,6 +155,8 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
             file: Some(file!().to_string()),
             line: Some(line!()),
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await?;
         // 立即 flush 以触发轮转检查
@@ -254,6 +258,8 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
             file: Some(file!().to_string()),
             line: Some(line!()),
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await?;
         // 立即 flush 以触发轮转检查

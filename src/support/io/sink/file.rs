@@ -1591,6 +1591,8 @@ mod tests {
             file: Some("/path/to/test.rs".to_string()),
             line: Some(42),
             thread_id: "test-thread".to_string(),
+            trace_id: None,
+            span_id: None,
         }
     }
 
@@ -1808,6 +1810,8 @@ mod tests {
             file: Some("test.rs".to_string()),
             line: Some(1),
             thread_id: format!("{:?}", std::thread::current().id()),
+            trace_id: None,
+            span_id: None,
         };
 
         // Should succeed with sufficient disk space
@@ -3139,6 +3143,8 @@ mod tests {
             file: None,
             line: None,
             thread_id: "t1".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await.unwrap();
         sink.flush().await.unwrap();
@@ -3172,6 +3178,8 @@ mod tests {
             file: None,
             line: None,
             thread_id: "t1".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await.unwrap();
         sink.flush().await.unwrap();

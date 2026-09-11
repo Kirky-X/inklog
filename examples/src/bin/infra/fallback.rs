@@ -216,6 +216,8 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
             file: Some(file!().to_string()),
             line: Some(line!()),
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         },
         LogRecord {
             timestamp: Utc::now(),
@@ -226,6 +228,8 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
             file: Some(file!().to_string()),
             line: Some(line!()),
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         },
         LogRecord {
             timestamp: Utc::now(),
@@ -236,6 +240,8 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
             file: Some(file!().to_string()),
             line: Some(line!()),
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         },
     ];
 
@@ -337,6 +343,8 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
             file: Some(file!().to_string()),
             line: Some(line!()),
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         })
         .collect();
 
@@ -529,6 +537,8 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
                 file: Some(file!().to_string()),
                 line: Some(line!()),
                 thread_id: "main".to_string(),
+                trace_id: None,
+                span_id: None,
             }
         })
         .collect();
@@ -570,6 +580,8 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
                 file: record.file.clone(),
                 line: record.line,
                 thread_id: record.thread_id.clone(),
+                trace_id: None,
+                span_id: None,
             };
             fallback_sink.write(&fallback_record).await?;
             fallback_sink.flush().await?;

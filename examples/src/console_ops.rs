@@ -44,6 +44,8 @@ pub async fn write_test_cases(sink: &dyn LogSink, cases: &[(&str, &str)]) -> Res
             file: None,
             line: None,
             thread_id: "main".to_string(),
+            trace_id: None,
+            span_id: None,
         };
         sink.write(&record).await?;
         written += 1;

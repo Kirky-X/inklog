@@ -752,6 +752,8 @@ fn create_test_logs(count: usize) -> Vec<inklog::log_record::LogRecord> {
             file: Some(format!("src/test_{}.rs", i % 5)),
             line: Some((i % 100) as u32),
             thread_id: format!("thread-{}", i % 4),
+            trace_id: None,
+            span_id: None,
         })
         .collect()
 }
