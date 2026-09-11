@@ -178,8 +178,8 @@ pub use support::io::sink::GzipCompression;
 pub use support::io::sink::{
     AsyncSink, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
     CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, Rotatable,
-    RotationContext, RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry,
-    SizeBasedRotation, TimeBasedRotation,
+    RotationContext, RotationResult, RotationStrategy, Sampler, SamplingSink, SinkFactory,
+    SinkMetadata, SinkRegistry, SizeBasedRotation, TimeBasedRotation,
 };
 
 // Re-export masking for benchmarks

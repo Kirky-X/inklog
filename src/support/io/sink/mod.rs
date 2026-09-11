@@ -22,6 +22,7 @@ pub mod file;
 pub mod registry;
 pub mod ring_buffered_file;
 pub mod rotation;
+pub mod sampling;
 
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 #[cfg(feature = "compression")]
@@ -43,6 +44,7 @@ pub use rotation::{
     CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,
     TimeBasedRotation,
 };
+pub use sampling::{Sampler, SamplingSink};
 
 use crate::InklogError;
 use crate::LogRecord;
