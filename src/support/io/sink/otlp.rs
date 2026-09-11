@@ -75,8 +75,8 @@ fn encode_log_record(record: &LogRecord) -> serde_json::Value {
     })
 }
 
-/// 组装 OTLP/HTTP JSON 请求体。
-pub(crate) fn encode_otlp_body(records: &[LogRecord], service_name: &str) -> String {
+/// 组装 OTLP/HTTP JSON 请求体（导出供下游复用同一编码）。
+pub fn encode_otlp_body(records: &[LogRecord], service_name: &str) -> String {
     let log_records: Vec<serde_json::Value> = records.iter().map(encode_log_record).collect();
     serde_json::json!({
         "resourceLogs": [{

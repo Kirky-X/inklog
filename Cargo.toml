@@ -198,6 +198,11 @@ path = "tests/performance/mod.rs"
 name = "inklog_bench"
 harness = false
 
+# T506：rc4 轮新增/受影响路径基准（写入/序列化/加密），基线见 docs/PERFORMANCE.md
+[[bench]]
+name = "rc4_pipeline_bench"
+harness = false
+
 [[bin]]
 name = "inklog-cli"
 path = "src/cli/main.rs"
