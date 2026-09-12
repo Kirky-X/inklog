@@ -23,6 +23,7 @@
 //! ```
 
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 /// HMAC-SHA256 输出长度（字节）
 pub const CHAIN_HASH_LEN: usize = 32;
@@ -179,27 +180,15 @@ impl ArchiveChain {
             let Some(actual) = hex_decode(&entry.hmac) else {
                 return false;
             };
-            // 常量时间比较（subtle），防时序侧信道
-            let expected_key = subtle_ct_eq(&expected, &actual);
-            if !expected_key {
+            // 常量时间比较（subtle::ConstantTimeEq，volatile 读取防编译器
+            // 重排引入时序方差）；长度不等立即 false——长度本身非秘密
+            if !bool::from(expected.ct_eq(&actual)) {
                 return false;
             }
             prev_hash = expected;
         }
         true
     }
-}
-
-/// 常量时间字节比较（长度不等立即 false——长度本身非秘密）。
-fn subtle_ct_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 #[cfg(test)]

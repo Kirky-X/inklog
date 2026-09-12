@@ -773,26 +773,6 @@ impl Metrics {
             ));
         }
 
-        //
-        s.push_str("# HELP inklog_latency_bucket Latency histogram bucket\n");
-        s.push_str("# TYPE inklog_latency_bucket counter\n");
-        let bounds = self.latency_histogram.bounds();
-        let buckets = self.latency_histogram.snapshot();
-        for (i, &bound) in bounds.iter().enumerate() {
-            if i < buckets.len() {
-                s.push_str(&format!(
-                    "inklog_latency_bucket{{le=\"{}\"}} {}\n",
-                    bound, buckets[i]
-                ));
-            }
-        }
-        //
-        let total_count: u64 = buckets.iter().sum();
-        s.push_str(&format!(
-            "inklog_latency_bucket{{le=\"+Inf\"}} {}\n",
-            total_count
-        ));
-
         s
     }
 }

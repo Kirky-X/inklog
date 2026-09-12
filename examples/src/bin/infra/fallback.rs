@@ -143,8 +143,9 @@ impl LogSink for FailingSink {
     }
 
     fn is_healthy(&self) -> bool {
-        // try_lock 避免在 sync 方法中 await
-        self.inner.try_lock().map(|g| g.is_some()).unwrap_or(false)
+        // try_lock 避免在 sync 方法中 await；锁被占用说明写入正在进行，
+        // 视为健康（竞争 ≠ 故障），仅 inner 为 None（已故障/关闭）时不健康
+        self.inner.try_lock().map(|g| g.is_some()).unwrap_or(true)
     }
 
     async fn shutdown(&self) -> Result<(), inklog::InklogError> {

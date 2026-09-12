@@ -121,6 +121,9 @@ struct TcpState {
 }
 
 /// TCP 转发 sink（断线缓冲 + 自动重连）。
+///
+/// 未调用 [`TcpSink::shutdown`] 即 drop 时，重发缓冲中未落盘的记录会被
+/// 丢弃；需要 at-least-once 语义的调用方应先显式 shutdown。
 pub struct TcpSink {
     config: TcpSinkConfig,
     tls_config: Option<rustls::ClientConfig>,
@@ -221,8 +224,16 @@ impl TcpSink {
     /// 单条记录 → 出站字节行。
     fn encode(&self, record: &LogRecord) -> Vec<u8> {
         let mut line = match self.config.format {
-            NetWireFormat::JsonLine => serde_json::to_string(record)
-                .unwrap_or_else(|_| format!("{{\"message\":{:?}}}", record.message)),
+            NetWireFormat::JsonLine => serde_json::to_string(record).unwrap_or_else(|_| {
+                // 序列化失败兜底：仅保留 message/level/target 的合法 JSON，
+                // 维持 NDJSON 单行契约（Debug 格式化的字符串不是合法 JSON）
+                serde_json::json!({
+                    "message": record.message,
+                    "level": record.level,
+                    "target": record.target,
+                })
+                .to_string()
+            }),
             NetWireFormat::Text => crate::LogTemplate::new(
                 "{timestamp} [{level}] {target} - {message}",
             )
@@ -253,7 +264,11 @@ impl TcpSink {
                     ),
                     // WouldBlock 等其他错误 = 存活
                 };
-                let _ = stream.set_nonblocking(false);
+                // 阻塞模式恢复失败则弃用连接：非阻塞残留会让后续
+                // write_all/flush 全部 WouldBlock，sink 永久失效
+                if stream.set_nonblocking(false).is_err() {
+                    return true;
+                }
                 verdict
             }
             // TLS 流的半开探测需 rustls 状态机配合，依赖 write 错误回传
@@ -358,15 +373,7 @@ impl UdpSink {
                 config.addr
             )));
         }
-        let socket = std::net::UdpSocket::bind(if std::net::ToSocketAddrs::to_socket_addrs(
-            &"0.0.0.0:0",
-        )
-        .is_ok()
-        {
-            "0.0.0.0:0"
-        } else {
-            "0.0.0.0:0"
-        })?;
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
         socket
             .connect(config.addr.as_str())
             .map_err(|e| InklogError::ConfigError(format!("UDP connect to '{}': {e}", config.addr)))?;
@@ -375,7 +382,15 @@ impl UdpSink {
 
     fn encode(&self, record: &LogRecord) -> Vec<u8> {
         let mut line = match self.format {
-            NetWireFormat::JsonLine => serde_json::to_string(record).unwrap_or_default(),
+            NetWireFormat::JsonLine => serde_json::to_string(record).unwrap_or_else(|_| {
+                // 序列化失败兜底：合法 JSON 单行（同 TcpSink，NDJSON 契约）
+                serde_json::json!({
+                    "message": record.message,
+                    "level": record.level,
+                    "target": record.target,
+                })
+                .to_string()
+            }),
             NetWireFormat::Text => crate::LogTemplate::new(
                 "{timestamp} [{level}] {target} - {message}",
             )
@@ -619,7 +634,13 @@ mod tests {
         );
 
         const MESSAGES: [&str; 4] = ["m0 first", "m1 buffered", "m2 buffered", "m3 after reconnect"];
-        for m in MESSAGES {
+        for (i, m) in MESSAGES.iter().enumerate() {
+            if i == 1 {
+                // 服务端在收到 m0 后立即断开；稍候写入让 FIN/RST 先于
+                // 写前探测可见，否则 m1 可能落入"TCP 写后知错"的固有窗口
+                //（对端已关但本端写仍被内核接受，数据不可达且无从缓冲）。
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
             sink.write(&test_record(m)).await.unwrap();
         }
 

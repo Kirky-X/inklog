@@ -17,7 +17,7 @@
 //! use std::sync::Arc;
 //!
 //! let chain = MiddlewareChain::new()
-//!     .push(Arc::new(LevelFilterMiddleware::new("warn")))
+//!     .push(Arc::new(LevelFilterMiddleware::new("warn").expect("valid level")))
 //!     .push(Arc::new(EnrichMiddleware::new("cluster", "prod-1")));
 //! let inner: Arc<dyn inklog::LogSink> = Arc::new(ConsoleSink::new(
 //!     Default::default(),
@@ -106,10 +106,20 @@ pub struct LevelFilterMiddleware {
 
 impl LevelFilterMiddleware {
     /// `min_level`: trace/debug/info/warn/error/fatal（大小写不敏感）。
-    pub fn new(min_level: &str) -> Self {
-        Self {
-            min_rank: level_rank(min_level),
+    ///
+    /// # Errors
+    ///
+    /// 未知级别名返回 `InklogError::ConfigError`——静默构造会让过滤器
+    /// 丢弃全部记录。
+    pub fn new(min_level: &str) -> Result<Self, InklogError> {
+        let rank = level_rank(min_level);
+        if rank == u8::MAX {
+            return Err(InklogError::ConfigError(format!(
+                "unknown min level '{min_level}' for level-filter middleware; \
+                 valid levels: trace/debug/info/warn/error/fatal"
+            )));
         }
+        Ok(Self { min_rank: rank })
     }
 }
 
@@ -184,6 +194,10 @@ impl MiddlewareSink {
 #[async_trait]
 impl LogSink for MiddlewareSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        // 空链快路：无中间件时零拷贝直通内层 sink
+        if self.chain.is_empty() {
+            return self.inner.write(record).await;
+        }
         let mut record = record.clone();
         if !self.chain.apply(&mut record) {
             if let Some(ref metrics) = self.metrics {
@@ -255,10 +269,18 @@ mod tests {
 
     #[test]
     fn test_level_filter_middleware() {
-        let mw = LevelFilterMiddleware::new("warn");
+        let mw = LevelFilterMiddleware::new("warn").expect("valid level");
         assert_eq!(mw.process(&mut record(Level::ERROR, "x")), MiddlewareVerdict::Continue);
         assert_eq!(mw.process(&mut record(Level::WARN, "x")), MiddlewareVerdict::Continue);
         assert_eq!(mw.process(&mut record(Level::INFO, "x")), MiddlewareVerdict::Drop);
+    }
+
+    #[test]
+    fn test_level_filter_middleware_rejects_unknown_level() {
+        // 未知级别必须构造期报错：静默构造会丢弃全部记录
+        assert!(LevelFilterMiddleware::new("foobar").is_err());
+        assert!(LevelFilterMiddleware::new("").is_err());
+        assert!(LevelFilterMiddleware::new("WARN").is_ok());
     }
 
     #[test]
@@ -291,7 +313,9 @@ mod tests {
             MiddlewareSink::new(
                 inner.clone() as Arc<dyn LogSink>,
                 MiddlewareChain::new()
-                    .push(Arc::new(LevelFilterMiddleware::new("warn")))
+                    .push(Arc::new(
+                        LevelFilterMiddleware::new("warn").expect("valid level"),
+                    ))
                     .push(Arc::new(EnrichMiddleware::new("tenant", "acme"))),
             )
             .with_metrics(metrics.clone()),

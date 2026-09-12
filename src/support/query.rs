@@ -262,7 +262,9 @@ pub(crate) fn parse_line(line: &str, source: &Path) -> Option<LogEntry> {
                     .to_string(),
                 message: json
                     .get("message")
-                    .map(|v| v.to_string())
+                    // 字符串值取原文（Value::to_string 会带上 JSON 引号）；
+                    // 非字符串值保留其 JSON 文本形态
+                    .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))
                     .unwrap_or_default(),
                 source: source.to_path_buf(),
             });
@@ -436,6 +438,8 @@ not a log line
         )
         .expect("JSON line must parse");
         assert_eq!(entry.level, "WARN");
+        // 字符串 message 不能携带 JSON 引号
+        assert_eq!(entry.message, r#"{"k":1}"#);
         assert!(parse_line("not a log line", Path::new("x")).is_none());
         assert!(parse_line("", Path::new("x")).is_none());
     }

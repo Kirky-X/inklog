@@ -182,13 +182,16 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 
     all_files.sort_by_key(|entry| entry.file_name());
 
+    // 轮转文件名带创建年份后缀；按运行时当前年份识别，避免硬编码过期
+    let year_tag = format!("_{}", chrono::Utc::now().format("%Y"));
+
     let mut rotation_count = 0;
     for file in &all_files {
         let file_name = file.file_name().to_string_lossy().to_string();
         if file_name.contains("inklog_example_rotation") {
             let metadata = file.metadata().await?;
             let size = metadata.len();
-            let marker = if file_name.contains("_2026") {
+            let marker = if file_name.contains(&year_tag) {
                 rotation_count += 1;
                 " [轮转]"
             } else {

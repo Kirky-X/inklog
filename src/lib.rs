@@ -351,6 +351,8 @@ pub async fn init_inklog_logger() -> Result<(), InklogError> {
 /// }
 /// ```
 pub async fn init_inklog_logger_with_config(config: InklogConfig) -> Result<(), InklogError> {
+    // 先初始化、后占哨兵：初始化失败时不污染单例状态，调用方可修正配置后重试。
+    let manager = LoggerManager::with_config(config).await?;
     INIT_SENTINEL.set(()).map_err(|_| {
         InklogError::ConfigError(
             "inklog logger already initialized; init_inklog_logger() is a singleton — \
@@ -358,9 +360,9 @@ pub async fn init_inklog_logger_with_config(config: InklogConfig) -> Result<(), 
                 .into(),
         )
     })?;
-    let _manager = LoggerManager::with_config(config).await?;
-    // LoggerManager::with_config already installs the global tracing subscriber
-    // and log crate logger. We intentionally leak `_manager` (it is kept alive
-    // for the process lifetime via the global subscriber).
+    // 管理器持有 sink worker 线程与 channel 接收端：必须跨进程存活期保留
+    //（mem::forget 抑制 Drop），否则 Drop→shutdown 会停掉全部 worker，
+    // 初始化完成后的日志会被静默丢弃。
+    std::mem::forget(manager);
     Ok(())
 }

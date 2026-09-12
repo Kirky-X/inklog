@@ -571,7 +571,7 @@ async fn test_manager_block_strategy_high_load_sampling() {
         })
         .collect();
     for handle in handles {
-        let _ = handle.join();
+        handle.join().expect("producer thread must not panic");
     }
 
     let start = Instant::now();
@@ -665,7 +665,7 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
         })
         .collect();
     for handle in handles {
-        let _ = handle.join();
+        handle.join().expect("producer thread must not panic");
     }
 
     // 核正：Adaptive 扩容是瞬态的——channel 排空后 shrink_wait_seconds（1s）到期

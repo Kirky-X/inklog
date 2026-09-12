@@ -582,10 +582,15 @@ impl LoggerManager {
             sender.clone()
         } else if let Some(first_custom) = custom_senders.first().cloned() {
             first_custom
-        } else {
+        } else if db_enabled {
             db_sender
                 .clone()
-                .expect("db sink enabled when file sink disabled")
+                .expect("db sender present when db_enabled")
+        } else {
+            // file/db 全关且无自定义 sink（仅 console 的极简配置）：无 async
+            // 通道可作主通道——以即刻断连的哑通道兜底，记录计入 logs_dropped
+            // 而非 panic。
+            bounded(config.performance.channel_capacity).0
         };
         let mut subscriber = LoggerSubscriber::new(
             console_sender.clone(),
@@ -608,7 +613,9 @@ impl LoggerManager {
         }
 
         // Wire rate limiter when configured
-        if let Some(rate) = config.performance.rate_limit {
+        // rate_limit = 0 等价"每秒 0 条"——会让非关键日志全量丢弃；与
+        // None 同义处理为不限流。
+        if let Some(rate) = config.performance.rate_limit.filter(|&r| r > 0) {
             subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(rate)));
         }
 
@@ -2982,6 +2989,32 @@ worker_threads = 1
     // 直接调用可覆盖其内部逻辑：metrics 创建、channel 创建、subscriber 创建、
     // filter 解析、kit 注册等。
     // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_build_detached_console_only_config_does_not_panic() {
+        // file/db 全关且无自定义 sink 的极简配置：主 async 通道必须退化为
+        // 断连哑通道而非 panic
+        let config = InklogConfig {
+            file_sink: Some(crate::FileSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            database_sink: None,
+            ..Default::default()
+        };
+        let (_manager, _subscriber, _filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(any(
+                feature = "sqlite",
+                feature = "postgres",
+                feature = "mysql",
+                feature = "duckdb"
+            ))]
+            None,
+        )
+        .await
+        .expect("console-only config must build without panic");
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_detached_returns_valid_components() {

@@ -286,6 +286,12 @@ impl DbNexusAdapter {
     ///
     /// * `pool` - 已创建的连接池实例
     /// * `table_name` - 日志表名称
+    ///
+    /// # Warning
+    ///
+    /// 池实例无法解析驱动，转义语义固定为 PostgreSQL（不含 MySQL 的
+    /// 反斜杠二次转义）。MySQL 连接池请改用 `with_full_config` /
+    /// `with_table_name` 等可显式指定驱动的方式，避免错误转义。
     pub fn from_pool(pool: DbPool, table_name: &str) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
         // 无 URL 可解析驱动，沿用 detect_driver_from_url 的默认回退（PostgreSQL）；
@@ -307,6 +313,11 @@ impl DbNexusAdapter {
     ///
     /// * `pool` - dbnexus 连接池 trait 对象（通常来自 `kit.require::<DbNexusModule>()`）
     /// * `table_name` - 日志表名称
+    ///
+    /// # Warning
+    ///
+    /// trait 对象无法解析驱动，转义语义固定为 PostgreSQL（不含 MySQL 的
+    /// 反斜杠二次转义）。MySQL 场景请改用可显式指定驱动的构造方式。
     pub fn from_connection_pool(
         pool: Arc<dyn ConnectionPool + Send + Sync>,
         table_name: &str,

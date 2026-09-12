@@ -96,21 +96,33 @@ async fn test_file_sink_auto_recovery() {
     tracing::info!("Test message before failure");
     recovery_thread::sleep(RecoveryDuration::from_millis(100));
 
+    // 基线断言：初始写入确实落盘
+    assert!(
+        recovery_fs::metadata(&log_file).is_ok(),
+        "log file must be created by the initial write"
+    );
+
     // Simulate file sink failure by removing the log file
     let _ = recovery_fs::remove_file(&log_file);
 
-    // Log more messages (these should fail and trigger recovery)
-    for i in 0..10 {
-        tracing::info!("Test message during failure {}", i);
+    // Log more messages after removal
+    for i in 0..5 {
+        tracing::info!("Test message after file removal {}", i);
         recovery_thread::sleep(RecoveryDuration::from_millis(50));
     }
 
-    // Wait for auto-recovery to trigger
-    recovery_thread::sleep(RecoveryDuration::from_secs(2));
-
-    // Log messages after potential recovery
-    tracing::info!("Test message after recovery");
-    recovery_thread::sleep(RecoveryDuration::from_millis(100));
+    // 契约断言：日志文件被删除后管道不得中断。注意 FileSink 持有已打开的
+    // 文件句柄——Linux 下删除路径不会使后续 write 失败（记录继续写入
+    // unlinked inode），因此工厂自动恢复路径（仅对真实写错误生效）不会
+    // 在此场景触发，断言的是"写入持续成功"而非"文件重建"。
+    let before = manager.get_health_status().metrics.logs_written;
+    tracing::info!("Test message after removal (pipeline continuity)");
+    recovery_thread::sleep(RecoveryDuration::from_millis(200));
+    let after = manager.get_health_status().metrics.logs_written;
+    assert!(
+        after > before,
+        "logging pipeline must keep working after log file removal (written {before} -> {after})"
+    );
 
     // Check health status
     let health = manager.get_health_status();

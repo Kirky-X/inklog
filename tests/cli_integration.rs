@@ -284,8 +284,8 @@ fn test_cli_query_exit_code_2_without_matches() {
     ])
     .assert()
     .failure()
-    .code(2)
-    .stdout(predicate::str::is_empty().not().or(predicate::str::is_empty()));
+    .code(2);
+    // 契约只承诺退出码：无匹配时 stdout 可为空（文本模式不输出结果集）
 }
 
 #[test]

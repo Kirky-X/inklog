@@ -551,10 +551,12 @@ impl<'a> tracing::field::Visit for LogVisitor<'a> {
             } else {
                 "-Infinity"
             };
-            tracing::warn!(
-                field = field.name(),
-                value = sentinel,
-                "f64 value is non-finite, stored as string sentinel"
+            // 此处处于事件 record() 访问回调内：再发 tracing 事件会对正在
+            // 遍历的订阅者链重入（第三方层若在 on_event 中持锁处理事件，
+            // 重入可能死锁），故用标准错误报告而非 tracing。
+            eprintln!(
+                "inklog: field '{}' is non-finite ({sentinel}), stored as string sentinel",
+                field.name()
             );
             self.fields.insert(
                 field.name().to_string(),

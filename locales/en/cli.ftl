@@ -133,6 +133,7 @@ cli-decrypt-err-read-dir = Failed to read input directory: { $path }
 cli-decrypt-err-no-filename = path has no file name: { $path }
 cli-decrypt-err-glob = Invalid glob pattern: { $err }
 cli-decrypt-err-input-utf8 = Input path is not valid UTF-8: { $path }
+cli-decrypt-err-input-not-found = Input path does not exist: { $path }
 cli-decrypt-err-output-symlink = Output path is a symbolic link: { $path }
 cli-decrypt-err-input-dir-symlink = Input directory is a symbolic link: { $path }
 cli-decrypt-err-subdir-symlink = Subdirectory entry is a symbolic link (skipping): { $path }

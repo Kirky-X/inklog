@@ -97,31 +97,44 @@ pub fn encode_otlp_body(records: &[LogRecord], service_name: &str) -> String {
 /// 手写 HTTP/1.1 POST（明文；worker 阻塞线程上执行）。
 fn http_post_json(endpoint: &str, body: &str, timeout: Duration) -> Result<(), InklogError> {
     let (host, port, path) = parse_http_endpoint(endpoint)?;
+    // CR/LF 注入防护：host/path 直接内插进原始请求头，出现换行控制符
+    // 即可注入额外头部/拆分响应
+    if host.contains(['\r', '\n']) || path.contains(['\r', '\n']) {
+        return Err(InklogError::ConfigError(format!(
+            "OTLP endpoint contains CR/LF in host or path: '{endpoint}'"
+        )));
+    }
     let addr = format!("{host}:{port}");
-    let mut stream = std::net::TcpStream::connect(&addr)
-        .map_err(|e| InklogError::ConfigError(format!("OTLP connect to '{endpoint}': {e}")))?;
+    let mut stream = std::net::TcpStream::connect(&addr).map_err(|e| {
+        InklogError::IoError(std::io::Error::other(format!(
+            "OTLP connect to '{endpoint}': {e}"
+        )))
+    })?;
     stream
         .set_write_timeout(Some(timeout))
         .and_then(|_| stream.set_read_timeout(Some(timeout)))
-        .map_err(|e| InklogError::ConfigError(format!("OTLP timeout setup: {e}")))?;
+        .map_err(|e| {
+            InklogError::IoError(std::io::Error::other(format!(
+                "OTLP timeout setup: {e}"
+            )))
+        })?;
 
     use std::io::Write;
     let request = format!(
         "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| InklogError::ConfigError(format!("OTLP send: {e}")))?;
+    stream.write_all(request.as_bytes()).map_err(|e| {
+        InklogError::IoError(std::io::Error::other(format!("OTLP send: {e}")))
+    })?;
     stream.flush().ok();
 
     // 读状态行，2xx 视为成功
     use std::io::Read as _;
     let mut response = Vec::new();
-    stream
-        .take(8192)
-        .read_to_end(&mut response)
-        .map_err(|e| InklogError::ConfigError(format!("OTLP read: {e}")))?;
+    stream.take(8192).read_to_end(&mut response).map_err(|e| {
+        InklogError::IoError(std::io::Error::other(format!("OTLP read: {e}")))
+    })?;
     let text = String::from_utf8_lossy(&response);
     let status = text
         .lines()
@@ -130,7 +143,8 @@ fn http_post_json(endpoint: &str, body: &str, timeout: Duration) -> Result<(), I
         .and_then(|code| code.parse::<u16>().ok())
         .unwrap_or(0);
     if !(200..300).contains(&status) {
-        return Err(InklogError::ConfigError(format!(
+        // 传输层/远端状态错误与配置错误分型：调用方的重试/熔断依据错误类别区分
+        return Err(InklogError::RuntimeError(format!(
             "OTLP export to '{endpoint}' failed with HTTP status {status}"
         )));
     }

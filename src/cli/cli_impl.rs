@@ -56,6 +56,15 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
                 decrypt::batch_decrypt(input_str, &output, &key_env)?;
             } else if input.is_file() {
                 decrypt::decrypt_file_compatible(&input, &output, &key_env)?;
+            } else if !input.exists() {
+                // 不存在的路径在分支判定里两个谓词都是 false，会静默滑进
+                // 目录解密分支——显式拦截给出明确错误
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("path", input.display().to_string());
+                return Err(anyhow::anyhow!(
+                    "{}",
+                    inklog::i18n::tr_args("cli-decrypt-err-input-not-found", args)
+                ));
             } else {
                 decrypt::decrypt_directory_compatible(&input, &output, &key_env, recursive)?;
             }

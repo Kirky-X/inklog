@@ -515,12 +515,14 @@ fn show_prometheus_export() {
     assert!(output.contains("# TYPE inklog_sink_healthy gauge"));
     assert!(output.contains("inklog_sink_healthy{sink=\"console\"} 1"));
     assert!(output.contains("inklog_sink_healthy{sink=\"database\"} 0"));
-    assert!(output.contains("# TYPE inklog_latency_bucket counter"));
-    assert!(output.contains("inklog_latency_bucket{le=\"+Inf\"}"));
+    // 原生直方图（累积桶 + sum + count）；重复的非累积 bucket 导出已移除
+    assert!(output.contains("# TYPE inklog_write_latency_us histogram"));
+    assert!(output.contains("inklog_write_latency_us_bucket{le=\"+Inf\"}"));
+    assert!(output.contains("inklog_write_latency_us_count"));
 
     // 打印部分输出（避免刷屏）
     for line in output.lines() {
-        if line.starts_with("inklog_") && !line.starts_with("inklog_latency_bucket") {
+        if line.starts_with("inklog_") && !line.starts_with("inklog_write_latency_us_bucket") {
             println!("  {}", line);
         }
     }
