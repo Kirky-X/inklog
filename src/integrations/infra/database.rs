@@ -91,12 +91,14 @@ pub trait Database: Send + Sync {
     feature = "duckdb"
 ))]
 use dbnexus::ConnectionPool;
+// PoolStatus 仅被四驱动门控的 DbNexusAdapter::pool_status 使用；
+// test-utils 不链接 dbnexus，混入门控会在 examples 等仅开 test-utils
+// 的构建下触发 E0433。
 #[cfg(any(
     feature = "sqlite",
     feature = "postgres",
     feature = "mysql",
-    feature = "duckdb",
-    feature = "test-utils"
+    feature = "duckdb"
 ))]
 use dbnexus::database::PoolStatus;
 #[cfg(any(
