@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/inklog.png" alt="Inklog Logo" width="200">
+<img src="docs/assets/inklog.png" alt="inklog" width="180">
 
 [![CI Status](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![Version](https://img.shields.io/crates/v/inklog.svg)](https://crates.io/crates/inklog) [![Docs.rs](https://docs.rs/inklog/badge.svg)](https://docs.rs/inklog) [![Downloads](https://img.shields.io/crates/d/inklog.svg)](https://crates.io/crates/inklog) [![License](https://img.shields.io/crates/l/inklog.svg)](LICENSE) [![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org/) [![Coverage](https://codecov.io/gh/Kirky-X/inklog/branch/main/graph/badge.svg)](https://codecov.io/gh/Kirky-X/inklog)
 
@@ -10,44 +10,28 @@
 
 [✨ 功能特性](#-功能特性) • [🚀 快速开始](#-快速开始) • [📚 文档](#-文档) • [💻 示例](#-示例) • [🤝 参与贡献](#-参与贡献)
 
+<table style="width:100%; border-collapse: collapse; margin: 8px 0;">
+<tr>
+<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
+<b>⚡ 异步高吞吐</b><br>
+<sub>Tokio 异步运行时 + Crossbeam 有界通道，批量写入与背压控制</sub>
+</td>
+<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
+<b>🔒 安全内建</b><br>
+<sub>AES-256-GCM 加密、PII 脱敏、密钥内存清零、路径穿越防护</sub>
+</td>
+<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
+<b>🎯 多目标输出</b><br>
+<sub>控制台、文件、数据库、TCP/UDP 转发、OTLP 导出</sub>
+</td>
+<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
+<b>📊 全链路可观测</b><br>
+<sub>健康检查端点、Prometheus 指标、trace_id 追踪关联</sub>
+</td>
+</tr>
+</table>
+
 </div>
-
----
-
-### 🎯 基于 Tokio 构建的高性能、安全、功能丰富的日志基础设施
-
-Inklog 为企业级应用提供**全面**的日志解决方案：
-
-| ⚡ 高性能 | 🔒 安全优先 | 🌐 多目标输出 | 📊 可观测性 |
-|:---------:|:----------:|:--------------:|:--------:|
-| Tokio 异步 I/O | AES-256-GCM 加密 | 控制台、文件、数据库 | 健康监控 |
-| 批量写入与压缩 | 密钥内存安全清除 | 自动轮转 | 指标与追踪 |
-
-```rust
-use inklog::{InklogConfig, LoggerManager};
-use std::path::PathBuf;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = InklogConfig {
-        file_sink: Some(inklog::FileSinkConfig {
-            enabled: true,
-            path: "logs/app.log".into(),
-            max_size: "100MB".into(),
-            compress: true,
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    let _logger = LoggerManager::with_config(config).await?;
-
-    log::info!("应用启动成功");
-    log::error!("发生错误，详情如下");
-
-    Ok(())
-}
-```
 
 ---
 
@@ -58,13 +42,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - [✨ 功能特性](#-功能特性)
 - [🚀 快速开始](#-快速开始)
-  - [📦 安装](#-安装)
-  - [💡 基本用法](#-基本用法)
-  - [🔧 高级配置](#-高级配置)
 - [🎨 特性标志](#-特性标志)
 - [📚 文档](#-文档)
 - [💻 示例](#-示例)
 - [🏗️ 架构](#️-架构)
+- [🔀 核心执行链路](#-核心执行链路)
+- [🧯 故障降级与自愈](#-故障降级与自愈)
 - [🧪 测试](#-测试)
 - [📊 性能](#-性能)
 - [🔒 安全](#-安全)
@@ -82,276 +65,132 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## ✨ 功能特性
 
-| 🎯 核心功能 | ⚡ 企业功能 |
-|:----------:|:----------:|
-| 始终可用 | 可选特性 |
+inklog 是面向生产环境的日志基础设施：应用代码继续使用 `log` / `tracing` 标准宏，由 inklog 接管订阅、脱敏、分发与落盘。下表为主要能力，全部与仓库代码和 [docs/](docs/USER_GUIDE.md) 文档对应。
 
 <table style="width:100%; border-collapse: collapse;">
 <tr>
-<td width="50%" style="vertical-align:top; padding: 16px; border-radius:8px; border:1px solid #E2E8F0;">
+<td width="50%" style="vertical-align:top; padding: 8px;">
 
-### 🎯 核心功能 (始终可用)
-
-| 状态 | 功能 | 描述 |
-|:----:|------|------|
-| ✅ | **异步 I/O** | 基于 Tokio 的非阻塞日志记录 |
-| ✅ | **多目标输出** | 控制台、文件、数据库、自定义 Sink |
-| ✅ | **结构化日志** | tracing 生态系统集成 |
-| ✅ | **自定义格式** | 基于模板的日志格式 |
-| ✅ | **文件轮转** | 基于大小和时间的轮转 |
-| ✅ | **数据脱敏** | 基于正则的 PII 数据脱敏 |
-| ✅ | **健康监控** | Sink 状态和指标追踪 |
-| ✅ | **命令行工具** | decrypt、generate、validate 命令（需 `cli` feature） |
+| 能力 | 说明 |
+|------|------|
+| ⚡ **异步管线** | Crossbeam 有界通道 + 专用工作线程池，发送端非阻塞、队列满时背压 |
+| 📁 **文件输出** | 按大小与时间轮转、`BufWriter` 缓冲、可选压缩与加密 |
+| 🗄️ **数据库输出** | 批量落库、连接池、分区表支持，经 dbnexus 适配四种后端 |
+| 🎭 **数据脱敏** | 敏感字段名检测 + 正则规则库，`fast-masking` 加速多模式匹配 |
+| 🎨 **模板格式化** | `{timestamp}` `{level}` `{message}` `{trace_id}` 等占位符模板 |
+| 🧩 **依赖注入** | `Cache` / `Config` / `Database` trait 抽象，适配器可替换、可 Mock |
 
 </td>
-<td width="50%" style="vertical-align:top; padding: 16px; border-radius:8px; border:1px solid #E2E8F0;">
+<td width="50%" style="vertical-align:top; padding: 8px;">
 
-### ⚡ 企业功能
-
-| 状态 | 功能 | 描述 |
-|:----:|------|------|
-| 🔍 | **压缩** | ZSTD、GZIP 支持 |
-| 🔒 | **加密** | AES-256-GCM 文件加密 |
-| 🗄️ | **数据库 Sink** | PostgreSQL、MySQL、SQLite、DuckDB (dbnexus) |
-| 📊 | **Parquet 导出** | 分析就绪的日志格式 |
-| 🌐 | **HTTP 端点** | Axum 健康检查服务器 |
-| 🔧 | **命令行工具** | 日志管理实用命令 |
+| 能力 | 说明 |
+|------|------|
+| 🔁 **可靠性** | 断路器、DB → File → Console 三级降级、健康检查线程自动恢复 |
+| 🔀 **动态 Sink** | `LoggerBuilder::add_sink` 注册第三方 Sink，每 Sink 独立通道；中间件链、采样器、令牌桶限流装饰器 |
+| 🌡️ **运行时热调** | `set_level` 经 `tracing_subscriber::reload` 即时调整全局与 per-target 级别 |
+| 🔍 **日志检索** | `inklog-cli query` 按时间、级别、关键词检索本地日志（自动解密解包） |
+| 🌐 **i18n** | 错误消息经 Fluent + ICU 按系统 locale 渲染（zh-CN / en） |
+| 📈 **可观测性** | 健康状态、通道水位、连接池与写延迟直方图的 Prometheus 导出 |
 
 </td>
 </tr>
 </table>
 
-### 📦 功能预设
+<details>
+<summary>📦 进阶能力清单（对应 <code>src/</code> 模块）</summary>
 
-| 预设 | 功能 | 适用场景 |
-|------|------|----------|
-| <span style="color:#166534; padding:4px 8px; border-radius:4px;">minimal</span> | 无可选特性 | 仅核心日志功能 |
-| <span style="color:#1E40AF; padding:4px 8px; border-radius:4px;">standard</span> | `http`, `cli` | 标准开发环境 |
-| <span style="color:#991B1B; padding:4px 8px; border-radius:4px;">full</span> | 所有默认功能 | 生产环境日志 |
-| <span style="color:#9333EA; padding:4px 8px; border-radius:4px;">test-utils</span> | `MockCache`/`MockConfig`/`MockDatabaseAdapter` | 外部测试消费者：默认公共 API 已移除三个 mock（BREAKING），集成测试已全部真实化（DbNexusAdapter + sqlite），仅外部测试代码需显式启用本 feature |
+- **Sink 家族**（`src/support/io/sink/`）：`console`、`file`（轮转/压缩/加密）、`database`（批量/分区/断路器）、`ring_buffered_file`（通道缓冲高吞吐）、`net`（TCP 可 TLS + UDP）、`otlp`、`middleware`、`sampling`、`rate_limit`
+- **处理层**（`src/support/processing/`）：`template` 模板引擎、`masking` 脱敏引擎与规则注册表、`object_pool` LogRecord/字符串对象池
+- **可观测性**（`src/support/observability/`）：`Metrics`、`HealthStatus`、`SinkHealthMonitor`、回退状态
+- **校验**（`src/validation/`）：`PathValidator` 路径穿越防护、`LogSanitizer` 日志内容净化
+- **归档防篡改**（`src/support/audit_chain.rs`）：归档 HMAC-SHA256 链，防删除、重排与伪造
+- **集成适配**（`src/integrations/`）：`OxCacheAdapter`、`InklogConfigAdapter`、`DbNexusAdapter`、trait-kit `InklogModule`、dbnexus 审计桥、confers 配置与 watch
+- **CLI**（`src/cli/`）：`decrypt`、`generate`、`validate`、`query` 四个子命令
+
+</details>
 
 ---
 
 ## 🚀 快速开始
 
-### 📦 安装
+### 环境要求
 
-在 `Cargo.toml` 中添加依赖：
+| 要求 | 版本 |
+|------|------|
+| Rust | 1.97.1+（仓库经 `rust-toolchain.toml` 固定） |
+| edition | 2024 |
+| 平台 | Linux / macOS / Windows |
+
+### 安装
+
+```bash
+cargo add inklog
+```
+
+或在 `Cargo.toml` 中显式声明（`default = []`，默认仅启用核心能力）：
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.2"
+inklog = "0.3.0-rc.3"
 ```
 
-完整功能集（显式启用）：
+### 最小可运行示例
 
-```toml
-[dependencies]
-inklog = { version = "0.3.0-rc.2", default-features = false, features = ["http", "cli", "sqlite"] }
-```
-
-### 💡 基本用法
-
-<div align="center" style="margin: 24px 0;">
-
-#### 🎬 5 分钟快速开始
-
-</div>
-
-<table style="width:100%; border-collapse: collapse;">
-<tr>
-<td width="50%" style="padding: 16px; vertical-align:top;">
-
-**第一步：初始化日志系统**
+出自 [`examples/src/bin/core/basic.rs`](examples/src/bin/core/basic.rs)：
 
 ```rust
 use inklog::LoggerManager;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _logger = LoggerManager::new().await?;
+    // 默认配置初始化并安装全局 subscriber（Console Sink，级别 info）
+    let logger = LoggerManager::new().await?;
 
-    log::info!("日志系统已初始化");
+    tracing::info!("Hello, inklog!");
+    tracing::info!(user_id = 42, action = "login", "结构化字段示例");
+
+    // 退出前排空通道并关闭全部 Sink
+    logger.shutdown()?;
+    std::mem::forget(logger); // 已显式关闭，阻止 Drop 重复关闭
     Ok(())
 }
 ```
 
-</td>
-<td width="50%" style="padding: 16px; vertical-align:top;">
+### 核心概念
 
-**第二步：记录日志消息**
-
-```rust
-use inklog::LoggerManager;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _logger = LoggerManager::new().await?;
-
-    log::trace!("追踪消息");
-    log::debug!("调试消息");
-    log::info!("信息消息");
-    log::warn!("警告消息");
-    log::error!("错误消息");
-
-    Ok(())
-}
-```
-
-</td>
-</tr>
-<tr>
-<td width="50%" style="padding: 16px; vertical-align:top;">
-
-**第三步：文件日志**
-
-```rust
-use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
-
-let config = InklogConfig {
-    file_sink: Some(FileSinkConfig {
-        enabled: true,
-        path: "logs/app.log".into(),
-        max_size: "10MB".into(),
-        rotation_time: "daily".into(),
-        keep_files: 7,
-        compress: true,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-</td>
-<td width="50%" style="padding: 16px; vertical-align:top;">
-
-**第四步：数据库日志**
-
-```rust
-use inklog::{DatabaseSinkConfig, InklogConfig};
-
-let config = InklogConfig {
-    database_sink: Some(DatabaseSinkConfig {
-        enabled: true,
-        url: "sqlite://logs/app.db".to_string(),
-        pool_size: 5,
-        batch_size: 100,
-        flush_interval_ms: 1000,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-</td>
-</tr>
-</table>
-
-### 🔧 高级配置
-
-#### 加密文件日志
-
-```rust
-use inklog::{FileSinkConfig, InklogConfig};
-
-// 从环境变量设置加密密钥
-std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
-
-let config = InklogConfig {
-    file_sink: Some(FileSinkConfig {
-        enabled: true,
-        path: "logs/encrypted.log.enc".into(),
-        max_size: "10MB".into(),
-        encrypt: true,
-        encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
-        compress: false, // 加密日志不压缩
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-#### 自定义日志格式
-
-```rust
-use inklog::{InklogConfig, config::GlobalConfig};
-
-let format_string = "[{timestamp}] [{level:>5}] {target} - {message} | {file}:{line}";
-
-let config = InklogConfig {
-    global: GlobalConfig {
-        level: "debug".into(),
-        format: format_string.to_string(),
-        masking_enabled: true,
-        ..Default::default()
-    },
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
+1. **初始化**：`LoggerManager` 负责安装全局 tracing subscriber，进程内单例语义（`init_inklog_logger()` 提供便捷入口）。
+2. **记录**：业务代码使用 `tracing::info!` 等标准宏，无侵入。
+3. **Sink**：输出目标抽象（`LogSink` / `AsyncSink` trait），console / file / database / net / otlp 内置实现，可自定义。
+4. **配置**：`InklogConfig` 支持 TOML 文件与 `INKLOG_*` 环境变量覆盖，优先级为环境变量 > 配置文件 > 默认值。
+5. **关闭**：应用退出前调用 `shutdown()`，等待通道中剩余日志全部写入。
 
 ---
 
 ## 🎨 特性标志
 
-### 默认功能
+`default = []`：默认组合只包含核心能力，下列 feature 全部按需显式启用（依据 `Cargo.toml` `[features]` 定义）。
 
-```toml
-inklog = "0.3.0-rc.2"  # 默认不包含可选 feature (default = [])
-```
+| 标志 | 默认 | 说明 |
+|------|:----:|------|
+| `sqlite` | ❌ | SQLite 数据库后端（经 dbnexus，rustls 运行时） |
+| `postgres` | ❌ | PostgreSQL 数据库后端（经 dbnexus） |
+| `mysql` | ❌ | MySQL 数据库后端（经 dbnexus） |
+| `duckdb` | ❌ | DuckDB 数据库后端（经 dbnexus） |
+| `http` | ❌ | Axum HTTP 健康与指标端点（axum + axum-server，TLS 走 rustls） |
+| `cli` | ❌ | `inklog-cli` 命令行工具（clap + glob） |
+| `kit` | ❌ | trait-kit 生命周期与可观测集成（`InklogModule`），需至少一个数据库后端 feature |
+| `compression` | ❌ | Zstd 压缩轮转日志文件（zstd） |
+| `gzip` | ❌ | Gzip 压缩后端（flate2 纯 Rust；未启用 `compression` 时 FileSink 轮转回退 gzip） |
+| `parquet` | ❌ | Parquet/Arrow 导出（数据库 Sink 归档） |
+| `fast-masking` | ❌ | Aho-Corasick 多模式脱敏加速 |
+| `dbnexus-audit` | ❌ | dbnexus AuditStorage 端口适配器，审计事件经 inklog DB sink 落库，可与任一后端组合 |
+| `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数 |
+| `kms` | ❌ | KMS 密钥提供者（`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP） |
+| `net-sink` | ❌ | 网络转发 Sink（TCP 可 TLS + UDP，断线缓冲与自动重连） |
+| `otlp` | ❌ | OTLP/HTTP JSON 日志导出 MVP（手写传输，零新增依赖） |
+| `test-utils` | ❌ | 测试面 mock 导出（`MockCache` / `MockConfig` / `MockDatabaseAdapter`），不入 default 与任何生产组合 |
 
-### 可选功能
-
-```toml
-# HTTP 服务器
-inklog = { version = "0.3.0-rc.2", features = [
-    "http",       # Axum HTTP 健康端点
-] }
-
-# 命令行工具
-inklog = { version = "0.3.0-rc.2", features = [
-    "cli",        # decrypt, generate, validate 命令
-] }
-
-# 数据库 Sink (可选一个或多个)
-inklog = { version = "0.3.0-rc.2", features = [
-    "sqlite",     # SQLite 数据库 Sink
-    "postgres",   # PostgreSQL 数据库 Sink
-    "mysql",      # MySQL 数据库 Sink
-] }
-
-# 压缩与性能
-inklog = { version = "0.3.0-rc.2", features = [
-    "compression",  # ZSTD 压缩支持
-    "parquet",      # Parquet 导出支持
-    "fast-masking", # Aho-Corasick 多模式加速脱敏
-] }
-```
-
-### 功能详情
-
-| 功能 | 依赖 | 描述 |
-|---------|-------------|-------------|
-| **http** | axum | HTTP 健康检查端点 |
-| **cli** | clap, glob | 命令行工具 |
-| **sqlite** | dbnexus | SQLite 数据库 Sink |
-| **postgres** | dbnexus | PostgreSQL 数据库 Sink |
-| **mysql** | dbnexus | MySQL 数据库 Sink |
-| **duckdb** | dbnexus | DuckDB 数据库 Sink |
-| **compression** | zstd | ZSTD 压缩支持（轮转日志文件） |
-| **parquet** | parquet, arrow-array, arrow-schema | Parquet 导出支持（分析场景） |
-| **fast-masking** | aho-corasick | Aho-Corasick 多模式加速脱敏 |
-| **kit** | trait-kit, dbnexus, oxcache | trait-kit AsyncKit 集成 (InklogModule) |
-| **test-utils** | — | 测试面 mock 导出（MockCache/MockConfig/MockDatabaseAdapter），不入 default 与任何生产组合 |
-
-> ⚠️ **数据库后端互斥**：`sqlite`/`postgres`/`mysql`/`duckdb` 后端 feature 互斥（经 dbnexus 强制），不适用 `--all-features`，请按后端分组启用。
+> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 互斥（经 dbnexus 强制，embedded 与 server-side 驱动不得混用），不适用 `--all-features`，请按后端分组启用。
 
 ---
 
@@ -359,271 +198,103 @@ inklog = { version = "0.3.0-rc.2", features = [
 
 | 文档 | 说明 |
 |------|------|
-| [📖 用户指南](docs/USER_GUIDE.md) | 从安装到进阶的完整使用教程 |
-| [📘 API 参考](docs/API_REFERENCE.md) | 全部公开 API 的详细说明 |
-| [🏗️ 架构文档](docs/ARCHITECTURE.md) | 设计理念与内部实现 |
-| [🔒 安全文档](docs/SECURITY.md) | 安全设计与最佳实践 |
-| [📋 更新日志](docs/CHANGELOG.md) | 每个版本的变更记录 |
-| [🤝 贡献指南](docs/CONTRIBUTING.md) | 如何参与项目开发 |
+| [📖 用户指南](docs/USER_GUIDE.md) | 从安装、配置详解到高级主题的完整教程 |
+| [📘 API 参考](docs/API_REFERENCE.md) | 核心类型、配置结构体、错误类型与 trait 的逐项说明 |
+| [🏗️ 架构文档](docs/ARCHITECTURE.md) | 分层设计、依赖注入架构、数据流与并发模型 |
+| [📊 性能基线](docs/PERFORMANCE.md) | criterion 基准环境、方法与正式基线数字 |
+| [🧪 测试场景](docs/TEST_SCENARIOS.md) | 测试金字塔、E2E 场景定义与组合矩阵 |
+| [🔒 安全文档](docs/SECURITY.md) | 安全设计、漏洞报告流程与合规性说明 |
+| [📋 更新日志](docs/CHANGELOG.md) | 按 Keep a Changelog 格式维护的版本记录 |
+| [🤝 贡献指南](docs/CONTRIBUTING.md) | 开发环境、TDD 流程与代码风格约定 |
 | [📦 在线 API 文档](https://docs.rs/inklog) | docs.rs 自动生成的最新文档 |
 
 ---
 
 ## 💻 示例
 
-<table style="width:100%; border-collapse: collapse;">
-<tr>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
+[`examples/`](examples/) 是 workspace 内的独立 crate（`inklog-examples`），按目录分为 7 类共 39 个示例。在仓库根目录运行：
 
-#### 📝 基础日志
-
-```rust
-use inklog::LoggerManager;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _logger = LoggerManager::new().await?;
-
-    log::info!("应用已启动");
-    log::error!("发生错误: {}", err);
-
-    Ok(())
-}
+```bash
+cargo run --package inklog-examples --example <名称>
 ```
-
-</td>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
-#### 📁 带轮转的文件日志
-
-```rust
-use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
-
-let config = InklogConfig {
-    file_sink: Some(FileSinkConfig {
-        enabled: true,
-        path: "logs/app.log".into(),
-        max_size: "10MB".into(),
-        rotation_time: "daily".into(),
-        keep_files: 7,
-        compress: true,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-</td>
-</tr>
-<tr>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
-#### 🔒 加密日志
-
-```rust
-use inklog::{FileSinkConfig, InklogConfig};
-
-std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-key");
-
-let config = InklogConfig {
-    file_sink: Some(FileSinkConfig {
-        enabled: true,
-        path: "logs/encrypted.log".into(),
-        encrypt: true,
-        encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-</td>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
-#### 🗄️ 数据库日志
-
-```rust
-use inklog::{DatabaseSinkConfig, InklogConfig};
-
-let config = InklogConfig {
-    database_sink: Some(DatabaseSinkConfig {
-        enabled: true,
-        url: "postgresql://localhost/logs".to_string(),
-        pool_size: 10,
-        batch_size: 100,
-        flush_interval_ms: 1000,
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-</td>
-</tr>
-<tr>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
-#### 🏥 HTTP 健康端点
-
-```rust
-use axum::{routing::get, Json, Router};
-use inklog::LoggerManager;
-use std::sync::Arc;
-
-let logger = Arc::new(LoggerManager::new().await?);
-
-let app = Router::new().route(
-    "/health",
-    get({
-        let logger = logger.clone();
-        || async move { Json(logger.get_health_status()) }
-    }),
-);
-
-// 启动 HTTP 服务器...
-```
-
-</td>
-</tr>
-<tr>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
-#### 🎨 自定义格式
-
-```rust
-use inklog::{InklogConfig, config::GlobalConfig};
-
-let format_string = "[{timestamp}] [{level:>5}] {target} - {message}";
-
-let config = InklogConfig {
-    global: GlobalConfig {
-        level: "debug".into(),
-        format: format_string.to_string(),
-        masking_enabled: true,
-        ..Default::default()
-    },
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-```
-
-</td>
-<td width="50%" style="padding: 16px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-
-#### 🔍 数据脱敏
-
-```rust
-use inklog::{InklogConfig, config::GlobalConfig};
-
-let config = InklogConfig {
-    global: GlobalConfig {
-        level: "info".into(),
-        format: "{timestamp} {level} {message}".to_string(),
-        masking_enabled: true,  // 启用 PII 脱敏
-        ..Default::default()
-    },
-    ..Default::default()
-};
-
-let _logger = LoggerManager::with_config(config).await?;
-
-// 敏感数据将自动脱敏
-log::info!("用户邮箱: user@example.com");
-// 输出: 用户邮箱: ***@***.***
-```
-
-</td>
-</tr>
-</table>
-
-### 📦 可运行示例
-
-`examples/` 是 workspace 内的独立 crate（`inklog-examples`），按目录分为 7 类共 39 个示例。在仓库根目录使用 `cargo run --package inklog-examples --example <名称>` 运行（或进入 `examples/` 目录后 `cargo run --example <名称>`）。部分示例需启用对应 feature（如 `sqlite`、`postgres`、`compression`、`parquet`）。
 
 #### 配置（config）
 
-| 示例 | 描述 | 运行命令 |
+| 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `config_file` | 配置文件加载示例（Layer 1 本地资源） | `cargo run --package inklog-examples --example config_file` |
-| `config_inspect` | 配置 inspect：`sinks_enabled()` + `LoggerManager::load()` | `cargo run --package inklog-examples --example config_inspect` |
-| `env_overrides` | 环境变量覆盖加载示例 | `cargo run --package inklog-examples --example env_overrides` |
+| `config_file` | 配置文件加载（Layer 1 本地资源） | 无 |
+| `config_inspect` | 配置检查：`sinks_enabled()` 与 `LoggerManager::load()` | 无 |
+| `env_overrides` | 环境变量覆盖配置加载 | 无 |
 
 #### 核心（core）
 
-| 示例 | 描述 | 运行命令 |
+| 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `basic` | 基础用法示例 | `cargo run --package inklog-examples --example basic` |
-| `builder` | Builder 模式配置示例 | `cargo run --package inklog-examples --example builder` |
-| `all_features` | 完整功能演示 | `cargo run --package inklog-examples --example all_features` |
-| `production` | 生产环境配置示例 | `cargo run --package inklog-examples --example production` |
-| `template` | 日志模板示例 | `cargo run --package inklog-examples --example template` |
-| `error_handling` | 错误处理示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example error_handling` |
-| `i18n` | 国际化 (i18n) 格式化示例 | `cargo run --package inklog-examples --example i18n` |
+| `basic` | 基础用法：初始化、级别、结构化字段、健康检查、优雅关闭 | 无 |
+| `builder` | Builder 模式配置 | 无 |
+| `all_features` | 完整功能演示 | 无 |
+| `production` | 生产环境配置 | 无 |
+| `template` | 日志模板 | 无 |
+| `error_handling` | 错误处理（Layer 0 零依赖） | 无 |
+| `i18n` | 国际化格式化 | 无 |
 
 #### Sink 与输出（sinks）
 
-| 示例 | 描述 | 运行命令 |
+| 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `console` | Console Sink 示例 | `cargo run --package inklog-examples --example console` |
-| `file` | File Sink 示例 | `cargo run --package inklog-examples --example file` |
-| `rotation` | 日志轮转示例（Layer 1 本地资源） | `cargo run --package inklog-examples --example rotation` |
-| `compression` | Zstd 压缩/解压缩示例（需 `compression` feature） | `cargo run --package inklog-examples --example compression` |
-| `ring_buffered_file` | ChannelBufferedFileSink 示例（Layer 1 本地资源） | `cargo run --package inklog-examples --example ring_buffered_file` |
-| `archive_format` | 归档格式示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example archive_format` |
-| `parquet_archive` | Parquet 归档示例（需 `parquet` feature） | `cargo run --package inklog-examples --example parquet_archive` |
-| `partition_strategy` | 数据库分区策略示例 | `cargo run --package inklog-examples --example partition_strategy` |
+| `console` | Console Sink | 无 |
+| `file` | File Sink | 无 |
+| `rotation` | 日志轮转（Layer 1 本地资源） | 无 |
+| `ring_buffered_file` | ChannelBufferedFileSink（Layer 1 本地资源） | 无 |
+| `archive_format` | 归档格式（Layer 0 零依赖） | 无 |
+| `compression` | Zstd 压缩与解压缩 | `compression` |
+| `parquet_archive` | Parquet 归档 | `parquet` + 任一数据库后端 |
+| `partition_strategy` | 数据库分区策略 | 无 |
 
 #### 数据库（database）
 
-| 示例 | 描述 | 运行命令 |
+| 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `database` | Database Sink 示例（SQLite 内存库，需 `sqlite` feature） | `cargo run --package inklog-examples --features sqlite --example database` |
-| `database_pg_mysql` | PostgreSQL/MySQL 数据库驱动示例 | `cargo run --package inklog-examples --example database_pg_mysql` |
-| `di_example` | DI (Dependency Injection) 模式示例 | `cargo run --package inklog-examples --example di_example` |
+| `database` | Database Sink（SQLite 内存库） | 任一数据库后端（示例文档用 `sqlite`） |
+| `database_pg_mysql` | PostgreSQL/MySQL 数据库驱动演示 | 无 |
+| `di_example` | 依赖注入模式 | `sqlite`（经 required-features 强制） |
 
 #### 基础设施（infra）
 
-| 示例 | 描述 | 运行命令 |
+| 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `channel_strategy` | 自适应 Channel 策略示例 | `cargo run --package inklog-examples --example channel_strategy` |
-| `circuit_breaker` | 断路器示例（Layer 2 外部服务） | `cargo run --package inklog-examples --example circuit_breaker` |
-| `fallback` | Sink 降级机制示例 | `cargo run --package inklog-examples --example fallback` |
-| `log_adapter` | `log` crate 适配器示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example log_adapter` |
-| `log_level` | LogLevel 类型解析/比较/Display 示例 | `cargo run --package inklog-examples --example log_level` |
-| `metrics` | 健康监控与指标收集示例（Layer 2 外部服务） | `cargo run --package inklog-examples --example metrics` |
-| `object_pool` | 对象池示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example object_pool` |
-| `output_format` | 输出格式示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example output_format` |
-| `performance` | 性能测试示例 | `cargo run --package inklog-examples --example performance` |
-| `rate_limiter` | 速率限制器示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example rate_limiter` |
-| `runtime_ops` | LoggerManager 运行时操作 API 示例 | `cargo run --package inklog-examples --example runtime_ops` |
+| `channel_strategy` | 自适应 Channel 策略 | 无 |
+| `circuit_breaker` | 断路器（Layer 2 外部服务） | 无 |
+| `fallback` | Sink 降级机制 | 无 |
+| `log_adapter` | `log` crate 适配桥（Layer 0 零依赖） | 无 |
+| `log_level` | LogLevel 解析、比较与 Display | 无 |
+| `metrics` | 健康监控与指标收集（Layer 2 外部服务） | 无 |
+| `object_pool` | 对象池（Layer 0 零依赖） | 无 |
+| `output_format` | 输出格式（Layer 0 零依赖） | 无 |
+| `performance` | 性能演示 | 无 |
+| `rate_limiter` | 速率限制器（Layer 0 零依赖） | 无 |
+| `runtime_ops` | LoggerManager 运行时操作 API | 无 |
 
 #### 网络（network）
 
-| 示例 | 描述 | 运行命令 |
+| 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `http` | HTTP 健康检查和指标端点示例 | `cargo run --package inklog-examples --example http` |
-| `http_auth` | HTTP 认证与 IP 白名单示例 | `cargo run --package inklog-examples --example http_auth` |
-| `tls_config` | TLS 配置示例 | `cargo run --package inklog-examples --example tls_config` |
+| `http` | HTTP 健康检查与指标端点演示 | 无 |
+| `http_auth` | HTTP 认证与 IP 白名单配置 | 无 |
+| `tls_config` | TLS 配置 | 无 |
 
 #### 安全（security）
 
-| 示例 | 描述 | 运行命令 |
+| 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `encryption` | 日志加密示例 | `cargo run --package inklog-examples --example encryption` |
-| `log_sanitizer` | 日志内容净化示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example log_sanitizer` |
-| `masking` | 数据脱敏示例 | `cargo run --package inklog-examples --example masking` |
-| `path_validator` | 路径验证器示例（Layer 0 零依赖） | `cargo run --package inklog-examples --example path_validator` |
+| `encryption` | 日志加密 | 无 |
+| `log_sanitizer` | 日志内容净化（Layer 0 零依赖） | 无 |
+| `masking` | 数据脱敏 | 无 |
+| `path_validator` | 路径验证器（Layer 0 零依赖） | 无 |
 
-<div align="center" style="margin: 24px 0;">
+<div align="center">
 
-**[📂 查看所有示例 →](examples/)**
+**[📂 浏览全部示例 →](examples/)**
 
 </div>
 
@@ -631,341 +302,282 @@ log::info!("用户邮箱: user@example.com");
 
 ## 🏗️ 架构
 
-> 完整的架构设计、数据流与扩展点说明见 [🏗️ 架构文档](docs/ARCHITECTURE.md)。
-
-<div align="center" style="margin: 24px 0;">
-
-### 🏗️ 系统架构
-
-</div>
+inklog 采用分层异步架构（对照 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 `src/` 模块树）：`domain` 层持有 `LoggerManager` / `LoggerBuilder` 与配置模型，`domain::core::subscriber` 实现 tracing Subscriber 并构建 `LogRecord`；记录经 `support::processing` 完成模板渲染与脱敏后进入 Crossbeam 有界通道，由 `domain::core::workers` 的专用线程分发给 `support::io::sink` 中的各 Sink；`integrations` 层以依赖倒置方式把缓存（oxcache）、配置（confers）、数据库（dbnexus）适配到 `Cache` / `Config` / `Database` trait 上；`support::observability` 汇聚健康状态与指标，并经 `http` feature 暴露端点。
 
 ```mermaid
 flowchart TD
-    App["应用层<br/>(使用 log! 宏的代码)"]
-    API["Inklog API 层<br/>- LoggerManager, LoggerBuilder<br/>- 配置管理<br/>- 健康监控"]
-    Sink["Sink 抽象层<br/>- ConsoleSink<br/>- FileSink (轮转、压缩)<br/>- DatabaseSink (批量写入)<br/>- AsyncFileSink<br/>- RingBufferedFileSink"]
-    Core["核心处理层<br/>- 日志格式化和模板<br/>- 数据脱敏 (PII)<br/>- 加密 (AES-256-GCM)<br/>- 压缩 (ZSTD, GZIP)"]
-    IO["并发与 I/O<br/>- Tokio 异步运行时<br/>- Crossbeam 通道<br/>- Rayon 并行处理"]
-    Store["存储与外部服务<br/>- 文件系统<br/>- 数据库 (PostgreSQL, MySQL, SQLite, DuckDB)<br/>- Parquet (分析)"]
-
-    App --> API --> Sink --> Core --> IO --> Store
+    APP["应用代码<br/>tracing 标准宏"] --> SUB["domain::core::subscriber<br/>LoggerSubscriber"]
+    CFG["domain::config<br/>InklogConfig"] --> MGR["domain::core<br/>LoggerManager / LoggerBuilder"]
+    MGR --> SUB
+    MGR --> INT["integrations 适配器<br/>OxCache / InklogConfig / DbNexus"]
+    SUB --> PROC["support::processing<br/>template / masking / object_pool"]
+    PROC --> CH["Crossbeam 有界通道"]
+    CH --> W["domain::core::workers<br/>文件 / 数据库 / 健康检查线程"]
+    W --> SINK["support::io::sink<br/>console / file / database / net / otlp<br/>middleware / sampling / rate_limit"]
+    SINK --> STORE["存储后端<br/>文件系统 / PostgreSQL / MySQL / SQLite / DuckDB"]
+    W --> OBS["support::observability<br/>Metrics / HealthStatus"]
+    OBS --> HTTP["HTTP 端点<br/>健康与 Prometheus 指标"]
 ```
 
-### 分层说明
+| 分层 | 职责 |
+|------|------|
+| `domain` | 日志管理器、构建器、DI 容器、Subscriber、工作线程与配置模型 |
+| `support` | Sink 实现、模板与脱敏处理、对象池、指标、校验、查询、审计链 |
+| `integrations` | 以 trait 适配 oxcache / confers / dbnexus / trait-kit，隔离外部依赖 |
+| `i18n` | Fluent + ICU 消息本地化（zh-CN / en 资源位于 `locales/`） |
+| `cli` | `inklog-cli` 二进制：decrypt / generate / validate / query |
 
-**应用层**
-- 应用代码使用 `log` crate 的标准 `log!` 宏
-- 与现有 Rust 日志模式兼容
+---
 
-**Inklog API 层**
-- `LoggerManager`: 所有日志操作的主要协调器
-- `LoggerBuilder`: 流式构建器模式配置
-- 健康状态跟踪和指标收集
+## 🔀 核心执行链路
 
-**Sink 抽象层**
-- 多种 Sink 实现对应不同的输出目标
-- 开发环境的控制台输出
-- 带轮转、压缩和加密的文件输出
-- 批量写入的数据库输出 (PostgreSQL, MySQL, SQLite, DuckDB)
-- 高吞吐量场景的异步和缓冲文件 Sink
+一条日志从记录到落盘的完整路径（依据 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)「数据流」章节提炼）：
 
-**核心处理层**
-- 基于模板的日志格式化
-- 基于正则的 PII 数据脱敏 (邮箱、身份证、信用卡等)
-- 敏感日志的 AES-256-GCM 加密
-- 多种压缩算法 (ZSTD, GZIP)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as 应用代码
+    participant Sub as LoggerSubscriber
+    participant Chan as Crossbeam 有界通道
+    participant Worker as 工作线程
+    participant FS as FileSink
+    participant DS as DatabaseSink
+    participant Met as Metrics
+    participant HTTP as HTTP 端点
 
-**并发与 I/O 层**
-- Tokio 异步运行时用于非阻塞 I/O
-- Crossbeam 通道用于任务间通信
-- Rayon 用于 CPU 密集型并行处理
+    App->>Sub: tracing 标准宏记录日志
+    Sub->>Sub: 构建 LogRecord 并提取 trace_id
+    Sub->>Sub: 按规则库脱敏敏感字段
+    Sub->>Chan: 非阻塞发送 LogRecord
+    Chan->>Worker: 队列分发记录
+    Worker->>FS: 写入并按需轮转压缩加密
+    Worker->>DS: 缓冲后按批次落库
+    Worker->>Met: 更新延迟与 Sink 健康指标
+    Met-->>HTTP: 暴露健康与 Prometheus 指标
+```
 
-**存储与外部服务层**
-- 本地文件系统访问
-- 通过 Sea-ORM 的数据库连接
-- 分析工作流的 Parquet 格式
+要点：
+
+- 发送端只在通道满时阻塞（背压），默认容量 10000、3 个工作线程，可经 `PerformanceConfig` 调整；
+- 文件线程为阻塞 I/O，数据库线程持有独立 tokio 运行时；
+- 加密、压缩与轮转按轮转文件触发，不占用单条记录的写入热路径。
+
+---
+
+## 🧯 故障降级与自愈
+
+Sink 故障的处理与恢复路径（依据 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)「错误处理流程」与「FileSink 写入流程」）：
+
+```mermaid
+flowchart TD
+    W["Sink 写入"] --> OK["写入成功"]
+    W --> ERR["写入失败"]
+    ERR --> CB["断路器记录失败"]
+    CB --> THR{"失败次数达到阈值"}
+    THR -->|"是"| DEG["降级输出<br/>DB → File → Console 三级回退"]
+    THR -->|"否"| RETRY["重试最多三次<br/>指数退避"]
+    RETRY -->|"成功"| OK
+    RETRY -->|"失败"| DEG
+    DEG --> MET["记录失败指标并更新 Sink 健康"]
+    MET --> HC["健康检查线程巡检<br/>每 10 秒"]
+    HC -->|"连续失败超阈值且冷却期已过"| RECOVER["发送 Sink 恢复指令"]
+    RECOVER --> REINIT["重新初始化 Sink<br/>重置断路器"]
+    REINIT --> OK
+```
+
+- **断路器**：默认失败阈值 5 次、冷却 30 秒，半开状态下动态批大小减半；
+- **三级降级**：数据库不可用时回退文件，文件不可用时回退控制台；
+- **自动恢复**：健康检查线程检测不健康 Sink 并触发重建，恢复结果回写指标。
 
 ---
 
 ## 🧪 测试
 
-<div align="center" style="margin: 24px 0;">
+### 测试策略
 
-### 🎯 运行测试
+| 类型 | 位置 | 说明 |
+|------|------|------|
+| 单元测试 | `src/` 内联 `#[cfg(test)]` | 各模块边界与异常场景，Mock 经 cfg(test) 直接可见 |
+| 集成测试 | `tests/integration/`、`tests/cli_integration.rs` | 覆盖批量写入、HTTP、CLI、压缩比、Parquet、自动恢复等，需 `sqlite,http,cli,compression,parquet,test-utils` 组合 |
+| 组合测试 | `tests/combinations/` | feature 组合矩阵与多 Sink 降级，需 `sqlite` |
+| 端到端测试 | `tests/e2e/e2e_advanced.rs` | 226 个场景、15 个场景域（见 [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md)） |
+| Docker 数据库集成 | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite 生命周期验证 |
+| 性能测试 | `tests/performance/` + `benches/` | 大容量、长时间运行测试与 criterion 基准 |
 
-</div>
+**测试规模**（截至 v0.3.0-rc.3，按 `#[test]` / `#[tokio::test]` 统计）：`src/` 内联 1,255 个 + `tests/` 目录 528 个，共 **1,783 个测试函数**；另有 criterion 基准函数 18 个（`benches/inklog_bench.rs` 15 个、`benches/rc4_pipeline_bench.rs` 3 个）。
 
-```bash
-# ⚠️ 数据库后端 features（sqlite/postgres/mysql/duckdb）互斥（经 dbnexus 强制），
-# 不适用 --all-features；请按后端分组运行：
-cargo test --features "http,cli,compression,parquet,fast-masking"        # 无数据库后端
-cargo test --features "sqlite,http,cli,compression,parquet,fast-masking,kit"  # SQLite 面
-
-# 在发布模式下运行测试
-cargo test --release
-
-# 运行基准测试
-cargo bench
-```
-
-> **本地化提示**：错误消息经 ICU/Fluent 按系统 locale 渲染。若测试断言英文消息文本，
-> 请设置 `INKLOG_LOCALE=en`（如 CI 或非英文系统环境）以固定输出语言。
-
-### 测试覆盖率
-
-Inklog 目标是 **95%+ 代码覆盖率**：
+### 运行命令（与 CI 一致）
 
 ```bash
-# 生成覆盖率报告
-cargo tarpaulin --out Html --all-features
+# CI 测试门禁（数据库后端互斥，不适用 --all-features）
+cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
+
+# Docker 数据库集成测试
+docker compose -f docker/docker-compose.test.yml up -d
+
+# 覆盖率门禁（CI 要求 ≥80% 行覆盖）
+cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 80
+
+# 基准测试
+cargo bench --bench rc4_pipeline_bench
+cargo bench --bench inklog_bench
 ```
 
-### 代码检查和格式化
+> **本地化提示**：错误消息经 ICU/Fluent 按系统 locale 渲染。若测试断言英文消息文本，请设置 `INKLOG_LOCALE=en`（如 CI 或非英文系统环境）以固定输出语言。
+
+### 代码质量门禁
 
 ```bash
-# 格式化代码
-cargo fmt --all
-
-# 检查格式而不修改
-cargo fmt --all -- --check
-
-# 运行 Clippy (警告视为错误)
-cargo clippy --all-targets --all-features -- -D warnings
-```
-
-### 安全审计
-
-```bash
-# 运行 cargo deny 安全检查
-cargo deny check
-
-# 检查安全公告
-cargo deny check advisories
-
-# 检查禁止的许可证
-cargo deny check bans
-```
-
-### 依赖注入测试
-
-> ⚠️ 自 0.3.0-rc.2 起，`MockCache`/`MockConfig`/`MockDatabaseAdapter` 已从默认公共 API 移除（BREAKING），外部测试代码需显式启用 `test-utils` feature。
-
-Inklog 提供 Mock 实现，支持无外部依赖的单元测试：
-
-```rust
-use inklog::{LoggerManager, LoggerDependencies};
-use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
-use std::sync::Arc;
-
-#[tokio::test]
-async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
-    // 创建 Mock 依赖
-    let deps = LoggerDependencies {
-        cache: Some(Arc::new(MockCache::new())),
-        config: Some(Arc::new(MockConfig::new())),
-        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-        database: Some(Arc::new(MockDatabaseAdapter::new())),
-        ..Default::default()
-    };
-
-    // 注入依赖创建 logger
-    let logger = LoggerManager::with_dependencies(deps).await?;
-
-    // 测试日志记录...
-    log::info!("Test message");
-
-    Ok(())
-}
-```
-
-**Mock 实现特性**:
-- **MockCache**: 内存 HashMap，支持延迟模拟
-- **MockConfig**: 运行时可修改的配置
-- **MockDatabaseAdapter**: 内存日志存储，支持健康状态控制
-
-详细使用方法请参考 [用户指南](docs/USER_GUIDE.md#使用-mock-实现进行测试)。
-
-### 集成测试
-
-```bash
-# 运行集成测试
-cargo test --test '*'
-
-# 使用 Docker 服务运行 (PostgreSQL, MySQL)
-docker-compose up -d
-cargo test --all-features
-docker-compose down
+cargo fmt --all -- --check                    # 格式检查
+cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking" -- -D warnings  # 零告警
+cargo deny check                              # 依赖漏洞 / 许可证 / 重复依赖
+cargo audit                                   # 安全公告（lefthook pre-push）
 ```
 
 ---
 
 ## 📊 性能
 
-Inklog 通过异步 I/O、批量写入、有界队列与内存池等设计优化日志路径。以下为[架构文档](docs/ARCHITECTURE.md)「性能考虑」章节中记录的设计要点与参考数据：
+### 基线数字
 
-### 批量写入
+以下为 [docs/PERFORMANCE.md](docs/PERFORMANCE.md) 记录的首份正式基线（2026-09-11，criterion 中位数）：
 
-- **FileSink**：行级写入 + `BufWriter` 减少系统调用
-- **DatabaseSink**：缓冲批量刷新（`batch_size` 默认 100，刷新间隔默认 500ms）
+| 基准 | 路径 | 中位耗时 | 吞吐 |
+|------|------|----------|------|
+| `template_render_text`（默认模板 + 2 字段） | 写入 | 320 ns | ~3.12 M rec/s |
+| `mask_sensitive_fields`（正则 + 敏感键） | 写入 | 50.5 µs | ~19.8 K rec/s |
+| `logrecord_to_json`（单条序列化） | 序列化 | 257 ns | ~3.89 M rec/s |
+| `logrecord_batch_100_to_json`（100 条批量） | 序列化 | 26.5 µs | ~3.77 M rec/s |
+| `aes256gcm_roundtrip_1kb`（1 KiB 加解密往返） | 加密 | 506 ns | ~1.88 GiB/s |
+| `pbkdf2_derive_600k`（PBKDF2-HMAC-SHA256 密钥派生） | 加密 | 63.3 ms | ~15.8 ops/s |
 
-| 策略 | 数据库事务 | I/O 开销 | 吞吐量（参考值） |
-|------|-----------|---------|----------------|
-| 逐条插入 | N（自动提交） | 高 | ~100/s |
-| 批量 100 条 | 单次事务 | 低 | ~10,000/s |
+**环境口径**（沿用 docs/PERFORMANCE.md 注明方式）：WSL2 开发笔记本（linux 6.6.87.2），criterion 0.8，release profile（`opt-level=3`、`lto=fat`、`codegen-units=1`），快速基线参数 `--warm-up-time 1 --measurement-time 2 --sample-size 10`。跨机型噪声较大，数字供对照而非承诺。
 
-> 上表为 docs/ARCHITECTURE.md 中记录的策略对比参考值，实际吞吐因硬件、数据库与配置而异。
+### 设计要点
 
-### 队列与背压
+| 机制 | 参数 | 效果 |
+|------|------|------|
+| 有界通道背压 | `channel_capacity` 默认 10000 | 防止内存溢出，通道水位经指标暴露 |
+| 数据库批量写入 | `batch_size` 默认 100，刷新间隔默认 500 ms | docs/ARCHITECTURE.md 参考值：批量 100 条约 10,000 行/s，逐条插入约 100 行/s |
+| 脱敏按需开启 | `masking_enabled` | 正则脱敏是主链路中最贵的安全环节，建议仅在需要的 sink 开启 |
+| Zstd 压缩 | 级别 0-22，默认 3 | 默认级别压缩比约 3.5x；加密与密钥派生按轮转文件触发，不占单条记录路径 |
 
-- Crossbeam 有界通道（`channel_capacity` 默认 10000）防止内存溢出，队列满时发送端阻塞
-- 默认 3 个工作线程（`worker_threads`，经 `PerformanceConfig` 调整）
-- 通道使用率经健康指标暴露，可导出为 Prometheus 指标（`inklog_channel_usage`）
-
-### 压缩
-
-- ZSTD 压缩级别 0-22（默认 3，压缩比约 3.5x）；级别越高压缩比越高、速度越慢
-
-### 基准测试
-
-项目使用 Criterion 维护基准测试（`benches/inklog_bench.rs`）：
-
-```bash
-cargo bench
-```
-
-`examples/src/bin/infra/performance.rs` 提供了可运行的性能示例。
-
-> 注：仓库内暂无正式发布的跨版本基准测试报告（docs/ 下暂无 PERFORMANCE.md 与 benchmarks/ 目录），欢迎基于上述工具在目标硬件上实测并反馈数据。
+复现方式见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)「复现」章节。
 
 ---
 
 ## 🔒 安全
 
-Inklog 以安全为首要优先级构建，完整的安全设计、漏洞报告流程与最佳实践见 [🔒 安全文档](docs/SECURITY.md)。
+### 漏洞报告
 
-#### 🔒 加密
+发现安全漏洞请**不要**公开披露，按 [docs/SECURITY.md](docs/SECURITY.md) 流程负责任上报：
 
-- **AES-256-GCM**: 军用级日志文件加密
-- **密钥管理**: 基于环境变量的密钥注入
-- **内存安全清除**: 通过 `zeroize` crate 安全清除密钥
-- **SHA-256 哈希**: 加密日志的完整性验证
+- **首选**：邮件 [security@inklog.dev](mailto:security@inklog.dev)
+- **备选**：[GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)
+- **响应时限**：24 小时内确认，48 小时内初步评估，修复开发 7-14 天
 
-#### 🎭 数据脱敏
+### 安全设计
 
-- **基于正则的模式**: 自动 PII 检测和脱敏
-- **邮箱脱敏**: `user@example.com` → `***@***.***`
-- **身份证脱敏**: 信用卡和社会安全号脱敏
-- **自定义模式**: 可配置的正则表达式模式
+| 能力 | 实现 |
+|------|------|
+| 静态加密 | AES-256-GCM 认证加密（[aes-gcm](https://crates.io/crates/aes-gcm)），密文格式 `[nonce][ciphertext]` |
+| 密钥内存安全 | `zeroize` 在密钥离开作用域时清零内存 |
+| 密钥派生 | PBKDF2-HMAC-SHA256 600k 迭代（安全审查认可的最低迭代数，按轮转文件至多一次） |
+| 路径安全 | `PathValidator` 防路径穿越，禁止写入用户主目录与密钥文件 |
+| 内容净化 | `LogSanitizer` 日志注入防护；PII 脱敏覆盖邮箱、电话、证件、卡号等模式 |
+| 访问控制 | HTTP 端点认证 token 启动期缓存、失败 fail-closed；文件权限 0600（Unix） |
+| 归档防篡改 | `ArchiveChain` HMAC-SHA256 归档链，防删除、重排与伪造 |
+| 合规支持 | 加密、脱敏与审计设计支持 GDPR、HIPAA、PCI-DSS 等合规要求（见 [docs/SECURITY.md](docs/SECURITY.md)） |
 
-#### 🔐 密钥安全处理
+### 供应链安全
 
-```rust
-// 从环境变量安全设置加密密钥
-std::env::set_var("INKLOG_ENCRYPTION_KEY", "base64-encoded-32-byte-key");
-
-// 密钥使用后自动清除
-// 切勿在代码中硬编码密钥
-```
-
-#### 🛡️ 安全最佳实践
-
-- **无硬编码密钥**: 密钥从环境变量加载
-- **最小权限操作**: 仅必要的文件/数据库访问
-- **审计日志**: 调试功能用于安全审计追踪
-- **合规就绪**: 支持 GDPR、HIPAA、PCI-DSS 日志要求
+仓库维护 [`deny.toml`](deny.toml)：CI 的 security job 与 lefthook pre-push 分别运行 `cargo deny check`（漏洞 / 许可证 / 重复依赖）与 `cargo audit`（RustSec 公告）；lefthook pre-commit 含私钥文件扫描。
 
 ---
 
 ## 🗺️ 开发路线图
 
-以下为基于 [CHANGELOG](docs/CHANGELOG.md) 与当前发布安排整理的阶段性目标（具体节奏可能随工作区整体发布计划调整）：
+以下为既有发布安排整理的阶段性目标（节奏随工作区整体发布计划调整）：
 
-### v0.3.0 正式发布
-
-- [ ] 完成 0.3.0-rc.2 → 0.3.0 正式版发布
-- [ ] 随工作区依赖传导表同步升级：trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0
-
-### 质量与 CI
-
-- [ ] CI 测试矩阵按数据库后端分组（`sqlite`/`postgres`/`mysql`/`duckdb` 后端 feature 互斥，当前 `--all-features` 组合无法编译）
-- [ ] 补齐 MySQL 集成测试环境（当前缺少 MySQL 服务导致该后端集成测试阻塞）
-- [ ] 提升测试覆盖率（llvm-cov 基线约 80%，向 95%+ 目标提升）
+| 状态 | 目标 | 说明 |
+|:----:|------|------|
+| 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.3 → 0.3.0 正式版 |
+| 📋 | 工作区依赖传导同步 | trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0 |
+| 📋 | CI 测试矩阵按数据库后端分组 | 后端 feature 互斥，需按后端拆分验证组合 |
+| 📋 | 补齐 MySQL 集成测试环境 | 当前缺少 MySQL 服务导致该后端集成测试阻塞 |
+| 📋 | 提升测试覆盖率 | llvm-cov 基线约 80%，向 95%+ 目标提升 |
 
 ---
 
 ## 🤝 参与贡献
 
-欢迎贡献！请查看 [CONTRIBUTING.md](docs/CONTRIBUTING.md) 了解指南。
+欢迎贡献！完整流程见 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)。
 
-### 开发环境设置
+### 开发环境
+
+| 要求 | 说明 |
+|------|------|
+| Rust 1.97.1 | 经 `rust-toolchain.toml` 固定 |
+| protobuf 编译器 | 含数据库 feature 的组合构建需要 `protoc` |
+| lefthook | `bash scripts/install-pre-commit.sh` 安装钩子 |
 
 ```bash
-# 克隆仓库
 git clone https://github.com/Kirky-X/inklog.git
 cd inklog
+bash scripts/install-pre-commit.sh
 
-# 安装 pre-commit 钩子 (如果可用)
-./scripts/install-pre-commit.sh
-
-# 运行测试（按数据库后端分组，避免 --all-features）
-cargo test --features "http,cli,compression,parquet,fast-masking"
-
-# 运行 linter
-cargo clippy --all-targets -- -D warnings
-
-# 格式化代码
-cargo fmt --all
+# 运行测试（与 CI 相同的 feature 组合）
+cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
 ```
+
+### 提交约定
+
+- **Conventional Commits**：`feat: ...` / `fix: ...` / `docs: ...` 等，commit-msg 钩子强制校验；
+- **pre-commit 钩子**：rustfmt、clippy（`-D warnings` 零告警）、`cargo deny check`、私钥扫描；
+- **pre-push 钩子**：`cargo audit` 与覆盖率 ≥80% 门禁。
 
 ### Pull Request 流程
 
-1. Fork 仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 进行修改
-4. 运行测试确保全部通过
-5. 运行 clippy 并修复警告
-6. 提交修改 (`git commit -m 'Add amazing feature'`)
-7. 推送到分支 (`git push origin feature/amazing-feature`)
-8. 打开 Pull Request
-
-### 代码风格
-
-- 遵循 Rust 命名约定 (变量 snake_case，类型 PascalCase)
-- 使用 `thiserror` 定义错误类型
-- 使用 `anyhow` 提供错误上下文
-- 为所有公共 API 添加文档注释
-- 提交前运行 `cargo fmt`
+1. Fork 仓库并创建功能分支（`git checkout -b feature/your-feature`）；
+2. 进行修改，为公共 API 补充文档注释；
+3. 运行测试、clippy 与 `cargo fmt --all`，确保全部通过；
+4. 以 Conventional Commits 风格提交并推送；
+5. 打开 Pull Request 并通过 CI 全部质量门禁。
 
 ---
 
 ## 📋 更新日志
 
-完整的版本变更记录见 [CHANGELOG](docs/CHANGELOG.md)。
+完整版本记录见 [docs/CHANGELOG.md](docs/CHANGELOG.md)（Keep a Changelog 格式，语义化版本）。
 
 ### 最近版本
 
-- **0.3.0-rc.2** (2026-09-03)：集成 trait-kit 0.5.0-rc.2 与 i18n 重构并升级版本号；默认公共 API 移除三个 Mock（BREAKING，外部测试消费者需启用 `test-utils`）；清理 S3 归档相关文档描述
-- **0.2.0** (2026-08-05)：新增 `compression`/`parquet`/`fast-masking` feature 与 i18n 核心模块（fluent-bundle + ICU）；新增 ChannelBufferedFileSink、断路器保护与环形缓冲文件 Sink；edition 2024、MSRV 1.94
-- **0.1.12** (2026-07-22)：新增 `tests/e2e_advanced.rs`（226 个测试），覆盖 19 个模块的边界与异常场景
+- **0.3.0-rc.3**（2026-09-10）：新增 `init_inklog_logger` 单例初始化、运行时级别热调（`set_level`）、动态 Sink 注册（`LoggerBuilder::add_sink`）、`trace_id`/`span_id` 追踪关联、`inklog-cli query` 日志检索、网络转发 Sink（TCP/UDP）、OTLP 导出 MVP、归档防篡改链与 `docs/PERFORMANCE.md` 首份性能基线；
+- **0.3.0-rc.2**（2026-09-03）：集成 trait-kit 0.5.0-rc.2 与 i18n 重构并升级版本号；默认公共 API 移除三个 Mock（BREAKING，外部测试消费者需启用 `test-utils`）；
+- **0.2.0**（2026-08-05）：新增 `compression` / `parquet` / `fast-masking` feature 与 i18n 核心模块；新增 ChannelBufferedFileSink、断路器保护与环形缓冲文件 Sink；edition 2024、MSRV 1.94。
 
 ---
 
 ## 📄 许可证
 
-本项目基于 MIT + Commons Clause 许可证发布，商业使用需单独授权。详见 [LICENSE](LICENSE)。
+本项目基于 [MIT License](LICENSE) 发布，附加 [Commons Clause](LICENSE) 条件：未经单独授权，不得销售本软件。版权所有 (c) 2026 Kirky.X。
 
 ---
 
 ## 🙏 致谢
 
-Inklog 的实现离不开这些优秀的项目：
+inklog 的实现依赖这些优秀的开源项目：
 
-- [tracing](https://github.com/tokio-rs/tracing) - Rust 结构化日志基础
-- [tokio](https://tokio.rs/) - Rust 异步运行时
-- [Sea-ORM](https://www.sea-ql.org/SeaORM/) - 异步 ORM
-- [axum](https://github.com/tokio-rs/axum) - HTTP 端点 Web 框架
-- [serde](https://serde.rs/) - 序列化框架
-- 整个 Rust 生态系统的优秀工具和库
+- [tokio](https://tokio.rs/)：异步运行时
+- [tracing](https://github.com/tokio-rs/tracing)：结构化日志与 Subscriber 生态
+- [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam)：高性能有界通道
+- [axum](https://github.com/tokio-rs/axum)：HTTP 健康与指标端点
+- [serde](https://serde.rs/)：序列化框架
+- [RustCrypto](https://github.com/RustCrypto)（aes-gcm / sha2 / pbkdf2 / zeroize）：密码学原语
+- [Project Fluent](https://projectfluent.org/) 与 [ICU](https://icu4x.unicode.org/)：国际化消息格式
+- [criterion](https://github.com/bheisler/criterion.rs)：统计严谨的基准测试框架
+
+数据库、缓存、配置与生命周期集成分别由同工作区项目 dbnexus、oxcache、confers、trait-kit 提供。
 
 ---
 
