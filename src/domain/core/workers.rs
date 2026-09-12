@@ -202,8 +202,6 @@ pub(crate) fn should_attempt_recovery(last_attempt: Option<&Instant>, cooldown: 
 pub(crate) enum ControlAction {
     /// Attempt to recover the target sink.
     Recover,
-    /// Report status (GetStatus received).
-    Status,
     /// Message is for a different sink; ignore.
     Ignore,
 }
@@ -215,7 +213,6 @@ pub(crate) fn classify_control_message(
 ) -> ControlAction {
     match msg {
         SinkControlMessage::RecoverSink(name) if name == target_sink => ControlAction::Recover,
-        SinkControlMessage::GetStatus => ControlAction::Status,
         _ => ControlAction::Ignore,
     }
 }
@@ -553,9 +550,6 @@ impl SinkWorker<'_> {
                 } else {
                     tracing::error!("{}", crate::i18n::tr(self.desc.recovery_failed_key));
                 }
-            }
-            ControlAction::Status => {
-                // Status is already tracked in metrics
             }
             ControlAction::Ignore => {}
         }
@@ -1146,19 +1140,6 @@ mod tests {
         assert!(matches!(
             classify_control_message(&msg, "file"),
             ControlAction::Ignore
-        ));
-    }
-
-    #[test]
-    fn test_classify_control_get_status() {
-        let msg = SinkControlMessage::GetStatus;
-        assert!(matches!(
-            classify_control_message(&msg, "file"),
-            ControlAction::Status
-        ));
-        assert!(matches!(
-            classify_control_message(&msg, "database"),
-            ControlAction::Status
         ));
     }
 
