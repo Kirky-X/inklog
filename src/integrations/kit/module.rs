@@ -315,8 +315,9 @@ mod tests {
             .expect("register InklogModule");
         kit.register_lifecycle::<InklogModule>();
         let built = kit.build().await.expect("build");
-        // shutdown() invokes on_shutdown for each lifecycle-registered module
-        built.shutdown();
+        // shutdown_async() drains async on_shutdown hooks (one-shot) in
+        // reverse topological order — AsyncKit's counterpart of Kit::shutdown
+        built.shutdown_async().await;
     }
 
     /// Full integration: lifecycle + health check working together.
@@ -354,7 +355,7 @@ mod tests {
         assert_eq!(status, HealthStatus::Healthy);
 
         // Shutdown
-        built.shutdown();
+        built.shutdown_async().await;
     }
 
     // ========================================================================
