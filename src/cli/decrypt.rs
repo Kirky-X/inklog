@@ -1215,7 +1215,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_symlink_detected_before_canonicalize() {
-        // T005: symlink check must use symlink_metadata() to detect symlinks
+        // symlink check must use symlink_metadata() to detect symlinks
         // on the original path before canonicalize resolves them.
         // 仅 unix 平台语义（Windows 无普通用户 symlink 权限）。
         let temp_dir = tempfile::tempdir().unwrap();

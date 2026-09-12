@@ -71,12 +71,12 @@ pub(crate) struct WorkerParams {
         feature = "duckdb"
     ))]
     pub(crate) db_receiver: Option<Receiver<Arc<LogRecord>>>,
-    /// 动态注册的第三方 sink（T501）：每项拥有独立 channel 接收端，
+    /// 动态注册的第三方 sink：每项拥有独立 channel 接收端，
     /// 由通用 SinkWorker 消费。每个条目独立命名用于健康上报。
     pub(crate) custom_sinks: Vec<CustomSinkEntry>,
 }
 
-/// T501：动态注册 sink 的 worker 条目。
+/// 动态注册 sink 的 worker 条目。
 pub(crate) struct CustomSinkEntry {
     /// 健康上报与指标使用的 sink 名（"custom-N"）
     pub(crate) name: String,
@@ -94,7 +94,7 @@ pub(crate) type WorkerStartResult =
 /// 自定义 sink 写失败重试上限（与内置 worker 的 WRITE_MAX_ATTEMPTS 一致）。
 const CUSTOM_SINK_WRITE_ATTEMPTS: u32 = 3;
 
-/// T501：通用 SinkWorker 主循环，消费动态注册 sink 的专属 channel。
+/// 通用 SinkWorker 主循环，消费动态注册 sink 的专属 channel。
 ///
 /// 语义与内置 file/db worker 对齐：
 /// - 记录产生→处理的延迟计入 metrics；
@@ -895,7 +895,7 @@ impl LoggerManager {
         };
 
 
-        // T501: dynamic third-party sinks — one generic SinkWorker per entry,
+        // dynamic third-party sinks — one generic SinkWorker per entry,
         // each consuming its own dedicated channel (no MPMC contention with
         // the built-in file/db workers).
         let mut custom_handles = Vec::with_capacity(custom_sinks.len());
@@ -1723,7 +1723,7 @@ mod tests {
 }
 
 // =========================================================================
-// T501: 通用 SinkWorker（动态注册 sink）单元测试
+// 通用 SinkWorker（动态注册 sink）单元测试
 // =========================================================================
 
 #[cfg(test)]

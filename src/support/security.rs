@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T509：KMS 密钥提供者端口（feature `kms`）。
+//! KMS 密钥提供者端口（feature `kms`）。
 //!
 //! [`KeyProvider`] 为加密链路（FileSink / DatabaseSink 的 AES-256-GCM 主密钥）
 //! 提供可插拔取钥口：

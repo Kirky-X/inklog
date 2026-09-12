@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T507：Sink 级日志采样器。
+//! Sink 级日志采样器。
 //!
 //! [`Sampler`] 决策规则（按顺序短路）：
 //! 1. **关键词白名单豁免**：message/target 命中白名单（大小写不敏感）→ 放行；

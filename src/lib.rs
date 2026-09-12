@@ -164,7 +164,7 @@ pub mod domain;
 // Support layer
 pub mod support;
 
-// T514：Sink 中间件链
+// Sink 中间件链
 pub use support::io::sink::middleware::{
     EnrichMiddleware, LevelFilterMiddleware, MiddlewareChain, MiddlewareSink, MiddlewareVerdict,
     RecordMiddleware,
@@ -172,11 +172,11 @@ pub use support::io::sink::middleware::{
 #[cfg(feature = "otlp")]
 pub use support::io::sink::otlp::{OtlpConfig, OtlpSink};
 
-// T513：网络转发 sink（net-sink feature）
+// 网络转发 sink（net-sink feature）
 #[cfg(feature = "net-sink")]
 pub use support::io::sink::net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
 
-// T509：KMS 密钥提供者（kms feature）
+// KMS 密钥提供者（kms feature）
 #[cfg(feature = "kms")]
 pub use support::security::{ConfersKeyProvider, EnvKeyProvider, KeyProvider, VaultTransitConfig, vault_transit_provider};
 
@@ -286,7 +286,7 @@ pub use tokio;
 pub use tracing;
 
 // ============================================================================
-// T040: Convenience init functions with singleton semantics
+// Convenience init functions with singleton semantics
 // ============================================================================
 
 use std::sync::OnceLock;

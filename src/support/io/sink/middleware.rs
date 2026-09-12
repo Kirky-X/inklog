@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T514：Sink 中间件链（transform/filter 组合）。
+//! Sink 中间件链（transform/filter 组合）。
 //!
 //! [`RecordMiddleware`] 在记录进入 sink 前做改写（transform）或丢弃
 //! （filter）；[`MiddlewareChain`] 按注册顺序短路执行；[`MiddlewareSink`]
-//! 是 [`LogSink`] 装饰器，把链条接入任意 sink（内置或 T501 动态注册的
+//! 是 [`LogSink`] 装饰器，把链条接入任意 sink（内置或动态注册的
 //! 第三方 sink）。被丢弃的记录计入 `logs_dropped`。
 //!
 //! # Example

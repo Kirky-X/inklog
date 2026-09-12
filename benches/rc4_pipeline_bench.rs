@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T506：rc4 轮新增/受影响路径的性能基准（写入 / 序列化 / 加密）。
+//! rc4 轮新增/受影响路径的性能基准（写入 / 序列化 / 加密）。
 //!
 //! 基线数字见 `docs/PERFORMANCE.md`（本机记录；CI 门禁阈值待机型稳定后启用，
 //! 与设计 D4 口径一致：criterion 基线 + 文档化，不在本轮开启 CI 红绿灯）。

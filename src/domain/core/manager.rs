@@ -83,27 +83,27 @@ pub struct LoggerManager {
         feature = "duckdb"
     ))]
     database: Option<Arc<dyn Database>>,
-    /// T502：当前级别指令集，`set_level` 在此之上做 upsert 后重建 EnvFilter 热换装。
+    /// 当前级别指令集，`set_level` 在此之上做 upsert 后重建 EnvFilter 热换装。
     level_state: Mutex<LevelDirectives>,
-    /// T502：级别热调执行器，包装 `reload::Handle<EnvFilter, Registry>::reload`。
+    /// 级别热调执行器，包装 `reload::Handle<EnvFilter, Registry>::reload`。
     /// `None` 表示构建路径未提供 reload 能力。
     level_reloader: Option<LevelReloader>,
-    /// T512：ops 事件广播通道（每个启用的 sink 通道一个发送端：
+    /// ops 事件广播通道（每个启用的 sink 通道一个发送端：
     /// file/db 通道 + 各自定义 sink 通道），`publish_ops_event` 逐一投递。
     ops_senders: Vec<Sender<Arc<LogRecord>>>,
 }
 
-/// T502：EnvFilter 热换装闭包类型（隐藏 `reload::Handle` 的具体类型参数）。
+/// EnvFilter 热换装闭包类型（隐藏 `reload::Handle` 的具体类型参数）。
 type LevelReloader = Arc<
     dyn Fn(tracing_subscriber::filter::EnvFilter) -> Result<(), String> + Send + Sync,
 >;
 
-/// T502：reload 换装层类型（`S = Registry`：与 `with_config_and_sinks` 中
+/// reload 换装层类型（`S = Registry`：与 `with_config_and_sinks` 中
 /// 先挂 filter、再挂 subscriber 的组合顺序对应）。
 type ReloadFilterLayer =
     tracing_subscriber::reload::Layer<tracing_subscriber::filter::EnvFilter, tracing_subscriber::Registry>;
 
-/// T502：级别指令集状态与 `set_level` 的 upsert/重建逻辑。
+/// 级别指令集状态与 `set_level` 的 upsert/重建逻辑。
 #[derive(Debug, Clone)]
 pub(crate) struct LevelDirectives {
     /// 全局默认级别
@@ -149,7 +149,7 @@ impl LevelDirectives {
     }
 }
 
-/// T502：级别指令集 → EnvFilter 指令字符串（全局级别在前，target 指令在后）。
+/// 级别指令集 → EnvFilter 指令字符串（全局级别在前，target 指令在后）。
 #[cfg(test)]
 pub(crate) fn directives_to_filter_string(directives: &LevelDirectives) -> String {
     directives.to_filter_string()
@@ -337,7 +337,7 @@ impl LoggerManager {
         Self::with_config_and_sinks(config, Vec::new()).await
     }
 
-    /// 使用给定配置创建 LoggerManager 并注册动态第三方 sink（T501），
+    /// 使用给定配置创建 LoggerManager 并注册动态第三方 sink，
     /// 随后安装全局 tracing/log 前端。语义与 [`Self::with_config`] 一致。
     pub(crate) async fn with_config_and_sinks(
         config: InklogConfig,
@@ -366,7 +366,7 @@ impl LoggerManager {
         .await?;
 
         // 1. 安装 tracing subscriber。
-        // T502：filter_layer（reload 包装）先于 subscriber 挂载——与其构造处的
+        // filter_layer（reload 包装）先于 subscriber 挂载——与其构造处的
         // `S = Registry` 类型标注一致；组合顺序对过滤语义无影响。
         let registry = tracing_subscriber::registry()
             .with(filter_layer)
@@ -468,7 +468,7 @@ impl LoggerManager {
         .await
     }
 
-    /// 构建 LoggerManager 但不安装全局订阅者，并注册动态第三方 sink（T501）。
+    /// 构建 LoggerManager 但不安装全局订阅者，并注册动态第三方 sink。
     ///
     /// 每个注册的 sink 获得独立 channel（`extra_async_senders` 通道）与一条
     /// 通用 SinkWorker 消费线程，第三方 Sink 零核心改动接入。
@@ -505,7 +505,7 @@ impl LoggerManager {
         Ok((manager, subscriber, filter))
     }
 
-    /// T502 完整构建路径：额外返回 reload 换装层（供 `with_config_and_sinks`
+    /// 完整构建路径：额外返回 reload 换装层（供 `with_config_and_sinks`
     /// 安装到全局 registry，使 [`Self::set_level`] 热调即时生效）。
     pub(crate) async fn build_detached_full(
         config: InklogConfig,
@@ -532,7 +532,7 @@ impl LoggerManager {
         let (control_tx, control_rx) = bounded(10); // Control channel for recovery commands
         let effective_capacity = Arc::new(AtomicUsize::new(config.performance.channel_capacity));
 
-        // T501：动态 sink 各自获得独立 channel；若内置异步 sink（file/db）全部
+        // 动态 sink 各自获得独立 channel；若内置异步 sink（file/db）全部
         // 关闭，首个自定义 sink 的通道兼任主 async 通道（承担 fallback 补发语义），
         // 不再重复加入 extras，避免该 sink 收到重复记录。
         let mut custom_channels: Vec<(
@@ -562,7 +562,7 @@ impl LoggerManager {
             (None, None)
         };
 
-        // T512：ops 事件广播通道 = 启用的 file 通道 + 启用的 db 通道 + 全部自定义通道
+        // ops 事件广播通道 = 启用的 file 通道 + 启用的 db 通道 + 全部自定义通道
         let mut ops_senders: Vec<Sender<Arc<LogRecord>>> = Vec::new();
         if file_enabled {
             ops_senders.push(sender.clone());
@@ -592,7 +592,7 @@ impl LoggerManager {
             primary_async_sender,
             metrics.clone(),
         );
-        // T501：每个动态 sink 通道加入 extras；当首个自定义通道兼任主 async
+        // 每个动态 sink 通道加入 extras；当首个自定义通道兼任主 async
         // 通道（file/db 全关）时跳过它，防止重复投递。
         let custom_extra_offset = usize::from(!file_enabled && !db_enabled);
         for extra in custom_senders.iter().skip(custom_extra_offset) {
@@ -615,7 +615,7 @@ impl LoggerManager {
         // Filter — use EnvFilter to support RUST_LOG per-module filtering
         // Configured level serves as the global default; RUST_LOG overrides
         // specific modules (e.g. RUST_LOG=nebulaid=debug,hyper=warn).
-        // T040: target_levels from config are merged between global level and RUST_LOG.
+        // target_levels from config are merged between global level and RUST_LOG.
         let level = config
             .global
             .level
@@ -640,7 +640,7 @@ impl LoggerManager {
             _ => tracing_subscriber::filter::EnvFilter::new(base_filter),
         };
 
-        // T502：EnvFilter 以 reload::Layer 包装，支持运行时 set_level 热换装。
+        // EnvFilter 以 reload::Layer 包装，支持运行时 set_level 热换装。
         // 兼容路径返回的 EnvFilter 是同一指令集的克隆（供测试/调用方断言字符串）；
         // 真正安装到 registry 的是 filter_layer。
         let (filter_layer, reload_handle): (ReloadFilterLayer, _) =
@@ -907,7 +907,7 @@ impl LoggerManager {
         self.effective_capacity.load(Ordering::Acquire)
     }
 
-    /// 运行时日志级别热调整（T502）。
+    /// 运行时日志级别热调整。
     ///
     /// 在当前级别指令集之上做 upsert 后重建 `EnvFilter`，并经
     /// `tracing_subscriber::reload` 热换装——进程内即时生效，无需重启。
@@ -961,10 +961,10 @@ impl LoggerManager {
         Ok(())
     }
 
-    /// 发布内部审计/运维事件（T512）。
+    /// 发布内部审计/运维事件。
     ///
     /// 事件转换为结构化记录（`target = "inklog::ops"`）后广播到每个启用的
-    /// sink 通道（T501 的 per-sink 通道体系：file/db + 自定义），供告警与
+    /// sink 通道（per-sink 通道体系：file/db + 自定义），供告警与
     /// 事后审计。通道满/关闭时静默丢弃并计 `channel_blocked`——事件通道
     /// 不得反压主链路。
     pub fn publish_ops_event(&self, kind: &str, sink: Option<&str>, detail: serde_json::Value) {
@@ -980,7 +980,7 @@ impl LoggerManager {
         }
     }
 
-    /// 查询当前级别指令集的 EnvFilter 字符串表示（T502 调试用）。
+    /// 查询当前级别指令集的 EnvFilter 字符串表示（调试用）。
     pub fn current_level_filter_string(&self) -> String {
         self.level_state
             .lock()
@@ -3075,7 +3075,7 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    /// T040: target_levels 配置项正确合并到 EnvFilter 字符串。
+    /// target_levels 配置项正确合并到 EnvFilter 字符串。
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_detached_target_levels_in_filter() {
         use std::collections::HashMap;
@@ -3544,7 +3544,7 @@ worker_threads = 1
 }
 
 // ============================================================================
-// T502: 运行时级别热调 —— 指令集 upsert/重建 + reload 换装过滤行为
+// 运行时级别热调 —— 指令集 upsert/重建 + reload 换装过滤行为
 // ============================================================================
 
 #[cfg(test)]

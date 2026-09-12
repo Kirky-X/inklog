@@ -17,7 +17,7 @@ pub use cli_impl::run_cli;
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "inklog - Enterprise-grade Rust logging infrastructure CLI", long_about = None)]
 struct Cli {
-    /// T510：机器可读 JSON 输出（全子命令）
+    /// 机器可读 JSON 输出（全子命令）
     #[arg(long, global = true)]
     #[arg(help = "Emit machine-readable JSON output")]
     json: bool,
@@ -137,7 +137,7 @@ impl std::fmt::Display for ConfigType {
 }
 
 fn main() {
-    // 退出码契约（T505/T510）：0 = 成功/有匹配，1 = 错误，2 = 无匹配/校验失败
+    // 退出码契约：0 = 成功/有匹配，1 = 错误，2 = 无匹配/校验失败
     let code = run_cli();
     if code != 0 {
         std::process::exit(code);

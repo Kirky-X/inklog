@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T512：归档文件防篡改 HMAC 链（复用工作区 HMAC-SHA256(prev||event) 模式）。
+//! 归档文件防篡改 HMAC 链（复用工作区 HMAC-SHA256(prev||event) 模式）。
 //!
-//! 与 dbnexus 权限审计链（T409）同构，差异在链首：本链条以**每次
+//! 与 dbnexus 权限审计链同构，差异在链首：本链条以**每次
 //! [`ArchiveChain::new`] 生成的随机盐**为链首——`hmac_0 = HMAC(key, salt)`，
 //! `hmac_n = HMAC(key, salt || prev_hash_n || canonical_event_n)`。盐随
 //! manifest 存储（secret 由使用方持有），校验方重算整条链：任一事件被

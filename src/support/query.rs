@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T505：本地日志文件检索（含加密/压缩格式解包）。
+//! 本地日志文件检索（含加密/压缩格式解包）。
 //!
 //! 供 `inklog-cli query` 与嵌入式消费方使用：对日志文件（默认模板格式
 //! `{timestamp} [{level}] {target} - {message}`，兼容 JSON lines）按时间范围/
@@ -32,7 +32,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{open_validated_file, InklogError};
 
-/// 查询过滤条件（T505）。
+/// 查询过滤条件。
 #[derive(Debug, Clone, Default)]
 pub struct QueryOptions {
     /// 仅保留该时刻（含）之后的记录（RFC3339 语义）
@@ -322,7 +322,7 @@ fn expand_paths(inputs: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
-/// 对文件/目录集合执行检索（T505 核心入口）。
+/// 对文件/目录集合执行检索（核心入口）。
 ///
 /// 单个不可读/不可解包的文件不中断整体查询（跳过并继续）；全部失败时
 /// 返回最后一个错误。
@@ -388,7 +388,7 @@ pub fn query_paths(
 
 /// 由 `inklog-cli` 使用的便捷封装：执行检索并返回 (结果, 退出码)。
 ///
-/// 退出码契约（T505/T510）：`0` = 有匹配/成功，`2` = 无匹配，`1` = 错误。
+/// 退出码契约：`0` = 有匹配/成功，`2` = 无匹配，`1` = 错误。
 pub fn query_exit_code(entries: &[LogEntry]) -> i32 {
     if entries.is_empty() {
         2

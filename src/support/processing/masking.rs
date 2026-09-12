@@ -1417,7 +1417,7 @@ mod tests {
 
     #[test]
     fn test_mask_skips_disabled_rules() {
-        // T008: mask() should respect the enabled flag on rules
+        // mask() should respect the enabled flag on rules
         let masker = DataMasker::builder().disable_builtin("email").build();
         let input = "user@example.com";
         let result = masker.mask(input);
@@ -1427,7 +1427,7 @@ mod tests {
 
     #[test]
     fn test_mask_value_masks_sensitive_keys() {
-        // T009: mask_value should check key names for sensitive fields
+        // mask_value should check key names for sensitive fields
         let masker = DataMasker::new();
         let mut value = serde_json::json!({
             "password": "secret123",
@@ -1440,7 +1440,7 @@ mod tests {
 
     #[test]
     fn test_mask_hashmap_masks_sensitive_keys() {
-        // T009: mask_hashmap should check key names for sensitive fields
+        // mask_hashmap should check key names for sensitive fields
         let masker = DataMasker::new();
         let mut map = HashMap::new();
         map.insert(

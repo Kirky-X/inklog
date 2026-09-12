@@ -65,7 +65,7 @@ use crate::InklogError;
 use crate::LogRecord;
 use async_trait::async_trait;
 
-/// Async sink registration port (T501: dynamic sink registration).
+/// Async sink registration port .
 ///
 /// Third-party sinks implement [`LogSink`] (all methods async) and are
 /// registered via [`crate::LoggerBuilder::add_sink`] as `Arc<dyn AsyncSink>`.

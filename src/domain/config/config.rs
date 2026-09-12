@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn test_env_override_invalid_level_falls_back() {
         let _lock = ENV_MUTEX.lock().unwrap();
-        // T025: invalid log level should not be applied
+        // invalid log level should not be applied
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_LEVEL", "invalid_level");
         }

@@ -48,8 +48,8 @@
 //! | `inklog_latency_p50_us` | Gauge | P50 延迟（微秒）|
 //! | `inklog_latency_p95_us` | Gauge | P95 延迟（微秒）|
 //! | `inklog_latency_p99_us` | Gauge | P99 延迟（微秒）|
-//! | `inklog_write_latency_us_bucket{le=...}` | Histogram | 写入延迟原生直方图桶（累计；T514）|
-//! | `inklog_write_latency_us_sum` / `_count` | Histogram | 写入延迟总和与总数（T514）|
+//! | `inklog_write_latency_us_bucket{le=...}` | Histogram | 写入延迟原生直方图桶（累计）|
+//! | `inklog_write_latency_us_sum` / `_count` | Histogram | 写入延迟总和与总数|
 //! | `inklog_sink_healthy` | Gauge | Sink 健康状态 |
 //! | `inklog_uptime_seconds` | Gauge | 运行时间（秒）|
 
@@ -327,7 +327,7 @@ pub struct Metrics {
     pub(crate) db_batch_size: Gauge,
     pub(crate) pool_hit_rate: GaugeF64,
 
-    // T041: dbnexus pool gauges (sampled via DbNexusAdapter::pool_metrics)
+    // dbnexus pool gauges (sampled via DbNexusAdapter::pool_metrics)
     pub(crate) db_pool_total: Gauge,
     pub(crate) db_pool_active: Gauge,
     pub(crate) db_pool_idle: Gauge,
@@ -472,7 +472,7 @@ impl Metrics {
         self.latency_histogram.record(micros);
     }
 
-    /// T041: Record database pool metrics sampled from `DbNexusAdapter`.
+    /// Record database pool metrics sampled from `DbNexusAdapter`.
     ///
     /// Updates the `db_pool_total`, `db_pool_active`, and `db_pool_idle` gauges.
     /// Call this periodically from a health monitoring worker to expose pool
@@ -707,7 +707,7 @@ impl Metrics {
             self.latency_histogram.p99()
         ));
 
-        // T514：Prometheus 原生 histogram 导出（bucket/sum/count），服务端可
+        // Prometheus 原生 histogram 导出（bucket/sum/count），服务端可
         // histogram_quantile 跨实例聚合分位；旧 p50/p95/p99 gauge 保留过渡。
         s.push_str("# HELP inklog_write_latency_us Write latency distribution in microseconds\n");
         s.push_str("# TYPE inklog_write_latency_us histogram\n");
@@ -747,7 +747,7 @@ impl Metrics {
             self.pool_hit_rate.get()
         ));
 
-        // T041: dbnexus pool gauges
+        // dbnexus pool gauges
         s.push_str("# HELP inklog_db_pool_total Total database connections\n");
         s.push_str("# TYPE inklog_db_pool_total gauge\n");
         s.push_str(&format!("inklog_db_pool_total {}\n", self.db_pool_total.get()));
@@ -2125,7 +2125,7 @@ mod metrics_tests {
 
     #[test]
     fn test_prometheus_label_sanitizes_special_characters() {
-        // T020: Prometheus label values must only contain [a-zA-Z0-9_:]
+        // Prometheus label values must only contain [a-zA-Z0-9_:]
         assert_eq!(super::sanitize_prometheus_label("file-sink"), "file_sink");
         assert_eq!(super::sanitize_prometheus_label("db/sink"), "db_sink");
         assert_eq!(super::sanitize_prometheus_label("sink@v1"), "sink_v1");
@@ -2164,7 +2164,7 @@ mod metrics_tests {
         );
     }
 
-    /// T041: record_pool_metrics 更新 gauge 并在 Prometheus 导出中可见。
+    /// record_pool_metrics 更新 gauge 并在 Prometheus 导出中可见。
     #[test]
     fn test_record_pool_metrics_updates_gauges_and_prometheus() {
         let metrics = Metrics::new();
@@ -2198,7 +2198,7 @@ mod metrics_tests {
 }
 
 // ============================================================================
-// T514: 原生直方图导出
+// 原生直方图导出
 // ============================================================================
 
 #[cfg(test)]

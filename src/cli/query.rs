@@ -1,13 +1,13 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T505：`inklog-cli query` —— 本地日志文件检索子命令。
+//! `inklog-cli query` —— 本地日志文件检索子命令。
 //!
 //! 支持按时间范围（`--since`/`--until`，RFC3339）、最低级别（`--level`）、
 //! 关键词（`--grep`，匹配 message/target）检索本地日志文件（文件或目录，
 //! 递归）。加密归档（`.enc` / `ENCLOG1` 头）经 `--key-env` 指定的环境变量
 //! 解密后解析；`.zst`/`.gz` 压缩归档按对应 feature 解包。
 //!
-//! 输出：默认人类可读行；`--json` 输出 JSON 数组（T505/T510 机器可读契约）。
+//! 输出：默认人类可读行；`--json` 输出 JSON 数组（机器可读契约）。
 //!
 //! 退出码：`0` = 有匹配，`2` = 无匹配，`1` = 错误。
 

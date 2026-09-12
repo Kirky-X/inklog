@@ -705,7 +705,7 @@ mod tests {
 
     #[test]
     fn test_validate_accepts_filenames_with_double_dots() {
-        // T017: filenames containing ".." as part of the name should be accepted
+        // filenames containing ".." as part of the name should be accepted
         // e.g., "foo..bar" is a valid filename, not a path traversal
         let validator = super::PathValidator::new();
         let result = validator.validate(Path::new("foo..bar"));

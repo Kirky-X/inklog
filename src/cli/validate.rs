@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
-// T510：--json 模式下抑制人类可读输出（文本模式行为不变）
+// --json 模式下抑制人类可读输出（文本模式行为不变）
 static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_quiet_output(quiet: bool) {

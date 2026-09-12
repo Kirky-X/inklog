@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T513：网络转发 Sink（feature `net-sink`）。
+//! 网络转发 Sink（feature `net-sink`）。
 //!
 //! - [`TcpSink`]：NDJSON/TCP 转发（可选 TLS，rustls 客户端）；断线时写入
 //!   进入有界内存缓冲（满则丢最旧），后续写入触发自动重连并按序补发缓冲；

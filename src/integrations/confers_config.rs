@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T508：confers 配置集成（feature `config-confers`）。
+//! confers 配置集成（feature `config-confers`）。
 //!
 //! [`InklogConfig`](crate::InklogConfig) 经 confers 的 `ConfigBuilder`
 //! （文件源 + TOML 格式）加载；[`ConfersConfigWatcher`] 基于 confers
@@ -24,7 +24,7 @@ use parking_lot::RwLock;
 
 use crate::InklogError;
 
-/// 允许热更新的配置子集（T508）。
+/// 允许热更新的配置子集。
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HotReloadValues {
     /// 全局日志级别（trace/debug/info/warn/error/fatal）
@@ -96,7 +96,7 @@ impl ConfersConfigWatcher {
     /// * `path` - 配置文件路径（TOML）
     /// * `debounce_ms` - confers FsWatcher 去抖间隔（毫秒）
     /// * `on_reload` - 热更回调（初值也会调用一次）；调用方在其中接线
-    ///   `LoggerManager::set_level`（T502）等运行时应用点
+    ///   `LoggerManager::set_level`等运行时应用点
     pub async fn spawn<F>(path: PathBuf, debounce_ms: u64, on_reload: F) -> Result<Self, InklogError>
     where
         F: Fn(&HotReloadValues) + Send + Sync + 'static,

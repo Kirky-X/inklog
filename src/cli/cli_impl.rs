@@ -26,7 +26,7 @@ pub fn run_cli() -> i32 {
     }
 }
 
-/// 退出码契约（T505/T510）：`0` = 成功/有匹配，`1` = 错误，`2` = 无匹配。
+/// 退出码契约：`0` = 成功/有匹配，`1` = 错误，`2` = 无匹配。
 pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
     match args.command {
         Commands::Decrypt {
@@ -60,7 +60,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
                 decrypt::decrypt_directory_compatible(&input, &output, &key_env, recursive)?;
             }
             if args.json {
-                // T510：机器可读结果（人类可读的 i18n 消息仅文本模式输出）
+                // 机器可读结果（人类可读的 i18n 消息仅文本模式输出）
                 println!(
                     "{}",
                     serde_json::json!({
@@ -207,7 +207,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
 }
 
 // ============================================================================
-// T510: 全子命令 --json + 稳定退出码（0/1/2）契约单测
+// 全子命令 --json + 稳定退出码（0/1/2）契约单测
 // ============================================================================
 
 #[cfg(test)]

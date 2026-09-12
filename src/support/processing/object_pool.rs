@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn test_string_pool_clears_string_on_put() {
-        // T015: put() must clear string contents before pooling to prevent data leaks
+        // put() must clear string contents before pooling to prevent data leaks
         let pool = super::ThreadLocalStringPool::new(10);
         let mut s = pool.get();
         s.push_str("sensitive data");

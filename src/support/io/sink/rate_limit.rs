@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T511：按目标的 sink 写入限流端口（防日志洪水）。
+//! 按目标的 sink 写入限流端口（防日志洪水）。
 //!
 //! 分层铁律：inklog（下层）只定义端口 + NoOp 默认实现；token 预算/滑动窗口
-//! 等真实算法由上层项目（limiteron，见其 T617）实现 [`SinkRateLimit`] 后经
+//! 等真实算法由上层项目（limiteron）实现 [`SinkRateLimit`] 后经
 //! [`LoggerBuilder::add_sink`](crate::LoggerBuilder::add_sink) 注入
 //! [`RateLimitedSink`] 装饰器。
 //!

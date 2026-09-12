@@ -141,7 +141,7 @@ impl LoggerSubscriber {
         level == "ERROR" || level == "FATAL"
     }
 
-    /// T504：从当前 tracing span 上下文提取 trace_id/span_id。
+    /// 从当前 tracing span 上下文提取 trace_id/span_id。
     ///
     /// - `span_id` = 事件所在 span 的 16 位小写 hex id；
     /// - `trace_id` 优先取事件/span 已显式记录的 `trace_id` 字段（与
@@ -301,7 +301,7 @@ where
 {
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let mut record = LogRecord::from_event(event);
-        // T504：从当前 span 上下文提取 trace_id/span_id（未启用 span 时零成本直通）
+        // 从当前 span 上下文提取 trace_id/span_id（未启用 span 时零成本直通）
         Self::extract_trace_context(&ctx, &mut record);
 
         // Rate limiting check (before sanitization to save work on dropped logs)
@@ -1066,7 +1066,7 @@ mod tests {
     }
 
     // =========================================================================
-    // T003: sanitizer integration tests
+    // sanitizer integration tests
     // =========================================================================
 
     #[test]
@@ -1116,7 +1116,7 @@ mod tests {
     }
 
     // =========================================================================
-    // T005: rate limiter integration tests
+    // rate limiter integration tests
     // =========================================================================
 
     #[test]
@@ -1194,7 +1194,7 @@ mod tests {
 }
 
 // ============================================================================
-// T504: 追踪 ID 关联 —— span 上下文提取与输出
+// 追踪 ID 关联 —— span 上下文提取与输出
 // ============================================================================
 
 #[cfg(test)]

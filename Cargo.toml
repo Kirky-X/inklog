@@ -79,17 +79,17 @@ gzip = ["dep:flate2"]
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 # Aho-Corasick multi-pattern masking acceleration.
 fast-masking = ["dep:aho-corasick"]
-# T503：dbnexus AuditStorage 端口适配器（审计事件 → inklog DB sink 落库）。
+# dbnexus AuditStorage 端口适配器（审计事件 → inklog DB sink 落库）。
 # 不含数据库驱动，可与任一后端 feature 组合。
 dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
-# T508：confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
+# confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
 # 级别/轮转参数（confers 依赖层级合法：inklog → confers）。
 config-confers = ["dep:confers", "confers/toml", "confers/watch"]
-# T509：KMS 密钥提供者——confers AsyncKeyProvider 适配 + Vault transit MVP
+# KMS 密钥提供者——confers AsyncKeyProvider 适配 + Vault transit MVP
 kms = ["dep:confers", "confers/encryption", "confers/cloud-kms"]
-# T513：网络转发 Sink——TCP（可 TLS，rustls 客户端）+ UDP，断线缓冲重连
+# 网络转发 Sink——TCP（可 TLS，rustls 客户端）+ UDP，断线缓冲重连
 net-sink = ["dep:rustls"]
-# T514：OTLP 日志导出 MVP（OTLP/HTTP JSON，手写传输，无新增依赖）
+# OTLP 日志导出 MVP（OTLP/HTTP JSON，手写传输，无新增依赖）
 otlp = []
 
 [dependencies]
@@ -198,7 +198,7 @@ path = "tests/performance/mod.rs"
 name = "inklog_bench"
 harness = false
 
-# T506：rc4 轮新增/受影响路径基准（写入/序列化/加密），基线见 docs/PERFORMANCE.md
+# rc4 轮新增/受影响路径基准（写入/序列化/加密），基线见 docs/PERFORMANCE.md
 [[bench]]
 name = "rc4_pipeline_bench"
 harness = false

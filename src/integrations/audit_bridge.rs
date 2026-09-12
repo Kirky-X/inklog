@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T503：dbnexus `AuditStorage` 端口的 inklog 适配器（feature `dbnexus-audit`）。
+//! dbnexus `AuditStorage` 端口的 inklog 适配器（feature `dbnexus-audit`）。
 //!
 //! 实现下层 dbnexus 定义的 [`AuditStorage`] 端口：把 dbnexus 审计事件转换为
 //! 结构化 [`LogRecord`]（`target = "audit::<entity_type>"`、`message` = 事件

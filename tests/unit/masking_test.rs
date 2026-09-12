@@ -403,7 +403,6 @@ mod masking_test {
         assert!(!result.contains("13812345678"));
     }
 
-    // === 国际电话号码脱敏测试 (T003) ===
 
     #[test]
     fn test_international_phone_masking() {
@@ -425,7 +424,6 @@ mod masking_test {
         assert!(!s.contains("7946"), "Should mask middle of intl phone");
     }
 
-    // === 信用卡脱敏测试 (T004) ===
 
     #[test]
     fn test_credit_card_visa() {
@@ -465,7 +463,6 @@ mod masking_test {
         assert!(result.contains("****-****-****-1111"));
     }
 
-    // === IPv4 脱敏测试 (T005) ===
 
     #[test]
     fn test_ipv4_masking() {
@@ -483,7 +480,6 @@ mod masking_test {
         assert_eq!(value["ip"], "***.***.***.1");
     }
 
-    // === IPv6 脱敏测试 (T005) ===
 
     #[test]
     fn test_ipv6_masking() {
@@ -497,7 +493,6 @@ mod masking_test {
         assert!(!result.contains("2001:0db8:85a3"));
     }
 
-    // === MAC 地址脱敏测试 (T006) ===
 
     #[test]
     fn test_mac_address_colon() {
@@ -532,7 +527,6 @@ mod masking_test {
         );
     }
 
-    // === 护照号脱敏测试 (T007) ===
 
     #[test]
     fn test_passport_masking() {
@@ -548,7 +542,6 @@ mod masking_test {
         assert!(result.contains("G******32"), "Passport G: {}", result);
     }
 
-    // === SSN 脱敏测试 (T008) ===
 
     #[test]
     fn test_ssn_masking() {
@@ -558,7 +551,6 @@ mod masking_test {
         assert!(!result.contains("123-45-6789"));
     }
 
-    // === 数据库连接串脱敏测试 (T009) ===
 
     #[test]
     fn test_db_connection_masking() {
@@ -578,7 +570,6 @@ mod masking_test {
         assert!(!result.contains("secret"));
     }
 
-    // === GitHub Token 脱敏测试 (T010) ===
 
     #[test]
     fn test_github_token_masking() {
@@ -593,7 +584,6 @@ mod masking_test {
         assert!(!result.contains(token));
     }
 
-    // === Slack Token 脱敏测试 (T010) ===
 
     #[test]
     fn test_slack_token_masking() {
@@ -603,7 +593,6 @@ mod masking_test {
         assert!(result.contains("***REDACTED_SLACK***"), "Slack: {}", result);
     }
 
-    // === Stripe Key 脱敏测试 (T010) ===
 
     #[test]
     fn test_stripe_key_masking() {
@@ -618,7 +607,6 @@ mod masking_test {
         );
     }
 
-    // === Google API Key 脱敏测试 (T010) ===
 
     #[test]
     fn test_google_api_key_masking() {
@@ -633,7 +621,6 @@ mod masking_test {
         );
     }
 
-    // === Private Key 脱敏测试 (T010) ===
 
     #[test]
     fn test_private_key_masking() {

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T514：OTLP 日志导出 MVP（feature `otlp`）。
+//! OTLP 日志导出 MVP（feature `otlp`）。
 //!
 //! [`OtlpSink`] 把记录编码为 OTLP/HTTP JSON（`resourceLogs`）批量 POST 到
 //! OpenTelemetry Collector。传输层为手写 HTTP/1.1（std::net 阻塞 IO，与

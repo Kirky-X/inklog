@@ -362,7 +362,7 @@ impl LogTemplate {
                 Placeholder::ThreadId => {
                     result.push_str(&record.thread_id);
                 }
-                // T504：追踪 ID 占位符；无 span 上下文时渲染为空串（与 {file} 一致）
+                // 追踪 ID 占位符；无 span 上下文时渲染为空串（与 {file} 一致）
                 Placeholder::TraceId => {
                     if let Some(ref trace_id) = record.trace_id {
                         result.push_str(trace_id);
@@ -755,7 +755,7 @@ mod tests {
 }
 
 // ============================================================================
-// T504: 追踪 ID 占位符渲染
+// 追踪 ID 占位符渲染
 // ============================================================================
 
 #[cfg(test)]

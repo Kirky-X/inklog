@@ -57,7 +57,7 @@ pub struct LoggerDependencies {
     /// 如果未提供，LoggerManager 将从文件系统加载配置。
     pub config: Option<Arc<dyn Config>>,
 
-    /// 动态注册的第三方 sink（T501）
+    /// 动态注册的第三方 sink
     ///
     /// 经 [`LoggerBuilder::add_sink`] 注册；每个 sink 获得独立 channel 与
     /// 通用 SinkWorker，第三方 Sink 零核心改动接入。
@@ -179,7 +179,6 @@ mod tests {
         assert!(builder.validation_errors.is_empty());
     }
 
-    // === T501: add_sink 累积注册 ===
 
     #[test]
     fn test_builder_add_sink_accumulates_and_upcasts() {
@@ -1095,9 +1094,9 @@ impl LoggerBuilder {
         self
     }
 
-    // === 动态 Sink 注册（T501） ===
+    // === 动态 Sink 注册 ===
 
-    /// 注册第三方 sink（T501 动态 Sink 注册）。
+    /// 注册第三方 sink（动态 Sink 注册）。
     ///
     /// 每个 `add_sink` 注册的 sink 获得独立的记录 channel（与内置 file/db
     /// worker 的 MPMC 通道隔离，互不抢占）和一条通用 SinkWorker 消费线程，

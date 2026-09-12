@@ -18,10 +18,10 @@ pub mod confers_config;
 ))]
 pub mod kit;
 
-// T503：dbnexus AuditStorage 端口的 inklog 写入桥（审计事件 → 结构化日志 → 落库）
+// dbnexus AuditStorage 端口的 inklog 写入桥（审计事件 → 结构化日志 → 落库）
 #[cfg(feature = "dbnexus-audit")]
 pub use audit_bridge::InklogAuditStorage;
-// T508：confers 配置加载 + watch 热更新
+// confers 配置加载 + watch 热更新
 #[cfg(feature = "config-confers")]
 pub use confers_config::{ConfersConfigWatcher, HotReloadValues, load_config_via_confers};
 

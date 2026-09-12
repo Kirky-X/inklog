@@ -81,7 +81,7 @@ pub struct LogRecord {
     /// Thread ID where the log was emitted (e.g., "ThreadId(1)").
     pub thread_id: String,
 
-    /// Distributed trace id (T504), extracted from the current tracing span.
+    /// Distributed trace id, extracted from the current tracing span.
     ///
     /// Format: 32-char lowercase hex (W3C Trace Context compatible width).
     /// When no OpenTelemetry layer is installed the value is derived from the
@@ -90,7 +90,7 @@ pub struct LogRecord {
     #[serde(default)]
     pub trace_id: Option<String>,
 
-    /// Span id of the span the event was emitted in (T504).
+    /// Span id of the span the event was emitted in.
     ///
     /// Format: 16-char lowercase hex; `None` when outside any span.
     #[serde(default)]
@@ -1340,7 +1340,7 @@ mod tests {
 }
 
 // ============================================================================
-// T504: trace_id/span_id 字段与序列化兼容
+// trace_id/span_id 字段与序列化兼容
 // ============================================================================
 
 #[cfg(test)]

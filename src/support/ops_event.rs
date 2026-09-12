@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Kirky.X
 // SPDX-License-Identifier: MIT
-//! T512：内部审计/运维事件流（ops event log）。
+//! 内部审计/运维事件流（ops event log）。
 //!
 //! sink 恢复、降级切换、丢弃激增等运维事件以结构化 [`InklogOpsEvent`]
 //! 表达，经 [`LoggerManager::publish_ops_event`](crate::LoggerManager::publish_ops_event)
-//! 复用 T501 的 sink 通道写入全部已启用 sink（file/db/自定义），供告警
+//! 复用统一 sink 通道写入全部已启用 sink（file/db/自定义），供告警
 //! 系统与事后审计消费（与 [`crate::support::audit_chain`] 的防篡改链互补：
 //! 链防外部篡改，本事件流记内部运维）。
 
