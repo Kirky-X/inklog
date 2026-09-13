@@ -39,8 +39,6 @@ Every log record travels a controlled path through capture, masking, and encrypt
 - [📚 Documentation](#-documentation)
 - [💻 Examples](#-examples)
 - [🏗️ Architecture](#️-architecture)
-- [🔀 Core Pipeline](#-core-pipeline)
-- [🧯 Failure Handling](#-failure-handling)
 - [🧪 Testing](#-testing)
 - [📊 Performance](#-performance)
 - [🔒 Security](#-security)
@@ -297,15 +295,11 @@ cargo run --package inklog-examples --example <name>
 
 inklog uses a layered async architecture: `domain` (manager, subscriber, and worker threads) passes records through `support::processing` for template rendering and masking into a bounded Crossbeam channel, from which dedicated threads dispatch to the sinks in `support::io::sink`; `integrations` adapts oxcache / confers / dbnexus / trait-kit onto traits, and `support::observability` exposes health and metric endpoints via the `http` feature. The full architecture diagram, layer responsibility table, and `src/` module tree comparison live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Layered Architecture").
 
----
-
-## 🔀 Core Pipeline
+### 🔀 Core Pipeline
 
 The full sequence of a log record — emitted via `tracing` macros, masked, sent non-blocking into the bounded channel (backpressure when full), persisted by the file / database sinks, and written back to metrics — is diagrammed in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Core Pipeline"), together with the key parameters: default channel capacity 10,000 and 3 worker threads, tunable via `PerformanceConfig`; encryption, compression, and rotation fire per rotated file and never sit on the per-record hot path.
 
----
-
-## 🧯 Failure Handling
+### 🧯 Failure Handling
 
 Sink write failures go through the circuit breaker (default failure threshold 5, 30-second cooldown) into retry or the DB → File → Console three-level fallback, while the health-check thread patrols every 10 seconds, re-initializing unhealthy sinks and resetting the breaker. The full flow diagram is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Failure degradation and self-healing").
 
@@ -369,7 +363,7 @@ The first official baseline (2026-09-11, criterion medians, covering the write /
 | Bounded-channel backpressure | `channel_capacity` default 10,000 | Prevents memory exhaustion; channel usage exposed via metrics |
 | Database batch writes | `batch_size` default 100, flush interval default 500 ms | docs/ARCHITECTURE.md reference: ~10,000 rows/s for batches of 100 vs ~100 rows/s for per-row inserts |
 | Masking on demand | `masking_enabled` | Regex masking is the most expensive security step on the main path; enable only on sinks that need it |
-| Zstd compression | levels 0-22, default 3 | ~3.5x ratio at the default level; encryption and key derivation fire per rotated file, not per record |
+| Zstd compression | levels 0-22, default 3 | ~3.5x ratio at the default level |
 
 Reproduction steps are documented in the "Reproduction" section of [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 

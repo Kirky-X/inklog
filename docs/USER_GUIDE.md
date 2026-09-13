@@ -757,7 +757,7 @@ println!("整体状态: {:?}", health.overall_status);
 println!("Channel 使用率: {:.2}%", health.channel_usage * 100.0);
 ```
 
-故障处理与恢复的完整流程见 [🏗️ 架构设计](ARCHITECTURE.md)「错误处理流程」章节。
+故障处理与恢复的完整流程见 [🏗️ 架构设计](ARCHITECTURE.md)「故障降级与自愈」章节。
 
 ### 使用 Mock 实现进行测试
 

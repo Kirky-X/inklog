@@ -39,8 +39,6 @@
 - [📚 文档](#-文档)
 - [💻 示例](#-示例)
 - [🏗️ 架构](#️-架构)
-- [🔀 核心执行链路](#-核心执行链路)
-- [🧯 故障降级与自愈](#-故障降级与自愈)
 - [🧪 测试](#-测试)
 - [📊 性能](#-性能)
 - [🔒 安全](#-安全)
@@ -297,15 +295,11 @@ cargo run --package inklog-examples --example <名称>
 
 inklog 采用分层异步架构：`domain`（管理器、Subscriber 与工作线程）经 `support::processing` 完成模板渲染与脱敏后进入 Crossbeam 有界通道，由专用线程分发给 `support::io::sink` 各 Sink；`integrations` 以 trait 适配 oxcache / confers / dbnexus / trait-kit，`support::observability` 经 `http` feature 暴露健康与指标端点。分层架构图、分层职责表与模块树对照见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「分层架构」。
 
----
-
-## 🔀 核心执行链路
+### 🔀 核心执行链路
 
 一条日志从 `tracing` 标准宏记录、脱敏、非阻塞进入有界通道（满时背压）到文件 / 数据库 Sink 落盘并回写指标的完整时序图，以及关键要点（默认通道容量 10000、3 个工作线程，可经 `PerformanceConfig` 调整；加密、压缩与轮转按轮转文件触发，不占用单条记录写入热路径），见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「核心执行链路」。
 
----
-
-## 🧯 故障降级与自愈
+### 🧯 故障降级与自愈
 
 Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重试或触发 DB → File → Console 三级降级，健康检查线程每 10 秒巡检并自动重建不健康 Sink、重置断路器。完整流程图见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「故障降级与自愈」。
 
@@ -369,7 +363,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 | 有界通道背压 | `channel_capacity` 默认 10000 | 防止内存溢出，通道水位经指标暴露 |
 | 数据库批量写入 | `batch_size` 默认 100，刷新间隔默认 500 ms | docs/ARCHITECTURE.md 参考值：批量 100 条约 10,000 行/s，逐条插入约 100 行/s |
 | 脱敏按需开启 | `masking_enabled` | 正则脱敏是主链路中最贵的安全环节，建议仅在需要的 sink 开启 |
-| Zstd 压缩 | 级别 0-22，默认 3 | 默认级别压缩比约 3.5x；加密与密钥派生按轮转文件触发，不占单条记录路径 |
+| Zstd 压缩 | 级别 0-22，默认 3 | 默认级别压缩比约 3.5x |
 
 复现方式见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)「复现」章节。
 
