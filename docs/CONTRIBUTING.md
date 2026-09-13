@@ -154,7 +154,7 @@ cargo build --release  # 发布构建
 cargo build -p inklog  # 只构建主 crate
 ```
 
-> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 互斥（经 dbnexus 强制，embedded 与 server-side 驱动不得混用），本项目**不适用** `--all-features`。请按后端分组启用，CI 与本地验证均使用统一 feature 组合（见下文测试章节）。
+> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 不可同时启用，本项目**不适用** `--all-features`（互斥原因见 [README · 特性标志](../README.md#-特性标志)）。请按后端分组启用，CI 与本地验证均使用统一 feature 组合（见下文测试章节）。
 
 ### 构建诊断
 

@@ -40,11 +40,7 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ### 核心概念
 
-1. **初始化**：`LoggerManager` 负责安装全局 tracing subscriber 与 `log` crate 前端；`init_inklog_logger()` 提供进程级单例便捷入口；
-2. **记录**：业务代码使用 `tracing::info!` 等标准宏，无侵入；
-3. **Sink**：输出目标抽象（`LogSink` / `AsyncSink` trait），console / file / database / net / otlp 内置实现，可自定义；
-4. **配置**：`InklogConfig` 支持 TOML 文件与 `INKLOG_*` 环境变量覆盖，优先级为环境变量 > 配置文件 > 默认值；
-5. **关闭**：应用退出前调用 `shutdown()`，等待通道中剩余日志全部写入。
+初始化（`LoggerManager` 安装全局 tracing subscriber 与 `log` crate 前端、进程级单例语义）、记录（标准宏无侵入）、Sink（输出目标抽象与内置实现）、配置（TOML + 环境变量优先级）与关闭（`shutdown()` 排空通道）五大核心概念，逐项说明见 [README · 快速开始](../README.md#-快速开始)。
 
 ## ✨ 核心特性
 
@@ -111,7 +107,7 @@ inklog = { version = "0.3.0-rc.3", features = ["net-sink", "otlp", "kms", "confi
 
 完整 feature 清单与说明见 [README](../README.md#-特性标志)。
 
-> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 不可同时启用（dbnexus 禁止 embedded 与 server-side 驱动混用），因此本项目不适用 `--all-features`。
+> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 不可同时启用，不适用 `--all-features`；互斥原因与按后端分组的启用方式见 [README · 特性标志](../README.md#-特性标志)。
 
 > 注：TOML 配置文件加载（`LoggerManager::from_file` / `load`）为内建能力，无需额外 feature。
 
@@ -572,37 +568,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### 文件日志与轮转
 
-```rust
-use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all("logs")?;
-
-    let file_config = FileSinkConfig {
-        enabled: true,
-        path: "logs/app.log".into(),
-        max_size: "10MB".into(),
-        rotation_time: "daily".into(),
-        keep_files: 7,
-        compress: true,
-        ..Default::default()
-    };
-
-    let config = InklogConfig {
-        file_sink: Some(file_config),
-        ..Default::default()
-    };
-
-    let _logger = LoggerManager::with_config(config).await?;
-
-    for i in 0..1000 {
-        log::info!("日志消息 #{}", i);
-    }
-
-    Ok(())
-}
-```
+文件 Sink 的完整初始化示例（含 `FileSinkConfig` 配置与优雅关闭）见[快速开始 · 文件日志](#文件日志)；`FileSinkConfig` 全部轮转字段与归档命名规则见[文件输出配置](#文件输出配置)。
 
 ### 加密日志
 
@@ -1144,7 +1110,7 @@ inklog-cli decrypt \
 
 ### 如何同时输出到文件和控制台？
 
-`console_sink` 默认启用，再配置 `file_sink` 即可，见上文「多目标输出」示例。
+`console_sink` 默认启用，再配置 `file_sink` 即可，示例见[多目标输出](#多目标输出)。
 
 ### 如何禁用数据脱敏？
 

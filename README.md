@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### 核心概念
 
-1. **初始化**：`LoggerManager` 负责安装全局 tracing subscriber，进程内单例语义（`init_inklog_logger()` 提供便捷入口）。
+1. **初始化**：`LoggerManager` 负责安装全局 tracing subscriber 与 `log` crate 前端，进程内单例语义（`init_inklog_logger()` 提供便捷入口）。
 2. **记录**：业务代码使用 `tracing::info!` 等标准宏，无侵入。
 3. **Sink**：输出目标抽象（`LogSink` / `AsyncSink` trait），console / file / database / net / otlp 内置实现，可自定义。
 4. **配置**：`InklogConfig` 支持 TOML 文件与 `INKLOG_*` 环境变量覆盖，优先级为环境变量 > 配置文件 > 默认值。
@@ -316,92 +316,19 @@ cargo run --package inklog-examples --example <名称>
 
 ## 🏗️ 架构
 
-inklog 采用分层异步架构（对照 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 `src/` 模块树）：`domain` 层持有 `LoggerManager` / `LoggerBuilder` 与配置模型，`domain::core::subscriber` 实现 tracing Subscriber 并构建 `LogRecord`；记录经 `support::processing` 完成模板渲染与脱敏后进入 Crossbeam 有界通道，由 `domain::core::workers` 的专用线程分发给 `support::io::sink` 中的各 Sink；`integrations` 层以依赖倒置方式把缓存（oxcache）、配置（confers）、数据库（dbnexus）适配到 `Cache` / `Config` / `Database` trait 上；`support::observability` 汇聚健康状态与指标，并经 `http` feature 暴露端点。
-
-```mermaid
-flowchart TD
-    APP["应用代码<br/>tracing 标准宏"] --> SUB["domain::core::subscriber<br/>LoggerSubscriber"]
-    CFG["domain::config<br/>InklogConfig"] --> MGR["domain::core<br/>LoggerManager / LoggerBuilder"]
-    MGR --> SUB
-    MGR --> INT["integrations 适配器<br/>OxCache / InklogConfig / DbNexus"]
-    SUB --> PROC["support::processing<br/>template / masking / object_pool"]
-    PROC --> CH["Crossbeam 有界通道"]
-    CH --> W["domain::core::workers<br/>文件 / 数据库 / 健康检查线程"]
-    W --> SINK["support::io::sink<br/>console / file / database / net / otlp<br/>middleware / sampling / rate_limit"]
-    SINK --> STORE["存储后端<br/>文件系统 / PostgreSQL / MySQL / SQLite / DuckDB"]
-    W --> OBS["support::observability<br/>Metrics / HealthStatus"]
-    OBS --> HTTP["HTTP 端点<br/>健康与 Prometheus 指标"]
-```
-
-| 分层 | 职责 |
-|------|------|
-| `domain` | 日志管理器、构建器、DI 容器、Subscriber、工作线程与配置模型 |
-| `support` | Sink 实现、模板与脱敏处理、对象池、指标、校验、查询、审计链 |
-| `integrations` | 以 trait 适配 oxcache / confers / dbnexus / trait-kit，隔离外部依赖 |
-| `i18n` | Fluent + ICU 消息本地化（zh-CN / en 资源位于 `locales/`） |
-| `cli` | `inklog-cli` 二进制：decrypt / generate / validate / query |
+inklog 采用分层异步架构：`domain`（管理器、Subscriber 与工作线程）经 `support::processing` 完成模板渲染与脱敏后进入 Crossbeam 有界通道，由专用线程分发给 `support::io::sink` 各 Sink；`integrations` 以 trait 适配 oxcache / confers / dbnexus / trait-kit，`support::observability` 经 `http` feature 暴露健康与指标端点。分层架构图、分层职责表与模块树对照见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「分层架构」。
 
 ---
 
 ## 🔀 核心执行链路
 
-一条日志从记录到落盘的完整路径（依据 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)「数据流」章节提炼）：
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as 应用代码
-    participant Sub as LoggerSubscriber
-    participant Chan as Crossbeam 有界通道
-    participant Worker as 工作线程
-    participant FS as FileSink
-    participant DS as DatabaseSink
-    participant Met as Metrics
-    participant HTTP as HTTP 端点
-
-    App->>Sub: tracing 标准宏记录日志
-    Sub->>Sub: 构建 LogRecord 并提取 trace_id
-    Sub->>Sub: 按规则库脱敏敏感字段
-    Sub->>Chan: 非阻塞发送 LogRecord
-    Chan->>Worker: 队列分发记录
-    Worker->>FS: 写入并按需轮转压缩加密
-    Worker->>DS: 缓冲后按批次落库
-    Worker->>Met: 更新延迟与 Sink 健康指标
-    Met-->>HTTP: 暴露健康与 Prometheus 指标
-```
-
-要点：
-
-- 发送端只在通道满时阻塞（背压），默认容量 10000、3 个工作线程，可经 `PerformanceConfig` 调整；
-- 文件线程为阻塞 I/O，数据库线程持有独立 tokio 运行时；
-- 加密、压缩与轮转按轮转文件触发，不占用单条记录的写入热路径。
+一条日志从 `tracing` 标准宏记录、脱敏、非阻塞进入有界通道（满时背压）到文件 / 数据库 Sink 落盘并回写指标的完整时序图，以及关键要点（默认通道容量 10000、3 个工作线程，可经 `PerformanceConfig` 调整；加密、压缩与轮转按轮转文件触发，不占用单条记录写入热路径），见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「核心执行链路」。
 
 ---
 
 ## 🧯 故障降级与自愈
 
-Sink 故障的处理与恢复路径（依据 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)「错误处理流程」与「FileSink 写入流程」）：
-
-```mermaid
-flowchart TD
-    W["Sink 写入"] --> OK["写入成功"]
-    W --> ERR["写入失败"]
-    ERR --> CB["断路器记录失败"]
-    CB --> THR{"失败次数达到阈值"}
-    THR -->|"是"| DEG["降级输出<br/>DB → File → Console 三级回退"]
-    THR -->|"否"| RETRY["重试最多三次<br/>指数退避"]
-    RETRY -->|"成功"| OK
-    RETRY -->|"失败"| DEG
-    DEG --> MET["记录失败指标并更新 Sink 健康"]
-    MET --> HC["健康检查线程巡检<br/>每 10 秒"]
-    HC -->|"连续失败超阈值且冷却期已过"| RECOVER["发送 Sink 恢复指令"]
-    RECOVER --> REINIT["重新初始化 Sink<br/>重置断路器"]
-    REINIT --> OK
-```
-
-- **断路器**：默认失败阈值 5 次、冷却 30 秒，半开状态下动态批大小减半；
-- **三级降级**：数据库不可用时回退文件，文件不可用时回退控制台；
-- **自动恢复**：健康检查线程检测不健康 Sink 并触发重建，恢复结果回写指标。
+Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重试或触发 DB → File → Console 三级降级，健康检查线程每 10 秒巡检并自动重建不健康 Sink、重置断路器。完整流程图见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「故障降级与自愈」。
 
 ---
 
@@ -454,18 +381,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 
 ### 基线数字
 
-以下为 [docs/PERFORMANCE.md](docs/PERFORMANCE.md) 记录的首份正式基线（2026-09-11，criterion 中位数）：
-
-| 基准 | 路径 | 中位耗时 | 吞吐 |
-|------|------|----------|------|
-| `template_render_text`（默认模板 + 2 字段） | 写入 | 320 ns | ~3.12 M rec/s |
-| `mask_sensitive_fields`（正则 + 敏感键） | 写入 | 50.5 µs | ~19.8 K rec/s |
-| `logrecord_to_json`（单条序列化） | 序列化 | 257 ns | ~3.89 M rec/s |
-| `logrecord_batch_100_to_json`（100 条批量） | 序列化 | 26.5 µs | ~3.77 M rec/s |
-| `aes256gcm_roundtrip_1kb`（1 KiB 加解密往返） | 加密 | 506 ns | ~1.88 GiB/s |
-| `pbkdf2_derive_600k`（PBKDF2-HMAC-SHA256 密钥派生） | 加密 | 63.3 ms | ~15.8 ops/s |
-
-**环境口径**（沿用 docs/PERFORMANCE.md 注明方式）：WSL2 开发笔记本（linux 6.6.87.2），criterion 0.8，release profile（`opt-level=3`、`lto=fat`、`codegen-units=1`），快速基线参数 `--warm-up-time 1 --measurement-time 2 --sample-size 10`。跨机型噪声较大，数字供对照而非承诺。
+首份正式基线（2026-09-11，criterion 中位数，覆盖写入 / 序列化 / 加密三条路径）的完整数字、环境口径与「复现」步骤见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
 ### 设计要点
 
@@ -488,24 +404,15 @@ cargo audit                                   # 安全公告（lefthook pre-push
 
 - **首选**：邮件 [security@inklog.dev](mailto:security@inklog.dev)
 - **备选**：[GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)
-- **响应时限**：24 小时内确认，48 小时内初步评估，修复开发 7-14 天
+- **响应时限与协调披露流程**：见 [docs/SECURITY.md](docs/SECURITY.md)「漏洞报告流程」。
 
 ### 安全设计
 
-| 能力 | 实现 |
-|------|------|
-| 静态加密 | AES-256-GCM 认证加密（[aes-gcm](https://crates.io/crates/aes-gcm)），密文格式 `[nonce][ciphertext]` |
-| 密钥内存安全 | `zeroize` 在密钥离开作用域时清零内存 |
-| 密钥派生 | PBKDF2-HMAC-SHA256 600k 迭代（安全审查认可的最低迭代数，按轮转文件至多一次） |
-| 路径安全 | `PathValidator` 防路径穿越，禁止写入用户主目录与密钥文件 |
-| 内容净化 | `LogSanitizer` 日志注入防护；PII 脱敏覆盖邮箱、电话、证件、卡号等模式 |
-| 访问控制 | HTTP 端点认证 token 启动期缓存、失败 fail-closed；文件权限 0600（Unix） |
-| 归档防篡改 | `ArchiveChain` HMAC-SHA256 归档链，防删除、重排与伪造 |
-| 合规支持 | 加密、脱敏与审计设计支持 GDPR、HIPAA、PCI-DSS 等合规要求（见 [docs/SECURITY.md](docs/SECURITY.md)） |
+静态加密（AES-256-GCM）、密钥派生与内存清零、路径与内容防护、SQL 注入防护、HTTP 访问控制、归档防篡改链，以及对 GDPR / HIPAA / PCI-DSS 的合规映射，逐项说明见 [docs/SECURITY.md](docs/SECURITY.md)「安全设计概览」。
 
 ### 供应链安全
 
-仓库维护 [`deny.toml`](deny.toml)：CI 的 security job 与 lefthook pre-push 分别运行 `cargo deny check`（漏洞 / 许可证 / 重复依赖）与 `cargo audit`（RustSec 公告）；lefthook pre-commit 含私钥文件扫描。
+仓库维护 [`deny.toml`](deny.toml)；`cargo deny check`（漏洞 / 许可证 / 重复依赖）、`cargo audit`（RustSec 公告）与 pre-commit 私钥扫描的运行位置与口径见 [docs/SECURITY.md](docs/SECURITY.md)「安全设计概览」。
 
 ---
 

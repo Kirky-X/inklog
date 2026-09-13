@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Core Concepts
 
-1. **Initialization**: `LoggerManager` installs the global tracing subscriber with process-wide singleton semantics (`init_inklog_logger()` is the convenience entry point).
+1. **Initialization**: `LoggerManager` installs the global tracing subscriber and the `log` crate frontend with process-wide singleton semantics (`init_inklog_logger()` is the convenience entry point).
 2. **Recording**: business code uses standard macros such as `tracing::info!` with zero intrusion.
 3. **Sinks**: the output abstraction (`LogSink` / `AsyncSink` traits) with built-in console / file / database / net / otlp implementations, extensible with your own.
 4. **Configuration**: `InklogConfig` supports TOML files and `INKLOG_*` environment variable overrides; precedence is environment > file > defaults.
@@ -316,92 +316,19 @@ cargo run --package inklog-examples --example <name>
 
 ## 🏗️ Architecture
 
-inklog uses a layered async architecture (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the `src/` module tree): the `domain` layer owns `LoggerManager` / `LoggerBuilder` and the configuration model, while `domain::core::subscriber` implements the tracing Subscriber and builds `LogRecord`s; records pass through `support::processing` for template rendering and masking before entering a bounded Crossbeam channel, from which the dedicated threads in `domain::core::workers` dispatch to the sinks in `support::io::sink`; the `integrations` layer adapts caching (oxcache), configuration (confers), and databases (dbnexus) onto the `Cache` / `Config` / `Database` traits via dependency inversion; `support::observability` aggregates health and metrics, exposed through the `http` feature.
-
-```mermaid
-flowchart TD
-    APP["Application code<br/>tracing macros"] --> SUB["domain::core::subscriber<br/>LoggerSubscriber"]
-    CFG["domain::config<br/>InklogConfig"] --> MGR["domain::core<br/>LoggerManager / LoggerBuilder"]
-    MGR --> SUB
-    MGR --> INT["integrations adapters<br/>OxCache / InklogConfig / DbNexus"]
-    SUB --> PROC["support::processing<br/>template / masking / object_pool"]
-    PROC --> CH["Bounded Crossbeam channel"]
-    CH --> W["domain::core::workers<br/>file / database / health threads"]
-    W --> SINK["support::io::sink<br/>console / file / database / net / otlp<br/>middleware / sampling / rate_limit"]
-    SINK --> STORE["Storage backends<br/>filesystem / PostgreSQL / MySQL / SQLite / DuckDB"]
-    W --> OBS["support::observability<br/>Metrics / HealthStatus"]
-    OBS --> HTTP["HTTP endpoints<br/>health and Prometheus metrics"]
-```
-
-| Layer | Responsibility |
-|------|------|
-| `domain` | Log manager, builder, DI container, subscriber, worker threads, configuration model |
-| `support` | Sink implementations, template and masking processing, object pool, metrics, validation, query, audit chain |
-| `integrations` | Trait-based adapters for oxcache / confers / dbnexus / trait-kit, isolating external dependencies |
-| `i18n` | Fluent + ICU message localization (zh-CN / en resources in `locales/`) |
-| `cli` | `inklog-cli` binary: decrypt / generate / validate / query |
+inklog uses a layered async architecture: `domain` (manager, subscriber, and worker threads) passes records through `support::processing` for template rendering and masking into a bounded Crossbeam channel, from which dedicated threads dispatch to the sinks in `support::io::sink`; `integrations` adapts oxcache / confers / dbnexus / trait-kit onto traits, and `support::observability` exposes health and metric endpoints via the `http` feature. The full architecture diagram, layer responsibility table, and `src/` module tree comparison live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Layered Architecture").
 
 ---
 
 ## 🔀 Core Pipeline
 
-The full path of a log record from emission to persistence (distilled from the "Data Flow" chapter of [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)):
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as Application code
-    participant Sub as LoggerSubscriber
-    participant Chan as Bounded Crossbeam channel
-    participant Worker as Worker threads
-    participant FS as FileSink
-    participant DS as DatabaseSink
-    participant Met as Metrics
-    participant HTTP as HTTP endpoints
-
-    App->>Sub: record a log via tracing macros
-    Sub->>Sub: build LogRecord and extract trace_id
-    Sub->>Sub: mask sensitive fields by rule set
-    Sub->>Chan: send LogRecord non-blocking
-    Chan->>Worker: dispatch record from queue
-    Worker->>FS: write with on-demand rotation, compression, encryption
-    Worker->>DS: buffer and flush in batches
-    Worker->>Met: update latency and sink health metrics
-    Met-->>HTTP: expose health and Prometheus metrics
-```
-
-Key points:
-
-- Senders only block when the channel is full (backpressure); default capacity is 10,000 with 3 worker threads, tunable via `PerformanceConfig`;
-- The file thread performs blocking I/O, while the database thread runs its own dedicated tokio runtime;
-- Encryption, compression, and rotation fire per rotated file and never sit on the per-record hot path.
+The full sequence of a log record — emitted via `tracing` macros, masked, sent non-blocking into the bounded channel (backpressure when full), persisted by the file / database sinks, and written back to metrics — is diagrammed in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Core Pipeline"), together with the key parameters: default channel capacity 10,000 and 3 worker threads, tunable via `PerformanceConfig`; encryption, compression, and rotation fire per rotated file and never sit on the per-record hot path.
 
 ---
 
 ## 🧯 Failure Handling
 
-How sink failures are degraded and recovered (from the "Error Handling Flow" and "FileSink write flow" chapters of [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)):
-
-```mermaid
-flowchart TD
-    W["Sink write"] --> OK["Write succeeded"]
-    W --> ERR["Write failed"]
-    ERR --> CB["Circuit breaker records failure"]
-    CB --> THR{"Failure threshold reached"}
-    THR -->|"yes"| DEG["Degraded output<br/>DB → File → Console fallback"]
-    THR -->|"no"| RETRY["Retry up to three times<br/>with exponential backoff"]
-    RETRY -->|"succeeded"| OK
-    RETRY -->|"failed"| DEG
-    DEG --> MET["Record failure metrics and update sink health"]
-    MET --> HC["Health-check thread patrol<br/>every 10 seconds"]
-    HC -->|"failures exceed threshold after cooldown"| RECOVER["Send sink recovery command"]
-    RECOVER --> REINIT["Re-initialize sink<br/>reset circuit breaker"]
-    REINIT --> OK
-```
-
-- **Circuit breaker**: default failure threshold of 5 with a 30-second cooldown; batch size halves in the half-open state;
-- **Three-level fallback**: database failure degrades to file, file failure degrades to console;
-- **Automatic recovery**: the health-check thread detects unhealthy sinks and triggers re-initialization, writing results back to metrics.
+Sink write failures go through the circuit breaker (default failure threshold 5, 30-second cooldown) into retry or the DB → File → Console three-level fallback, while the health-check thread patrols every 10 seconds, re-initializing unhealthy sinks and resetting the breaker. The full flow diagram is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Failure degradation and self-healing").
 
 ---
 
@@ -454,18 +381,7 @@ cargo audit                                   # security advisories (lefthook pr
 
 ### Baseline Numbers
 
-The first official baseline recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md) (2026-09-11, criterion medians):
-
-| Benchmark | Path | Median | Throughput |
-|------|------|----------|------|
-| `template_render_text` (default template + 2 fields) | Write | 320 ns | ~3.12 M rec/s |
-| `mask_sensitive_fields` (regex + sensitive keys) | Write | 50.5 µs | ~19.8 K rec/s |
-| `logrecord_to_json` (single record) | Serialization | 257 ns | ~3.89 M rec/s |
-| `logrecord_batch_100_to_json` (batch of 100) | Serialization | 26.5 µs | ~3.77 M rec/s |
-| `aes256gcm_roundtrip_1kb` (1 KiB encrypt/decrypt roundtrip) | Encryption | 506 ns | ~1.88 GiB/s |
-| `pbkdf2_derive_600k` (PBKDF2-HMAC-SHA256 key derivation) | Encryption | 63.3 ms | ~15.8 ops/s |
-
-**Environment notes** (as stated in docs/PERFORMANCE.md): WSL2 development laptop (linux 6.6.87.2), criterion 0.8, release profile (`opt-level=3`, `lto=fat`, `codegen-units=1`), quick baseline parameters `--warm-up-time 1 --measurement-time 2 --sample-size 10`. Numbers vary across machines and are provided for comparison, not as guarantees.
+The first official baseline (2026-09-11, criterion medians, covering the write / serialization / encryption paths) — full numbers, environment notes, and reproduction steps — is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ### Design Highlights
 
@@ -488,24 +404,15 @@ Please do **not** disclose security vulnerabilities publicly; report responsibly
 
 - **Preferred**: email [security@inklog.dev](mailto:security@inklog.dev)
 - **Alternative**: [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)
-- **Response targets**: acknowledgment within 24 hours, initial assessment within 48 hours, fix development in 7-14 days
+- **Response targets and coordinated disclosure**: see [docs/SECURITY.md](docs/SECURITY.md) ("Vulnerability Reporting Process").
 
 ### Security Design
 
-| Capability | Implementation |
-|------|------|
-| Encryption at rest | AES-256-GCM authenticated encryption ([aes-gcm](https://crates.io/crates/aes-gcm)); ciphertext format `[nonce][ciphertext]` |
-| Key memory safety | `zeroize` clears key material when it leaves scope |
-| Key derivation | PBKDF2-HMAC-SHA256 with 600k iterations (minimum approved by security review; at most once per rotated file) |
-| Path safety | `PathValidator` prevents path traversal and blocks user home directories and key files |
-| Content sanitization | `LogSanitizer` guards against log injection; PII masking covers email, phone, ID, and card patterns |
-| Access control | HTTP endpoint auth token cached at startup with fail-closed behavior; file permissions 0600 on Unix |
-| Tamper-evident archives | `ArchiveChain` HMAC-SHA256 chain resisting deletion, reordering, and forgery |
-| Compliance support | Encryption, masking, and audit design supports GDPR, HIPAA, PCI-DSS, and similar requirements (see [docs/SECURITY.md](docs/SECURITY.md)) |
+Encryption at rest (AES-256-GCM), key derivation and memory zeroization, path and content protection, SQL injection protection, HTTP access control, tamper-evident archival, and the GDPR / HIPAA / PCI-DSS compliance mapping are documented item by item in [docs/SECURITY.md](docs/SECURITY.md) ("Security Design Overview").
 
 ### Supply Chain Security
 
-The repository maintains [`deny.toml`](deny.toml): the CI security job and lefthook pre-push run `cargo deny check` (advisories / licenses / duplicate crates) and `cargo audit` (RustSec advisories) respectively; lefthook pre-commit includes a private-key file scan.
+The repository maintains [`deny.toml`](deny.toml); where `cargo deny check` (advisories / licenses / duplicate crates), `cargo audit` (RustSec advisories), and the pre-commit private-key scan run, and their scope, are documented in [docs/SECURITY.md](docs/SECURITY.md) ("Security Design Overview").
 
 ---
 

@@ -188,32 +188,13 @@ trait 签名逐项见 [📘 API 参考](API_REFERENCE.md)「依赖注入类型�
 
 ### 配置键映射
 
-`InklogConfigAdapter` 支持完整的点分配置键路径，供外部配置系统对齐：
-
-| 键前缀 | 键 |
-|--------|-----|
-| `global.*` | level、format、masking_enabled、auto_fallback、fallback_initial_delay_ms、fallback_max_delay_ms、fallback_max_retries、output_format |
-| `file_sink.*` | enabled、path、max_size、rotation_time、keep_files、compress、compression_level、encrypt、encryption_key_env、retention_days、max_total_size、cleanup_interval_minutes、batch_size、flush_interval_ms、masking_enabled、output_format |
-| `console_sink.*` | enabled、colored、stderr_levels、masking_enabled |
+`InklogConfigAdapter` 支持完整的点分配置键路径（`global.*` / `file_sink.*` / `console_sink.*`），供外部配置系统对齐；逐键清单见 [📘 API 参考](API_REFERENCE.md#config-trait)。
 
 ## 🚰 Sink 系统
 
 ### LogSink 抽象
 
-所有输出目标实现统一接口 `LogSink`（方法均为 `&self`，内部可变性由实现方保证）；`AsyncSink` 为其标记子 trait（blanket impl），用于动态注册与 trait 上转型：
-
-```rust
-#[async_trait]
-pub trait LogSink: Send + Sync {
-    async fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
-    async fn flush(&self) -> Result<(), InklogError>;
-    fn is_healthy(&self) -> bool { true }  // 默认恒健康，建议覆写
-    async fn shutdown(&self) -> Result<(), InklogError>;
-}
-
-pub trait AsyncSink: LogSink {}
-impl<T: LogSink + ?Sized> AsyncSink for T {}
-```
+所有输出目标实现统一接口 `LogSink`（方法均为 `&self`，内部可变性由实现方保证）；`AsyncSink` 为其标记子 trait（blanket impl），用于动态注册与 trait 上转型。trait 签名与内置实现清单逐项见 [📘 API 参考](API_REFERENCE.md#-sink-类型)。
 
 ### 内置 Sink
 
@@ -372,15 +353,7 @@ flowchart TD
 
 ### 文件存储
 
-**文件组织**（时间戳格式 `%Y%m%d_%H%M%S`）：
-
-```text
-logs/
-├── app.log                        # 当前活动文件（明文）
-├── app_20260913_143022.log        # 已轮转
-├── app_20260912_080000.log.zst    # 已压缩（compression / gzip feature）
-└── app_20260911_080000.log.zst.enc  # 已压缩并加密
-```
+**文件组织**：轮转归档命名与目录布局示例（时间戳格式 `%Y%m%d_%H%M%S`）见 [📖 用户指南](USER_GUIDE.md#轮转文件命名)。
 
 **轮转策略**：达到 `max_size` 立即轮转；`hourly` / `daily` / `weekly` 定时轮转；同一秒内二次轮转时目标已存在则追加 `.1`、`.2` 序号后缀，保证永不覆盖。
 
@@ -427,22 +400,7 @@ FOR VALUES FROM ('2026-09-01') TO ('2026-10-01');
 
 ## 🔐 安全架构
 
-安全设计的完整说明（密钥格式、脱敏规则库、上报流程与合规）见 [🔒 安全文档](SECURITY.md)，本节聚焦架构位置。
-
-| 机制 | 架构位置 | 说明 |
-|------|----------|------|
-| 静态加密 | `support::io::sink::encryption` | AES-256-GCM，密文格式 `[nonce][ciphertext]`，仅作用于轮转归档 |
-| 密钥派生 | 同上 | PBKDF2-HMAC-SHA256 600k 迭代（每次轮转至多一次），600,000 为安全审查认可的最低迭代数 |
-| 密钥内存安全 | `zeroize` | 密钥离开作用域自动清零 |
-| 数据脱敏 | `support::processing::masking` | 21 条内置正则规则（优先级分组）+ 敏感字段名检测 + 注册表扩展 |
-| 路径安全 | `validation::path`（PathValidator） | 防路径穿越，禁止写入用户主目录与密钥文件 |
-| 内容净化 | `validation::sanitize`（LogSanitizer） | 日志注入与控制字符防护 |
-| SQL 注入防护 | DatabaseSink | 表名/分区名白名单校验 + 参数化查询 |
-| 访问控制 | HTTP 端点 | 认证 token 启动期缓存、失败 fail-closed；IP 白名单；文件权限 0600 |
-| 归档防篡改 | `support::audit_chain` | `ArchiveChain` HMAC-SHA256 归档链（随机链首盐），防删除、重排与伪造 |
-| KMS 密钥提供 | `support::security` | `KeyProvider` 端口 + `EnvKeyProvider` / `ConfersKeyProvider` / Vault transit（`kms` feature） |
-
-**加密文件格式 v2**：文件头 `[MAGIC 8][version 2][algo 2][salt 16][nonce 12]`（MAGIC 为 `ENCLOG1\0`）；Base64/原始 32 字节密钥直接使用（盐存而不用），普通密码经 PBKDF2 以头中盐确定性派生；v1（无盐）文件仍可解密。
+安全设计的完整说明（密钥格式、脱敏规则库、上报流程与合规）见 [🔒 安全文档](SECURITY.md)，各安全机制与实现位置（架构落点）的对应清单以其「[安全能力总览](SECURITY.md#️-安全设计概览)」表为准，此处不再重复；加密文件格式（v2 头结构与 v1 / Legacy 兼容）的逐字节说明见「[加密文件格式](SECURITY.md#加密文件格式)」。
 
 ## ⚡ 性能考虑
 
