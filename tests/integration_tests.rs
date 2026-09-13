@@ -79,18 +79,46 @@ use std::time::Duration as RecoveryDuration;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_file_sink_auto_recovery() {
+    // 全局 tracing 订阅者进程内仅首个 manager 能绑定（try_init 良性失败），
+    // 多 manager 并存的测试二进制中 builder().build() 的日志流向取决于
+    // 构建竞速——按本仓正典范式（log_native_test::test_log_to_file）改用
+    // build_detached + 线程级 set_default，使事件确定性路由到本用例的 manager。
+    use inklog::config::FileSinkConfig;
+    use inklog::InklogConfig;
+    use std::time::Instant as RecoveryInstant;
+    use tracing_subscriber::layer::SubscriberExt;
+
     // Create a test directory
     let test_dir = "tests/temp_recovery";
     let _ = recovery_fs::create_dir_all(test_dir);
-
-    // Create a logger with file sink
     let log_file = format!("{}/test_recovery.log", test_dir);
-    let manager = RecoveryLoggerManager::builder()
-        .level("info")
-        .file(log_file.clone())
-        .build()
-        .await
-        .expect("Failed to create logger manager");
+
+    let config = InklogConfig {
+        global: inklog::config::GlobalConfig {
+            level: "info".to_string(),
+            ..Default::default()
+        },
+        file_sink: Some(FileSinkConfig {
+            enabled: true,
+            path: log_file.clone().into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let (manager, subscriber, filter) = RecoveryLoggerManager::build_detached(
+        config,
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
+        None,
+    )
+    .await
+    .expect("Failed to create logger manager");
+    let _dispatch_guard =
+        tracing::subscriber::set_default(tracing_subscriber::registry().with(subscriber).with(filter));
 
     // Log some messages
     tracing::info!("Test message before failure");
@@ -117,7 +145,6 @@ async fn test_file_sink_auto_recovery() {
     // 在此场景触发，断言的是"写入持续成功"而非"文件重建"。
     // 异步写路径的落账时机不固定（同二进制内并行用例争抢调度时更慢），
     // 以轮询等待代替固定 sleep，5s 内计数器推进即视为管道连续。
-    use std::time::Instant as RecoveryInstant;
     let before = manager.get_health_status().metrics.logs_written;
     tracing::info!("Test message after removal (pipeline continuity)");
     let deadline = RecoveryInstant::now() + RecoveryDuration::from_secs(5);
@@ -139,6 +166,7 @@ async fn test_file_sink_auto_recovery() {
     println!("Health status: {:?}", health);
 
     // Clean up
+    let _ = manager.shutdown();
     let _ = recovery_fs::remove_dir_all(test_dir);
 }
 
