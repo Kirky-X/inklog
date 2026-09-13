@@ -35,10 +35,24 @@
 
 ---
 
+<div align="center" style="padding: 32px; margin: 24px 0">
+
+### ⚡ Structured Logging, Security Built In
+
+Every log record travels a controlled path through capture, masking, and encryption to multi-sink persistence:
+
+<table style="width:100%; border-collapse: collapse">
+<tr><td align="center" width="25%" style="padding: 12px">⚡<br><b>Async Throughput</b><br><span style="color:#64748B">Tokio runtime + bounded channels, batching with backpressure</span></td><td align="center" width="25%" style="padding: 12px">🔒<br><b>Security Built In</b><br><span style="color:#64748B">AES-256-GCM encryption, PII masking, key zeroization</span></td><td align="center" width="25%" style="padding: 12px">🎯<br><b>Multi-Target Output</b><br><span style="color:#64748B">console, file, database, TCP/UDP forwarding, OTLP export</span></td><td align="center" width="25%" style="padding: 12px">📊<br><b>Full Observability</b><br><span style="color:#64748B">health endpoints, Prometheus metrics, trace_id correlation</span></td></tr>
+</table>
+
+</div>
+
+---
+
 ## 📋 Table of Contents
 
 <details open>
-<summary>📑 Table of Contents (Click to expand)</summary>
+<summary>📑 目录</summary>
 
 - [✨ Features](#-features)
 - [🚀 Quick Start](#-quick-start)

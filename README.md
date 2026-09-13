@@ -35,10 +35,24 @@
 
 ---
 
+<div align="center" style="padding: 32px; margin: 24px 0">
+
+### ⚡ 结构化日志，安全内建
+
+一条日志从采集、脱敏、加密到多端落盘，全链路可控：
+
+<table style="width:100%; border-collapse: collapse">
+<tr><td align="center" width="25%" style="padding: 12px">⚡<br><b>异步高吞吐</b><br><span style="color:#64748B">Tokio 异步 + 有界通道，批量写入与背压控制</span></td><td align="center" width="25%" style="padding: 12px">🔒<br><b>安全内建</b><br><span style="color:#64748B">AES-256-GCM 加密、PII 脱敏、密钥内存清零</span></td><td align="center" width="25%" style="padding: 12px">🎯<br><b>多目标输出</b><br><span style="color:#64748B">控制台、文件、数据库、TCP/UDP 转发、OTLP 导出</span></td><td align="center" width="25%" style="padding: 12px">📊<br><b>全链路可观测</b><br><span style="color:#64748B">健康检查端点、Prometheus 指标、trace_id 关联</span></td></tr>
+</table>
+
+</div>
+
+---
+
 ## 📋 目录
 
 <details open>
-<summary>📑 目录（点击展开）</summary>
+<summary>📑 目录</summary>
 
 - [✨ 功能特性](#-功能特性)
 - [🚀 快速开始](#-快速开始)
