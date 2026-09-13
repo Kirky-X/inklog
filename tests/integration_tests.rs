@@ -115,10 +115,20 @@ async fn test_file_sink_auto_recovery() {
     // 文件句柄——Linux 下删除路径不会使后续 write 失败（记录继续写入
     // unlinked inode），因此工厂自动恢复路径（仅对真实写错误生效）不会
     // 在此场景触发，断言的是"写入持续成功"而非"文件重建"。
+    // 异步写路径的落账时机不固定（同二进制内并行用例争抢调度时更慢），
+    // 以轮询等待代替固定 sleep，5s 内计数器推进即视为管道连续。
+    use std::time::Instant as RecoveryInstant;
     let before = manager.get_health_status().metrics.logs_written;
     tracing::info!("Test message after removal (pipeline continuity)");
-    recovery_thread::sleep(RecoveryDuration::from_millis(200));
-    let after = manager.get_health_status().metrics.logs_written;
+    let deadline = RecoveryInstant::now() + RecoveryDuration::from_secs(5);
+    let mut after = before;
+    while RecoveryInstant::now() < deadline {
+        after = manager.get_health_status().metrics.logs_written;
+        if after > before {
+            break;
+        }
+        recovery_thread::sleep(RecoveryDuration::from_millis(50));
+    }
     assert!(
         after > before,
         "logging pipeline must keep working after log file removal (written {before} -> {after})"
