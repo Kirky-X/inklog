@@ -10,27 +10,6 @@
 
 [✨ 功能特性](#-功能特性) • [🚀 快速开始](#-快速开始) • [📚 文档](#-文档) • [💻 示例](#-示例) • [🤝 参与贡献](#-参与贡献)
 
-<table style="width:100%; border-collapse: collapse; margin: 8px 0;">
-<tr>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>⚡ 异步高吞吐</b><br>
-<sub>Tokio 异步运行时 + Crossbeam 有界通道，批量写入与背压控制</sub>
-</td>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>🔒 安全内建</b><br>
-<sub>AES-256-GCM 加密、PII 脱敏、密钥内存清零、路径穿越防护</sub>
-</td>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>🎯 多目标输出</b><br>
-<sub>控制台、文件、数据库、TCP/UDP 转发、OTLP 导出</sub>
-</td>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>📊 全链路可观测</b><br>
-<sub>健康检查端点、Prometheus 指标、trace_id 追踪关联</sub>
-</td>
-</tr>
-</table>
-
 </div>
 
 ---

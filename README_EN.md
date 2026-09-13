@@ -10,27 +10,6 @@
 
 [✨ Features](#-features) • [🚀 Quick Start](#-quick-start) • [📚 Documentation](#-documentation) • [💻 Examples](#-examples) • [🤝 Contributing](#-contributing)
 
-<table style="width:100%; border-collapse: collapse; margin: 8px 0;">
-<tr>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>⚡ Async Throughput</b><br>
-<sub>Tokio runtime + bounded Crossbeam channels with batching and backpressure</sub>
-</td>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>🔒 Security Built In</b><br>
-<sub>AES-256-GCM encryption, PII masking, key zeroization, path traversal protection</sub>
-</td>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>🎯 Multi-Target Output</b><br>
-<sub>Console, file, database, TCP/UDP forwarding, OTLP export</sub>
-</td>
-<td width="25%" align="center" style="padding: 12px; border-radius:8px; border:1px solid #E2E8F0; vertical-align:top;">
-<b>📊 Full Observability</b><br>
-<sub>Health endpoints, Prometheus metrics, trace_id correlation</sub>
-</td>
-</tr>
-</table>
-
 </div>
 
 ---
