@@ -1,52 +1,45 @@
-# 📘 Inklog API 参考
+# 📘 inklog API 参考
 
-本文档提供 Inklog 公共 API 的完整参考。
-
----
-
-## 📋 目录
+本文档提供 inklog v0.3.0-rc.3 公共 API 的逐项参考：核心类型、配置结构体、错误类型、健康监控、Sink 家族、依赖注入 trait 与测试 Mock。使用教程见 [📖 用户指南](USER_GUIDE.md)，内部设计见 [🏗️ 架构设计](ARCHITECTURE.md)。
 
 <details open>
-<summary>📑 目录（点击展开）</summary>
+<summary>📑 目录</summary>
 
-- [概述](#概述)
-- [核心类型](#核心类型)
-  - [LoggerManager](#loggermanager)
-  - [LoggerBuilder](#loggerbuilder)
-  - [InklogConfig](#inklogconfig)
-- [配置结构体](#配置结构体)
-  - [GlobalConfig](#globalconfig)
-  - [ConsoleSinkConfig](#consolesinkconfig)
-  - [FileSinkConfig](#filesinkconfig)
-  - [DatabaseSinkConfig](#databasesinkconfig)
-  - [HttpServerConfig](#httpserverconfig)
-  - [PerformanceConfig](#performanceconfig)
-  - [ParquetConfig](#parquetconfig)
-- [错误类型](#错误类型)
-- [健康监控类型](#健康监控类型)
-- [特征（Traits）](#特征traits)
-- [依赖注入类型](#依赖注入类型)
-- [基础设施 Trait（Infrastructure Traits）](#基础设施-traitinfrastructure-traits)
-- [Mock 实现（测试用）](#mock-实现测试用)
-- [适配器实现](#适配器实现)
-- [示例参考](#示例参考)
+- [📭 概述](#-概述)
+- [🚀 顶层便捷函数](#-顶层便捷函数)
+- [🧩 核心类型](#-核心类型)
+- [⚙️ 配置结构体](#️-配置结构体)
+- [⚠️ 错误类型](#️-错误类型)
+- [🩺 健康监控类型](#-健康监控类型)
+- [🧾 日志记录类型](#-日志记录类型)
+- [🔌 Sink 类型](#-sink-类型)
+- [🧪 依赖注入类型](#-依赖注入类型)
+- [🎭 Mock 实现（测试用）](#-mock-实现测试用)
+- [🏭 适配器实现](#-适配器实现)
+- [💡 示例参考](#-示例参考)
 
 </details>
 
 ---
 
-## 概述
+## 📭 概述
 
-Inklog 提供了以下公共 API 类型：
+### 公共 API 总览
 
-| 类型 | 模块 | 描述 |
-|------|--------|------|
-| `LoggerManager` | `manager` | 核心日志管理器，协调所有日志操作 |
-| `LoggerBuilder` | `manager` | 流式构建器，用于创建配置 |
-| `InklogConfig` | `config` | 根配置结构 |
-| `InklogError` | `error` | 错误类型枚举 |
-| `HealthStatus` | `metrics` | 健康状态结构 |
-| `Metrics` | `metrics` | 指标收集器 |
+| 类别 | 类型 | 描述 |
+|------|------|------|
+| 核心 | `LoggerManager` | 核心日志管理器，协调日志收集与路由 |
+| 核心 | `LoggerBuilder` | 流式构建器，用于创建管理器 |
+| 核心 | `LoggerDependencies` | 依赖注入容器 |
+| 核心 | `InklogContainer` / `InklogContainerBuilder` | DI 容器 |
+| 配置 | `InklogConfig` 及子配置 | 根配置与各 Sink 配置 |
+| 错误 | `InklogError` / `InklogResult` | 错误枚举与结果别名 |
+| 健康 | `HealthStatus` / `Metrics` / `SinkHealthMonitor` | 健康状态与指标 |
+| Sink | `LogSink` / `AsyncSink` 及内置实现 | 输出目标抽象与实现 |
+| 记录 | `LogRecord` | 日志记录结构 |
+| 注入 | `Cache` / `Config` / `Database` trait | 基础设施抽象 |
+| 适配 | `OxCacheAdapter` / `InklogConfigAdapter` / `DbNexusAdapter` | 生产环境适配器 |
+| 测试 | `MockCache` / `MockConfig` / `MockDatabaseAdapter` | 测试 Mock（`test-utils` feature） |
 
 ### 导入公共 API
 
@@ -55,92 +48,96 @@ use inklog::{
     // 核心类型
     LoggerManager,
     LoggerBuilder,
+    LoggerDependencies,
     InklogConfig,
+    LogRecord,
+    LogLevel,
 
     // 配置类型
     config::{
         GlobalConfig,
         ConsoleSinkConfig,
         FileSinkConfig,
-
+        DatabaseSinkConfig,
+        DatabaseDriver,
         HttpServerConfig,
         PerformanceConfig,
         ParquetConfig,
-        DatabaseDriver,
     },
 
     // 错误类型
     InklogError,
+    InklogResult,
 
     // 健康监控
     HealthStatus,
     Metrics,
+    SinkStatus,
+    SinkHealth,
+
+    // Sink 抽象
+    LogSink,
+    AsyncSink,
 };
 ```
 
----
+## 🚀 顶层便捷函数
 
-## 核心类型
+### `init_inklog_logger`
+
+以默认配置初始化并安装全局日志前端，进程级单例语义（重复初始化返回明确错误）。
+
+**签名**
+
+```rust
+pub async fn init_inklog_logger() -> Result<(), InklogError>
+```
+
+**示例**
+
+```rust
+inklog::init_inklog_logger().await?;
+tracing::info!("Hello, inklog!");
+```
+
+### `init_inklog_logger_with_config`
+
+以自定义配置初始化，语义与 [`init_inklog_logger`](#init_inklog_logger) 一致。
+
+**签名**
+
+```rust
+pub async fn init_inklog_logger_with_config(config: InklogConfig) -> Result<(), InklogError>
+```
+
+## 🧩 核心类型
 
 ### LoggerManager
 
-核心日志管理器，协调日志收集和路由到各个 Sink。
-
-#### 定义
-
-```rust
-pub struct LoggerManager {
-    // 内部字段
-}
-```
+核心日志管理器，协调日志收集、脱敏、分发与路由到各个 Sink，并负责安装全局 tracing subscriber 与 `log` crate 前端。
 
 #### 方法
 
 ##### `new`
 
-创建带有默认配置的新 `LoggerManager`。
+创建带有默认配置的 `LoggerManager` 并安装全局前端。
 
-**签名**
 ```rust
 pub async fn new() -> Result<Self, InklogError>
 ```
 
-**返回值**
-- `Ok(LoggerManager)` - 成功创建的管理器
-- `Err(InklogError)` - 初始化失败
-
-**示例**
-```rust
-use inklog::LoggerManager;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _logger = LoggerManager::new().await?;
-    Ok(())
-}
-```
-
----
-
 ##### `with_config`
 
-使用给定配置创建新的 `LoggerManager`。
+使用给定配置创建 `LoggerManager` 并安装全局前端。
 
-**签名**
 ```rust
 pub async fn with_config(config: InklogConfig) -> Result<Self, InklogError>
 ```
 
-**参数**
-- `config` - 日志系统配置
-
-**返回值**
-- `Ok(LoggerManager)` - 成功创建的管理器
-- `Err(InklogError)` - 初始化失败
-
 **示例**
+
 ```rust
-use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
+use inklog::{FileSinkConfig, InklogConfig};
 
 let config = InklogConfig {
     file_sink: Some(FileSinkConfig {
@@ -151,859 +148,213 @@ let config = InklogConfig {
     ..Default::default()
 };
 
-let _logger = LoggerManager::with_config(config).await?;
+let logger = LoggerManager::with_config(config).await?;
 ```
-
----
 
 ##### `with_dependencies`
 
 使用依赖注入创建 `LoggerManager`。
 
-**签名**
 ```rust
 pub async fn with_dependencies(deps: LoggerDependencies) -> Result<Self, InklogError>
 ```
 
-**参数**
-- `deps` - 依赖注入容器，包含可选的 Cache、Config、Database 实现
-
-**返回值**
-- `Ok(LoggerManager)` - 成功创建的管理器
-- `Err(InklogError)` - 初始化失败
-
-**示例**
-```rust
-use inklog::{LoggerManager, LoggerDependencies};
-use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
-use std::sync::Arc;
-
-let deps = LoggerDependencies {
-    cache: Some(Arc::new(MockCache::new())),
-    config: Some(Arc::new(MockConfig::new())),
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
-    database: Some(Arc::new(MockDatabaseAdapter::new())),
-};
-
-let logger = LoggerManager::with_dependencies(deps).await?;
-```
-
----
-
 ##### `builder`
 
-创建 LoggerBuilder 实例。
+创建 `LoggerBuilder` 实例。
 
-**签名**
 ```rust
 pub fn builder() -> LoggerBuilder
 ```
 
-**返回值**
-- `LoggerBuilder` - 构建器实例
-
-**示例**
-```rust
-use inklog::LoggerManager;
-
-let builder = LoggerManager::builder();
-```
-
----
-
-##### `effective_channel_capacity`
-
-获取有效的通道容量。
-
-**签名**
-```rust
-pub fn effective_channel_capacity(&self) -> usize
-```
-
-**返回值**
-- `usize` - 当前有效通道容量
-
-**示例**
-```rust
-let capacity = logger.effective_channel_capacity();
-println!("通道容量: {}", capacity);
-```
-
----
-
-##### `channel_len`
-
-获取通道当前长度（待处理日志数）。
-
-**签名**
-```rust
-pub fn channel_len(&self) -> usize
-```
-
-**返回值**
-- `usize` - 当前队列中的日志数量
-
-**示例**
-```rust
-let pending = logger.channel_len();
-println!("待处理日志: {}", pending);
-```
-
----
-
-##### `get_health_status`
-
-获取当前健康状态。
-
-**签名**
-```rust
-pub fn get_health_status(&self) -> HealthStatus
-```
-
-**返回值**
-- `HealthStatus` - 包含系统健康信息的结构
-
-**示例**
-```rust
-let health = logger.get_health_status();
-println!("整体状态: {:?}", health.overall_status);
-println!("Sink 状态: {:?}", health.sinks);
-```
-
----
-
-##### `recover_sink`
-
-手动恢复特定的 Sink。
-
-**签名**
-```rust
-pub fn recover_sink(&self, sink_name: &str) -> Result<(), InklogError>
-```
-
-**参数**
-- `sink_name` - 要恢复的 Sink 名称（如：`"file"`、`"database"`）
-
-**返回值**
-- `Ok(())` - 恢复命令已发送
-- `Err(InklogError)` - 发送恢复命令失败
-
-**示例**
-```rust
-// 恢复文件 Sink
-logger.recover_sink("file")?;
-
-// 恢复数据库 Sink
-logger.recover_sink("database")?;
-```
-
----
-
-##### `trigger_recovery_for_unhealthy_sinks`
-
-触发所有不健康 Sink 的恢复。
-
-**签名**
-```rust
-pub fn trigger_recovery_for_unhealthy_sinks(&self) -> Result<Vec<String>, InklogError>
-```
-
-**返回值**
-- `Ok(Vec<String>)` - 已恢复的 Sink 名称列表
-- `Err(InklogError)` - 恢复操作失败
-
-**示例**
-```rust
-let recovered = logger.trigger_recovery_for_unhealthy_sinks()?;
-for sink in &recovered {
-    println!("已恢复: {}", sink);
-}
-```
-
----
-
-##### `shutdown`
-
-优雅关闭日志系统。
-
-**签名**
-```rust
-pub fn shutdown(&self) -> Result<(), InklogError>
-```
-
-**返回值**
-- `Ok(())` - 关闭成功
-- `Err(InklogError)` - 关闭失败
-
-**示例**
-```rust
-logger.shutdown()?;
-```
-
----
-
-##### `build_detached`
-
-构建 LoggerManager 但不安装全局订阅者。这主要用于测试和基准测试。
-
-**签名**
-```rust
-pub async fn build_detached(
-    config: InklogConfig,
-) -> Result<(LoggerManager, LoggerSubscriber, tracing_subscriber::EnvFilter), InklogError>
-```
-
-**返回值**
-- `Ok((LoggerManager, LoggerSubscriber, EnvFilter))` - 构建的管理器、订阅者和过滤器
-- `Err(InklogError)` - 构建失败
-
-**示例**
-```rust
-use inklog::{InklogConfig, LoggerManager};
-
-let config = InklogConfig::default();
-let (manager, subscriber, filter) = LoggerManager::build_detached(config).await?;
-// 可以手动设置订阅者
-```
-
----
-
 ##### `from_file`
 
-从指定路径加载配置文件。
+从指定路径加载 TOML 配置并初始化。
 
-**签名**
 ```rust
 pub async fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, InklogError>
 ```
 
-**参数**
-- `path` - 配置文件路径（TOML 格式）
-
-**返回值**
-- `Ok(LoggerManager)` - 加载配置并初始化的管理器
-- `Err(InklogError)` - 加载失败
-
-**示例**
-```rust
-let logger = LoggerManager::from_file("inklog_config.toml").await?;
-```
-
----
-
 ##### `load`
 
-从默认位置加载配置文件。
+从默认位置加载配置文件并初始化。查找优先级（从高到低）：
 
-**签名**
+1. `$INKLOG_CONFIG_PATH` 指定的路径；
+2. `./inklog_config.toml`（当前目录）；
+3. `~/.config/inklog/config.toml`（用户配置目录）；
+4. 系统配置路径（Unix: `/etc/inklog/config.toml`）。
+
 ```rust
 pub async fn load() -> Result<Self, InklogError>
 ```
 
-**返回值**
-- `Ok(LoggerManager)` - 加载配置并初始化的管理器
-- `Err(InklogError)` - 加载失败
+##### `build_detached`
 
-**默认查找位置**（按优先级从高到低）
-1. `$INKLOG_CONFIG_PATH` 环境变量指定的路径
-2. `./inklog_config.toml`（当前目录）
-3. `~/.config/inklog/config.toml`（用户配置目录）
-4. 系统配置路径（Unix: `/etc/inklog/config.toml`，Windows: `%ProgramData%\inklog\config.toml`）
+构建 `LoggerManager` 但不安装全局订阅者，返回管理器、订阅者与 EnvFilter 三元组，供测试/基准自行装配（如线程级 `set_default`）。
 
-**示例**
 ```rust
-let logger = LoggerManager::load().await?;
+pub async fn build_detached(
+    config: InklogConfig,
+    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    database: Option<Arc<dyn Database>>,
+) -> Result<(Self, LoggerSubscriber, tracing_subscriber::filter::EnvFilter), InklogError>
 ```
 
----
+另有 `build_detached_with_sinks` 变体，可同时注册动态第三方 Sink。
+
+##### `set_level`
+
+运行时级别热调：经 `tracing_subscriber::reload` 换装 EnvFilter，进程内即时生效；支持全局与 per-target upsert，`RUST_LOG` 附加指令跨重建保留。
+
+```rust
+pub fn set_level(&self, target: Option<&str>, level: &str) -> Result<(), InklogError>
+```
+
+| 参数 | 描述 |
+|------|------|
+| `target` | `None` 调整全局级别；`Some("hyper")` 调整指定 target |
+| `level` | 目标级别（`trace` / `debug` / `info` / `warn` / `error`） |
+
+##### `get_health_status`
+
+获取当前健康状态快照。
+
+```rust
+pub fn get_health_status(&self) -> HealthStatus
+```
+
+##### `recover_sink`
+
+向指定 Sink 发送恢复指令（重新初始化并重置断路器）。
+
+```rust
+pub fn recover_sink(&self, sink_name: &str) -> Result<(), InklogError>
+```
+
+##### `trigger_recovery_for_unhealthy_sinks`
+
+恢复所有不健康的 Sink，返回已恢复的 Sink 名称列表。
+
+```rust
+pub fn trigger_recovery_for_unhealthy_sinks(&self) -> Result<Vec<String>, InklogError>
+```
+
+##### `effective_channel_capacity` / `channel_len`
+
+查询有效通道容量与当前积压条数。
+
+```rust
+pub fn effective_channel_capacity(&self) -> usize
+pub fn channel_len(&self) -> usize
+```
+
+##### `publish_ops_event`
+
+广播内部运维事件（ops event）到全部 Sink 通道。
+
+```rust
+pub fn publish_ops_event(&self, kind: &str, sink: Option<&str>, detail: serde_json::Value)
+```
+
+##### `current_level_filter_string`
+
+返回当前生效的 EnvFilter 指令串。
+
+```rust
+pub fn current_level_filter_string(&self) -> String
+```
+
+##### `cache` / `database`
+
+访问注入的缓存 / 数据库实现（未注入返回 `None`）。
+
+```rust
+pub fn cache(&self) -> Option<Arc<dyn Cache>>
+pub fn database(&self) -> Option<Arc<dyn Database>>
+```
+
+##### `shutdown`
+
+优雅关闭：对停止信号采用 2 秒超时发送（`send_timeout`），超时后继续轮询 worker handles，保证永不挂死；等待通道中剩余日志排空后关闭全部 Sink。
+
+```rust
+pub fn shutdown(&self) -> Result<(), InklogError>
+```
 
 ### LoggerBuilder
 
-流式构建器，用于创建 `LoggerManager` 配置。
-
-#### 定义
-
-```rust
-pub struct LoggerBuilder {
-    config: InklogConfig,
-}
-```
+流式构建器，用于创建 `LoggerManager`。非法参数延迟到 `build()` 统一报 `ConfigError`（builder 返回 `Result`）。
 
 #### 方法
 
-##### `new`
-
-创建新的 `LoggerBuilder`。
-
-**签名**
-```rust
-pub fn new() -> Self
-```
-
-**示例**
-```rust
-use inklog::LoggerBuilder;
-
-let builder = LoggerBuilder::new();
-```
-
----
-
-##### `level`
-
-设置全局日志级别。
-
-**签名**
-```rust
-pub fn level(mut self, level: impl Into<String>) -> Self
-```
-
-**参数**
-- `level` - 日志级别（`"trace"`、`"debug"`、`"info"`、`"warn"`、`"error"`）
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .level("debug");
-```
-
----
-
-##### `format`
-
-设置日志格式字符串。
-
-**签名**
-```rust
-pub fn format(mut self, format: impl Into<String>) -> Self
-```
-
-**参数**
-- `format` - 格式字符串
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .format("[{timestamp}] {level}: {message}");
-```
-
----
-
-##### `console`
-
-启用或禁用控制台 Sink。
-
-**签名**
-```rust
-pub fn console(mut self, enabled: bool) -> Self
-```
-
-**参数**
-- `enabled` - 是否启用控制台 Sink
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .console(true);
-```
-
----
-
-##### `file`
-
-配置文件 Sink。
-
-**签名**
-```rust
-pub fn file(mut self, path: impl Into<std::path::PathBuf>) -> Self
-```
-
-**参数**
-- `path` - 日志文件路径
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .file("logs/app.log");
-```
-
----
-
-##### `database`
-
-配置数据库 Sink。
-
-**签名**
-```rust
-pub fn database(mut self, url: impl Into<String>) -> Self
-```
-
-**参数**
-- `url` - 数据库连接 URL
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .database("sqlite://logs/app.db");
-```
-
----
-
-##### `channel_capacity`
-
-设置日志通道容量。
-
-**签名**
-```rust
-pub fn channel_capacity(mut self, capacity: usize) -> Self
-```
-
-**参数**
-- `capacity` - 通道容量
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .channel_capacity(20000);
-```
-
----
-
-##### `worker_threads`
-
-设置工作线程数。
-
-**签名**
-```rust
-pub fn worker_threads(mut self, threads: usize) -> Self
-```
-
-**参数**
-- `threads` - 工作线程数
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .worker_threads(4);
-```
-
----
-
-##### `enable_http_server`
-
-启用内置 HTTP 服务器（指标/健康检查端点）。
-
-**签名**
-```rust
-pub fn enable_http_server(mut self, enabled: bool) -> Self
-```
-
-**参数**
-- `enabled` - 是否启用 HTTP 服务器
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .enable_http_server(true)
-    .http_host("0.0.0.0")
-    .http_port(8080);
-```
-
----
-
-##### `console_colored`
-
-设置控制台是否使用彩色输出。
-
-**签名**
-```rust
-pub fn console_colored(mut self, colored: bool) -> Self
-```
-
-**参数**
-- `colored` - 是否启用彩色输出
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .console_colored(true);
-```
-
----
-
-##### `console_stderr_levels`
-
-设置输出到 stderr 的日志级别。
-
-**签名**
-```rust
-pub fn console_stderr_levels(mut self, levels: &[&str]) -> Self
-```
-
-**参数**
-- `levels` - 日志级别数组（如 `["error", "warn"]`）
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .console_stderr_levels(&["error", "warn"]);
-```
-
----
-
-##### `file_max_size`
-
-设置单个日志文件最大大小。
-
-**签名**
-```rust
-pub fn file_max_size(mut self, max_size: impl Into<String>) -> Self
-```
-
-**参数**
-- `max_size` - 最大大小（如 `"100MB"`、`"1GB"`）
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .file_max_size("50MB");
-```
-
----
-
-##### `file_compress`
-
-设置是否压缩轮转文件。
-
-**签名**
-```rust
-pub fn file_compress(mut self, compress: bool) -> Self
-```
-
-**参数**
-- `compress` - 是否启用压缩
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .file_compress(true);
-```
-
----
-
-##### `file_rotation_time`
-
-设置文件轮转时间策略。
-
-**签名**
-```rust
-pub fn file_rotation_time(mut self, rotation: impl Into<String>) -> Self
-```
-
-**参数**
-- `rotation` - 轮转策略（`"hourly"`、`"daily"`、`"weekly"`）
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .file_rotation_time("daily");
-```
-
----
-
-##### `file_keep_files`
-
-设置保留的轮转文件数量。
-
-**签名**
-```rust
-pub fn file_keep_files(mut self, keep: u32) -> Self
-```
-
-**参数**
-- `keep` - 保留文件数
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .file_keep_files(30);
-```
-
----
-
-##### `enable_http_server`
-
-启用或禁用 HTTP 服务器。
-
-**签名**
-```rust
-pub fn enable_http_server(mut self, enabled: bool) -> Self
-```
-
-**参数**
-- `enabled` - 是否启用
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .enable_http_server(true);
-```
-
----
-
-##### `http_host`
-
-设置 HTTP 服务器监听主机。
-
-**签名**
-```rust
-pub fn http_host(mut self, host: impl Into<String>) -> Self
-```
-
-**参数**
-- `host` - 监听主机地址
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .http_host("0.0.0.0");
-```
-
----
-
-##### `http_port`
-
-设置 HTTP 服务器监听端口。
-
-**签名**
-```rust
-pub fn http_port(mut self, port: u16) -> Self
-```
-
-**参数**
-- `port` - 监听端口
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .http_port(8080);
-```
-
----
-
-##### `http_metrics_path`
-
-设置 Prometheus 指标端点路径。
-
-**签名**
-```rust
-pub fn http_metrics_path(mut self, path: impl Into<String>) -> Self
-```
-
-**参数**
-- `path` - 端点路径
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .http_metrics_path("/metrics");
-```
-
----
-
-##### `http_health_path`
-
-设置健康检查端点路径。
-
-**签名**
-```rust
-pub fn http_health_path(mut self, path: impl Into<String>) -> Self
-```
-
-**参数**
-- `path` - 端点路径
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .http_health_path("/health");
-```
-
----
-
-##### `http_error_mode`
-
-设置 HTTP 服务器启动失败时的错误处理模式。
-
-**签名**
-```rust
-pub fn http_error_mode(mut self, mode: impl Into<String>) -> Self
-```
-
-**参数**
-- `mode` - 错误模式（`"warn"`、`"strict"`）
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-let builder = LoggerBuilder::new()
-    .http_error_mode("warn");
-```
-
----
-
-##### `cache`
-
-注入自定义 Cache 实现。
-
-**签名**
-```rust
-pub fn cache(mut self, cache: Arc<dyn Cache>) -> Self
-```
-
-**参数**
-- `cache` - 实现 `Cache` trait 的缓存实例
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-use inklog::MockCache;
-use std::sync::Arc;
-
-let builder = LoggerBuilder::new()
-    .cache(Arc::new(MockCache::new()));
-```
-
----
-
-##### `config`
-
-注入自定义 Config 实现。
-
-**签名**
-```rust
-pub fn config(mut self, config: Arc<dyn Config>) -> Self
-```
-
-**参数**
-- `config` - 实现 `Config` trait 的配置实例
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-use inklog::MockConfig;
-use std::sync::Arc;
-
-let builder = LoggerBuilder::new()
-    .config(Arc::new(MockConfig::new()));
-```
-
----
-
-##### `with_database`
-
-注入自定义 Database 实现。
-
-**签名**
-```rust
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
-pub fn with_database(mut self, database: Arc<dyn Database>) -> Self
-```
-
-**参数**
-- `database` - 实现 `Database` trait 的数据库实例
-
-**返回值**
-- `Self` - 构建器链
-
-**示例**
-```rust
-use inklog::MockDatabaseAdapter;
-use std::sync::Arc;
-
-let builder = LoggerBuilder::new()
-    .with_database(Arc::new(MockDatabaseAdapter::new()));
-```
-
----
+##### 基础配置
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `new` | `pub fn new() -> Self` | 创建构建器 |
+| `level` | `pub fn level(self, level: impl Into<String>) -> Self` | 全局日志级别 |
+| `format` | `pub fn format(self, format: impl Into<String>) -> Self` | 格式模板 |
+| `console` | `pub fn console(self, enabled: bool) -> Self` | 启用/禁用控制台 Sink |
+| `file` | `pub fn file(self, path: impl Into<PathBuf>) -> Self` | 启用文件 Sink 并设置路径 |
+| `database` | `pub fn database(self, url: impl Into<String>) -> Self` | 启用数据库 Sink 并设置 URL |
+| `channel_capacity` | `pub fn channel_capacity(self, capacity: usize) -> Self` | 通道容量 |
+| `worker_threads` | `pub fn worker_threads(self, threads: usize) -> Self` | 工作线程数 |
+
+##### 数据库细化（需数据库后端 feature）
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `with_driver` | `pub fn with_driver(self, driver: DatabaseDriver) -> Self` | 数据库驱动 |
+| `with_pool_size` | `pub fn with_pool_size(self, pool_size: u32) -> Self` | 连接池大小 |
+| `with_batch_size` | `pub fn with_batch_size(self, batch_size: usize) -> Self` | 批量大小 |
+| `with_flush_interval_ms` | `pub fn with_flush_interval_ms(self, flush_interval_ms: u64) -> Self` | 刷新间隔 |
+| `with_table_name` | `pub fn with_table_name(self, table_name: impl Into<String>) -> Self` | 日志表名 |
+| `with_admin_role` | `pub fn with_admin_role(self, admin_role: impl Into<String>) -> Self` | 管理角色名 |
+
+##### 文件细化
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `file_max_size` | `pub fn file_max_size(self, max_size: impl Into<String>) -> Self` | 单文件最大大小（如 `"50MB"`） |
+| `file_compress` | `pub fn file_compress(self, compress: bool) -> Self` | 是否压缩轮转文件 |
+| `file_rotation_time` | `pub fn file_rotation_time(self, rotation: impl Into<String>) -> Self` | 时间轮转策略 |
+| `file_keep_files` | `pub fn file_keep_files(self, keep: u32) -> Self` | 保留轮转文件数 |
+
+##### 控制台细化
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `console_colored` | `pub fn console_colored(self, colored: bool) -> Self` | 是否彩色输出 |
+| `console_stderr_levels` | `pub fn console_stderr_levels(self, levels: &[&str]) -> Self` | 输出到 stderr 的级别（默认 `["error", "warn"]`） |
+
+##### HTTP 服务器细化（需 `http` feature）
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `enable_http_server` | `pub fn enable_http_server(self, enabled: bool) -> Self` | 启用 HTTP 端点 |
+| `http_host` / `http_port` | `pub fn http_host(self, host: impl Into<String>) -> Self` / `pub fn http_port(self, port: u16) -> Self` | 监听地址与端口 |
+| `http_metrics_path` / `http_health_path` | `pub fn http_metrics_path(self, path: impl Into<String>) -> Self` 等 | 端点路径 |
+| `http_error_mode` | `pub fn http_error_mode(self, mode: impl Into<String>) -> Self` | 错误模式（`"warn"` / `"strict"`） |
+
+##### 依赖注入与动态 Sink
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `cache` | `pub fn cache(self, cache: Arc<dyn Cache>) -> Self` | 注入自定义 Cache |
+| `config` | `pub fn config(self, config: Arc<dyn Config>) -> Self` | 注入自定义 Config |
+| `with_database` | `pub fn with_database(self, database: Arc<dyn Database>) -> Self` | 注入自定义 Database（需数据库后端 feature） |
+| `add_sink` | `pub fn add_sink(self, sink: Arc<dyn AsyncSink>) -> Self` | 注册动态第三方 Sink（每 Sink 独立通道） |
 
 ##### `build`
 
-构建并返回 `LoggerManager`。
+构建并返回 `LoggerManager`（安装全局前端）。
 
-**签名**
 ```rust
 pub async fn build(self) -> Result<LoggerManager, InklogError>
 ```
 
-**返回值**
-- `Ok(LoggerManager)` - 成功构建的管理器
-- `Err(InklogError)` - 构建失败
-
 **示例**
+
 ```rust
 use inklog::LoggerBuilder;
 
@@ -1012,599 +363,248 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logger = LoggerBuilder::new()
         .level("debug")
         .file("logs/app.log")
-        .database("sqlite://logs/app.db")
         .channel_capacity(20000)
         .worker_threads(4)
         .build()
         .await?;
-
     Ok(())
 }
 ```
 
----
+## ⚙️ 配置结构体
 
 ### InklogConfig
 
-根配置结构，包含所有子配置。
-
-#### 定义
+根配置结构，支持 TOML 文件与 `INKLOG_*` 环境变量覆盖。
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InklogConfig {
-    #[serde(default)]
     pub global: GlobalConfig,
-    #[serde(default = "default_console_sink")]
-    pub console_sink: Option<ConsoleSinkConfig>,
-    #[serde(default)]
+    pub console_sink: Option<ConsoleSinkConfig>,   // 默认 Some(default())
     pub file_sink: Option<FileSinkConfig>,
-    #[serde(default)]
     pub database_sink: Option<DatabaseSinkConfig>,
-    #[serde(default)]
     pub performance: PerformanceConfig,
-    #[serde(default)]
     pub http_server: Option<HttpServerConfig>,
+    pub target_levels: HashMap<String, String>,    // per-target 级别预设
 }
 ```
 
-#### 字段说明
-
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `global` | `GlobalConfig` | `default()` | 全局配置 |
-| `console_sink` | `Option<ConsoleSinkConfig>` | `Some(default())` | 控制台 Sink 配置 |
-| `file_sink` | `Option<FileSinkConfig>` | `None` | 文件 Sink 配置 |
-| `database_sink` | `Option<DatabaseSinkConfig>` | `None` | 数据库配置 |
-| `performance` | `PerformanceConfig` | `default()` | 性能配置 |
-| `http_server` | `Option<HttpServerConfig>` | `None` | HTTP 服务器配置 |
-
-**注意**: `ParquetConfig` 不是 `InklogConfig` 的直接字段，而是 `DatabaseSinkConfig` 的内部字段。
+> `target_levels` 的条目合并进 EnvFilter：优先级低于 `RUST_LOG`、高于全局默认级别。
 
 #### 方法
 
-##### `validate`
-
-验证配置是否有效。
-
-**签名**
-```rust
-pub fn validate(&self) -> Result<(), InklogError>
-```
-
-**返回值**
-- `Ok(())` - 配置有效
-- `Err(InklogError)` - 配置无效
-
-**示例**
-```rust
-let config = InklogConfig::default();
-config.validate()?;
-```
-
----
-
-##### `apply_env_overrides`
-
-应用环境变量覆盖配置。
-
-**签名**
-```rust
-// 注意：这是私有方法，通过公共 API load_with_env_overrides() 调用
-fn apply_env_overrides(config: &mut Self)
-```
-
-**示例**
-```rust
-let mut config = InklogConfig::default();
-config.apply_env_overrides();
-```
-
----
-
-## 配置结构体
-
-### DatabaseSinkConfig
-
-数据库 Sink 配置，用于持久化日志存储。
-
-#### 定义
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DatabaseSinkConfig {
-    pub name: String,
-    pub enabled: bool,
-    pub driver: DatabaseDriver,
-    pub url: String,
-    pub pool_size: u32,
-    pub batch_size: usize,
-    pub flush_interval_ms: u64,
-    pub partition: PartitionStrategy,
-    pub table_name: String,
-    pub archive_format: ArchiveFormat,
-    pub parquet_config: ParquetConfig,
-    pub permissions_path: Option<String>,
-    pub admin_role: String,
-}
-```
-
-#### 字段说明
-
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `name` | `String` | `"default"` | Sink 名称 |
-| `enabled` | `bool` | `false` | 是否启用数据库日志输出 |
-| `driver` | `DatabaseDriver` | `SQLite` | 数据库驱动：`postgres`、`mysql`、`sqlite`、`duckdb` |
-| `url` | `String` | `"sqlite::memory:"` | 数据库连接 URL |
-| `pool_size` | `u32` | `10` | 数据库连接池大小（SQLite 自动设为 1） |
-| `batch_size` | `usize` | `100` | 批量写入大小 |
-| `flush_interval_ms` | `u64` | `500` | 批量刷新间隔（毫秒） |
-| `partition` | `PartitionStrategy` | `Monthly` | 表分区策略：`Monthly`、`Yearly` |
-| `table_name` | `String` | `"logs"` | 日志表名 |
-| `archive_format` | `ArchiveFormat` | `Json` | 归档导出格式：`Json`、`Parquet`、`Csv` |
-| `parquet_config` | `ParquetConfig` | `default()` | Parquet 导出配置 |
-| `permissions_path` | `Option<String>` | `None` | RBAC 权限配置文件路径 |
-| `admin_role` | `String` | `"admin"` | DDL 和写操作的管理角色名 |
-
-**注意**: `DatabaseSinkConfig` 不需要功能标志即可配置，但实际数据库操作需要 `sqlite`/`postgres`/`mysql`/`duckdb` 功能标志。
-
-#### 示例
-```rust
-use inklog::config::DatabaseSinkConfig;
-
-let db_config = DatabaseSinkConfig {
-    enabled: true,
-    url: "postgres://user:pass@localhost/logs".to_string(),
-    batch_size: 100,
-    flush_interval_ms: 500,
-    pool_size: 10,
-    ..Default::default()
-};
-```
-
----
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `validate` | `pub fn validate(&self) -> Result<(), InklogError>` | 校验配置（级别合法性、路径非空等） |
+| `sinks_enabled` | `pub fn sinks_enabled(&self) -> Vec<&'static str>` | 查询已启用的 Sink 名称 |
 
 ### GlobalConfig
 
-全局配置，应用于所有日志输出。
-
-#### 定义
-
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GlobalConfig {
-    pub level: String,
-    pub format: String,
-    pub masking_enabled: bool,
-    pub auto_fallback: bool,
-    pub fallback_initial_delay_ms: u64,
-    pub fallback_max_delay_ms: u64,
-    pub fallback_max_retries: u32,
-    pub output_format: OutputFormat,
+    pub level: String,                    // 默认 "info"
+    pub format: String,                   // 默认 "{timestamp} [{level}] {target} - {message}"
+    pub masking_enabled: bool,            // 默认 true
+    pub auto_fallback: bool,              // 默认 true
+    pub fallback_initial_delay_ms: u64,   // 默认 1000
+    pub fallback_max_delay_ms: u64,       // 默认 60000
+    pub fallback_max_retries: u32,        // 默认 10
+    pub output_format: OutputFormat,      // 默认 Text
 }
 ```
 
-#### 字段说明
-
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `level` | `String` | `"info"` | 日志级别：`trace`、`debug`、`info`、`warn`、`error`、`fatal` |
-| `format` | `String` | `"{timestamp} [{level}] {target} - {message}"` | 日志格式模板 |
-| `masking_enabled` | `bool` | `true` | 是否启用数据脱敏 |
-| `auto_fallback` | `bool` | `true` | 是否启用自动降级（Sink 失败时切换到备用 Sink） |
-| `fallback_initial_delay_ms` | `u64` | `1000` | 首次重试前的等待时间（毫秒） |
-| `fallback_max_delay_ms` | `u64` | `60000` | 重试最大延迟上限（毫秒） |
-| `fallback_max_retries` | `u32` | `10` | 最大重试次数 |
-| `output_format` | `OutputFormat` | `Text` | 输出格式：`Text`（模板）或 `Json`（NDJSON） |
-
-#### 格式变量
-
-| 变量 | 描述 |
-|--------|------|
-| `{timestamp}` | ISO 8601 格式的时间戳 |
-| `{level}` | 日志级别（TRACE/DEBUG/INFO/WARN/ERROR） |
-| `{target}` | 日志目标（模块/文件名） |
-| `{message}` | 日志消息内容 |
-| `{file}` | 源代码文件名 |
-| `{line}` | 源代码行号 |
-| `{thread_id}` | 线程标识符 |
-| `{fields}` | 附加结构化字段（JSON） |
-
-**示例**
-```rust
-use inklog::config::GlobalConfig;
-
-let global = GlobalConfig {
-    level: "debug".to_string(),
-    format: "[{timestamp}] [{level}] {target} - {message}".to_string(),
-    masking_enabled: true,
-    auto_fallback: true,
-    fallback_initial_delay_ms: 1000,
-    fallback_max_delay_ms: 60000,
-    fallback_max_retries: 10,
-    ..Default::default()
-};
-```
-
----
+`OutputFormat` 枚举：`Text`（模板渲染）、`Json`（NDJSON，自动禁用彩色）。
 
 ### ConsoleSinkConfig
 
-控制台 Sink 配置。
-
-#### 定义
-
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsoleSinkConfig {
-    pub enabled: bool,
-    pub colored: bool,
-    pub stderr_levels: Vec<String>,
-    pub masking_enabled: bool,
-    pub output_format: OutputFormat,
+    pub enabled: bool,               // 默认 true
+    pub colored: bool,               // 默认 true（NO_COLOR / TERM=dumb 时自动禁用）
+    pub stderr_levels: Vec<String>,  // 默认 ["error", "warn"]
+    pub masking_enabled: bool,       // 默认 true
+    pub output_format: OutputFormat, // 默认 Text
 }
 ```
-
-#### 字段说明
-
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `enabled` | `bool` | `true` | 是否启用控制台 Sink |
-| `colored` | `bool` | `true` | 是否使用彩色输出 |
-| `stderr_levels` | `Vec<String>` | `["error", "warn"]` | 输出到 stderr 的日志级别 |
-| `masking_enabled` | `bool` | `true` | 是否启用控制台输出数据脱敏 |
-| `output_format` | `OutputFormat` | `Text` | 输出格式：`Text` 或 `Json`（Json 时自动禁用彩色） |
-
-**示例**
-```rust
-use inklog::config::ConsoleSinkConfig;
-
-let console = ConsoleSinkConfig {
-    enabled: true,
-    colored: true,
-    stderr_levels: vec!["error".to_string(), "warn".to_string()],
-    masking_enabled: true,
-    ..Default::default()
-};
-```
-
----
 
 ### FileSinkConfig
 
-文件 Sink 配置，支持轮转、压缩和加密。
-
-#### 定义
-
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSinkConfig {
-    pub enabled: bool,
-    pub path: PathBuf,
-    pub max_size: String,
-    pub rotation_time: String,
-    pub keep_files: u32,
-    pub compress: bool,
-    pub compression_level: i32,
-    pub encrypt: bool,
-    pub encryption_key_env: Option<String>,
-    pub retention_days: u32,
-    pub max_total_size: String,
-    pub cleanup_interval_minutes: u64,
-    pub batch_size: usize,
-    pub flush_interval_ms: u64,
-    pub masking_enabled: bool,
-    pub output_format: OutputFormat,
+    pub enabled: bool,                        // 默认 true
+    pub path: PathBuf,                        // 默认 "logs/app.log"
+    pub max_size: String,                     // 默认 "100MB"
+    pub rotation_time: String,                // 默认 "daily"（hourly / daily / weekly）
+    pub keep_files: u32,                      // 默认 30
+    pub compress: bool,                       // 默认 true
+    pub compression_level: i32,               // 默认 3（0-22）
+    pub encrypt: bool,                        // 默认 false
+    pub encryption_key_env: Option<String>,   // 默认 None
+    pub retention_days: u32,                  // 默认 30
+    pub max_total_size: String,               // 默认 "1GB"
+    pub cleanup_interval_minutes: u64,        // 默认 60
+    pub batch_size: usize,                    // 默认 100
+    pub flush_interval_ms: u64,               // 默认 100
+    pub masking_enabled: bool,                // 默认 true
+    pub output_format: OutputFormat,          // 默认 Text
 }
 ```
 
-#### 字段说明
+> 压缩需 `compression`（Zstd）或 `gzip`（flate2）feature；未启用任一压缩 feature 时轮转文件保持未压缩。加密与压缩仅作用于轮转归档（先压缩后加密），活跃文件保持明文。
 
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `enabled` | `bool` | `true` | 是否启用文件 Sink |
-| `path` | `PathBuf` | `"logs/app.log"` | 日志文件路径 |
-| `max_size` | `String` | `"100MB"` | 触发轮转的最大文件大小 |
-| `rotation_time` | `String` | `"daily"` | 时间轮转策略：`hourly`、`daily`、`weekly` |
-| `keep_files` | `u32` | `30` | 保留的轮转文件数量 |
-| `compress` | `bool` | `true` | 是否压缩轮转文件 |
-| `compression_level` | `i32` | `3` | 压缩级别（1-22） |
-| `encrypt` | `bool` | `false` | 是否加密日志文件 |
-| `encryption_key_env` | `Option<String>` | `None` | 加密密钥的环境变量名 |
-| `retention_days` | `u32` | `30` | 日志保留天数 |
-| `max_total_size` | `String` | `"1GB"` | 日志目录最大总大小 |
-| `cleanup_interval_minutes` | `u64` | `60` | 清理旧日志的间隔（分钟） |
-| `batch_size` | `usize` | `100` | 写入前缓冲的日志记录数 |
-| `flush_interval_ms` | `u64` | `100` | 最大刷新间隔（毫秒） |
-| `masking_enabled` | `bool` | `true` | 是否启用文件输出数据脱敏 |
-| `output_format` | `OutputFormat` | `Text` | 输出格式：`Text` 或 `Json` |
-
-**示例**
-```rust
-use inklog::config::FileSinkConfig;
-use std::path::PathBuf;
-
-let file_config = FileSinkConfig {
-    enabled: true,
-    path: PathBuf::from("logs/app.log"),
-    max_size: "50MB".to_string(),
-    rotation_time: "daily".to_string(),
-    keep_files: 14,
-    compress: true,
-    compression_level: 5,
-    encrypt: false,
-    encryption_key_env: None,
-    retention_days: 30,
-    max_total_size: "2GB".to_string(),
-    cleanup_interval_minutes: 60,
-    batch_size: 100,
-    flush_interval_ms: 100,
-    masking_enabled: true,
-    ..Default::default()
-};
-```
-
----
-
-
-
-### HttpServerConfig
-
-HTTP 服务器配置（需要 `http` 功能）。
-
-#### 定义
+### DatabaseSinkConfig
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HttpServerConfig {
-    pub enabled: bool,
-    pub host: String,
-    pub port: u16,
-    pub metrics_path: String,
-    pub health_path: String,
-    pub error_mode: HttpErrorMode,
-    pub auth: Option<HttpAuthConfig>,
-    pub ip_whitelist: Option<Vec<String>>,
-    pub tls: Option<TlsConfig>,
+pub struct DatabaseSinkConfig {
+    pub name: String,                     // 默认 "default"
+    pub enabled: bool,                    // 默认 false
+    pub driver: DatabaseDriver,           // 默认 SQLite
+    pub url: String,                      // 默认 "sqlite::memory:"
+    pub pool_size: u32,                   // 默认 10（SQLite 自动设为 1）
+    pub batch_size: usize,                // 默认 100
+    pub flush_interval_ms: u64,           // 默认 500
+    pub partition: PartitionStrategy,     // 默认 Monthly
+    pub table_name: String,               // 默认 "logs"
+    pub archive_format: ArchiveFormat,    // 默认 Json
+    pub parquet_config: ParquetConfig,    // 默认 default()
+    pub permissions_path: Option<String>, // 默认 None（RBAC 权限配置）
+    pub admin_role: String,               // 默认 "admin"
 }
 ```
 
-#### 字段说明
+#### DatabaseDriver
 
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `enabled` | `bool` | `false` | 是否启用 HTTP 服务器 |
-| `host` | `String` | `"127.0.0.1"` | 监听主机地址 |
-| `port` | `u16` | `9090` | 监听端口 |
-| `metrics_path` | `String` | `"/metrics"` | Prometheus 指标端点路径 |
-| `health_path` | `String` | `"/health"` | 健康检查端点路径 |
-| `error_mode` | `HttpErrorMode` | `Strict` | 错误处理模式 |
-| `auth` | `Option<HttpAuthConfig>` | `None` | HTTP 认证配置 |
-| `ip_whitelist` | `Option<Vec<String>>` | `None` | IP 白名单 |
-| `tls` | `Option<TlsConfig>` | `None` | TLS 配置（设置后启用 HTTPS） |
+```rust
+#[derive(Default)]
+pub enum DatabaseDriver {
+    PostgreSQL, // serde: "postgres"
+    MySQL,      // serde: "mysql"
+    #[default]
+    SQLite,     // serde: "sqlite"
+    DuckDB,     // serde: "duckdb"
+}
+```
 
-#### HttpErrorMode 枚举
+实现 `FromStr` 与 `Display`（`"postgres"` / `"mysql"` / `"sqlite"` / `"duckdb"`，解析忽略大小写）；合法值外的输入返回本地化（i18n）错误消息。
+
+#### PartitionStrategy
+
+| 变体 | serde 值 | 描述 |
+|------|----------|------|
+| `Monthly` | `"monthly"` | 按月分区（默认） |
+| `Yearly` | `"yearly"` | 按年分区 |
+
+#### ArchiveFormat
 
 | 变体 | 描述 |
 |------|------|
-| `Strict` | 返回错误响应给调用者（默认） |
-| `Warn` | 将错误记录为警告并继续运行 |
+| `Json` | JSON 归档（默认） |
+| `Parquet` | Parquet/Arrow 归档（需 `parquet` feature） |
+| `Csv` | CSV 归档 |
 
-**示例**
+#### ParquetConfig
+
+| 字段 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `compression_level` | `i32` | `3` | Zstd 压缩级别（0-22） |
+| `encoding` | `String` | `"PLAIN"` | 编码方式：`PLAIN`、`DICTIONARY`、`RLE` |
+| `max_row_group_size` | `usize` | `10000` | Row Group 大小（行数） |
+| `max_page_size` | `usize` | `1048576` | 页面大小（字节） |
+| `include_fields` | `Vec<String>` | `[]` | 包含字段列表（空 = 全部） |
+
+可用字段：`id`、`timestamp`、`level`、`target`、`message`、`fields`、`file`、`line`、`thread_id`。
+
+### HttpServerConfig
+
+HTTP 端点配置（需 `http` feature）。
+
 ```rust
-use inklog::config::{HttpServerConfig, HttpErrorMode};
-
-let http_config = HttpServerConfig {
-    enabled: true,
-    host: "0.0.0.0".to_string(),
-    port: 8080,
-    metrics_path: "/metrics".to_string(),
-    health_path: "/health".to_string(),
-    error_mode: HttpErrorMode::Warn,
-};
+pub struct HttpServerConfig {
+    pub enabled: bool,                    // 默认 false
+    pub host: String,                     // 默认 "127.0.0.1"
+    pub port: u16,                        // 默认 9090
+    pub metrics_path: String,             // 默认 "/metrics"
+    pub health_path: String,              // 默认 "/health"
+    pub error_mode: HttpErrorMode,        // 默认 Strict
+    pub auth: Option<HttpAuthConfig>,     // 默认 None
+    pub ip_whitelist: Option<Vec<String>>,// 默认 None
+    pub tls: Option<TlsConfig>,           // 默认 None
+}
 ```
 
----
+| 关联类型 | 字段/变体 | 描述 |
+|----------|-----------|------|
+| `HttpErrorMode` | `Strict` / `Warn` | 启动失败时返回错误 / 记录警告并继续 |
+| `HttpAuthConfig` | `enabled: bool`、`token_env: String` | 认证 token 环境变量，启动期缓存、获取失败 fail-closed |
+| `TlsConfig` | `cert_path: String`、`key_path: String` | TLS 证书与私钥路径（rustls） |
 
 ### PerformanceConfig
 
-性能配置。
-
-#### 定义
-
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PerformanceConfig {
-    pub channel_capacity: usize,
-    pub worker_threads: usize,
-    pub channel_strategy: ChannelStrategy,
-    pub expand_threshold_percent: u8,
-    pub shrink_threshold_percent: u8,
-    pub shrink_wait_seconds: u64,
-    pub min_capacity: usize,
-    pub max_capacity: usize,
-    pub rate_limit: Option<u64>,
+    pub channel_capacity: usize,        // 默认 10000
+    pub worker_threads: usize,          // 默认 3
+    pub channel_strategy: ChannelStrategy, // 默认 Fixed
+    pub expand_threshold_percent: u8,   // 默认 80
+    pub shrink_threshold_percent: u8,   // 默认 20
+    pub shrink_wait_seconds: u64,       // 默认 30
+    pub min_capacity: usize,            // 默认 1000
+    pub max_capacity: usize,            // 默认 50000
+    pub rate_limit: Option<u64>,        // 默认 None（条/秒上限）
 }
 ```
 
-#### 字段说明
+`ChannelStrategy` 枚举：`Fixed`（固定容量）、`Adaptive`（按水位在 `min_capacity` 与 `max_capacity` 之间扩缩容）。
 
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `channel_capacity` | `usize` | `10000` | 日志通道容量 |
-| `worker_threads` | `usize` | `3` | 工作线程数 |
-| `channel_strategy` | `ChannelStrategy` | `Fixed` | 通道大小策略：`Fixed`、`Adaptive` |
-| `expand_threshold_percent` | `u8` | `80` | 扩容触发百分比（0–100） |
-| `shrink_threshold_percent` | `u8` | `20` | 缩容触发百分比（0–100） |
-| `shrink_wait_seconds` | `u64` | `30` | 缩容前等待时间（秒） |
-| `min_capacity` | `usize` | `1000` | 最小通道容量 |
-| `max_capacity` | `usize` | `50000` | 最大通道容量 |
-| `rate_limit` | `Option<u64>` | `None` | 最大日志速率（条/秒），`None` = 无限制 |
-
-**示例**
-```rust
-use inklog::config::PerformanceConfig;
-
-let performance = PerformanceConfig {
-    channel_capacity: 20000,
-    worker_threads: 4,
-    ..Default::default()
-};
-```
-
----
-
-### ParquetConfig
-
-Parquet 导出配置（用于数据库归档）。
-
-#### 定义
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParquetConfig {
-    pub compression_level: i32,
-    pub encoding: String,
-    pub max_row_group_size: usize,
-    pub max_page_size: usize,
-    pub include_fields: Vec<String>,
-}
-```
-
-#### 字段说明
-
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `compression_level` | `i32` | `3` | ZSTD 压缩级别（0-22） |
-| `encoding` | `String` | `"PLAIN"` | 编码方式：`PLAIN`、`DICTIONARY`、`RLE` |
-| `max_row_group_size` | `usize` | `10000` | Row Group 大小（行数） |
-| `max_page_size` | `usize` | `1024 * 1024` | 页面大小（字节） |
-| `include_fields` | `Vec<String>` | `[]` | 包含的字段列表（默认包含所有） |
-
-**可用字段**
-- `id` - 日志 ID
-- `timestamp` - 时间戳
-- `level` - 日志级别
-- `target` - 日志目标
-- `message` - 日志消息
-- `fields` - 结构化字段
-- `file` - 源文件
-- `line` - 源行号
-- `thread_id` - 线程 ID
-
-**示例**
-```rust
-use inklog::config::ParquetConfig;
-
-let parquet = ParquetConfig {
-    compression_level: 5,
-    encoding: "DICTIONARY".to_string(),
-    max_row_group_size: 10000,
-    max_page_size: 1024 * 1024,
-    include_fields: vec![
-        "id".to_string(),
-        "timestamp".to_string(),
-        "level".to_string(),
-        "message".to_string(),
-    ],
-};
-```
-
----
-
-### DatabaseDriver
-
-数据库驱动枚举。
-
-#### 定义
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub enum DatabaseDriver {
-    #[serde(rename = "postgres")]
-    #[default]
-    PostgreSQL,
-    #[serde(rename = "mysql")]
-    MySQL,
-    #[serde(rename = "sqlite")]
-    SQLite,
-}
-```
-
-#### 变体说明
-
-| 变体 | 字符串表示 | URL 示例 |
-|------|------------|----------|
-| `PostgreSQL` | `"postgres"` | `postgres://user:pass@localhost/logs` |
-| `MySQL` | `"mysql"` | `mysql://user:pass@localhost/logs` |
-| `SQLite` | `"sqlite"` | `sqlite://logs/app.db` |
-
-**示例**
-```rust
-use inklog::config::DatabaseDriver;
-
-let driver = DatabaseDriver::PostgreSQL;
-```
-
----
-
-## 错误类型
+## ⚠️ 错误类型
 
 ### InklogError
-
-所有错误的枚举类型。
-
-#### 定义
 
 ```rust
 #[derive(Error, Debug)]
 pub enum InklogError {
     #[error("Configuration error: {0}")]
     ConfigError(String),
-
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
-
-    #[error("Database error: {0}")]
-    DatabaseError(String),
-
-    #[error("Encryption error: {0}")]
-    EncryptionError(String),
-
+    #[error("Database error: {message}")]
+    DatabaseError {
+        message: String,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+    #[error("Cache error: {0}")]
+    CacheError(String),
+    #[error("Encryption error: {message}")]
+    EncryptionError {
+        message: String,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
     #[error("Shutdown error: {0}")]
     Shutdown(String),
-
     #[error("Channel error: {0}")]
     ChannelError(String),
-
     #[error("Compression error: {0}")]
     CompressionError(String),
-
     #[error("Runtime error: {0}")]
     RuntimeError(String),
-
     #[error("HTTP server error: {0}")]
     HttpServerError(String),
-
     #[error("Unknown error: {0}")]
     Unknown(String),
 }
 ```
 
-#### 变体说明
-
 | 变体 | 描述 |
 |------|------|
-| `ConfigError` | 配置相关错误 |
-| `IoError` | I/O 操作错误 |
-| `SerializationError` | JSON/TOML 序列化错误 |
-| `DatabaseError` | 数据库操作错误 |
-| `EncryptionError` | 加密/解密错误 |
+| `ConfigError` | 配置相关错误（级别非法、路径为空、builder 校验失败等） |
+| `IoError` | I/O 操作错误（从 `std::io::Error` 自动转换） |
+| `SerializationError` | 序列化错误（从 `serde_json::Error` 自动转换） |
+| `DatabaseError` | 数据库操作错误（带可选底层 source） |
+| `CacheError` | 缓存操作错误 |
+| `EncryptionError` | 加密/解密错误（带可选底层 source） |
 | `Shutdown` | 关闭过程中的错误 |
 | `ChannelError` | 通道通信错误 |
 | `CompressionError` | 压缩错误 |
@@ -1612,62 +612,32 @@ pub enum InklogError {
 | `HttpServerError` | HTTP 服务器错误 |
 | `Unknown` | 未知错误 |
 
-**示例**
+错误消息经 Fluent + ICU 按系统 locale 渲染（zh-CN / en），可用 `INKLOG_LOCALE` 固定语言。
+
+### InklogResult
+
 ```rust
-use inklog::InklogError;
-
-fn example() -> Result<(), InklogError> {
-    // 配置错误
-    Err(InklogError::ConfigError("Invalid log level".to_string()))?;
-
-    // I/O 错误
-    Err(InklogError::IoError(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "File not found",
-    )))?;
-
-    Ok(())
-}
+pub type InklogResult<T> = Result<T, InklogError>;
 ```
 
----
-
-## 健康监控类型
+## 🩺 健康监控类型
 
 ### HealthStatus
-
-系统健康状态结构。
-
-#### 定义
 
 ```rust
 #[derive(Debug, Serialize)]
 pub struct HealthStatus {
     pub overall_status: SinkStatus,
     pub sinks: HashMap<String, SinkHealth>,
-    pub channel_usage: f64,
+    pub channel_usage: f64,           // 0.0 - 1.0
     pub uptime_seconds: u64,
     pub metrics: MetricsSnapshot,
+    pub pool_stats: Option<PoolStats>,
+    pub encryption_key_valid: bool,
 }
 ```
 
-#### 字段说明
-
-| 字段 | 类型 | 描述 |
-|------|------|------|
-| `overall_status` | `SinkStatus` | 整体健康级别 |
-| `sinks` | `HashMap<String, SinkHealth>` | 各 Sink 的健康状态 |
-| `channel_usage` | `f64` | 通道使用率（0.0 - 1.0） |
-| `uptime_seconds` | `u64` | 运行时间（秒） |
-| `metrics` | `MetricsSnapshot` | 指标快照 |
-
----
-
 ### SinkStatus
-
-Sink 组件状态枚举。
-
-#### 定义
 
 ```rust
 #[derive(Debug, Serialize, Clone, PartialEq, Default)]
@@ -1680,40 +650,13 @@ pub enum SinkStatus {
 }
 ```
 
-#### 变体说明
+方法：
 
-| 变体 | 描述 |
-|------|------|
-| `Healthy` | Sink 正常运行 |
-| `Degraded` | Sink 降级但仍在运行 |
-| `Unhealthy` | Sink 失败且不可用 |
-| `NotStarted` | Sink 尚未初始化 |
-
-#### 方法
-
-##### `is_operational`
-
-返回 Sink 是否可操作（健康或降级但功能正常）。
-
-**签名**
 ```rust
-pub fn is_operational(&self) -> bool
+pub fn is_operational(&self) -> bool  // Healthy 或 Degraded 视为可操作
 ```
-
-**示例**
-```rust
-if status.is_operational() {
-    println!("Sink 可用");
-}
-```
-
----
 
 ### SinkHealth
-
-单个 Sink 的健康状态。
-
-#### 定义
 
 ```rust
 #[derive(Debug, Serialize, Clone)]
@@ -1724,204 +667,163 @@ pub struct SinkHealth {
 }
 ```
 
-#### 字段说明
-
-| 字段 | 类型 | 描述 |
-|------|------|------|
-| `status` | `SinkStatus` | 当前状态 |
-| `last_error` | `Option<String>` | 最后一次错误的描述 |
-| `consecutive_failures` | `u32` | 连续失败次数 |
-
----
-
 ### Metrics
 
-指标收集器。
-
-#### 定义
-
-```rust
-pub struct Metrics {
-    pub(crate) logs_written_total: AtomicU64,
-    pub(crate) logs_dropped_total: AtomicU64,
-    pub(crate) channel_send_blocked_total: AtomicU64,
-    pub(crate) sink_errors_total: AtomicU64,
-    pub(crate) start_time: Instant,
-    pub(crate) total_latency_us: AtomicU64,
-    pub(crate) latency_count: AtomicU64,
-    pub(crate) latency_histogram: Histogram,
-    pub(crate) active_workers: Gauge,
-    pub(crate) sink_health: Mutex<HashMap<String, SinkHealth>>,
-}
-```
+指标收集器（内部为原子计数与直方图，无锁读取）。
 
 #### 方法
 
-##### `new`
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `new` | `pub fn new() -> Self` | 创建实例 |
+| `logs_written` / `inc_logs_written` | `pub fn logs_written(&self) -> u64` 等 | 写入总数读取 / 递增 |
+| `logs_dropped` / `inc_logs_dropped` | 同上 | 丢弃总数 |
+| `channel_blocked` / `inc_channel_blocked` | 同上 | 通道阻塞次数 |
+| `sink_errors` / `inc_sink_error` | 同上 | Sink 错误总数 |
+| `active_workers` | `pub fn active_workers(&self) -> i64` | 活跃工作线程数 |
+| `record_latency` | `pub fn record_latency(&self, duration: Duration)` | 记录写入延迟（进入直方图） |
+| `record_pool_metrics` | `pub fn record_pool_metrics(&self, total: u64, active: u64, idle: u64)` | 记录连接池指标 |
+| `update_sink_health` | `pub fn update_sink_health(&self, name: &str, healthy: bool, error: Option<String>)` | 更新 Sink 健康状态 |
+| `sink_started` / `sink_degraded` | `pub fn sink_started(&self, name: &str)` 等 | Sink 生命周期事件 |
+| `get_status` | `pub fn get_status(&self, channel_len: usize, channel_cap: usize) -> HealthStatus` | 汇总健康快照 |
+| `export_prometheus` | `pub fn export_prometheus(&self) -> String` | 导出 Prometheus 文本格式 |
 
-创建新的 Metrics 实例。
+### MetricsSnapshot
 
-**签名**
 ```rust
-pub fn new() -> Self
+pub struct MetricsSnapshot {
+    pub logs_written: u64,
+    pub logs_dropped: u64,
+    pub channel_blocked: u64,
+    pub sink_errors: u64,
+    pub db_batch_size: i64,
+    pub db_batch_records_total: u64,
+    pub avg_latency_us: u64,
+    pub p50_latency_us: u64,
+    pub p95_latency_us: u64,
+    pub p99_latency_us: u64,
+    pub latency_distribution: Vec<u64>,
+    pub active_workers: i64,
+    pub pool_hit_rate: f64,
+}
+```
+
+### PoolStats
+
+数据库连接池状态快照（`DbNexusAdapter::pool_status()` 透传）。
+
+### Prometheus 指标
+
+| 指标名 | 类型 | 描述 |
+|--------|------|------|
+| `inklog_logs_written_total` | counter | 成功写入总数 |
+| `inklog_logs_dropped_total` | counter | 丢弃总数 |
+| `inklog_sink_errors_total` | counter | Sink 错误总数 |
+| `inklog_channel_blocked_total` | counter | 通道阻塞次数 |
+| `inklog_write_latency_us` | histogram | 写入延迟（微秒，含 bucket/sum/count） |
+| `inklog_sink_healthy` | gauge | 各 Sink 健康状态 |
+| `inklog_uptime_seconds` | gauge | 运行时长 |
+| `inklog_db_batch_size` | gauge | 数据库批量大小 |
+| `inklog_db_batch_records_total` | counter | 数据库批量写入记录总数 |
+| `inklog_db_pool_total` / `inklog_db_pool_active` / `inklog_db_pool_idle` | gauge | 连接池总量/活跃/空闲 |
+
+## 🧾 日志记录类型
+
+### LogRecord
+
+```rust
+pub struct LogRecord {
+    pub timestamp: DateTime<Utc>,
+    pub level: String,               // "trace"/"debug"/"info"/"warn"/"error"
+    pub target: String,              // 模块路径
+    pub message: String,
+    pub fields: HashMap<String, Value>,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+    pub thread_id: String,
+    pub trace_id: Option<String>,    // 从当前 tracing span 提取
+    pub span_id: Option<String>,     // 无 OTel 时沿 parent 链派生 16 位 hex
+}
+```
+
+#### `new`
+
+```rust
+pub fn new(level: tracing::Level, target: String, message: String) -> Self
 ```
 
 **示例**
-```rust
-use inklog::Metrics;
 
-let metrics = Metrics::new();
+```rust
+use inklog::LogRecord;
+
+let record = LogRecord::new(
+    tracing::Level::INFO,
+    "my_app::auth".to_string(),
+    "User logged in".to_string(),
+);
 ```
 
----
+### LogLevel
 
-##### `logs_written`
+`LogLevel` 枚举实现 `FromStr` 与 `Display`，用于级别解析与比较（非法输入返回 `LogLevelParseError`）。
 
-返回成功写入的日志总数。
+## 🔌 Sink 类型
 
-**签名**
+### LogSink trait
+
+所有输出目标的统一抽象，方法均为 `&self`（内部可变性由实现方使用 Mutex/RwLock/原子类型保证）：
+
 ```rust
-pub fn logs_written(&self) -> u64
+#[async_trait]
+pub trait LogSink: Send + Sync {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
+    async fn flush(&self) -> Result<(), InklogError>;
+    fn is_healthy(&self) -> bool { true }  // 默认恒健康，建议覆写
+    async fn shutdown(&self) -> Result<(), InklogError>;
+}
 ```
 
----
+### AsyncSink trait
 
-##### `inc_logs_written`
+`LogSink` 的标记子 trait（blanket impl：所有 `LogSink` 自动实现），用于 `LoggerBuilder::add_sink` 的动态 Sink 注册与 trait 上转型：
 
-增加日志写入计数。
-
-**签名**
 ```rust
-pub fn inc_logs_written(&self)
+pub trait AsyncSink: LogSink {}
+impl<T: LogSink + ?Sized> AsyncSink for T {}
 ```
 
----
+### 内置 Sink 一览
 
-##### `logs_dropped`
+| Sink | 模块 | feature | 描述 |
+|------|------|---------|------|
+| `ConsoleSink` | `support::io::sink::console` | 无 | ANSI 彩色、stderr 级别路由、NO_COLOR 支持 |
+| `FileSink` | `support::io::sink::file` | 无（压缩/加密按 feature） | 轮转、压缩、AES-256-GCM 加密、断路器、磁盘空间管理 |
+| `DatabaseSink` | `support::io::sink::database` | `sqlite`/`postgres`/`mysql`/`duckdb` 之一 | 批量落库、分区表、断路器 |
+| `ChannelBufferedFileSink` | `support::io::sink::ring_buffered_file` | 无 | 通道缓冲高吞吐文件 Sink |
+| `TcpSink` / `UdpSink` | `support::io::sink::net` | `net-sink` | TCP（可 TLS，rustls）+ UDP（NDJSON），断线缓冲与自动重连 |
+| `OtlpSink` | `support::io::sink::otlp` | `otlp` | OTLP/HTTP JSON 日志导出 |
+| `SamplingSink` | `support::io::sink::sampling` | 无 | 采样装饰器（级别阈值 + N 取 1 + 关键词白名单豁免） |
+| `RateLimitedSink` | `support::io::sink::rate_limit` | 无 | 令牌桶限流装饰器 |
+| `MiddlewareSink` | `support::io::sink::middleware` | 无 | 中间件链装饰器（filter / transform 组合） |
 
-返回丢弃的日志总数。
+### 关联类型
 
-**签名**
-```rust
-pub fn logs_dropped(&self) -> u64
-```
+| 类型 | 描述 |
+|------|------|
+| `CircuitBreaker` / `CircuitBreakerConfig` / `CircuitState` | 断路器（默认失败阈值 5 次、冷却 30 秒，半开动态批大小减半） |
+| `SinkRegistry` | Sink 注册表与查找 |
+| `RotationStrategy` / `SizeBasedRotation` / `TimeBasedRotation` / `CompositeRotation` | 轮转策略组合 |
+| `Rotatable` / `RotationContext` / `RotationResult` | 轮转抽象 |
+| `CompressionStrategy` / `NoCompression` / `ZstdCompression` / `GzipCompression` | 压缩后端抽象 |
+| `SinkFactory` / `FileSinkFactory` / `SinkMetadata` / `SinkWriteOutcome` | Sink 工厂与元数据 |
+| `Sampler` | 采样器（`should_emit(&LogRecord) -> bool`） |
+| `SinkRateLimit` / `NoOpRateLimit` / `TokenBucketRateLimit` | 限流端口与实现（对象安全，供上层实现注入） |
+| `MiddlewareChain` / `MiddlewareVerdict` / `RecordMiddleware` / `EnrichMiddleware` / `LevelFilterMiddleware` | 中间件组合子 |
 
----
-
-##### `inc_logs_dropped`
-
-增加日志丢弃计数。
-
-**签名**
-```rust
-pub fn inc_logs_dropped(&self)
-```
-
----
-
-##### `sink_errors`
-
-返回 Sink 错误总数。
-
-**签名**
-```rust
-pub fn sink_errors(&self) -> u64
-```
-
----
-
-##### `inc_sink_error`
-
-增加 Sink 错误计数。
-
-**签名**
-```rust
-pub fn inc_sink_error(&self)
-```
-
----
-
-##### `record_latency`
-
-记录处理延迟。
-
-**签名**
-```rust
-pub fn record_latency(&self, duration: Duration)
-```
-
----
-
-##### `update_sink_health`
-
-更新 Sink 的健康状态。
-
-**签名**
-```rust
-pub fn update_sink_health(&self, name: &str, healthy: bool, error: Option<String>)
-```
-
----
-
-##### `get_status`
-
-获取当前健康状态。
-
-**签名**
-```rust
-pub fn get_status(&self, channel_len: usize, channel_cap: usize) -> HealthStatus
-```
-
----
-
-##### `export_prometheus`
-
-导出 Prometheus 格式的指标。
-
-**签名**
-```rust
-pub fn export_prometheus(&self) -> String
-```
-
-**示例**
-```rust
-let metrics = Metrics::new();
-let prometheus_format = metrics.export_prometheus();
-println!("{}", prometheus_format);
-```
-
----
-
-## 特征（Traits）
-
-Inklog 实现了以下标准 Rust 特征：
-
-### InklogConfig
-
-实现了 `Serialize` 和 `Deserialize`，支持 TOML/JSON 配置。
-
-### DatabaseDriver
-
-实现了 `FromStr` 和 `Display`，支持字符串转换。
-
-**示例**
-```rust
-// 从字符串解析
-let driver: DatabaseDriver = "postgres".parse().unwrap();
-
-// 转换为字符串
-let driver_str = driver.to_string(); // "postgres"
-```
-
----
-
-## 依赖注入类型
+## 🧪 依赖注入类型
 
 ### LoggerDependencies
-
-依赖注入容器，用于向 LoggerManager 注入自定义实现。
-
-#### 定义
 
 ```rust
 pub struct LoggerDependencies {
@@ -1932,39 +834,9 @@ pub struct LoggerDependencies {
 }
 ```
 
-#### 字段说明
+未注入的依赖使用默认实现（`OxCacheAdapter` / `InklogConfigAdapter` / 无数据库）。
 
-| 字段 | 类型 | 默认值 | 描述 |
-|------|------|----------|------|
-| `cache` | `Option<Arc<dyn Cache>>` | `None` | 缓存实现（可选） |
-| `config` | `Option<Arc<dyn Config>>` | `None` | 配置实现（可选） |
-| `database` | `Option<Arc<dyn Database>>` | `None` | 数据库实现（可选，需要 `sqlite`/`postgres`/`mysql`/`duckdb` feature） |
-
-**示例**
-```rust
-use inklog::LoggerDependencies;
-use inklog::{MockCache, MockConfig, MockDatabaseAdapter};
-use std::sync::Arc;
-
-let deps = LoggerDependencies {
-    cache: Some(Arc::new(MockCache::new())),
-    config: Some(Arc::new(MockConfig::new().with_value("level", "debug"))),
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
-    database: Some(Arc::new(MockDatabaseAdapter::new())),
-};
-```
-
----
-
-## 基础设施 Trait（Infrastructure Traits）
-
-Inklog 提供了三个核心 trait 用于依赖注入，支持自定义实现和测试。
-
-### Cache Trait
-
-缓存操作 trait，用于缓存日志元数据和配置值。
-
-#### 定义
+### Cache trait
 
 ```rust
 #[async_trait]
@@ -1976,56 +848,7 @@ pub trait Cache: Send + Sync {
 }
 ```
 
-#### 方法说明
-
-| 方法 | 描述 |
-|------|------|
-| `get` | 获取缓存值，返回 `Result<Option<String>, InklogError>` |
-| `set` | 设置缓存键值对，返回 `Result<(), InklogError>` |
-| `delete` | 删除缓存键，返回 `Result<bool, InklogError>` |
-| `exists` | 检查键是否存在，返回 `Result<bool, InklogError>` |
-
-**示例实现**
-```rust
-use inklog::Cache;
-use inklog::InklogError;
-use async_trait::async_trait;
-
-struct MyCache {
-    // 自定义实现
-}
-
-#[async_trait]
-impl Cache for MyCache {
-    async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
-        // 实现获取逻辑
-        Ok(None)
-    }
-
-    async fn set(&self, key: &str, value: String) -> Result<(), InklogError> {
-        // 实现设置逻辑
-        Ok(())
-    }
-
-    async fn delete(&self, key: &str) -> Result<bool, InklogError> {
-        // 实现删除逻辑
-        Ok(false)
-    }
-
-    async fn exists(&self, key: &str) -> Result<bool, InklogError> {
-        // 实现存在检查逻辑
-        Ok(false)
-    }
-}
-```
-
----
-
-### Config Trait
-
-配置访问 trait，用于动态获取配置值。
-
-#### 定义
+### Config trait
 
 ```rust
 pub trait Config: Send + Sync {
@@ -2036,81 +859,9 @@ pub trait Config: Send + Sync {
 }
 ```
 
-#### 方法说明
+支持的配置键路径（点分层级）：`global.level`、`global.format`、`global.masking_enabled`、`global.auto_fallback`、`global.fallback_initial_delay_ms`、`global.fallback_max_delay_ms`、`global.fallback_max_retries`、`global.output_format`、`file_sink.*`（enabled/path/max_size/rotation_time/keep_files/compress/compression_level/encrypt/encryption_key_env/retention_days/max_total_size/cleanup_interval_minutes/batch_size/flush_interval_ms/masking_enabled/output_format）、`console_sink.*`（enabled/colored/stderr_levels/masking_enabled）。
 
-| 方法 | 描述 |
-|------|------|
-| `get_string` | 获取字符串配置值 |
-| `get_int` | 获取整数配置值，解析失败返回 `None` |
-| `get_bool` | 获取布尔配置值，解析失败返回 `None` |
-| `get_float` | 获取浮点数配置值，解析失败返回 `None` |
-
-**支持的配置键**
-
-| 键路径 | 类型 | 描述 |
-|--------|------|------|
-| `global.level` | String | 日志级别 |
-| `global.format` | String | 日志格式 |
-| `global.masking_enabled` | bool | 是否启用脱敏 |
-| `global.auto_fallback` | bool | 是否自动降级 |
-| `global.fallback_initial_delay_ms` | i64 | 降级初始延迟 |
-| `global.fallback_max_delay_ms` | i64 | 降级最大延迟 |
-| `global.fallback_max_retries` | i64 | 降级最大重试次数 |
-| `file_sink.enabled` | bool | 是否启用文件 Sink |
-| `file_sink.path` | String | 日志文件路径 |
-| `file_sink.max_size` | String | 最大文件大小 |
-| `file_sink.keep_files` | i64 | 保留文件数 |
-| `file_sink.retention_days` | i64 | 保留天数 |
-| `file_sink.compression_level` | i64 | 压缩级别 |
-| `file_sink.encryption_key_env` | String | 加密密钥环境变量 |
-| `console_sink.enabled` | bool | 是否启用控制台 Sink |
-| `console_sink.colored` | bool | 是否彩色输出 |
-| `console_sink.stderr_levels` | String | stderr 日志级别 |
-| `console_sink.masking_enabled` | bool | 是否启用脱敏 |
-
-**示例实现**
-```rust
-use inklog::Config;
-
-struct MyConfig {
-    // 自定义实现
-}
-
-impl Config for MyConfig {
-    fn get_string(&self, key: &str) -> Option<String> {
-        match key {
-            "global.level" => Some("debug".to_string()),
-            _ => None,
-        }
-    }
-
-    fn get_int(&self, key: &str) -> Option<i64> {
-        match key {
-            "file_sink.keep_files" => Some(30),
-            _ => None,
-        }
-    }
-
-    fn get_bool(&self, key: &str) -> Option<bool> {
-        match key {
-            "console_sink.colored" => Some(true),
-            _ => None,
-        }
-    }
-
-    fn get_float(&self, key: &str) -> Option<f64> {
-        None
-    }
-}
-```
-
----
-
-### Database Trait
-
-数据库操作 trait，用于批量插入日志记录。
-
-#### 定义
+### Database trait
 
 ```rust
 #[async_trait]
@@ -2120,205 +871,82 @@ pub trait Database: Send + Sync {
 }
 ```
 
-#### 方法说明
+## 🎭 Mock 实现（测试用）
 
-| 方法 | 描述 |
-|------|------|
-| `insert_batch` | 批量插入日志记录，返回成功插入的数量 |
-| `is_healthy` | 检查数据库连接是否健康 |
+三个 Mock 由 `test-utils` feature 门控（src 内联测试经 `cfg(test)` 直接可见，外部消费者需显式启用）：
 
-**示例实现**
-```rust
-use inklog::Database;
-use inklog::LogRecord;
-use inklog::InklogError;
-use async_trait::async_trait;
-
-struct MyDatabase {
-    // 自定义实现
-}
-
-#[async_trait]
-impl Database for MyDatabase {
-    async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {
-        // 实现批量插入逻辑
-        Ok(records.len())
-    }
-
-    async fn is_healthy(&self) -> bool {
-        // 实现健康检查逻辑
-        true
-    }
-}
+```toml
+[dev-dependencies]
+inklog = { version = "0.3.0-rc.3", features = ["test-utils"] }
 ```
-
----
-
-## Mock 实现（测试用）
-
-Inklog 提供了三个 Mock 实现，用于单元测试和集成测试。
 
 ### MockCache
 
-基于内存 HashMap 的 Mock Cache 实现。
-
-#### 定义
-
-```rust
-pub struct MockCache {
-    storage: RwLock<HashMap<String, String>>,
-    delay_ms: u64,
-}
-```
-
-#### 方法
+基于 `RwLock<HashMap>` 的内存 Cache。
 
 | 方法 | 描述 |
 |------|------|
 | `new()` | 创建空 MockCache |
-| `with_delay(ms: u64)` | 创建带延迟模拟的 MockCache |
-
-**示例**
-```rust
-use inklog::MockCache;
-
-let cache = MockCache::new();
-cache.set("key", "value".to_string()).await?;
-assert_eq!(cache.get("key").await?, Some("value".to_string()));
-```
-
----
+| `with_delay(ms: u64)` | 创建带延迟模拟的 MockCache（测试超时场景） |
+| Cache trait 四方法 | `get` / `set` / `delete` / `exists`，返回 `Result` |
 
 ### MockConfig
 
-基于内存 HashMap 的 Mock Config 实现。
-
-#### 定义
-
-```rust
-pub struct MockConfig {
-    values: RwLock<HashMap<String, String>>,
-}
-```
-
-#### 方法
+基于 `RwLock<HashMap>` 的内存 Config。
 
 | 方法 | 描述 |
 |------|------|
 | `new()` | 创建空 MockConfig |
-| `with_value(key, value)` | 链式添加配置值 |
-| `set(key, value)` | 运行时修改配置值 |
-
-**示例**
-```rust
-use inklog::MockConfig;
-
-let config = MockConfig::new()
-    .with_value("level", "debug")
-    .with_value("port", "8080");
-
-assert_eq!(config.get_string("level"), Some("debug".to_string()));
-assert_eq!(config.get_int("port"), Some(8080));
-```
-
----
+| `with_value(key: &str, value: &str)` | 链式添加配置值 |
+| `set(key: &str, value: &str)` | 运行时修改配置值 |
+| Config trait 四方法 | `get_string` / `get_int` / `get_bool` / `get_float` |
 
 ### MockDatabaseAdapter
 
-基于内存 Vec 的 Mock Database 实现。
-
-#### 定义
-
-```rust
-pub struct MockDatabaseAdapter {
-    records: RwLock<Vec<LogRecord>>,
-    healthy: Arc<AtomicBool>,
-}
-```
-
-#### 方法
+基于 `RwLock<Vec<LogRecord>>` 的内存 Database。
 
 | 方法 | 描述 |
 |------|------|
 | `new()` | 创建健康的 MockDatabaseAdapter |
-| `set_healthy(bool)` | 设置健康状态 |
-| `get_records()` | 获取所有插入的记录（用于测试验证） |
-| `clear()` | 清空记录 |
+| `set_healthy(healthy: bool)` | 设置健康状态（测试降级场景） |
+| `record_count()` / `stored_count()` | 已存储记录数 |
+| `get_records()` | 获取全部记录（测试验证） |
+| `clear()` | 清空记录（测试隔离） |
+| Database trait 两方法 | `insert_batch` / `is_healthy` |
 
-**示例**
-```rust
-use inklog::MockDatabaseAdapter;
+## 🏭 适配器实现
 
-let db = MockDatabaseAdapter::new();
-db.set_healthy(false); // 模拟数据库故障
+| 适配器 | 实现的 trait | 依赖 | 特性 |
+|--------|--------------|------|------|
+| `OxCacheAdapter` | `Cache` | oxcache（内建） | 高性能内存缓存，支持 TTL 与容量（`builder()` / `ttl()` / `capacity()`，`new()` 返回 `Result`） |
+| `InklogConfigAdapter` | `Config` | 无（默认可用） | 基于 `InklogConfig` 的链式键路径访问 |
+| `DbNexusAdapter` | `Database` | `sqlite`/`postgres`/`mysql`/`duckdb` 之一 | 连接池管理（dbnexus），`pool_status() -> PoolStatus` 透传池快照 |
+| `InklogModule` | trait-kit 模块 | `kit` + 数据库后端 | trait-kit 生命周期与可观测集成 |
+| `InklogAuditStorage` | dbnexus AuditStorage 端口 | `dbnexus-audit` | 审计事件经 inklog DB Sink 落库（路径 `inklog::integrations::InklogAuditStorage`） |
 
-assert_eq!(db.is_healthy().await, false);
+## 💡 示例参考
 
-db.set_healthy(true);
-let count = db.insert_batch(&records).await?;
-assert_eq!(count, records.len());
+`examples/` crate 提供 7 类共 39 个可运行示例（完整清单见 [README](../README.md#-示例)），运行方式：
+
+```bash
+cargo run --package inklog-examples --example <名称>
 ```
 
----
+与本文档对应的精选示例：
 
-## 适配器实现
-
-Inklog 提供了生产环境的适配器实现。
-
-### OxCacheAdapter
-
-OxCache 缓存适配器。
-
-**需要**: `oxcache` 库
-
-**特性**:
-- 高性能内存缓存
-- 支持 TTL 过期
-- 线程安全
-
-### InklogConfigAdapter
-
-InklogConfig 配置适配器（基于 `InklogConfig` 的内置配置访问）。
-
-**需要**: 无（默认可用）
-
-**特性**:
-- 基于 `InklogConfig` 的配置访问
-- 环境变量覆盖
-- 链式键路径访问（如 `global.level`、`file_sink.path`）
-
-### DbNexusAdapter
-
-DbNexus 数据库适配器。
-
-**需要**: `sqlite`/`postgres`/`mysql`/`duckdb` feature（任选其一）
-
-**特性**:
-- 连接池管理
-- 支持 PostgreSQL、MySQL、SQLite、DuckDB
-- 自动重连
+| 示例 | 对应 API |
+|------|----------|
+| `basic` | `LoggerManager::new` / `shutdown` / `get_health_status` |
+| `builder` | `LoggerBuilder` 全套方法 |
+| `config_file` | `InklogConfig` TOML 加载（`from_file` / `load`） |
+| `env_overrides` | `INKLOG_*` 环境变量覆盖 |
+| `rotation` | `FileSinkConfig` 轮转字段 |
+| `ring_buffered_file` | `ChannelBufferedFileSink` |
+| `metrics` | `Metrics` / `HealthStatus` / `export_prometheus` |
+| `circuit_breaker` | `CircuitBreaker` / `recover_sink` |
+| `di_example` | `LoggerDependencies` 注入（需 `sqlite`） |
+| `runtime_ops` | `set_level` / `publish_ops_event` 等运行时 API |
 
 ---
 
-## 示例参考
-
-Inklog 在 `examples/` crate 中提供了 10 个可运行示例，演示 API 的具体使用方式。使用 `cargo run --example <名称>` 运行（需要 `--package inklog-examples` 或在 `examples/` 目录下执行）。
-
-| 示例 | 对应 API/特性 | 运行命令 |
-|------|--------------|----------|
-| `object_pool` | 对象池复用与内存优化 | `cargo run --example object_pool` |
-| `path_validator` | 文件路径校验 | `cargo run --example path_validator` |
-| `log_sanitizer` | 日志输入净化 | `cargo run --example log_sanitizer` |
-| `log_adapter` | `log` 与 `tracing` 适配 | `cargo run --example log_adapter` |
-| `compression` | `FileSinkConfig` 压缩配置 | `cargo run --example compression` |
-| `rotation` | `FileSinkConfig` 轮转策略 | `cargo run --example rotation` |
-| `ring_buffered_file` | 环形缓冲文件 Sink | `cargo run --example ring_buffered_file` |
-| `config_file` | `InklogConfig::from_file` / `load`（内建支持） | `cargo run --example config_file` |
-| `metrics` | `Metrics` / `HealthStatus` / Prometheus 导出 | `cargo run --example metrics` |
-| `circuit_breaker` | Sink 断路器与 `recover_sink` | `cargo run --example circuit_breaker` |
-
-更多示例请参考 [examples/](../examples/) 目录。
-
----
-
-**[返回顶部](#-inklog-api-参考)**
+**[⬆ 返回顶部](#-inklog-api-参考)**

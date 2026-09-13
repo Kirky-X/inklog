@@ -5,6 +5,25 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<details open>
+<summary>📑 目录</summary>
+
+- [Unreleased](#unreleased)
+- [0.3.0-rc.3](#030-rc3---2026-09-10)
+- [0.3.0-rc.2](#030-rc2---2026-09-03)
+- [0.2.0](#020---2026-08-05)
+- [0.1.12](#0112---2026-07-22)
+- [0.1.11](#0111---2026-07-17)
+- [0.1.7](#017---2026-07-13)
+- [0.1.6](#016---2026-07-12)
+- [0.1.5](#015---2026-07-11)
+- [0.1.2](#012---2026-07-05)
+- [0.1.1](#011---2026-06-29)
+- [0.1.0](#010---2026-01-18)
+- [0.0.0](#000---2025-12-30)
+
+</details>
+
 ## [Unreleased]
 
 ## [0.3.0-rc.3] - 2026-09-10
@@ -14,19 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **可配置日志门面**：新增 `init_inklog_logger()` 与 `init_inklog_logger_with_config(config)` 便捷初始化函数，进程级单例语义（重复初始化返回明确错误）
 - **Per-crate target 级别预设**：`InklogConfig` 新增 `target_levels: HashMap<String, String>` 字段，按 crate target 设置独立日志级别，合并到 EnvFilter（优先级低于 RUST_LOG、高于全局默认）
 - **dbnexus 池指标接入**：`DbNexusAdapter` 新增 `pool_status()` 透传连接池状态快照；`Metrics` 新增 `record_pool_metrics(total, active, idle)` 方法及对应 Prometheus 导出（`inklog_db_pool_total/active/idle`）
-- **动态 Sink 注册（T501）**：`LoggerBuilder::add_sink(Arc<dyn AsyncSink>)` + 通用 SinkWorker——第三方 Sink 实现 `LogSink` 即可零核心改动接入，每 sink 独立通道互不抢占；`AsyncSink` 为 `LogSink` 子 trait（blanket impl，trait 上转型直通）
-- **运行时级别热调（T502）**：`LoggerManager::set_level(target, level)` 经 `tracing_subscriber::reload` 换装 EnvFilter，进程内即时生效；指令集支持全局/per-target upsert，RUST_LOG 附加指令跨重建保留
-- **dbnexus AuditStorage 适配器（T503，`dbnexus-audit` feature）**：`InklogAuditStorage` 实现 dbnexus 审计存储端口——审计事件 → 结构化日志（`audit::<entity_type>`）→ inklog DB 落库
-- **追踪 ID 关联（T504）**：`LogRecord` 新增 `trace_id`/`span_id`（从当前 tracing span 提取；无 OTel 时沿 parent 链以根 span id 派生 32/16 位 hex），模板新增 `{trace_id}`/`{span_id}` 占位符，serde 兼容旧数据
-- **日志查询 CLI（T505）**：`inklog-cli query` 按时间/级别/关键词检索本地日志（含 `ENCLOG1` v1/v2 解密与 zstd/gzip 解包，目录递归），`--json` 输出，退出码 0/2/1
-- **性能基线门禁（T506）**：新增 `rc4_pipeline_bench`（写入/序列化/加密路径）与 `docs/PERFORMANCE.md` 首份正式基线
-- **日志采样器（T507）**：`Sampler`（级别阈值 + N 取 1 + 关键词白名单豁免）与 `SamplingSink` 装饰器
-- **confers 配置集成（T508，`config-confers` feature）**：`InklogConfig` 经 confers 加载 + `ConfersConfigWatcher` watch 热更新级别/轮转参数（非法 TOML 保持旧配置）
-- **KMS 密钥提供者（T509，`kms` feature）**：`KeyProvider` 端口 + `EnvKeyProvider`/`ConfersKeyProvider`（confers AsyncKeyProvider 适配）+ Vault transit MVP（mock server 测试）
-- **按目标限流端口（T511）**：`SinkRateLimit`（对象安全）+ `NoOpRateLimit` 默认 + `TokenBucketRateLimit` 基线 + `RateLimitedSink` 装饰器——供 limiteron 上层实现
-- **内部审计事件流 + 归档防篡改链（T512）**：`publish_ops_event` 广播 ops 事件到全部 sink 通道；`ArchiveChain` 归档 HMAC-SHA256 链（随机链首盐，防篡改/删除/重排/伪造）
-- **网络转发 Sink（T513，`net-sink` feature）**：`TcpSink`（可 TLS，rustls 客户端）+ `UdpSink`（NDJSON），断线缓冲 + 半开探测 + 自动重连按序补发
-- **直方图/中间件/参数化批量/OTLP（T514）**：Prometheus 原生 `inklog_write_latency_us` histogram 导出；`MiddlewareChain`/`MiddlewareSink`（filter/transform 组合）；DuckDB 批量插入参数化（预编译语句绑定，消除转义拼接）；`otlp` feature OTLP/HTTP JSON 导出 MVP（mock collector 测试）
+- **动态 Sink 注册**：`LoggerBuilder::add_sink(Arc<dyn AsyncSink>)` + 通用 SinkWorker——第三方 Sink 实现 `LogSink` 即可零核心改动接入，每 sink 独立通道互不抢占；`AsyncSink` 为 `LogSink` 子 trait（blanket impl，trait 上转型直通）
+- **运行时级别热调**：`LoggerManager::set_level(target, level)` 经 `tracing_subscriber::reload` 换装 EnvFilter，进程内即时生效；指令集支持全局/per-target upsert，RUST_LOG 附加指令跨重建保留
+- **dbnexus AuditStorage 适配器（`dbnexus-audit` feature）**：`InklogAuditStorage` 实现 dbnexus 审计存储端口——审计事件 → 结构化日志（`audit::<entity_type>`）→ inklog DB 落库
+- **追踪 ID 关联**：`LogRecord` 新增 `trace_id`/`span_id`（从当前 tracing span 提取；无 OTel 时沿 parent 链以根 span id 派生 32/16 位 hex），模板新增 `{trace_id}`/`{span_id}` 占位符，serde 兼容旧数据
+- **日志查询 CLI**：`inklog-cli query` 按时间/级别/关键词检索本地日志（含 `ENCLOG1` v1/v2 解密与 zstd/gzip 解包，目录递归），`--json` 输出，退出码 0/2/1
+- **性能基线门禁**：新增 `rc4_pipeline_bench`（写入/序列化/加密路径）与 `docs/PERFORMANCE.md` 首份正式基线
+- **日志采样器**：`Sampler`（级别阈值 + N 取 1 + 关键词白名单豁免）与 `SamplingSink` 装饰器
+- **confers 配置集成（`config-confers` feature）**：`InklogConfig` 经 confers 加载 + `ConfersConfigWatcher` watch 热更新级别/轮转参数（非法 TOML 保持旧配置）
+- **KMS 密钥提供者（`kms` feature）**：`KeyProvider` 端口 + `EnvKeyProvider`/`ConfersKeyProvider`（confers AsyncKeyProvider 适配）+ Vault transit MVP（mock server 测试）
+- **按目标限流端口**：`SinkRateLimit`（对象安全）+ `NoOpRateLimit` 默认 + `TokenBucketRateLimit` 基线 + `RateLimitedSink` 装饰器——供 limiteron 上层实现
+- **内部审计事件流 + 归档防篡改链**：`publish_ops_event` 广播 ops 事件到全部 sink 通道；`ArchiveChain` 归档 HMAC-SHA256 链（随机链首盐，防篡改/删除/重排/伪造）
+- **网络转发 Sink（`net-sink` feature）**：`TcpSink`（可 TLS，rustls 客户端）+ `UdpSink`（NDJSON），断线缓冲 + 半开探测 + 自动重连按序补发
+- **直方图/中间件/参数化批量/OTLP**：Prometheus 原生 `inklog_write_latency_us` histogram 导出；`MiddlewareChain`/`MiddlewareSink`（filter/transform 组合）；DuckDB 批量插入参数化（预编译语句绑定，消除转义拼接）；`otlp` feature OTLP/HTTP JSON 导出 MVP（mock collector 测试）
 
 ### Changed
 
@@ -157,7 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 无代码变更，版本号对齐 workspace 同步升级
 
-### Changed（Phase 6 前置）
+### Changed
 
 - **edition 升级**: 从 edition 2021 升级至 edition 2024
 - **MSRV 声明**: `rust-version = "1.85"` 显式声明最低支持 Rust 版本
