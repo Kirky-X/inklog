@@ -211,13 +211,11 @@ mod tests {
     #[test]
     fn test_deserialize_masking_enabled_legacy_and_alias_keys() {
         // 旧键名 `masking_enabled`：既有配置文件必须继续解析（兼容别名）
-        let legacy: ConsoleSinkConfig =
-            toml::from_str("masking_enabled = false\n").unwrap();
+        let legacy: ConsoleSinkConfig = toml::from_str("masking_enabled = false\n").unwrap();
         assert!(!legacy.masking_enabled);
 
         // 新键名 `pii_masking_enabled`（推荐写法，serde alias）解析到同一字段
-        let renamed: ConsoleSinkConfig =
-            toml::from_str("pii_masking_enabled = false\n").unwrap();
+        let renamed: ConsoleSinkConfig = toml::from_str("pii_masking_enabled = false\n").unwrap();
         assert!(!renamed.masking_enabled);
     }
 

@@ -57,7 +57,10 @@ pub fn unique_sqlite_url(name: &str) -> String {
         })
         .collect();
     let pid = std::process::id();
-    format!("sqlite:///tmp/inklog_test_{}_{}.db?mode=rwc", sanitized, pid)
+    format!(
+        "sqlite:///tmp/inklog_test_{}_{}.db?mode=rwc",
+        sanitized, pid
+    )
 }
 
 /// 创建 logs 表的 SQL（兼容 SQLite/PostgreSQL/MySQL）。

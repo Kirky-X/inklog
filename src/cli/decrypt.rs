@@ -294,11 +294,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     Ok(())
 }
 
-pub fn decrypt_file_compatible(
-    input_path: &Path,
-    output_path: &Path,
-    key_env: &str,
-) -> Result<()> {
+pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &str) -> Result<()> {
     // O_NOFOLLOW 打开：关闭校验后输入路径被替换为符号链接的竞态
     let mut file = inklog::open_validated_file(input_path).with_context(|| {
         let mut args = fluent_bundle::FluentArgs::new();
@@ -396,13 +392,12 @@ pub fn decrypt_file_compatible(
                 ));
             }
             let header_salt: [u8; 16] = header[12..28].try_into().unwrap();
-            let key = get_encryption_key_with_salt_cli(key_env, &header_salt).with_context(
-                || {
+            let key =
+                get_encryption_key_with_salt_cli(key_env, &header_salt).with_context(|| {
                     let mut args = fluent_bundle::FluentArgs::new();
                     args.set("env", key_env.to_string());
                     inklog::i18n::tr_args("cli-decrypt-err-key", args)
-                },
-            )?;
+                })?;
 
             let nonce_slice: [u8; 12] = header[28..40].try_into().unwrap();
             let nonce = aes_gcm::Nonce::from(nonce_slice);
@@ -429,13 +424,11 @@ pub fn decrypt_file_compatible(
     };
 
     // O_NOFOLLOW 创建：关闭校验后输出路径被替换为符号链接的竞态
-    let mut output_file = inklog::create_validated_file(output_path).with_context(
-        || {
-            let mut args = fluent_bundle::FluentArgs::new();
-            args.set("path", output_path.display().to_string());
-            inklog::i18n::tr_args("cli-decrypt-err-create", args)
-        },
-    )?;
+    let mut output_file = inklog::create_validated_file(output_path).with_context(|| {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("path", output_path.display().to_string());
+        inklog::i18n::tr_args("cli-decrypt-err-create", args)
+    })?;
 
     output_file
         .write_all(&plaintext)
@@ -1082,7 +1075,12 @@ mod tests {
             std::env::set_var("TEST_V2_PWD_B", "wrong-password-entry-99");
         }
 
-        encrypt_with_file_sink(temp_dir.path(), &input_path, &encrypted_path, "TEST_V2_PWD_A");
+        encrypt_with_file_sink(
+            temp_dir.path(),
+            &input_path,
+            &encrypted_path,
+            "TEST_V2_PWD_A",
+        );
 
         let result = decrypt_file_compatible(&encrypted_path, &output_path, "TEST_V2_PWD_B");
         assert!(result.is_err(), "wrong password must fail to decrypt");
@@ -1267,8 +1265,7 @@ mod tests {
 
         #[cfg(unix)]
         let escape_result = {
-            std::os::unix::fs::symlink(outside_dir.path(), base_dir.path().join("escape"))
-                .unwrap();
+            std::os::unix::fs::symlink(outside_dir.path(), base_dir.path().join("escape")).unwrap();
             batch_decrypt("escape/*.enc", &output_dir, "INKLOG_TEST_BATCH_BASE_KEY")
         };
 
@@ -1276,7 +1273,10 @@ mod tests {
         // SAFETY: test-only env var mutation
         unsafe { std::env::remove_var("INKLOG_TEST_BATCH_BASE_KEY") };
 
-        assert!(ok_result.is_ok(), "inside-base file should decrypt: {ok_result:?}");
+        assert!(
+            ok_result.is_ok(),
+            "inside-base file should decrypt: {ok_result:?}"
+        );
         assert!(output_dir.join("inside.log").exists());
 
         #[cfg(unix)]
@@ -1322,7 +1322,13 @@ mod tests {
         unsafe { std::env::remove_var("INKLOG_TEST_DIR_VALIDATE_KEY") };
 
         assert!(result.is_err(), "symlinked input file should be skipped");
-        assert!(input_dir.join("good.log").exists(), "regular file should decrypt");
-        assert!(!input_dir.join("evil.log").exists(), "symlinked input must not be decrypted");
+        assert!(
+            input_dir.join("good.log").exists(),
+            "regular file should decrypt"
+        );
+        assert!(
+            !input_dir.join("evil.log").exists(),
+            "symlinked input must not be decrypted"
+        );
     }
 }

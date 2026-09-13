@@ -780,8 +780,7 @@ mod tests {
         // → build() 应返回 Err 而非 panic（旧实现为 .expect panic）
         let dir = tempfile::tempdir().expect("Failed to create tempdir");
         let bad = dir.path().join("invalid.toml");
-        std::fs::write(&bad, "this is = = not valid toml [[[")
-            .expect("Failed to write config");
+        std::fs::write(&bad, "this is = = not valid toml [[[").expect("Failed to write config");
         unsafe {
             std::env::set_var("INKLOG_CONFIG_PATH", &bad);
         }
@@ -801,8 +800,7 @@ mod tests {
         // Default 无法返回 Result：默认配置初始化失败时降级为默认配置，绝不 panic
         let dir = tempfile::tempdir().expect("Failed to create tempdir");
         let bad = dir.path().join("invalid.toml");
-        std::fs::write(&bad, "this is = = not valid toml [[[")
-            .expect("Failed to write config");
+        std::fs::write(&bad, "this is = = not valid toml [[[").expect("Failed to write config");
         unsafe {
             std::env::set_var("INKLOG_CONFIG_PATH", &bad);
         }

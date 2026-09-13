@@ -71,7 +71,11 @@ use std::collections::HashMap;
 fn safe_body_preview(body: &str) -> String {
     use inklog::LogSanitizer;
     let sanitized = LogSanitizer::new().sanitize(body);
-    sanitized.chars().filter(|c| !c.is_control()).take(400).collect()
+    sanitized
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(400)
+        .collect()
 }
 use std::time::Duration;
 
@@ -192,10 +196,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// 注意：接收 `Arc<Metrics>`（而非引用），便于在外层任务中
 /// 通过 `tokio::spawn` 独立运行（future 需满足 `'static` 约束）。
-async fn handle_connection(
-    mut stream: TcpStream,
-    metrics: std::sync::Arc<Metrics>,
-) -> Result<()> {
+async fn handle_connection(mut stream: TcpStream, metrics: std::sync::Arc<Metrics>) -> Result<()> {
     // 读取请求
     let mut buffer = Vec::new();
     let mut temp_buf = [0u8; 8192];
@@ -207,10 +208,7 @@ async fn handle_connection(
             Ok(Ok(n)) => n,
             Ok(Err(e)) => return Err(e.into()),
             Err(_elapsed) => {
-                eprintln!(
-                    "读取请求超时 ({}s)，关闭连接",
-                    READ_TIMEOUT.as_secs()
-                );
+                eprintln!("读取请求超时 ({}s)，关闭连接", READ_TIMEOUT.as_secs());
                 return Ok(());
             }
         };
@@ -463,7 +461,10 @@ async fn health_endpoint(port: u16) -> Result<()> {
     // 读取并解析响应体
     println!("\n响应内容 (JSON):\n");
     let json: serde_json::Value = serde_json::from_str(&body)?;
-    println!("{}", safe_body_preview(&serde_json::to_string_pretty(&json)?));
+    println!(
+        "{}",
+        safe_body_preview(&serde_json::to_string_pretty(&json)?)
+    );
 
     // 验证响应结构
     assert!(

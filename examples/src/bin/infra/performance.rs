@@ -369,7 +369,10 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
 /// 性能对比摘要
 ///
 /// 展示 Console Sink 和 File Sink 的性能对比
-#[expect(dead_code, reason = "演示用静态对比摘要，主流程未调用；若确认不再展示可整体删除")]
+#[expect(
+    dead_code,
+    reason = "演示用静态对比摘要，主流程未调用；若确认不再展示可整体删除"
+)]
 fn performance_summary() {
     print_separator("6. 性能对比摘要");
 

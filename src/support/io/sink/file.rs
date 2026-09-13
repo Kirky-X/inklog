@@ -660,8 +660,7 @@ impl FileSink {
         match rotation_time {
             "hourly" => Some(now + chrono::Duration::hours(1)),
             "daily" => {
-                let next_naive =
-                    now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
+                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
                 Some(next_naive.and_utc())
             }
             "weekly" => {
@@ -673,13 +672,14 @@ impl FileSink {
                 // 修复：原实现误写为“明天零点”，导致 monthly 实际每天轮转。
                 // 正确语义为“下个月同日的零点”；`checked_add_months` 在月末
                 // 溢出时钳制到次月最后一天（如 1 月 31 日 → 2 月 28 日）。
-                let next_date = now.date_naive().checked_add_months(chrono::Months::new(1))?;
+                let next_date = now
+                    .date_naive()
+                    .checked_add_months(chrono::Months::new(1))?;
                 Some(next_date.and_hms_opt(0, 0, 0)?.and_utc())
             }
             _ => {
                 // 默认每日轮转
-                let next_naive =
-                    now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
+                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
                 Some(next_naive.and_utc())
             }
         }
@@ -1398,8 +1398,7 @@ impl LogSink for FileSink {
     }
 
     fn is_healthy(&self) -> bool {
-        self.inner.read().current_file.is_some()
-            && !self.write_unhealthy.load(Ordering::Relaxed)
+        self.inner.read().current_file.is_some() && !self.write_unhealthy.load(Ordering::Relaxed)
     }
 
     async fn shutdown(&self) -> Result<(), InklogError> {
@@ -1989,12 +1988,7 @@ mod tests {
         let result = sink.get_encryption_key(b"test-salt-16bytes");
         assert!(result.is_err());
         // v2 统一走加密模块派生：base64 解码成功但只有 4 字节 → 长度错误
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("32 bytes")
-        );
+        assert!(result.unwrap_err().to_string().contains("32 bytes"));
     }
 
     #[test]
@@ -3496,12 +3490,7 @@ mod tests {
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err(), "encrypt_file should fail without key");
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("not set")
-        );
+        assert!(result.unwrap_err().to_string().contains("not set"));
     }
 
     #[test]
@@ -4968,10 +4957,7 @@ mod tests {
         assert!(result.is_err(), "symlinked log path must fail to open");
         assert!(inner.current_file.is_none());
         // 符号链接目标不得被创建/截断/写入
-        assert_eq!(
-            std::fs::read_to_string(&real_file).unwrap(),
-            "real content"
-        );
+        assert_eq!(std::fs::read_to_string(&real_file).unwrap(), "real content");
     }
 
     // ---- 缺陷 #5: 断路器/磁盘不足路径静默吞日志 ----
@@ -5061,7 +5047,10 @@ mod tests {
 
         // 第 6 条：熔断打开且无 fallback → 记录终态丢失但可观测
         let result = sink.write(&record).await;
-        assert!(result.is_ok(), "write must stay Ok to keep caller semantics");
+        assert!(
+            result.is_ok(),
+            "write must stay Ok to keep caller semantics"
+        );
         assert!(
             !sink.is_healthy(),
             "sink must be marked unhealthy after a lost record"

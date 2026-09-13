@@ -210,12 +210,7 @@ pub fn derive_key_from_password(
     };
 
     // 使用 PBKDF2-HMAC-SHA256 派生密钥
-    pbkdf2_hmac::<Sha256>(
-        password.as_bytes(),
-        &salt,
-        PBKDF2_ITERATIONS,
-        &mut key,
-    );
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, PBKDF2_ITERATIONS, &mut key);
 
     Ok((key, salt))
 }
@@ -495,7 +490,10 @@ mod tests {
         let salt = b"0123456789abcdef"; // 16 字节，与 v2 头中的盐长度一致
         let key1 = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT", salt).unwrap();
         let key2 = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT", salt).unwrap();
-        assert_eq!(*key1, *key2, "same password + same salt must derive the same key");
+        assert_eq!(
+            *key1, *key2,
+            "same password + same salt must derive the same key"
+        );
 
         let key3 =
             get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT", b"different-salt!!").unwrap();
@@ -521,7 +519,8 @@ mod tests {
         unsafe {
             std::env::set_var("INKLOG_TEST_KEY_WITH_SALT_B64", &key_b64);
         }
-        let key = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT_B64", b"ignored-salt!").unwrap();
+        let key = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT_B64", b"ignored-salt!")
+            .unwrap();
         assert_eq!(*key, key_bytes, "Base64 branch must ignore salt");
 
         unsafe {
@@ -537,7 +536,8 @@ mod tests {
         unsafe {
             std::env::set_var("INKLOG_TEST_KEY_WITH_SALT_RAW", raw);
         }
-        let key = get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT_RAW", b"ignored!").unwrap();
+        let key =
+            get_encryption_key_with_salt("INKLOG_TEST_KEY_WITH_SALT_RAW", b"ignored!").unwrap();
         assert_eq!(&*key, raw.as_bytes());
 
         unsafe {
@@ -566,7 +566,10 @@ mod tests {
                 "INKLOG_TEST_CLASSIFY_B64",
                 general_purpose::STANDARD.encode([0x5Au8; 32]).as_str(),
             );
-            std::env::set_var("INKLOG_TEST_CLASSIFY_RAW32", "abcdefghijklmnopqrstuvwxyz123456");
+            std::env::set_var(
+                "INKLOG_TEST_CLASSIFY_RAW32",
+                "abcdefghijklmnopqrstuvwxyz123456",
+            );
             // Base64 可解码但长度不对 → 走 base64_wrong_length 错误，不是密码
             std::env::set_var(
                 "INKLOG_TEST_CLASSIFY_B64_SHORT",

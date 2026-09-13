@@ -289,8 +289,7 @@ impl Default for LogSanitizer {
 /// （`***REDACTED***`、`***MASKED***`、`[REDACTED]` 等，含各自变体前缀）
 /// 即视为已被上游处理过，入口必须短路跳过再次脱敏，避免产生
 /// REDACTED 套 REDACTED 的嵌套标记。
-pub(crate) const REDACTION_MARKERS: &[&str] =
-    &["***REDACTED", "***MASKED", "[REDACTED]"];
+pub(crate) const REDACTION_MARKERS: &[&str] = &["***REDACTED", "***MASKED", "[REDACTED]"];
 
 /// 判断消息是否已包含脱敏/掩码标记（幂等短路判定）。
 pub(crate) fn contains_redaction_marker(message: &str) -> bool {

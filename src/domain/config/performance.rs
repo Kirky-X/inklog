@@ -125,7 +125,7 @@ impl PerformanceConfig {
     /// - Percentage thresholds are within 0–100
     /// - `min_capacity <= max_capacity`
     /// - `shrink_threshold_percent < expand_threshold_percent`
-    /// - `channel_capacity` does not exceed [`MAX_CHANNEL_CAPACITY`]
+    /// - `channel_capacity` does not exceed `MAX_CHANNEL_CAPACITY`
     pub fn validate(&mut self) -> Result<(), String> {
         if self.channel_capacity > MAX_CHANNEL_CAPACITY {
             return Err(format!(

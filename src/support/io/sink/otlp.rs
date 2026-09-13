@@ -114,9 +114,7 @@ fn http_post_json(endpoint: &str, body: &str, timeout: Duration) -> Result<(), I
         .set_write_timeout(Some(timeout))
         .and_then(|_| stream.set_read_timeout(Some(timeout)))
         .map_err(|e| {
-            InklogError::IoError(std::io::Error::other(format!(
-                "OTLP timeout setup: {e}"
-            )))
+            InklogError::IoError(std::io::Error::other(format!("OTLP timeout setup: {e}")))
         })?;
 
     use std::io::Write;
@@ -124,17 +122,18 @@ fn http_post_json(endpoint: &str, body: &str, timeout: Duration) -> Result<(), I
         "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    stream.write_all(request.as_bytes()).map_err(|e| {
-        InklogError::IoError(std::io::Error::other(format!("OTLP send: {e}")))
-    })?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| InklogError::IoError(std::io::Error::other(format!("OTLP send: {e}"))))?;
     stream.flush().ok();
 
     // 读状态行，2xx 视为成功
     use std::io::Read as _;
     let mut response = Vec::new();
-    stream.take(8192).read_to_end(&mut response).map_err(|e| {
-        InklogError::IoError(std::io::Error::other(format!("OTLP read: {e}")))
-    })?;
+    stream
+        .take(8192)
+        .read_to_end(&mut response)
+        .map_err(|e| InklogError::IoError(std::io::Error::other(format!("OTLP read: {e}"))))?;
     let text = String::from_utf8_lossy(&response);
     let status = text
         .lines()
@@ -153,13 +152,11 @@ fn http_post_json(endpoint: &str, body: &str, timeout: Duration) -> Result<(), I
 
 /// 解析 `http://host[:port]/path`。
 fn parse_http_endpoint(endpoint: &str) -> Result<(String, u16, String), InklogError> {
-    let rest = endpoint
-        .strip_prefix("http://")
-        .ok_or_else(|| {
-            InklogError::ConfigError(format!(
-                "OTLP endpoint '{endpoint}' must be http:// (MVP; HTTPS 演进中)"
-            ))
-        })?;
+    let rest = endpoint.strip_prefix("http://").ok_or_else(|| {
+        InklogError::ConfigError(format!(
+            "OTLP endpoint '{endpoint}' must be http:// (MVP; HTTPS 演进中)"
+        ))
+    })?;
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
@@ -218,9 +215,10 @@ impl LogSink for OtlpSink {
             batch.len() >= self.config.max_batch_size
         };
         if should_send {
-            let mut batch = self.batch.lock().map_err(|_| {
-                InklogError::ConfigError("otlp batch poisoned".to_string())
-            })?;
+            let mut batch = self
+                .batch
+                .lock()
+                .map_err(|_| InklogError::ConfigError("otlp batch poisoned".to_string()))?;
             self.send_now(&mut batch)?;
         }
         Ok(())
@@ -246,7 +244,11 @@ mod tests {
     use std::sync::Arc;
 
     fn record(message: &str) -> LogRecord {
-        let mut r = LogRecord::new(tracing::Level::ERROR, "otlp::test".to_string(), message.to_string());
+        let mut r = LogRecord::new(
+            tracing::Level::ERROR,
+            "otlp::test".to_string(),
+            message.to_string(),
+        );
         r.fields.insert("k".to_string(), serde_json::json!("v"));
         r
     }
@@ -282,7 +284,10 @@ mod tests {
         assert!(parse_http_endpoint("not-a-url").is_err());
         assert!(parse_http_endpoint("http://host:99999").is_err());
         let (host, port, path) = parse_http_endpoint("http://127.0.0.1:4318/v1/logs").unwrap();
-        assert_eq!((host.as_str(), port, path.as_str()), ("127.0.0.1", 4318, "/v1/logs"));
+        assert_eq!(
+            (host.as_str(), port, path.as_str()),
+            ("127.0.0.1", 4318, "/v1/logs")
+        );
     }
 
     /// mock collector：接受一次 POST，捕获请求体并回 200。
@@ -330,9 +335,7 @@ mod tests {
     }
 
     fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-        haystack
-            .windows(needle.len())
-            .position(|w| w == needle)
+        haystack.windows(needle.len()).position(|w| w == needle)
     }
 
     #[tokio::test]
@@ -355,12 +358,19 @@ mod tests {
         .unwrap();
 
         sink.write(&record("exported record")).await.unwrap();
-        assert_eq!(sink.pending(), 1, "batching: below max_batch_size stays buffered");
+        assert_eq!(
+            sink.pending(),
+            1,
+            "batching: below max_batch_size stays buffered"
+        );
         sink.flush().await.unwrap();
 
         server.join().unwrap();
         let raw = String::from_utf8_lossy(&captured.lock().unwrap()).to_string();
-        assert!(raw.starts_with("POST /v1/logs HTTP/1.1"), "must be an OTLP/HTTP POST");
+        assert!(
+            raw.starts_with("POST /v1/logs HTTP/1.1"),
+            "must be an OTLP/HTTP POST"
+        );
         assert!(raw.contains("Content-Type: application/json"));
         let body = raw.split("\r\n\r\n").nth(1).unwrap_or("");
         let json: serde_json::Value = serde_json::from_str(body).expect("body must be JSON");
@@ -425,7 +435,10 @@ mod tests {
         .unwrap();
 
         let err = sink.write(&record("x")).await.unwrap_err();
-        assert!(err.to_string().contains("503"), "collector failure must surface, got {err}");
+        assert!(
+            err.to_string().contains("503"),
+            "collector failure must surface, got {err}"
+        );
         server.join().unwrap();
     }
 }

@@ -163,10 +163,11 @@ impl LoggerSubscriber {
             record.trace_id = Some(explicit.clone());
         }
         if record.trace_id.is_none() {
-            let trace_id = ctx.span(&id).and_then(|span| {
-                span.scope().last().map(|root| format!("{:032x}", root.id().into_u64()))
+            record.trace_id = ctx.span(id).and_then(|span| {
+                span.scope()
+                    .last()
+                    .map(|root| format!("{:032x}", root.id().into_u64()))
             });
-            record.trace_id = trace_id;
         }
         // 事件字段显式携带的 span_id 覆盖派生值（与 OTel 语义对齐）
         if let Some(value::Value::String(explicit)) = record.fields.get("span_id") {
@@ -249,7 +250,10 @@ impl LoggerSubscriber {
                 } else {
                     &self.extra_async_senders[idx - 1]
                 };
-                if sender.send_timeout(Arc::clone(&entry.record), timeout).is_ok() {
+                if sender
+                    .send_timeout(Arc::clone(&entry.record), timeout)
+                    .is_ok()
+                {
                     if idx < entry.delivered.len() {
                         entry.delivered[idx] = true;
                     }
@@ -286,9 +290,8 @@ impl Drop for LoggerSubscriber {
             let remaining = self.fallback_buffer.lock().len();
             if remaining > 0 {
                 // Drop 阶段不依赖 tracing 全局状态：格式化到 String 后直接输出
-                let warning = format!(
-                    "LoggerSubscriber dropped with {remaining} unflushed fallback records"
-                );
+                let warning =
+                    format!("LoggerSubscriber dropped with {remaining} unflushed fallback records");
                 eprintln!("{warning}");
             }
         }
@@ -367,8 +370,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
     use crossbeam_channel::bounded;
+    use serde_json::Value;
     use serial_test::serial;
     use tracing::subscriber::with_default;
     use tracing_subscriber::prelude::*;
@@ -598,13 +601,10 @@ mod tests {
                 "test::fallback".to_string(),
                 format!("fallback-order-{i}"),
             ));
-            subscriber
-                .fallback_buffer
-                .lock()
-                .push_back(FallbackEntry {
-                    record,
-                    delivered: vec![false],
-                });
+            subscriber.fallback_buffer.lock().push_back(FallbackEntry {
+                record,
+                delivered: vec![false],
+            });
         }
         subscriber.try_flush_fallback();
 
@@ -1206,15 +1206,10 @@ mod trace_context_tests {
 
     /// 构建 (registry, console_rx)：从 console 通道读取 LoggerSubscriber
     /// 提取后的记录（trace 上下文在 on_event 中注入）。
-    type TestSubscriber = tracing_subscriber::layer::Layered<
-        LoggerSubscriber,
-        tracing_subscriber::Registry,
-    >;
+    type TestSubscriber =
+        tracing_subscriber::layer::Layered<LoggerSubscriber, tracing_subscriber::Registry>;
 
-    fn setup() -> (
-        TestSubscriber,
-        crossbeam_channel::Receiver<Arc<LogRecord>>,
-    ) {
+    fn setup() -> (TestSubscriber, crossbeam_channel::Receiver<Arc<LogRecord>>) {
         let (console_tx, console_rx) = bounded(100);
         let (async_tx, _async_rx) = bounded(100);
         let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()));
@@ -1232,12 +1227,22 @@ mod trace_context_tests {
             tracing::info!(target: "t504", message = "still inside");
         });
 
-        let r1 = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-        let r2 = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-        let (s1, s2) = (r1.span_id.clone().expect("span_id"), r2.span_id.clone().expect("span_id"));
+        let r1 = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let r2 = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let (s1, s2) = (
+            r1.span_id.clone().expect("span_id"),
+            r2.span_id.clone().expect("span_id"),
+        );
         assert_eq!(s1, s2, "same span must share span_id");
         assert_eq!(s1.len(), 16, "span_id must be 16-char hex");
-        let (t1, t2) = (r1.trace_id.clone().expect("trace_id"), r2.trace_id.clone().expect("trace_id"));
+        let (t1, t2) = (
+            r1.trace_id.clone().expect("trace_id"),
+            r2.trace_id.clone().expect("trace_id"),
+        );
         assert_eq!(t1, t2, "same span must share trace_id");
         assert_eq!(t1.len(), 32, "trace_id must be 32-char hex");
         assert_ne!(t1, s1, "trace_id must not equal span_id (root derivation)");
@@ -1256,8 +1261,12 @@ mod trace_context_tests {
             tracing::info!(target: "t504", message = "at child");
         });
 
-        let root = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-        let child = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let root = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let child = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
         let root_trace = root.trace_id.clone().expect("root trace_id");
         let child_trace = child.trace_id.clone().expect("child trace_id");
         assert_eq!(
@@ -1278,7 +1287,9 @@ mod trace_context_tests {
             tracing::info!(target: "t504", message = "no span");
         });
 
-        let record = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let record = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
         assert!(record.trace_id.is_none(), "no span → trace_id None");
         assert!(record.span_id.is_none(), "no span → span_id None");
     }
@@ -1298,7 +1309,9 @@ mod trace_context_tests {
             );
         });
 
-        let record = console_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let record = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
         assert_eq!(
             record.trace_id.as_deref(),
             Some("0af7651916cd43dd8448eb211c80319c"),

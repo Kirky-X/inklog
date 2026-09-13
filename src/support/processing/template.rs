@@ -750,7 +750,11 @@ mod tests {
             Value::String("as-is value".to_string()),
         )]);
         let output = template.render(&record);
-        assert!(output.contains("raw_note=as-is value"), "Output: {}", output);
+        assert!(
+            output.contains("raw_note=as-is value"),
+            "Output: {}",
+            output
+        );
     }
 }
 
@@ -788,6 +792,9 @@ mod trace_placeholder_tests {
         let template = LogTemplate::new("[{level}] {trace_id}/{span_id} {message}");
         let record = LogRecord::new(tracing::Level::INFO, "t".to_string(), "hello".to_string());
         let out = template.render(&record);
-        assert_eq!(out, "[INFO] / hello", "None trace ids must render as empty strings");
+        assert_eq!(
+            out, "[INFO] / hello",
+            "None trace ids must render as empty strings"
+        );
     }
 }

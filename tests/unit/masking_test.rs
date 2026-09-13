@@ -403,7 +403,6 @@ mod masking_test {
         assert!(!result.contains("13812345678"));
     }
 
-
     #[test]
     fn test_international_phone_masking() {
         let masker = DataMasker::new();
@@ -423,7 +422,6 @@ mod masking_test {
         let s = value.as_str().unwrap();
         assert!(!s.contains("7946"), "Should mask middle of intl phone");
     }
-
 
     #[test]
     fn test_credit_card_visa() {
@@ -463,7 +461,6 @@ mod masking_test {
         assert!(result.contains("****-****-****-1111"));
     }
 
-
     #[test]
     fn test_ipv4_masking() {
         let masker = DataMasker::new();
@@ -480,7 +477,6 @@ mod masking_test {
         assert_eq!(value["ip"], "***.***.***.1");
     }
 
-
     #[test]
     fn test_ipv6_masking() {
         let masker = DataMasker::new();
@@ -492,7 +488,6 @@ mod masking_test {
         );
         assert!(!result.contains("2001:0db8:85a3"));
     }
-
 
     #[test]
     fn test_mac_address_colon() {
@@ -527,7 +522,6 @@ mod masking_test {
         );
     }
 
-
     #[test]
     fn test_passport_masking() {
         let masker = DataMasker::new();
@@ -542,7 +536,6 @@ mod masking_test {
         assert!(result.contains("G******32"), "Passport G: {}", result);
     }
 
-
     #[test]
     fn test_ssn_masking() {
         let masker = DataMasker::new();
@@ -550,7 +543,6 @@ mod masking_test {
         assert!(result.contains("***-**-6789"), "SSN: {}", result);
         assert!(!result.contains("123-45-6789"));
     }
-
 
     #[test]
     fn test_db_connection_masking() {
@@ -570,7 +562,6 @@ mod masking_test {
         assert!(!result.contains("secret"));
     }
 
-
     #[test]
     fn test_github_token_masking() {
         let masker = DataMasker::new();
@@ -584,7 +575,6 @@ mod masking_test {
         assert!(!result.contains(token));
     }
 
-
     #[test]
     fn test_slack_token_masking() {
         let masker = DataMasker::new();
@@ -592,7 +582,6 @@ mod masking_test {
         let result = masker.mask(token);
         assert!(result.contains("***REDACTED_SLACK***"), "Slack: {}", result);
     }
-
 
     #[test]
     fn test_stripe_key_masking() {
@@ -607,7 +596,6 @@ mod masking_test {
         );
     }
 
-
     #[test]
     fn test_google_api_key_masking() {
         let masker = DataMasker::new();
@@ -620,7 +608,6 @@ mod masking_test {
             result
         );
     }
-
 
     #[test]
     fn test_private_key_masking() {

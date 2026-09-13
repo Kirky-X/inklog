@@ -242,11 +242,11 @@ impl LoggerManager {
             if let Err(e) = std_listener.set_nonblocking(true) {
                 return bind_failure_outcome(&error_mode, addr, &e, true);
             }
-            let server =
-                match axum_server::tls_rustls::from_tcp_rustls(std_listener, rustls_config) {
-                    Ok(s) => s,
-                    Err(e) => return bind_failure_outcome(&error_mode, addr, &e, true),
-                };
+            let server = match axum_server::tls_rustls::from_tcp_rustls(std_listener, rustls_config)
+            {
+                Ok(s) => s,
+                Err(e) => return bind_failure_outcome(&error_mode, addr, &e, true),
+            };
             info!(
                 "HTTPS server started on {} (auth: {}, ip_whitelist: {:?})",
                 addr, auth_enabled, ip_whitelist
@@ -287,9 +287,7 @@ impl LoggerManager {
 
         // 此锁仅保护 JoinHandle 槽位，无复合不变量：毒化时恢复出守卫继续写入，
         // 消除"仅记日志但 handle 未存入"的路径
-        let mut handle_guard = http_server_handle
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut handle_guard = http_server_handle.lock().unwrap_or_else(|e| e.into_inner());
         *handle_guard = Some(handle);
 
         info!("HTTP monitoring server configured on {}", addr);
@@ -322,9 +320,10 @@ fn bind_failure_outcome(
         "config-http_bind_failed"
     };
     match error_mode {
-        crate::HttpErrorMode::Strict => Err(InklogError::ConfigError(
-            crate::i18n::tr_args(message_key, args),
-        )),
+        crate::HttpErrorMode::Strict => Err(InklogError::ConfigError(crate::i18n::tr_args(
+            message_key,
+            args,
+        ))),
         crate::HttpErrorMode::Warn => {
             tracing::warn!("{}", crate::i18n::tr_args(message_key, args));
             Ok(())
@@ -420,7 +419,12 @@ mod tests {
             &flag
         ));
         // 通配：补结尾点防越界前缀匹配
-        assert!(whitelist_entry_matches("10.*", "10.1.2.3", ip("10.1.2.3"), &flag));
+        assert!(whitelist_entry_matches(
+            "10.*",
+            "10.1.2.3",
+            ip("10.1.2.3"),
+            &flag
+        ));
         assert!(!whitelist_entry_matches(
             "10.*",
             "110.1.2.3",

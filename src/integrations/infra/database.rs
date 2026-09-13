@@ -1450,7 +1450,11 @@ mod tests {
         assert_eq!(ansi, "2026-01-01T00:00:00''+00\\''00");
         // 拼入 VALUES 后字符串无法被提前闭合：剩余引号均已成对
         let values = format!("INSERT INTO logs VALUES ('{}')", ansi);
-        assert_eq!(values.matches('\'').count() % 2, 0, "quotes must stay balanced");
+        assert_eq!(
+            values.matches('\'').count() % 2,
+            0,
+            "quotes must stay balanced"
+        );
 
         // MySQL：反斜杠与单引号都转义，`\''` 序列不再可能逃逸
         let mysql = escape_sql_string(ts, &DatabaseDriver::MySQL);
@@ -1589,7 +1593,8 @@ mod param_batch_tests {
             .fields
             .insert("k".to_string(), serde_json::json!({"n": 1}));
 
-        let statements = build_duckdb_param_statements(&[record.clone(), record.clone()], "app_logs");
+        let statements =
+            build_duckdb_param_statements(&[record.clone(), record.clone()], "app_logs");
 
         assert_eq!(statements.len(), 2);
         // 预编译语句：全部记录共用同一段 SQL 文本

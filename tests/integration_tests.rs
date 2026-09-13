@@ -83,8 +83,8 @@ async fn test_file_sink_auto_recovery() {
     // 多 manager 并存的测试二进制中 builder().build() 的日志流向取决于
     // 构建竞速——按本仓正典范式（log_native_test::test_log_to_file）改用
     // build_detached + 线程级 set_default，使事件确定性路由到本用例的 manager。
-    use inklog::config::FileSinkConfig;
     use inklog::InklogConfig;
+    use inklog::config::FileSinkConfig;
     use std::time::Instant as RecoveryInstant;
     use tracing_subscriber::layer::SubscriberExt;
 
@@ -117,8 +117,9 @@ async fn test_file_sink_auto_recovery() {
     )
     .await
     .expect("Failed to create logger manager");
-    let _dispatch_guard =
-        tracing::subscriber::set_default(tracing_subscriber::registry().with(subscriber).with(filter));
+    let _dispatch_guard = tracing::subscriber::set_default(
+        tracing_subscriber::registry().with(subscriber).with(filter),
+    );
 
     // Log some messages
     tracing::info!("Test message before failure");

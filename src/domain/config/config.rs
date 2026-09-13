@@ -500,8 +500,7 @@ impl InklogConfig {
                     "config-file_batch_size_zero",
                 )));
             }
-            file.validate()
-                .map_err(InklogError::ConfigError)?;
+            file.validate().map_err(InklogError::ConfigError)?;
         }
 
         // --- Database sink ---
@@ -1467,9 +1466,15 @@ level = "verbose"
         unsafe {
             std::env::remove_var("INKLOG_CONFIG_PATH");
         }
-        assert!(result.is_err(), "config with invalid level must be rejected");
         assert!(
-            result.unwrap_err().to_string().contains("Invalid log level"),
+            result.is_err(),
+            "config with invalid level must be rejected"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid log level"),
             "expected invalid log level error"
         );
     }
@@ -1477,8 +1482,7 @@ level = "verbose"
     #[test]
     fn test_from_str_rejects_invalid_values() {
         // channel_capacity = 0 无法自动修正，必须报错
-        let result: Result<InklogConfig, _> =
-            "[performance]\nchannel_capacity = 0\n".parse();
+        let result: Result<InklogConfig, _> = "[performance]\nchannel_capacity = 0\n".parse();
         assert!(result.is_err());
 
         // 非法日志级别必须报错

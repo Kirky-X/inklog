@@ -117,7 +117,9 @@ static COMPILED_PATTERNS: LazyLock<Vec<(regex::Regex, &'static str)>> =
 /// invalid pattern is logged at `ERROR` level (with its index and the compile
 /// error) and excluded from the returned set. A skipped pattern means weaker
 /// redaction, which is why the failure must be observable rather than silent.
-fn compile_sensitive_patterns(patterns: &'static [(&'static str, &'static str)]) -> Vec<(regex::Regex, &'static str)> {
+fn compile_sensitive_patterns(
+    patterns: &'static [(&'static str, &'static str)],
+) -> Vec<(regex::Regex, &'static str)> {
     patterns
         .iter()
         .enumerate()

@@ -174,13 +174,20 @@ pub use support::io::sink::otlp::{OtlpConfig, OtlpSink};
 
 // 网络转发 sink（net-sink feature）
 #[cfg(feature = "net-sink")]
-pub use support::io::sink::net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
+pub use support::io::sink::net::{
+    NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig,
+};
 
 // KMS 密钥提供者（kms feature）
 #[cfg(feature = "kms")]
-pub use support::security::{ConfersKeyProvider, EnvKeyProvider, KeyProvider, VaultTransitConfig, vault_transit_provider};
+pub use support::security::{
+    ConfersKeyProvider, EnvKeyProvider, KeyProvider, VaultTransitConfig, vault_transit_provider,
+};
 
 // Sink trait and type re-exports for public API completeness
+#[cfg(feature = "gzip")]
+pub use support::io::sink::GzipCompression;
+pub use support::io::sink::SinkWriteOutcome;
 #[cfg(feature = "compression")]
 pub use support::io::sink::ZstdCompression;
 #[cfg(feature = "compression")]
@@ -189,16 +196,13 @@ pub use support::io::sink::encryption::{derive_key_from_password, get_encryption
 pub use support::io::sink::ring_buffered_file::{
     BackpressureStrategy, ChannelBufferedConfig, ChannelBufferedFileSink, ChannelBufferedMetrics,
 };
-#[cfg(feature = "gzip")]
-pub use support::io::sink::GzipCompression;
 pub use support::io::sink::{
     AsyncSink, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
     CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, NoOpRateLimit,
     RateLimitedSink, Rotatable, RotationContext, RotationResult, RotationStrategy, Sampler,
-    SamplingSink, SinkFactory, SinkMetadata, SinkRegistry, SinkRateLimit, SizeBasedRotation,
+    SamplingSink, SinkFactory, SinkMetadata, SinkRateLimit, SinkRegistry, SizeBasedRotation,
     TimeBasedRotation, TokenBucketRateLimit,
 };
-pub use support::io::sink::SinkWriteOutcome;
 
 // Re-export masking for benchmarks
 pub use support::processing::masking;
@@ -267,8 +271,8 @@ pub use support::processing::{
     put_log_record, put_string_buffer,
 };
 pub use validation::{
-    EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig, ValidationResult,
-    create_validated_file, open_validated_file,
+    EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig,
+    ValidationResult, create_validated_file, open_validated_file,
 };
 
 // Re-export underlying dependencies used in public API type signatures.

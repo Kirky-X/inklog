@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use icu::collator::Collator;
@@ -138,11 +138,8 @@ impl LogI18nFormatter {
             let dtf = match cache.entry(locale_key) {
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(entry) => {
-                    let dtf = DateTimeFormatter::try_new(
-                        self.locale.clone().into(),
-                        YMD::medium(),
-                    )
-                    .map_err(|e| I18nError::FormatError(e.to_string()))?;
+                    let dtf = DateTimeFormatter::try_new(self.locale.clone().into(), YMD::medium())
+                        .map_err(|e| I18nError::FormatError(e.to_string()))?;
                     entry.insert(dtf)
                 }
             };

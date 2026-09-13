@@ -172,7 +172,11 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
                 }
                 Err(e) => {
                     if args.json {
-                        let status = if config_path.exists() { "invalid" } else { "error" };
+                        let status = if config_path.exists() {
+                            "invalid"
+                        } else {
+                            "error"
+                        };
                         println!(
                             "{}",
                             serde_json::json!({
@@ -261,7 +265,10 @@ mod exit_code_tests {
             },
         ))
         .unwrap();
-        assert_eq!(code, 1, "invalid config must exit 1 (found problem, not an error)");
+        assert_eq!(
+            code, 1,
+            "invalid config must exit 1 (found problem, not an error)"
+        );
     }
 
     #[test]
@@ -309,7 +316,10 @@ mod exit_code_tests {
                 batch: false,
             },
         ));
-        assert!(code.is_err(), "missing input is an error (run_cli maps it to exit 1)");
+        assert!(
+            code.is_err(),
+            "missing input is an error (run_cli maps it to exit 1)"
+        );
     }
 
     #[test]

@@ -97,11 +97,11 @@ async fn test_comprehensive_real_data_writing() {
     let (logger, subscriber, filter) = LoggerManager::build_detached(
         config,
         #[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         None,
     )
     .await
@@ -305,11 +305,11 @@ async fn test_dynamic_configuration_changes() {
     let (logger1, subscriber1, filter1) = LoggerManager::build_detached(
         initial_config,
         #[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         None,
     )
     .await
@@ -346,11 +346,11 @@ async fn test_dynamic_configuration_changes() {
     let (logger2, subscriber2, filter2) = LoggerManager::build_detached(
         updated_config,
         #[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
         None,
     )
     .await

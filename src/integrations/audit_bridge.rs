@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use dbnexus::{AuditEvent, AuditQueryFilters, AuditStorage, AuditSeverity};
+use dbnexus::{AuditEvent, AuditQueryFilters, AuditSeverity, AuditStorage};
 
 use crate::integrations::Database;
 use crate::{InklogError, LogRecord};
@@ -70,9 +70,10 @@ impl InklogAuditStorage {
             "entity_id".to_string(),
             serde_json::Value::String(event.entity_id.clone()),
         );
-        record
-            .fields
-            .insert("result".to_string(), serde_json::to_value(&event.result).unwrap_or(serde_json::Value::Null));
+        record.fields.insert(
+            "result".to_string(),
+            serde_json::to_value(&event.result).unwrap_or(serde_json::Value::Null),
+        );
         record.fields.insert(
             "request_id".to_string(),
             serde_json::Value::String(event.request_id.clone()),
@@ -161,8 +162,14 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&record.message).unwrap();
         assert_eq!(json["entity_id"], serde_json::json!("42"));
         // 关键字段平铺
-        assert_eq!(record.fields.get("user_id").unwrap(), &serde_json::json!("admin"));
-        assert_eq!(record.fields.get("entity_id").unwrap(), &serde_json::json!("42"));
+        assert_eq!(
+            record.fields.get("user_id").unwrap(),
+            &serde_json::json!("admin")
+        );
+        assert_eq!(
+            record.fields.get("entity_id").unwrap(),
+            &serde_json::json!("42")
+        );
         assert_eq!(
             record.fields.get("operation").unwrap(),
             &serde_json::json!("Update")
@@ -196,10 +203,17 @@ mod tests {
         let mock = Arc::new(MockDatabaseAdapter::new());
         let storage = InklogAuditStorage::new(mock.clone() as Arc<dyn Database>);
 
-        storage.store(&sample_event()).await.expect("store must succeed");
+        storage
+            .store(&sample_event())
+            .await
+            .expect("store must succeed");
 
         let records = mock.get_records();
-        assert_eq!(records.len(), 1, "audit event must appear in the inklog write stream");
+        assert_eq!(
+            records.len(),
+            1,
+            "audit event must appear in the inklog write stream"
+        );
         assert_eq!(records[0].target, "audit::users");
         assert!(records[0].message.contains("entity_id"));
     }

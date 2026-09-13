@@ -111,7 +111,9 @@ impl Sampler {
         if self.sample_every_n == 1 {
             return true;
         }
-        self.counter.fetch_add(1, Ordering::Relaxed) % self.sample_every_n == 0
+        self.counter
+            .fetch_add(1, Ordering::Relaxed)
+            .is_multiple_of(self.sample_every_n)
     }
 
     /// 采样器生效参数（诊断用）。
@@ -138,7 +140,11 @@ pub struct SamplingSink {
 
 impl SamplingSink {
     pub fn new(inner: Arc<dyn LogSink>, sampler: Arc<Sampler>) -> Self {
-        Self { inner, sampler, metrics: None }
+        Self {
+            inner,
+            sampler,
+            metrics: None,
+        }
     }
 
     /// 绑定指标（采样淘汰计入 `logs_dropped`）。
@@ -186,8 +192,14 @@ mod tests {
 
     #[test]
     fn test_invalid_sampler_config_rejected() {
-        assert!(Sampler::new("info", 0, vec![]).is_err(), "N=0 must be rejected");
-        assert!(Sampler::new("verbose", 5, vec![]).is_err(), "bad level must be rejected");
+        assert!(
+            Sampler::new("info", 0, vec![]).is_err(),
+            "N=0 must be rejected"
+        );
+        assert!(
+            Sampler::new("verbose", 5, vec![]).is_err(),
+            "bad level must be rejected"
+        );
     }
 
     #[test]
@@ -215,24 +227,22 @@ mod tests {
             }
         }
         assert_eq!(
-            kept,
-            20,
+            kept, 20,
             "1-in-5 sampling must keep exactly 20 of 100 below-threshold records"
         );
         // 第 0 条放行：显式验证取余语义
         let s2 = Sampler::new("error", 2, vec![]).unwrap();
-        assert!(s2.should_emit(&record(Level::INFO, "t", "first")), "counter 0 passes");
+        assert!(
+            s2.should_emit(&record(Level::INFO, "t", "first")),
+            "counter 0 passes"
+        );
     }
 
     #[test]
     fn test_keyword_whitelist_exempts_from_sampling() {
         let sampler = Sampler::new("error", 1000, vec!["payment".to_string()]).unwrap();
         // 低于阈值但命中白名单 → 放行
-        assert!(sampler.should_emit(&record(
-            Level::DEBUG,
-            "app::billing",
-            "payment processed"
-        )));
+        assert!(sampler.should_emit(&record(Level::DEBUG, "app::billing", "payment processed")));
         // target 命中也放行（大小写不敏感）
         assert!(sampler.should_emit(&record(Level::DEBUG, "PaymentService", "x")));
         // 白名单外的低于阈值记录 → 采样淘汰（首条因计数器 0 放行，次条被淘汰）
@@ -276,12 +286,17 @@ mod tests {
         let _ = sink.write(&record(Level::INFO, "t", "critical path")).await;
         let _ = sink.write(&record(Level::INFO, "t", "noise 2")).await;
 
-        let messages = inner.messages.lock();
         // ERROR 放行；critical 白名单放行；INFO 噪声（N=1 时全部放行？——
         // N=1 语义为"全放行"，故断言全部写入）
-        assert_eq!(messages.len(), 4, "N=1 means pass-through for below-threshold");
-        assert!(messages.contains(&"critical path".to_string()));
-        drop(messages);
+        {
+            let messages = inner.messages.lock();
+            assert_eq!(
+                messages.len(),
+                4,
+                "N=1 means pass-through for below-threshold"
+            );
+            assert!(messages.contains(&"critical path".to_string()));
+        }
 
         // 采样淘汰计数：改用 N=1000 的采样器验证淘汰与 metrics
         let inner2 = Arc::new(CollectingSink {

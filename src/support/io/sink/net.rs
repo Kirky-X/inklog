@@ -183,9 +183,7 @@ impl TcpSink {
                     .add(cert)
                     .map_err(|e| InklogError::ConfigError(format!("CA cert rejected: {e}")))?;
             }
-            builder
-                .with_root_certificates(roots)
-                .with_no_client_auth()
+            builder.with_root_certificates(roots).with_no_client_auth()
         };
         Ok(config)
     }
@@ -211,8 +209,11 @@ impl TcpSink {
                         .unwrap_or_default(),
                 )
                 .map_err(|e| InklogError::ConfigError(format!("bad SNI: {e}")))?;
-                let conn = rustls::ClientConnection::new(Arc::new(client_config.clone()), server_name)
-                    .map_err(|e| InklogError::ConfigError(format!("TLS handshake setup: {e}")))?;
+                let conn =
+                    rustls::ClientConnection::new(Arc::new(client_config.clone()), server_name)
+                        .map_err(|e| {
+                            InklogError::ConfigError(format!("TLS handshake setup: {e}"))
+                        })?;
                 Ok(Wire::Tls(rustls::StreamOwned::new(conn, stream)))
             }
             (Some(_), None) => Err(InklogError::ConfigError(
@@ -234,10 +235,9 @@ impl TcpSink {
                 })
                 .to_string()
             }),
-            NetWireFormat::Text => crate::LogTemplate::new(
-                "{timestamp} [{level}] {target} - {message}",
-            )
-            .render(record),
+            NetWireFormat::Text => {
+                crate::LogTemplate::new("{timestamp} [{level}] {target} - {message}").render(record)
+            }
         };
         line.push('\n');
         line.into_bytes()
@@ -374,10 +374,13 @@ impl UdpSink {
             )));
         }
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-        socket
-            .connect(config.addr.as_str())
-            .map_err(|e| InklogError::ConfigError(format!("UDP connect to '{}': {e}", config.addr)))?;
-        Ok(Self { socket, format: config.format })
+        socket.connect(config.addr.as_str()).map_err(|e| {
+            InklogError::ConfigError(format!("UDP connect to '{}': {e}", config.addr))
+        })?;
+        Ok(Self {
+            socket,
+            format: config.format,
+        })
     }
 
     fn encode(&self, record: &LogRecord) -> Vec<u8> {
@@ -391,10 +394,9 @@ impl UdpSink {
                 })
                 .to_string()
             }),
-            NetWireFormat::Text => crate::LogTemplate::new(
-                "{timestamp} [{level}] {target} - {message}",
-            )
-            .render(record),
+            NetWireFormat::Text => {
+                crate::LogTemplate::new("{timestamp} [{level}] {target} - {message}").render(record)
+            }
         };
         line.push('\n');
         line.into_bytes()
@@ -517,7 +519,11 @@ mod tests {
     use std::sync::Arc;
 
     fn test_record(message: &str) -> LogRecord {
-        LogRecord::new(tracing::Level::INFO, "net::test".to_string(), message.to_string())
+        LogRecord::new(
+            tracing::Level::INFO,
+            "net::test".to_string(),
+            message.to_string(),
+        )
     }
 
     /// 后台 TCP 服务端：接受连接、收集收到的行，可控制"接受后立即断开"。
@@ -549,7 +555,11 @@ mod tests {
                     // 逐连接读至 EOF；仅首个连接在达到 close_after_lines 阈值后
                     // 立即 shutdown——模拟服务端主动断开（sink 端写失败→缓冲→
                     // 重连重放）。后续连接保持正常读取。
-                    let kill_after = if accepted == 1 { close_after_lines } else { None };
+                    let kill_after = if accepted == 1 {
+                        close_after_lines
+                    } else {
+                        None
+                    };
                     let mut conn_lines = 0usize;
                     loop {
                         let mut buf = [0u8; 4096];
@@ -576,7 +586,12 @@ mod tests {
                     }
                 }
             });
-            Self { addr, received, shutdown, handle }
+            Self {
+                addr,
+                received,
+                shutdown,
+                handle,
+            }
         }
 
         fn lines(&self) -> Vec<String> {
@@ -633,7 +648,12 @@ mod tests {
             .unwrap(),
         );
 
-        const MESSAGES: [&str; 4] = ["m0 first", "m1 buffered", "m2 buffered", "m3 after reconnect"];
+        const MESSAGES: [&str; 4] = [
+            "m0 first",
+            "m1 buffered",
+            "m2 buffered",
+            "m3 after reconnect",
+        ];
         for (i, m) in MESSAGES.iter().enumerate() {
             if i == 1 {
                 // 服务端在收到 m0 后立即断开；稍候写入让 FIN/RST 先于
@@ -666,32 +686,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_tcp_sink_invalid_config_rejected() {
-        assert!(TcpSink::new(TcpSinkConfig {
-            addr: "no-port-here".to_string(),
-            ..Default::default()
-        })
-        .is_err());
+        assert!(
+            TcpSink::new(TcpSinkConfig {
+                addr: "no-port-here".to_string(),
+                ..Default::default()
+            })
+            .is_err()
+        );
         // TLS 缺 server_name / 缺 CA → 构造期报错
-        assert!(TcpSink::new(TcpSinkConfig {
-            addr: "127.0.0.1:5170".to_string(),
-            tls: Some(TlsClientConfig {
-                server_name: String::new(),
-                ca_pem_path: None,
-                danger_accept_invalid_certs: false,
-            }),
-            ..Default::default()
-        })
-        .is_err());
-        assert!(TcpSink::new(TcpSinkConfig {
-            addr: "127.0.0.1:5170".to_string(),
-            tls: Some(TlsClientConfig {
-                server_name: "logs.internal".to_string(),
-                ca_pem_path: None,
-                danger_accept_invalid_certs: false,
-            }),
-            ..Default::default()
-        })
-        .is_err(), "TLS without CA and without danger opt-in must be rejected");
+        assert!(
+            TcpSink::new(TcpSinkConfig {
+                addr: "127.0.0.1:5170".to_string(),
+                tls: Some(TlsClientConfig {
+                    server_name: String::new(),
+                    ca_pem_path: None,
+                    danger_accept_invalid_certs: false,
+                }),
+                ..Default::default()
+            })
+            .is_err()
+        );
+        assert!(
+            TcpSink::new(TcpSinkConfig {
+                addr: "127.0.0.1:5170".to_string(),
+                tls: Some(TlsClientConfig {
+                    server_name: "logs.internal".to_string(),
+                    ca_pem_path: None,
+                    danger_accept_invalid_certs: false,
+                }),
+                ..Default::default()
+            })
+            .is_err(),
+            "TLS without CA and without danger opt-in must be rejected"
+        );
     }
 
     #[tokio::test]
@@ -707,7 +734,9 @@ mod tests {
         sink.write(&test_record("udp hello")).await.unwrap();
 
         let mut buf = [0u8; 4096];
-        socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         let n = socket.recv(&mut buf).expect("datagram must arrive");
         let parsed: serde_json::Value = serde_json::from_slice(&buf[..n]).unwrap();
         assert_eq!(parsed["message"], "udp hello");
@@ -715,10 +744,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_udp_sink_invalid_config_rejected() {
-        assert!(UdpSink::new(UdpSinkConfig {
-            addr: "bad".to_string(),
-            format: NetWireFormat::JsonLine,
-        })
-        .is_err());
+        assert!(
+            UdpSink::new(UdpSinkConfig {
+                addr: "bad".to_string(),
+                format: NetWireFormat::JsonLine,
+            })
+            .is_err()
+        );
     }
 }

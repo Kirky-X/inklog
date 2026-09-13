@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 
-use crate::{open_validated_file, InklogError};
+use crate::{InklogError, open_validated_file};
 
 /// 查询过滤条件。
 #[derive(Debug, Clone, Default)]
@@ -109,13 +109,19 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
         Some("zst") => {
             #[cfg(feature = "compression")]
             {
-                let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(&raw))
-                    .map_err(|e| {
-                        InklogError::ConfigError(format!("zstd decode failed for '{}': {e}", path.display()))
+                let mut decoder =
+                    zstd::stream::Decoder::new(std::io::Cursor::new(&raw)).map_err(|e| {
+                        InklogError::ConfigError(format!(
+                            "zstd decode failed for '{}': {e}",
+                            path.display()
+                        ))
                     })?;
                 let mut out = String::new();
                 decoder.read_to_string(&mut out).map_err(|e| {
-                    InklogError::ConfigError(format!("zstd decode failed for '{}': {e}", path.display()))
+                    InklogError::ConfigError(format!(
+                        "zstd decode failed for '{}': {e}",
+                        path.display()
+                    ))
                 })?;
                 Ok(out)
             }
@@ -173,10 +179,11 @@ fn decrypt_bytes(raw: &[u8], path: &Path, key_env: &str) -> Result<Vec<u8>, Inkl
         )));
     }
     let version = u16::from_le_bytes([raw[8], raw[9]]);
-    let key_from_env =
-        |salt: Option<&[u8]>| -> Result<zeroize::Zeroizing<[u8; 32]>, InklogError> {
+    let key_from_env = |salt: Option<&[u8]>| -> Result<zeroize::Zeroizing<[u8; 32]>, InklogError> {
         match salt {
-            Some(s) => crate::support::io::sink::encryption::get_encryption_key_with_salt(key_env, s),
+            Some(s) => {
+                crate::support::io::sink::encryption::get_encryption_key_with_salt(key_env, s)
+            }
             None => crate::support::io::sink::encryption::get_encryption_key(key_env),
         }
     };
@@ -242,33 +249,37 @@ pub(crate) fn parse_line(line: &str, source: &Path) -> Option<LogEntry> {
         return None;
     }
     // JSON lines 容错
-    if trimmed.starts_with('{') {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            let timestamp = json
-                .get("timestamp")
+    if trimmed.starts_with('{')
+        && let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed)
+    {
+        let timestamp = json
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .and_then(parse_timestamp);
+        return Some(LogEntry {
+            timestamp,
+            level: json
+                .get("level")
                 .and_then(|v| v.as_str())
-                .and_then(parse_timestamp);
-            return Some(LogEntry {
-                timestamp,
-                level: json
-                    .get("level")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("INFO")
-                    .to_string(),
-                target: json
-                    .get("target")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                message: json
-                    .get("message")
-                    // 字符串值取原文（Value::to_string 会带上 JSON 引号）；
-                    // 非字符串值保留其 JSON 文本形态
-                    .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))
-                    .unwrap_or_default(),
-                source: source.to_path_buf(),
-            });
-        }
+                .unwrap_or("INFO")
+                .to_string(),
+            target: json
+                .get("target")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            message: json
+                .get("message")
+                // 字符串值取原文（Value::to_string 会带上 JSON 引号）；
+                // 非字符串值保留其 JSON 文本形态
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default(),
+            source: source.to_path_buf(),
+        });
     }
     // 默认模板：{timestamp} [{level}] {target} - {message}
     //   2026-09-11T01:02:03.456Z [INFO] my::target - hello world
@@ -392,11 +403,7 @@ pub fn query_paths(
 ///
 /// 退出码契约：`0` = 有匹配/成功，`2` = 无匹配，`1` = 错误。
 pub fn query_exit_code(entries: &[LogEntry]) -> i32 {
-    if entries.is_empty() {
-        2
-    } else {
-        0
-    }
+    if entries.is_empty() { 2 } else { 0 }
 }
 
 #[cfg(test)]
@@ -427,7 +434,10 @@ not a log line
         assert_eq!(entry.level, "INFO");
         assert_eq!(entry.target, "app::boot");
         assert_eq!(entry.message, "service started");
-        assert_eq!(entry.timestamp.unwrap().to_rfc3339(), "2026-09-11T01:00:00.123+00:00");
+        assert_eq!(
+            entry.timestamp.unwrap().to_rfc3339(),
+            "2026-09-11T01:00:00.123+00:00"
+        );
     }
 
     #[test]
@@ -450,26 +460,43 @@ not a log line
         let f = write_file(dir.path(), "app.log", SAMPLE);
 
         // 级别过滤：warn 以上
-        let opts = QueryOptions { level: Some("warn".into()), ..Default::default() };
-        let got = query_paths(&[f.clone()], &opts, None).unwrap();
+        let opts = QueryOptions {
+            level: Some("warn".into()),
+            ..Default::default()
+        };
+        let got = query_paths(std::slice::from_ref(&f), &opts, None).unwrap();
         assert_eq!(got.len(), 3);
         assert!(got.iter().all(|e| level_rank(&e.level) >= 3));
 
         // 关键词
-        let opts = QueryOptions { keyword: Some("connection".into()), ..Default::default() };
-        let got = query_paths(&[f.clone()], &opts, None).unwrap();
+        let opts = QueryOptions {
+            keyword: Some("connection".into()),
+            ..Default::default()
+        };
+        let got = query_paths(std::slice::from_ref(&f), &opts, None).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].message, "connection refused");
 
         // limit
-        let opts = QueryOptions { limit: 2, ..Default::default() };
-        let got = query_paths(&[f.clone()], &opts, None).unwrap();
+        let opts = QueryOptions {
+            limit: 2,
+            ..Default::default()
+        };
+        let got = query_paths(std::slice::from_ref(&f), &opts, None).unwrap();
         assert_eq!(got.len(), 2);
 
         // 时间范围
         let opts = QueryOptions {
-            since: Some(DateTime::parse_from_rfc3339("2026-09-11T03:00:00Z").unwrap().with_timezone(&Utc)),
-            until: Some(DateTime::parse_from_rfc3339("2026-09-11T03:45:00Z").unwrap().with_timezone(&Utc)),
+            since: Some(
+                DateTime::parse_from_rfc3339("2026-09-11T03:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            until: Some(
+                DateTime::parse_from_rfc3339("2026-09-11T03:45:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
             ..Default::default()
         };
         let got = query_paths(&[f], &opts, None).unwrap();
@@ -483,9 +510,16 @@ not a log line
         write_file(dir.path(), "a.log", SAMPLE);
         let sub = dir.path().join("rotated");
         std::fs::create_dir_all(&sub).unwrap();
-        write_file(&sub, "b.log", "2026-09-11T05:00:00.000Z [ERROR] app::x - boom\n");
+        write_file(
+            &sub,
+            "b.log",
+            "2026-09-11T05:00:00.000Z [ERROR] app::x - boom\n",
+        );
 
-        let opts = QueryOptions { level: Some("error".into()), ..Default::default() };
+        let opts = QueryOptions {
+            level: Some("error".into()),
+            ..Default::default()
+        };
         let got = query_paths(&[dir.path().to_path_buf()], &opts, None).unwrap();
         // a.log: ERROR + FATAL；b.log（递归）：ERROR
         assert_eq!(got.len(), 3);
@@ -493,7 +527,11 @@ not a log line
 
         let empty = query_paths(
             &[dir.path().to_path_buf()],
-            &QueryOptions { level: Some("trace".into()), keyword: Some("nope".into()), ..Default::default() },
+            &QueryOptions {
+                level: Some("trace".into()),
+                keyword: Some("nope".into()),
+                ..Default::default()
+            },
             None,
         )
         .unwrap();
@@ -506,7 +544,11 @@ not a log line
         let dir = tempfile::tempdir().unwrap();
         // 目录内的 .zst 在未启用 compression 时被跳过，其余文件正常返回
         write_file(dir.path(), "bad.zst", "not really zstd");
-        write_file(dir.path(), "ok.log", "2026-09-11T01:00:00.000Z [INFO] a - ok\n");
+        write_file(
+            dir.path(),
+            "ok.log",
+            "2026-09-11T01:00:00.000Z [INFO] a - ok\n",
+        );
         let got = query_paths(&[dir.path().to_path_buf()], &QueryOptions::default(), None).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].message, "ok");
@@ -539,7 +581,10 @@ not a log line
         blob.extend_from_slice(&ciphertext);
         let enc_path = dir.path().join("app.log.enc");
         std::fs::write(&enc_path, &blob).unwrap();
-        let opts = QueryOptions { level: Some("error".into()), ..Default::default() };
+        let opts = QueryOptions {
+            level: Some("error".into()),
+            ..Default::default()
+        };
         let got = query_paths(&[enc_path], &opts, Some("INKLOG_QUERY_TEST_KEY")).unwrap();
         assert_eq!(got.len(), 1, "encrypted log must be unpacked and searched");
         assert_eq!(got[0].message, "leaked");

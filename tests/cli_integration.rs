@@ -386,14 +386,9 @@ fn test_cli_decrypt_json_error_is_machine_readable() {
     let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
     cmd.env("INKLOG_LOCALE", "en");
     cmd.env("INKLOG_DECRYPT_KEY", "0123456789abcdef0123456789abcdef");
-    cmd.args([
-        "--json",
-        "decrypt",
-        "-i",
-        "/nonexistent/inklog/file.enc",
-    ])
-    .assert()
-    .failure()
-    .code(1)
-    .stderr(predicate::str::contains("\"status\":\"error\""));
+    cmd.args(["--json", "decrypt", "-i", "/nonexistent/inklog/file.enc"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("\"status\":\"error\""));
 }

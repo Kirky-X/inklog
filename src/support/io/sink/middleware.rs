@@ -62,7 +62,14 @@ pub struct MiddlewareChain {
 impl std::fmt::Debug for MiddlewareChain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MiddlewareChain")
-            .field("middlewares", &self.middlewares.iter().map(|m| m.name()).collect::<Vec<_>>())
+            .field(
+                "middlewares",
+                &self
+                    .middlewares
+                    .iter()
+                    .map(|m| m.name())
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -160,9 +167,7 @@ impl RecordMiddleware for EnrichMiddleware {
     }
 
     fn process(&self, record: &mut LogRecord) -> MiddlewareVerdict {
-        record
-            .fields
-            .insert(self.key.clone(), self.value.clone());
+        record.fields.insert(self.key.clone(), self.value.clone());
         MiddlewareVerdict::Continue
     }
 }
@@ -176,7 +181,11 @@ pub struct MiddlewareSink {
 
 impl MiddlewareSink {
     pub fn new(inner: Arc<dyn LogSink>, chain: MiddlewareChain) -> Self {
-        Self { inner, chain, metrics: None }
+        Self {
+            inner,
+            chain,
+            metrics: None,
+        }
     }
 
     /// 绑定指标（丢弃计入 `logs_dropped`）。
@@ -270,9 +279,18 @@ mod tests {
     #[test]
     fn test_level_filter_middleware() {
         let mw = LevelFilterMiddleware::new("warn").expect("valid level");
-        assert_eq!(mw.process(&mut record(Level::ERROR, "x")), MiddlewareVerdict::Continue);
-        assert_eq!(mw.process(&mut record(Level::WARN, "x")), MiddlewareVerdict::Continue);
-        assert_eq!(mw.process(&mut record(Level::INFO, "x")), MiddlewareVerdict::Drop);
+        assert_eq!(
+            mw.process(&mut record(Level::ERROR, "x")),
+            MiddlewareVerdict::Continue
+        );
+        assert_eq!(
+            mw.process(&mut record(Level::WARN, "x")),
+            MiddlewareVerdict::Continue
+        );
+        assert_eq!(
+            mw.process(&mut record(Level::INFO, "x")),
+            MiddlewareVerdict::Drop
+        );
     }
 
     #[test]
@@ -294,7 +312,10 @@ mod tests {
         // 命中丢弃：短路（不再 enrich）
         let mut dropped = record(Level::INFO, "has secret inside");
         assert!(!chain.apply(&mut dropped));
-        assert!(dropped.fields.get("cluster").is_none(), "drop must short-circuit");
+        assert!(
+            !dropped.fields.contains_key("cluster"),
+            "drop must short-circuit"
+        );
 
         // 通过：enrich 生效
         let mut kept = record(Level::INFO, "plain message");
@@ -321,13 +342,21 @@ mod tests {
             .with_metrics(metrics.clone()),
         );
 
-        let _ = sink.write(&record(Level::ERROR, "keep me")).await.unwrap();
-        let _ = sink.write(&record(Level::INFO, "drop me")).await.unwrap();
+        sink.write(&record(Level::ERROR, "keep me")).await.unwrap();
+        sink.write(&record(Level::INFO, "drop me")).await.unwrap();
 
         let messages = inner.messages.lock();
-        assert_eq!(messages.len(), 1, "filtered record must not reach inner sink");
+        assert_eq!(
+            messages.len(),
+            1,
+            "filtered record must not reach inner sink"
+        );
         drop(messages);
-        assert_eq!(metrics.logs_dropped(), 1, "filtered record counts as dropped");
+        assert_eq!(
+            metrics.logs_dropped(),
+            1,
+            "filtered record counts as dropped"
+        );
     }
 
     #[tokio::test]

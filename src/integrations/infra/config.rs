@@ -206,9 +206,7 @@ impl std::convert::AsMut<InklogConfig> for InklogConfigAdapter {
 impl Default for InklogConfigAdapter {
     fn default() -> Self {
         Self::new().unwrap_or_else(|e| {
-            tracing::warn!(
-                "InklogConfigAdapter::new failed, falling back to default config: {e}"
-            );
+            tracing::warn!("InklogConfigAdapter::new failed, falling back to default config: {e}");
             Self::from_config(InklogConfig::default())
         })
     }
@@ -794,10 +792,7 @@ mod tests {
         }
 
         assert_eq!(adapter.get_string("global.level"), Some("info".to_string()));
-        assert_eq!(
-            adapter.get_int("performance.worker_threads"),
-            Some(3)
-        );
+        assert_eq!(adapter.get_int("performance.worker_threads"), Some(3));
     }
 
     #[test]

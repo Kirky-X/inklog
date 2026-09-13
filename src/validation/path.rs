@@ -234,9 +234,9 @@ impl PathValidator {
             match component {
                 std::path::Component::ParentDir => {
                     if components.pop().is_none() {
-                        return Err(InklogError::ConfigError(
-                            crate::i18n::tr("validation-path_traversal"),
-                        ));
+                        return Err(InklogError::ConfigError(crate::i18n::tr(
+                            "validation-path_traversal",
+                        )));
                     }
                 }
                 std::path::Component::CurDir => {}

@@ -8,8 +8,8 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use inklog::support::processing::LogTemplate;
 use inklog::LogRecord;
+use inklog::support::processing::LogTemplate;
 
 /// 构造一条带字段的典型记录。
 fn sample_record(message: &str) -> LogRecord {
@@ -82,9 +82,7 @@ fn bench_serialization(c: &mut Criterion) {
 
     #[cfg(feature = "otlp")]
     group.bench_function("otlp_body_100", |b| {
-        b.iter(|| {
-            inklog::support::io::sink::otlp::encode_otlp_body(&batch, "bench-svc")
-        })
+        b.iter(|| inklog::support::io::sink::otlp::encode_otlp_body(&batch, "bench-svc"))
     });
 
     group.finish();
@@ -121,7 +119,9 @@ fn bench_encryption(c: &mut Criterion) {
     let payload = vec![0xA5u8; 1024];
     group.bench_function("aes256gcm_roundtrip_1kb", |b| {
         b.iter(|| {
-            let ciphertext = cipher.encrypt(&nonce, black_box(payload.as_slice())).unwrap();
+            let ciphertext = cipher
+                .encrypt(&nonce, black_box(payload.as_slice()))
+                .unwrap();
             cipher.decrypt(&nonce, ciphertext.as_slice()).unwrap()
         })
     });
@@ -129,5 +129,10 @@ fn bench_encryption(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_write_path, bench_serialization, bench_encryption);
+criterion_group!(
+    benches,
+    bench_write_path,
+    bench_serialization,
+    bench_encryption
+);
 criterion_main!(benches);

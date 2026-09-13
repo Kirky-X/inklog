@@ -3443,8 +3443,8 @@ mod custom_sink_e2e {
     use super::*;
     use async_trait::async_trait;
     use inklog::{InklogConfig, LoggerManager};
-    use std::sync::Arc;
     use parking_lot::Mutex;
+    use std::sync::Arc;
     use tracing::subscriber::with_default;
     use tracing_subscriber::prelude::*;
 
@@ -3504,9 +3504,7 @@ mod custom_sink_e2e {
         .await
         .expect("build_detached_with_sinks");
 
-        let registry = tracing_subscriber::registry()
-            .with(subscriber)
-            .with(filter);
+        let registry = tracing_subscriber::registry().with(subscriber).with(filter);
 
         with_default(registry, || {
             tracing::info!(target: "custom::e2e", message = "hello custom sink");
@@ -3573,9 +3571,7 @@ mod ops_event_e2e {
         .await
         .expect("build_detached_with_sinks");
 
-        let registry = tracing_subscriber::registry()
-            .with(subscriber)
-            .with(filter);
+        let registry = tracing_subscriber::registry().with(subscriber).with(filter);
 
         // 发布运维事件 → 主 async 通道（此配置下即 custom sink 通道）；
         // 事件写入在 worker 线程消费，与 subscriber 安装无关。

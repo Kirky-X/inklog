@@ -189,12 +189,16 @@ fn show_sanitize_method() {
     let validator = PathValidator::new();
 
     print_section("6.1 \"foo/../bar\" → 移除 ParentDir");
-    let sanitized: PathBuf = validator.sanitize(Path::new("foo/../bar")).expect("非纯穿越路径应成功");
+    let sanitized: PathBuf = validator
+        .sanitize(Path::new("foo/../bar"))
+        .expect("非纯穿越路径应成功");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "bar");
 
     print_section("6.2 \"foo/./bar\" → 移除 CurDir");
-    let sanitized = validator.sanitize(Path::new("foo/./bar")).expect("非纯穿越路径应成功");
+    let sanitized = validator
+        .sanitize(Path::new("foo/./bar"))
+        .expect("非纯穿越路径应成功");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "foo/bar");
 

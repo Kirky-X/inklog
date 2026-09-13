@@ -14,7 +14,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use inklog::support::query::{query_exit_code, query_paths, LogEntry, QueryOptions};
+use inklog::support::query::{LogEntry, QueryOptions, query_exit_code, query_paths};
 
 /// `query` 子命令参数（与 main.rs clap 定义一一对应，便于单测构造）。
 #[derive(Debug, Clone, Default)]
@@ -41,8 +41,16 @@ pub fn run_query(args: &QueryArgs) -> Result<i32> {
         anyhow::bail!("query requires at least one --path (file or directory)");
     }
     let opts = QueryOptions {
-        since: args.since.as_deref().map(|s| parse_time(s, "since")).transpose()?,
-        until: args.until.as_deref().map(|s| parse_time(s, "until")).transpose()?,
+        since: args
+            .since
+            .as_deref()
+            .map(|s| parse_time(s, "since"))
+            .transpose()?,
+        until: args
+            .until
+            .as_deref()
+            .map(|s| parse_time(s, "until"))
+            .transpose()?,
         level: args.level.clone(),
         keyword: args.grep.clone(),
         limit: args.limit,
@@ -122,7 +130,10 @@ mod tests {
             ..Default::default()
         };
         let err = run_query(&args).unwrap_err().to_string();
-        assert!(err.contains("--since"), "error must name the offending flag");
+        assert!(
+            err.contains("--since"),
+            "error must name the offending flag"
+        );
     }
 
     #[test]

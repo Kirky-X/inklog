@@ -274,10 +274,7 @@ mod tests {
         for level in ["trace", "debug", "info", "warn", "error", "fatal", "INFO"] {
             let mut cfg = GlobalConfig::default();
             cfg.level = level.to_string();
-            assert!(
-                cfg.validate().is_ok(),
-                "level '{level}' should be accepted"
-            );
+            assert!(cfg.validate().is_ok(), "level '{level}' should be accepted");
         }
     }
 

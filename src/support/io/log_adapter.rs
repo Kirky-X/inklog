@@ -256,10 +256,7 @@ mod tests {
             .level(Level::Info)
             .build();
         let args = format_args!("{}", raw_message);
-        let record = log::Record::builder()
-            .metadata(metadata)
-            .args(args)
-            .build();
+        let record = log::Record::builder().metadata(metadata).args(args).build();
 
         let log_record = adapter.record_to_log_record(&record);
 
@@ -293,10 +290,7 @@ mod tests {
             .level(Level::Info)
             .build();
         let args = format_args!("{}", raw_message);
-        let record = log::Record::builder()
-            .metadata(metadata)
-            .args(args)
-            .build();
+        let record = log::Record::builder().metadata(metadata).args(args).build();
 
         adapter.log(&record);
 

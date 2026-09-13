@@ -94,14 +94,15 @@ pub struct LoggerManager {
 }
 
 /// EnvFilter 热换装闭包类型（隐藏 `reload::Handle` 的具体类型参数）。
-type LevelReloader = Arc<
-    dyn Fn(tracing_subscriber::filter::EnvFilter) -> Result<(), String> + Send + Sync,
->;
+type LevelReloader =
+    Arc<dyn Fn(tracing_subscriber::filter::EnvFilter) -> Result<(), String> + Send + Sync>;
 
 /// reload 换装层类型（`S = Registry`：与 `with_config_and_sinks` 中
 /// 先挂 filter、再挂 subscriber 的组合顺序对应）。
-type ReloadFilterLayer =
-    tracing_subscriber::reload::Layer<tracing_subscriber::filter::EnvFilter, tracing_subscriber::Registry>;
+type ReloadFilterLayer = tracing_subscriber::reload::Layer<
+    tracing_subscriber::filter::EnvFilter,
+    tracing_subscriber::Registry,
+>;
 
 /// 级别指令集状态与 `set_level` 的 upsert/重建逻辑。
 #[derive(Debug, Clone)]
@@ -115,8 +116,16 @@ pub(crate) struct LevelDirectives {
 }
 
 impl LevelDirectives {
-    pub(crate) fn new(global: String, targets: Vec<(String, String)>, extra_raw: Option<String>) -> Self {
-        Self { global, targets, extra_raw }
+    pub(crate) fn new(
+        global: String,
+        targets: Vec<(String, String)>,
+        extra_raw: Option<String>,
+    ) -> Self {
+        Self {
+            global,
+            targets,
+            extra_raw,
+        }
     }
 
     /// upsert 一条级别指令（None target 覆盖全局，Some 覆盖同 target 或追加）。
@@ -139,11 +148,11 @@ impl LevelDirectives {
         for (target, level) in &self.targets {
             s.push_str(&format!(",{target}={level}"));
         }
-        if let Some(raw) = &self.extra_raw {
-            if !raw.is_empty() {
-                s.push(',');
-                s.push_str(raw);
-            }
+        if let Some(raw) = &self.extra_raw
+            && !raw.is_empty()
+        {
+            s.push(',');
+            s.push_str(raw);
         }
         s
     }
@@ -154,6 +163,13 @@ impl LevelDirectives {
 pub(crate) fn directives_to_filter_string(directives: &LevelDirectives) -> String {
     directives.to_filter_string()
 }
+
+/// 自定义 sink 通道：名称 + sink + 独立接收端（build 时成对启动 worker）
+type CustomChannel = (
+    String,
+    Arc<dyn LogSink>,
+    crossbeam_channel::Receiver<Arc<LogRecord>>,
+);
 
 impl LoggerManager {
     pub async fn new() -> Result<Self, InklogError> {
@@ -535,11 +551,7 @@ impl LoggerManager {
         // 动态 sink 各自获得独立 channel；若内置异步 sink（file/db）全部
         // 关闭，首个自定义 sink 的通道兼任主 async 通道（承担 fallback 补发语义），
         // 不再重复加入 extras，避免该 sink 收到重复记录。
-        let mut custom_channels: Vec<(
-            String,
-            Arc<dyn LogSink>,
-            crossbeam_channel::Receiver<Arc<LogRecord>>,
-        )> = Vec::with_capacity(custom_sinks.len());
+        let mut custom_channels: Vec<CustomChannel> = Vec::with_capacity(custom_sinks.len());
         let mut custom_senders: Vec<crossbeam_channel::Sender<Arc<LogRecord>>> =
             Vec::with_capacity(custom_sinks.len());
         for (idx, sink) in custom_sinks.into_iter().enumerate() {
@@ -944,10 +956,7 @@ impl LoggerManager {
         }
         let normalized = level.to_ascii_lowercase();
         let new_filter = {
-            let mut state = self
-                .level_state
-                .lock()
-                .expect("level_state mutex poisoned");
+            let mut state = self.level_state.lock().expect("level_state mutex poisoned");
             state.upsert(target, &normalized);
             tracing_subscriber::filter::EnvFilter::new(state.to_filter_string())
         };
@@ -963,7 +972,9 @@ impl LoggerManager {
         }
         match target {
             None => tracing::info!(level = %normalized, "log level changed at runtime"),
-            Some(t) => tracing::info!(target = t, level = %normalized, "target log level changed at runtime"),
+            Some(t) => {
+                tracing::info!(target = t, level = %normalized, "target log level changed at runtime")
+            }
         }
         Ok(())
     }
@@ -1438,7 +1449,10 @@ mod tests {
         let got = manager
             .cache()
             .expect("injected cache dependency should be returned");
-        assert!(Arc::ptr_eq(&cache, &got), "getter must return the same instance");
+        assert!(
+            Arc::ptr_eq(&cache, &got),
+            "getter must return the same instance"
+        );
         let _ = manager.shutdown();
     }
 
@@ -3690,14 +3704,17 @@ mod set_level_tests {
     async fn test_manager_set_level_updates_directives_and_validates() {
         let mut config = InklogConfig::default();
         config.global.level = "info".to_string();
-        config.target_levels.insert("hyper".to_string(), "warn".to_string());
+        config
+            .target_levels
+            .insert("hyper".to_string(), "warn".to_string());
         #[cfg(any(
             feature = "sqlite",
             feature = "postgres",
             feature = "mysql",
             feature = "duckdb"
         ))]
-        let (manager, _subscriber, filter) = LoggerManager::build_detached(config, None).await.unwrap();
+        let (manager, _subscriber, filter) =
+            LoggerManager::build_detached(config, None).await.unwrap();
         #[cfg(not(any(
             feature = "sqlite",
             feature = "postgres",

@@ -171,7 +171,9 @@ mod tests {
 
         // 文件应已被创建且包含内容
         assert!(log_path.exists(), "日志文件应存在");
-        let content = tokio::fs::read_to_string(&log_path).await.expect("读取文件失败");
+        let content = tokio::fs::read_to_string(&log_path)
+            .await
+            .expect("读取文件失败");
         assert!(!content.is_empty(), "日志文件不应为空");
         for level in &levels {
             assert!(content.contains(level), "日志内容应包含级别 {}", level);

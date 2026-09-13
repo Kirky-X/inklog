@@ -179,7 +179,6 @@ mod tests {
         assert!(builder.validation_errors.is_empty());
     }
 
-
     #[test]
     fn test_builder_add_sink_accumulates_and_upcasts() {
         use crate::InklogError;
@@ -313,7 +312,10 @@ mod tests {
         let builder = LoggerBuilder::new()
             .database("postgres://localhost/logs")
             .with_batch_size(50);
-        assert_eq!(builder.config.database_sink.as_ref().unwrap().batch_size, 50);
+        assert_eq!(
+            builder.config.database_sink.as_ref().unwrap().batch_size,
+            50
+        );
     }
 
     #[cfg(any(
@@ -328,7 +330,12 @@ mod tests {
             .database("postgres://localhost/logs")
             .with_flush_interval_ms(250);
         assert_eq!(
-            builder.config.database_sink.as_ref().unwrap().flush_interval_ms,
+            builder
+                .config
+                .database_sink
+                .as_ref()
+                .unwrap()
+                .flush_interval_ms,
             250
         );
     }
@@ -453,18 +460,39 @@ mod tests {
     #[test]
     fn test_builder_infer_driver_common_schemes() {
         use crate::DatabaseDriver;
-        assert_eq!(LoggerBuilder::infer_driver("postgres://h/db"), Some(DatabaseDriver::PostgreSQL));
+        assert_eq!(
+            LoggerBuilder::infer_driver("postgres://h/db"),
+            Some(DatabaseDriver::PostgreSQL)
+        );
         assert_eq!(
             LoggerBuilder::infer_driver("postgresql://h/db"),
             Some(DatabaseDriver::PostgreSQL)
         );
-        assert_eq!(LoggerBuilder::infer_driver("mysql://h/db"), Some(DatabaseDriver::MySQL));
-        assert_eq!(LoggerBuilder::infer_driver("sqlite://f.db"), Some(DatabaseDriver::SQLite));
-        assert_eq!(LoggerBuilder::infer_driver("sqlite3://f.db"), Some(DatabaseDriver::SQLite));
-        assert_eq!(LoggerBuilder::infer_driver("sqlite::memory:"), Some(DatabaseDriver::SQLite));
-        assert_eq!(LoggerBuilder::infer_driver("duckdb://f.db"), Some(DatabaseDriver::DuckDB));
+        assert_eq!(
+            LoggerBuilder::infer_driver("mysql://h/db"),
+            Some(DatabaseDriver::MySQL)
+        );
+        assert_eq!(
+            LoggerBuilder::infer_driver("sqlite://f.db"),
+            Some(DatabaseDriver::SQLite)
+        );
+        assert_eq!(
+            LoggerBuilder::infer_driver("sqlite3://f.db"),
+            Some(DatabaseDriver::SQLite)
+        );
+        assert_eq!(
+            LoggerBuilder::infer_driver("sqlite::memory:"),
+            Some(DatabaseDriver::SQLite)
+        );
+        assert_eq!(
+            LoggerBuilder::infer_driver("duckdb://f.db"),
+            Some(DatabaseDriver::DuckDB)
+        );
         // 大小写不敏感
-        assert_eq!(LoggerBuilder::infer_driver("POSTGRES://h/db"), Some(DatabaseDriver::PostgreSQL));
+        assert_eq!(
+            LoggerBuilder::infer_driver("POSTGRES://h/db"),
+            Some(DatabaseDriver::PostgreSQL)
+        );
         // 无法识别
         assert_eq!(LoggerBuilder::infer_driver("weird://x"), None);
     }
@@ -1101,7 +1129,7 @@ impl LoggerBuilder {
     /// 每个 `add_sink` 注册的 sink 获得独立的记录 channel（与内置 file/db
     /// worker 的 MPMC 通道隔离，互不抢占）和一条通用 SinkWorker 消费线程，
     /// 语义与内置 sink worker 对齐（延迟计量、写失败重试 3 次、降级 console、
-    /// 关停排水）。第三方 Sink 只需实现 [`LogSink`]（即 `Arc<dyn AsyncSink>`），
+    /// 关停排水）。第三方 Sink 只需实现 `LogSink`（即 `Arc<dyn AsyncSink>`），
     /// 零核心改动接入。
     ///
     /// # Arguments

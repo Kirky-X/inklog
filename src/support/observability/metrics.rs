@@ -750,15 +750,24 @@ impl Metrics {
         // dbnexus pool gauges
         s.push_str("# HELP inklog_db_pool_total Total database connections\n");
         s.push_str("# TYPE inklog_db_pool_total gauge\n");
-        s.push_str(&format!("inklog_db_pool_total {}\n", self.db_pool_total.get()));
+        s.push_str(&format!(
+            "inklog_db_pool_total {}\n",
+            self.db_pool_total.get()
+        ));
 
         s.push_str("# HELP inklog_db_pool_active Active database connections\n");
         s.push_str("# TYPE inklog_db_pool_active gauge\n");
-        s.push_str(&format!("inklog_db_pool_active {}\n", self.db_pool_active.get()));
+        s.push_str(&format!(
+            "inklog_db_pool_active {}\n",
+            self.db_pool_active.get()
+        ));
 
         s.push_str("# HELP inklog_db_pool_idle Idle database connections\n");
         s.push_str("# TYPE inklog_db_pool_idle gauge\n");
-        s.push_str(&format!("inklog_db_pool_idle {}\n", self.db_pool_idle.get()));
+        s.push_str(&format!(
+            "inklog_db_pool_idle {}\n",
+            self.db_pool_idle.get()
+        ));
 
         //
         s.push_str("# HELP inklog_sink_healthy Sink health status (1=healthy, 0=unhealthy)\n");

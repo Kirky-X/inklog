@@ -50,7 +50,9 @@ pub struct EnvKeyProvider {
 
 impl EnvKeyProvider {
     pub fn new(env_var: impl Into<String>) -> Self {
-        Self { env_var: env_var.into() }
+        Self {
+            env_var: env_var.into(),
+        }
     }
 }
 
@@ -85,11 +87,10 @@ impl ConfersKeyProvider {
 #[async_trait]
 impl KeyProvider for ConfersKeyProvider {
     async fn get_key(&self) -> Result<Zeroizing<[u8; 32]>, InklogError> {
-        let bytes = self
-            .inner
-            .get_key()
-            .await
-            .map_err(|e| InklogError::ConfigError(format!("confers key provider failed: {e}")))?;
+        let bytes =
+            self.inner.get_key().await.map_err(|e| {
+                InklogError::ConfigError(format!("confers key provider failed: {e}"))
+            })?;
         let bytes: &[u8] = bytes.as_slice();
         let arr: [u8; 32] = bytes.try_into().map_err(|_| {
             InklogError::ConfigError(format!(
@@ -135,9 +136,9 @@ pub fn vault_transit_provider(cfg: &VaultTransitConfig) -> Result<ConfersKeyProv
     if let Some(ns) = &cfg.namespace {
         builder = builder.namespace(ns.clone());
     }
-    let inner = builder
-        .build()
-        .map_err(|e| InklogError::ConfigError(format!("vault transit provider build failed: {e}")))?;
+    let inner = builder.build().map_err(|e| {
+        InklogError::ConfigError(format!("vault transit provider build failed: {e}"))
+    })?;
     Ok(ConfersKeyProvider::new(Arc::new(inner)))
 }
 
@@ -180,7 +181,10 @@ mod tests {
         }
         let provider = ConfersKeyProvider::new(Arc::new(ShortProvider));
         let err = provider.get_key().await.unwrap_err();
-        assert!(err.to_string().contains("16 bytes"), "length mismatch must be diagnosed");
+        assert!(
+            err.to_string().contains("16 bytes"),
+            "length mismatch must be diagnosed"
+        );
     }
 
     /// Vault transit MVP：mock collector（本地 TCP server 回 transit 解包响应）
@@ -223,7 +227,11 @@ mod tests {
         assert_eq!(provider.provider_type(), "vault-transit");
         let key = provider.get_key().await.unwrap();
         server.abort();
-        assert_eq!(key.as_slice(), &[0x7bu8; 32], "vault-transit MVP must unwrap the key");
+        assert_eq!(
+            key.as_slice(),
+            &[0x7bu8; 32],
+            "vault-transit MVP must unwrap the key"
+        );
     }
 
     #[tokio::test]

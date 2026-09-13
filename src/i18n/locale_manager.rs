@@ -184,7 +184,9 @@ fn is_valid_locale(locale: &str) -> bool {
         return false;
     }
     // Normalize, then validate as a BCP-47 language identifier
-    normalize_locale(locale).parse::<LanguageIdentifier>().is_ok()
+    normalize_locale(locale)
+        .parse::<LanguageIdentifier>()
+        .is_ok()
 }
 
 /// Compile-time embedded copies of the `locales/` directory.
@@ -532,7 +534,9 @@ mod tests {
         let pattern = message.value().expect("pattern");
         let mut errors = vec![];
         assert_eq!(
-            bundle.format_pattern(pattern, None, &mut errors).to_string(),
+            bundle
+                .format_pattern(pattern, None, &mut errors)
+                .to_string(),
             "信息"
         );
     }
@@ -544,9 +548,9 @@ mod tests {
         let (embedded, _) = load_embedded_resources();
         assert!(!embedded.is_empty(), "embedded table must not be empty");
         for (locale, fs_map) in &fs_resources {
-            let emb_map = embedded.get(locale).unwrap_or_else(|| {
-                panic!("EMBEDDED_LOCALES missing locale dir '{locale}'")
-            });
+            let emb_map = embedded
+                .get(locale)
+                .unwrap_or_else(|| panic!("EMBEDDED_LOCALES missing locale dir '{locale}'"));
             assert_eq!(
                 emb_map.len(),
                 fs_map.len(),

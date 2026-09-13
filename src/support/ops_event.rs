@@ -42,7 +42,10 @@ impl InklogOpsEvent {
     /// 关键字段平铺进 `fields`；`sink_degraded`/`records_dropped` 类事件
     /// 映射为 WARN 级，其余 INFO。
     pub fn to_log_record(&self) -> LogRecord {
-        let warn = matches!(self.kind.as_str(), "sink_degraded" | "records_dropped" | "sink_unavailable");
+        let warn = matches!(
+            self.kind.as_str(),
+            "sink_degraded" | "records_dropped" | "sink_unavailable"
+        );
         let mut record = LogRecord::new(
             if warn {
                 tracing::Level::WARN

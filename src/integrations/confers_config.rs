@@ -97,7 +97,11 @@ impl ConfersConfigWatcher {
     /// * `debounce_ms` - confers FsWatcher 去抖间隔（毫秒）
     /// * `on_reload` - 热更回调（初值也会调用一次）；调用方在其中接线
     ///   `LoggerManager::set_level`等运行时应用点
-    pub async fn spawn<F>(path: PathBuf, debounce_ms: u64, on_reload: F) -> Result<Self, InklogError>
+    pub async fn spawn<F>(
+        path: PathBuf,
+        debounce_ms: u64,
+        on_reload: F,
+    ) -> Result<Self, InklogError>
     where
         F: Fn(&HotReloadValues) + Send + Sync + 'static,
     {
@@ -139,7 +143,9 @@ impl ConfersConfigWatcher {
                 if shutdown_for_task.load(std::sync::atomic::Ordering::Relaxed) {
                     return;
                 }
-                match tokio::time::timeout(std::time::Duration::from_millis(200), watcher.recv()).await {
+                match tokio::time::timeout(std::time::Duration::from_millis(200), watcher.recv())
+                    .await
+                {
                     Ok(Some(_changed_path)) => {
                         // 热更宽容策略：解析/校验失败保持旧配置
                         let values = match load_config_via_confers(&path) {
@@ -172,7 +178,11 @@ impl ConfersConfigWatcher {
             }
         });
 
-        Ok(Self { current, shutdown, task })
+        Ok(Self {
+            current,
+            shutdown,
+            task,
+        })
     }
 
     /// 当前热更值快照。
@@ -232,14 +242,10 @@ mod tests {
 
         let applied = Arc::new(AtomicUsize::new(0));
         let applied_for_cb = applied.clone();
-        let watcher = ConfersConfigWatcher::spawn(
-            path.clone(),
-            50,
-            move |values| {
-                assert!(!values.level.is_empty());
-                applied_for_cb.fetch_add(1, Ordering::SeqCst);
-            },
-        )
+        let watcher = ConfersConfigWatcher::spawn(path.clone(), 50, move |values| {
+            assert!(!values.level.is_empty());
+            applied_for_cb.fetch_add(1, Ordering::SeqCst);
+        })
         .await
         .unwrap();
         assert_eq!(watcher.current().level, "info");
@@ -250,7 +256,11 @@ mod tests {
         while watcher.current().level != "debug" && std::time::Instant::now() < deadline {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        assert_eq!(watcher.current().level, "debug", "level change must hot-reload");
+        assert_eq!(
+            watcher.current().level,
+            "debug",
+            "level change must hot-reload"
+        );
         watcher.stop();
         assert!(
             applied.load(Ordering::SeqCst) >= 2,
@@ -264,12 +274,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("inklog_config.toml");
         write_config(&path, "info");
-        let mut watcher = ConfersConfigWatcher::spawn(path.clone(), 50, |_| {}).await.unwrap();
+        let mut watcher = ConfersConfigWatcher::spawn(path.clone(), 50, |_| {})
+            .await
+            .unwrap();
 
         // 非法 TOML：热更被拒，旧配置保持
         std::fs::write(&path, "this is not [ valid toml {{{{").unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-        assert_eq!(watcher.current().level, "info", "invalid TOML must keep old config");
+        assert_eq!(
+            watcher.current().level,
+            "info",
+            "invalid TOML must keep old config"
+        );
 
         // 恢复合法内容 → 继续热更
         write_config(&path, "error");
@@ -277,7 +293,11 @@ mod tests {
         while watcher.current().level != "error" && std::time::Instant::now() < deadline {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        assert_eq!(watcher.current().level, "error", "watcher survives invalid config");
+        assert_eq!(
+            watcher.current().level,
+            "error",
+            "watcher survives invalid config"
+        );
         watcher.stop();
     }
 
@@ -291,13 +311,9 @@ mod tests {
         write_config(&path, "info");
         let reloads = Arc::new(AtomicUsize::new(0));
         let reloads_cb = reloads.clone();
-        let mut watcher = ConfersConfigWatcher::spawn(
-            path.clone(),
-            50,
-            move |_| {
-                reloads_cb.fetch_add(1, Ordering::SeqCst);
-            },
-        )
+        let mut watcher = ConfersConfigWatcher::spawn(path.clone(), 50, move |_| {
+            reloads_cb.fetch_add(1, Ordering::SeqCst);
+        })
         .await
         .unwrap();
         let initial = reloads.load(Ordering::SeqCst);

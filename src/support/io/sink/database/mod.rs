@@ -712,7 +712,11 @@ mod tests {
 
         // 整批 10 条都应进入 fallback
         let captured = recorder.captured();
-        assert_eq!(captured.len(), 10, "the whole batch should reach the fallback");
+        assert_eq!(
+            captured.len(),
+            10,
+            "the whole batch should reach the fallback"
+        );
         assert_eq!(captured[0].message, "flush-fallback-0");
         assert_eq!(captured[9].message, "flush-fallback-9");
 

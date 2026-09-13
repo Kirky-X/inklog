@@ -151,7 +151,11 @@ pub struct RateLimitedSink {
 
 impl RateLimitedSink {
     pub fn new(inner: Arc<dyn LogSink>, limiter: Arc<dyn SinkRateLimit>) -> Self {
-        Self { inner, limiter, metrics: None }
+        Self {
+            inner,
+            limiter,
+            metrics: None,
+        }
     }
 
     /// 绑定指标（拒绝计入 `logs_dropped`）。
@@ -243,10 +247,7 @@ mod tests {
     #[async_trait]
     impl LogSink for CollectingSink {
         async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
-            if self
-                .fail_once
-                .swap(false, Ordering::Relaxed)
-            {
+            if self.fail_once.swap(false, Ordering::Relaxed) {
                 return Err(InklogError::ConfigError("simulated failure".to_string()));
             }
             self.messages.lock().push(record.message.clone());
@@ -268,16 +269,33 @@ mod tests {
         });
         let metrics = Arc::new(Metrics::new());
         let sink = Arc::new(
-            RateLimitedSink::new(inner.clone() as Arc<dyn LogSink>, Arc::new(TokenBucketRateLimit::new(2)))
-                .with_metrics(metrics.clone()),
+            RateLimitedSink::new(
+                inner.clone() as Arc<dyn LogSink>,
+                Arc::new(TokenBucketRateLimit::new(2)),
+            )
+            .with_metrics(metrics.clone()),
         );
 
-        let _ = sink.write(&record(tracing::Level::INFO, "t")).await.unwrap();
-        let _ = sink.write(&record(tracing::Level::INFO, "t")).await.unwrap();
-        let _ = sink.write(&record(tracing::Level::INFO, "t")).await.unwrap(); // 被拒
+        sink.write(&record(tracing::Level::INFO, "t"))
+            .await
+            .unwrap();
+        sink.write(&record(tracing::Level::INFO, "t"))
+            .await
+            .unwrap();
+        sink.write(&record(tracing::Level::INFO, "t"))
+            .await
+            .unwrap(); // 被拒
 
-        assert_eq!(inner.messages.lock().len(), 2, "budget=2 → exactly 2 writes");
-        assert_eq!(metrics.logs_dropped(), 1, "rejected record must count as dropped");
+        assert_eq!(
+            inner.messages.lock().len(),
+            2,
+            "budget=2 → exactly 2 writes"
+        );
+        assert_eq!(
+            metrics.logs_dropped(),
+            1,
+            "rejected record must count as dropped"
+        );
     }
 
     #[tokio::test]
@@ -292,9 +310,15 @@ mod tests {
         // 首条：预算扣 1，写失败 → 预算归还
         let r = sink.write(&record(tracing::Level::INFO, "t")).await;
         assert!(r.is_err(), "inner failure must propagate");
-        assert_eq!(limiter.available(), 2, "failed write must refund the budget");
+        assert_eq!(
+            limiter.available(),
+            2,
+            "failed write must refund the budget"
+        );
         // 次条：写成功 → 消耗 1
-        let _ = sink.write(&record(tracing::Level::INFO, "t")).await.unwrap();
+        sink.write(&record(tracing::Level::INFO, "t"))
+            .await
+            .unwrap();
         assert_eq!(limiter.available(), 1);
         assert_eq!(inner.messages.lock().len(), 1);
     }

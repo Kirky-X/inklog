@@ -1365,8 +1365,14 @@ mod trace_id_tests {
         record.span_id = Some("b".repeat(16));
         let json = serde_json::to_string(&record).unwrap();
         let back: LogRecord = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.trace_id.as_deref(), Some(record.trace_id.as_deref().unwrap()));
-        assert_eq!(back.span_id.as_deref(), Some(record.span_id.as_deref().unwrap()));
+        assert_eq!(
+            back.trace_id.as_deref(),
+            Some(record.trace_id.as_deref().unwrap())
+        );
+        assert_eq!(
+            back.span_id.as_deref(),
+            Some(record.span_id.as_deref().unwrap())
+        );
     }
 
     #[test]

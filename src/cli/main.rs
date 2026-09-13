@@ -83,7 +83,9 @@ enum Commands {
     },
 
     #[command(name = "query")]
-    #[command(about = "Search local log files by time range/level/keyword (unpacks encrypted/compressed archives)")]
+    #[command(
+        about = "Search local log files by time range/level/keyword (unpacks encrypted/compressed archives)"
+    )]
     Query {
         #[arg(long = "path")]
         #[arg(help = "Log file or directory to search (recursive; repeatable)")]

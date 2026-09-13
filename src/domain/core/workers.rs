@@ -147,11 +147,7 @@ pub(crate) fn run_custom_sink_worker(
                             );
                             if attempt == CUSTOM_SINK_WRITE_ATTEMPTS {
                                 metrics.inc_sink_error();
-                                metrics.update_sink_health(
-                                    &entry.name,
-                                    false,
-                                    Some(e.to_string()),
-                                );
+                                metrics.update_sink_health(&entry.name, false, Some(e.to_string()));
                                 let _ = runtime_handle
                                     .block_on(async { console_sink.write(&record).await });
                             } else {
@@ -451,7 +447,10 @@ impl SinkWorker<'_> {
     ) -> bool {
         let mut attempts = 0;
         while attempts < WRITE_MAX_ATTEMPTS {
-            match self.runtime_handle.block_on(async { sink.write(record).await }) {
+            match self
+                .runtime_handle
+                .block_on(async { sink.write(record).await })
+            {
                 Ok(_) => {
                     self.metrics.inc_logs_written();
                     self.metrics.update_sink_health(self.desc.name, true, None);
@@ -601,7 +600,9 @@ impl SinkWorker<'_> {
             }
         }
         if let Some(sink) = state.sink.as_ref() {
-            let _ = self.runtime_handle.block_on(async { sink.shutdown().await });
+            let _ = self
+                .runtime_handle
+                .block_on(async { sink.shutdown().await });
         }
     }
 
@@ -763,13 +764,22 @@ impl LoggerManager {
                         // Check for shutdown
                         if shutdown_file.try_recv().is_ok() {
                             // Drain with 30s timeout
-                            worker.drain(&mut state, &rx_file, Duration::from_secs(30), &mut create_sink);
+                            worker.drain(
+                                &mut state,
+                                &rx_file,
+                                Duration::from_secs(30),
+                                &mut create_sink,
+                            );
                             break;
                         }
 
                         // Check for control messages
                         if let Ok(control_msg) = control_rx_file.try_recv() {
-                            worker.handle_control_message(&mut state, &control_msg, &mut create_sink);
+                            worker.handle_control_message(
+                                &mut state,
+                                &control_msg,
+                                &mut create_sink,
+                            );
                         }
 
                         // 降级模式：工厂重试放在 recv 之前，跳过记录处理时也不会跳过重试
@@ -859,13 +869,22 @@ impl LoggerManager {
                         // Check for shutdown
                         if shutdown_db.try_recv().is_ok() {
                             // Drain with 30s timeout
-                            worker.drain(&mut state, &rx_db, Duration::from_secs(30), &mut create_sink);
+                            worker.drain(
+                                &mut state,
+                                &rx_db,
+                                Duration::from_secs(30),
+                                &mut create_sink,
+                            );
                             break;
                         }
 
                         // Check for control messages
                         if let Ok(control_msg) = control_rx_db.try_recv() {
-                            worker.handle_control_message(&mut state, &control_msg, &mut create_sink);
+                            worker.handle_control_message(
+                                &mut state,
+                                &control_msg,
+                                &mut create_sink,
+                            );
                         }
 
                         // 降级模式：工厂重试放在 recv 之前，跳过记录处理时也不会跳过重试
@@ -887,7 +906,6 @@ impl LoggerManager {
                 metrics_db.active_workers.dec();
             })
         };
-
 
         // dynamic third-party sinks — one generic SinkWorker per entry,
         // each consuming its own dedicated channel (no MPMC contention with
@@ -1531,12 +1549,22 @@ mod tests {
 
     /// 捕获写入内容的 error sink（验证 error.log 记录）。
     /// 仅 db worker 测试使用，随其 cfg 门控。
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     struct CapturingSink {
         messages: Mutex<Vec<String>>,
     }
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     #[async_trait::async_trait]
     impl LogSink for CapturingSink {
         async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
@@ -1554,10 +1582,20 @@ mod tests {
     }
 
     /// 写入必然失败的 db sink（模拟运行期写库失败）。
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     struct FailingDbSink;
 
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    #[cfg(any(
+        feature = "sqlite",
+        feature = "postgres",
+        feature = "mysql",
+        feature = "duckdb"
+    ))]
     #[async_trait::async_trait]
     impl LogSink for FailingDbSink {
         async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
@@ -1625,7 +1663,9 @@ mod tests {
             file_sink_factory: Box::new(|| {
                 Err(InklogError::ConfigError("unused in test".to_string()))
             }),
-            db_sink_factory: Box::new(|_db, _metrics| Ok(Box::new(FailingDbSink) as Box<dyn LogSink>)),
+            db_sink_factory: Box::new(|_db, _metrics| {
+                Ok(Box::new(FailingDbSink) as Box<dyn LogSink>)
+            }),
             database: Some(Arc::new(crate::integrations::MockDatabaseAdapter::new())
                 as Arc<dyn crate::integrations::Database>),
             db_receiver: Some(db_rx),
@@ -1798,7 +1838,6 @@ mod custom_sink_worker_tests {
                 thread_id: "test".to_string(),
                 trace_id: None,
                 span_id: None,
-                ..Default::default()
             }))
             .unwrap();
         }
@@ -1867,7 +1906,6 @@ mod custom_sink_worker_tests {
             thread_id: "test".to_string(),
             trace_id: None,
             span_id: None,
-            ..Default::default()
         }))
         .unwrap();
 

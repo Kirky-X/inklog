@@ -280,11 +280,7 @@ mod performance_test {
 
     #[tokio::test]
     async fn test_batch_write_performance() {
-        #[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql"
-))]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("batch_test.db");
@@ -334,11 +330,11 @@ mod performance_test {
         }
 
         #[cfg(not(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-)))]
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        )))]
         {
             println!("Skipping test: requires --features \"dbnexus\"");
         }
@@ -348,11 +344,7 @@ mod performance_test {
 
     #[tokio::test]
     async fn test_connection_pool_performance() {
-        #[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql"
-))]
+        #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
         {
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("pool_test.db");
@@ -417,11 +409,11 @@ mod performance_test {
         }
 
         #[cfg(not(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-)))]
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        )))]
         {
             println!("Skipping test: requires --features \"dbnexus\"");
         }

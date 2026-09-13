@@ -90,10 +90,9 @@ impl DatabaseSink {
             path: PathBuf::from("logs/db_fallback.log"),
             ..Default::default()
         };
-        let fallback_sink: Option<Arc<dyn LogSink + Send + Sync>> =
-            FileSink::new(fallback_config)
-                .ok()
-                .map(|s| Arc::new(s) as Arc<dyn LogSink + Send + Sync>);
+        let fallback_sink: Option<Arc<dyn LogSink + Send + Sync>> = FileSink::new(fallback_config)
+            .ok()
+            .map(|s| Arc::new(s) as Arc<dyn LogSink + Send + Sync>);
 
         // 使用配置参数或默认值
         let batch_size = config
@@ -195,10 +194,11 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
             let masked_fields_json =
                 serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
             let masked = self.masker.mask(&masked_fields_json);
-            let fields = serde_json::from_str::<
-                std::collections::HashMap<String, serde_json::Value>,
-            >(&masked)
-            .unwrap_or_else(|_| record.fields.clone());
+            let fields =
+                serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(
+                    &masked,
+                )
+                .unwrap_or_else(|_| record.fields.clone());
             let masked_record = LogRecord {
                 message: self.masker.mask(&record.message),
                 fields,

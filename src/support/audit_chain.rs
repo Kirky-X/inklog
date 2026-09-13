@@ -68,7 +68,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// 十六进制解码（奇数长度/非 hex 字符返回 None）
 fn hex_decode(raw: &str) -> Option<Vec<u8>> {
-    if raw.len() % 2 != 0 {
+    if !raw.len().is_multiple_of(2) {
         return None;
     }
     (0..raw.len())
@@ -114,7 +114,8 @@ impl ArchiveChain {
     /// 追加事件（规范化 JSON 字符串）；返回条目序号。
     pub fn append(&mut self, canonical_event: &str) -> u64 {
         let index = self.entries.len() as u64;
-        let mut message = Vec::with_capacity(CHAIN_SALT_LEN + CHAIN_HASH_LEN * 2 + canonical_event.len());
+        let mut message =
+            Vec::with_capacity(CHAIN_SALT_LEN + CHAIN_HASH_LEN * 2 + canonical_event.len());
         message.extend_from_slice(&self.salt);
         message.extend_from_slice(&self.prev_hash);
         message.extend_from_slice(canonical_event.as_bytes());
@@ -172,7 +173,8 @@ impl ArchiveChain {
             if prev != prev_hash {
                 return false;
             }
-            let mut message = Vec::with_capacity(CHAIN_SALT_LEN + CHAIN_HASH_LEN * 2 + entry.event.len());
+            let mut message =
+                Vec::with_capacity(CHAIN_SALT_LEN + CHAIN_HASH_LEN * 2 + entry.event.len());
             message.extend_from_slice(&entry_salt);
             message.extend_from_slice(&prev_hash);
             message.extend_from_slice(entry.event.as_bytes());
@@ -236,12 +238,18 @@ mod tests {
         // 删除中间条目
         let mut entries = chain.entries().to_vec();
         entries.remove(1);
-        assert!(!ArchiveChain::verify_entries(&entries, b"key-1"), "deletion must break the chain");
+        assert!(
+            !ArchiveChain::verify_entries(&entries, b"key-1"),
+            "deletion must break the chain"
+        );
 
         // 重排
         let mut entries = chain.entries().to_vec();
         entries.swap(0, 1);
-        assert!(!ArchiveChain::verify_entries(&entries, b"key-1"), "reorder must break the chain");
+        assert!(
+            !ArchiveChain::verify_entries(&entries, b"key-1"),
+            "reorder must break the chain"
+        );
 
         // 伪造（追加一条非链上条目）
         let mut entries = chain.entries().to_vec();
@@ -252,7 +260,10 @@ mod tests {
             event: event("forged", "4"),
             hmac: hex_encode(&[0u8; 32]),
         });
-        assert!(!ArchiveChain::verify_entries(&entries, b"key-1"), "forgery must be detected");
+        assert!(
+            !ArchiveChain::verify_entries(&entries, b"key-1"),
+            "forgery must be detected"
+        );
     }
 
     #[test]
@@ -264,7 +275,10 @@ mod tests {
         // 换盐重放：修改盐 → 链断裂
         let mut entries = chain.entries().to_vec();
         entries[0].salt = hex_encode(&[9u8; CHAIN_SALT_LEN]);
-        assert!(!ArchiveChain::verify_entries(&entries, b"key-1"), "salt swap must be detected");
+        assert!(
+            !ArchiveChain::verify_entries(&entries, b"key-1"),
+            "salt swap must be detected"
+        );
     }
 
     #[test]
@@ -275,7 +289,8 @@ mod tests {
         a.append(&event("a", "1"));
         b.append(&event("a", "1"));
         assert_ne!(
-            a.entries()[0].salt, b.entries()[0].salt,
+            a.entries()[0].salt,
+            b.entries()[0].salt,
             "chain-start salt must be random per instance"
         );
     }

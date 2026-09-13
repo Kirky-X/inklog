@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 //! Integrations module - external service integrations.
 
-pub mod infra;
 #[cfg(feature = "dbnexus-audit")]
 pub mod audit_bridge;
 #[cfg(feature = "config-confers")]
 pub mod confers_config;
+pub mod infra;
 #[cfg(all(
     feature = "kit",
     any(

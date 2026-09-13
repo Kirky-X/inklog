@@ -24,17 +24,17 @@ pub mod middleware;
 pub mod net;
 #[cfg(feature = "otlp")]
 pub mod otlp;
+pub mod rate_limit;
 pub mod registry;
 pub mod ring_buffered_file;
-pub mod rate_limit;
 pub mod rotation;
 pub mod sampling;
 
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
-#[cfg(feature = "compression")]
-pub use compression::ZstdCompression;
 #[cfg(feature = "gzip")]
 pub use compression::GzipCompression;
+#[cfg(feature = "compression")]
+pub use compression::ZstdCompression;
 pub use compression::{CompressionStrategy, NoCompression};
 pub use console::ConsoleSink;
 #[cfg(any(
@@ -45,12 +45,6 @@ pub use console::ConsoleSink;
 ))]
 pub use database::DatabaseSink;
 pub use file::FileSink;
-pub use registry::{FileSinkFactory, SinkFactory, SinkMetadata, SinkRegistry};
-pub use rotation::{
-    CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,
-    TimeBasedRotation,
-};
-pub use rate_limit::{NoOpRateLimit, RateLimitedSink, SinkRateLimit, SinkWriteOutcome, TokenBucketRateLimit};
 pub use middleware::{
     EnrichMiddleware, LevelFilterMiddleware, MiddlewareChain, MiddlewareSink, MiddlewareVerdict,
     RecordMiddleware,
@@ -59,6 +53,14 @@ pub use middleware::{
 pub use net::{NetWireFormat, TcpSink, TcpSinkConfig, TlsClientConfig, UdpSink, UdpSinkConfig};
 #[cfg(feature = "otlp")]
 pub use otlp::{OtlpConfig, OtlpSink};
+pub use rate_limit::{
+    NoOpRateLimit, RateLimitedSink, SinkRateLimit, SinkWriteOutcome, TokenBucketRateLimit,
+};
+pub use registry::{FileSinkFactory, SinkFactory, SinkMetadata, SinkRegistry};
+pub use rotation::{
+    CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,
+    TimeBasedRotation,
+};
 pub use sampling::{Sampler, SamplingSink};
 
 use crate::InklogError;
