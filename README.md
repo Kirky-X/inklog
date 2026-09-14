@@ -58,32 +58,30 @@
 
 inklog 是面向生产环境的日志基础设施：应用代码继续使用 `log` / `tracing` 标准宏，由 inklog 接管订阅、脱敏、分发与落盘。下表为主要能力，全部与仓库代码和 [docs/](docs/USER_GUIDE.md) 文档对应。
 
-<table style="width:100%; border-collapse: collapse;">
+<table style="width:100%; border-collapse: collapse">
 <tr>
-<td width="50%" style="vertical-align:top; padding: 8px;">
-
-| 能力 | 说明 |
-|------|------|
-| ⚡ **异步管线** | Crossbeam 有界通道 + 专用工作线程池，发送端非阻塞、队列满时背压 |
-| 📁 **文件输出** | 按大小与时间轮转、`BufWriter` 缓冲、可选压缩与加密 |
-| 🗄️ **数据库输出** | 批量落库、连接池、分区表支持，经 dbnexus 适配四种后端 |
-| 🎭 **数据脱敏** | 敏感字段名检测 + 正则规则库，`fast-masking` 加速多模式匹配 |
-| 🎨 **模板格式化** | `{timestamp}` `{level}` `{message}` `{trace_id}` 等占位符模板 |
-| 🧩 **依赖注入** | `Cache` / `Config` / `Database` trait 抽象，适配器可替换、可 Mock |
-
-</td>
-<td width="50%" style="vertical-align:top; padding: 8px;">
-
-| 能力 | 说明 |
-|------|------|
-| 🔁 **可靠性** | 断路器、DB → File → Console 三级降级、健康检查线程自动恢复 |
-| 🔀 **动态 Sink** | `LoggerBuilder::add_sink` 注册第三方 Sink，每 Sink 独立通道；中间件链、采样器、令牌桶限流装饰器 |
-| 🌡️ **运行时热调** | `set_level` 经 `tracing_subscriber::reload` 即时调整全局与 per-target 级别 |
-| 🔍 **日志检索** | `inklog-cli query` 按时间、级别、关键词检索本地日志（自动解密解包） |
-| 🌐 **i18n** | 错误消息经 Fluent + ICU 按系统 locale 渲染（zh-CN / en） |
-| 📈 **可观测性** | 健康状态、通道水位、连接池与写延迟直方图的 Prometheus 导出 |
-
-</td>
+<td width="50%" style="vertical-align:top; padding: 12px">⚡ <b>异步管线</b><br><span style="color:#64748B">Crossbeam 有界通道 + 专用工作线程池，发送端非阻塞、队列满时背压</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📁 <b>文件输出</b><br><span style="color:#64748B">按大小与时间轮转、<code>BufWriter</code> 缓冲、可选压缩与加密</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🗄️ <b>数据库输出</b><br><span style="color:#64748B">批量落库、连接池、分区表支持，经 dbnexus 适配四种后端</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🎭 <b>数据脱敏</b><br><span style="color:#64748B">敏感字段名检测 + 正则规则库，<code>fast-masking</code> 加速多模式匹配</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🎨 <b>模板格式化</b><br><span style="color:#64748B"><code>{timestamp}</code> <code>{level}</code> <code>{message}</code> <code>{trace_id}</code> 等占位符模板</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧩 <b>依赖注入</b><br><span style="color:#64748B"><code>Cache</code> / <code>Config</code> / <code>Database</code> trait 抽象，适配器可替换、可 Mock</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🔁 <b>可靠性</b><br><span style="color:#64748B">断路器、DB → File → Console 三级降级、健康检查线程自动恢复</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🔀 <b>动态 Sink</b><br><span style="color:#64748B"><code>LoggerBuilder::add_sink</code> 注册第三方 Sink，每 Sink 独立通道；中间件链、采样器、令牌桶限流装饰器</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🌡️ <b>运行时热调</b><br><span style="color:#64748B"><code>set_level</code> 经 <code>tracing_subscriber::reload</code> 即时调整全局与 per-target 级别</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🔍 <b>日志检索</b><br><span style="color:#64748B"><code>inklog-cli query</code> 按时间、级别、关键词检索本地日志（自动解密解包）</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🌐 <b>i18n</b><br><span style="color:#64748B">错误消息经 Fluent + ICU 按系统 locale 渲染（zh-CN / en）</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📈 <b>可观测性</b><br><span style="color:#64748B">健康状态、通道水位、连接池与写延迟直方图的 Prometheus 导出</span></td>
 </tr>
 </table>
 
