@@ -32,17 +32,17 @@
 //! ) -> Result<(), Box<dyn std::error::Error>> {
 //!     // 从配置获取参数
 //!     let batch_size = config.get_int("batch.size").unwrap_or(100);
-//!     
+//!
 //!     // 检查数据库健康状态
 //!     if !db.is_healthy().await {
 //!         return Err("Database unhealthy".into());
 //!     }
-//!     
+//!
 //!     // 使用缓存
 //!     if let Some(cached) = cache.get("last_sync").await {
 //!         println!("Last sync: {}", cached);
 //!     }
-//!     
+//!
 //!     Ok(())
 //! }
 //!
@@ -52,7 +52,7 @@
 //!     let cache = OxCacheAdapter::new()?;
 //!     let config = InklogConfigAdapter::new()?;
 //!     let db = DbNexusAdapter::new("postgres://localhost/logs", 10).await?;
-//!     
+//!
 //!     process_logs(&cache, &config, &db).await
 //! }
 //! ```

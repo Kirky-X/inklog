@@ -28,14 +28,14 @@
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // 创建默认容器
 //!     let container = InklogContainer::new()?;
-//!     
+//!
 //!     // 创建 LoggerManager
 //!     let logger = container.create_logger().await?;
-//!     
+//!
 //!     // 使用共享的依赖
 //!     let cache = container.cache();
 //!     cache.set("key", "value".to_string()).await?;
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -49,7 +49,7 @@
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let config = InklogConfig::default();
 //!     let container = InklogContainer::from_config(config)?;
-//!     
+//!
 //!     let logger = container.create_logger().await?;
 //!     Ok(())
 //! }
@@ -68,7 +68,7 @@
 //!         .cache(Arc::new(OxCacheAdapter::new()?))
 //!         .config(Arc::new(InklogConfigAdapter::new()?))
 //!         .build()?;
-//!     
+//!
 //!     let logger = container.create_logger().await?;
 //!     Ok(())
 //! }

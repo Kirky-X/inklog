@@ -42,10 +42,10 @@ use async_trait::async_trait;
 ///     let records = vec![
 ///         LogRecord::new(Level::INFO, "module".to_string(), "message".to_string()),
 ///     ];
-///     
+///
 ///     let count = db.insert_batch(&records).await.unwrap();
 ///     assert_eq!(count, 1);
-///     
+///
 ///     if db.is_healthy().await {
 ///         println!("Database is healthy");
 ///     }
@@ -142,10 +142,10 @@ use crate::domain::config::database::DatabaseDriver;
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let db = DbNexusAdapter::new("postgres://user:pass@localhost/logs", 10).await?;
-///     
+///
 ///     let healthy = db.is_healthy().await;
 ///     println!("Database healthy: {}", healthy);
-///     
+///
 ///     Ok(())
 /// }
 /// ```

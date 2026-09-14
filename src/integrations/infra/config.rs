@@ -114,11 +114,11 @@ use crate::InklogError;
 ///
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let config = InklogConfigAdapter::new()?;
-///     
+///
 ///     let level = config.get_string("global.level");
 ///     let port = config.get_int("http_server.port");
 ///     let enabled = config.get_bool("file_sink.enabled");
-///     
+///
 ///     Ok(())
 /// }
 /// ```
