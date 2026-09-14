@@ -557,17 +557,18 @@ mod tests {
             },
             channel_capacity: 2,
             backpressure_strategy: BackpressureStrategy::DropNewest,
-            flush_batch_size: 2,
+            // `flush_batch_size = 0` keeps the IO thread from draining the
+            // channel, so overflow (and thus DropNewest drops) is deterministic
+            // instead of racing the IO thread's drain speed.
+            flush_batch_size: 0,
             flush_interval_ms: 1000,
         };
         let tmpl = LogTemplate::default();
         let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
-        // Write far more messages than the channel can buffer. The IO thread
-        // drains in batches of `flush_batch_size` (2) with a `flush()` syscall
-        // per batch; 10_000 synchronous `try_send` calls complete in
-        // microseconds and overwhelm the IO thread, guaranteeing the channel
-        // fills and DropNewest kicks in.
+        // Write far more messages than the channel can buffer: with the IO
+        // thread not draining, every write beyond capacity 2 is dropped and
+        // counted, regardless of scheduler timing.
         for i in 0..10_000 {
             let rec = make_record(&format!("drop-newest-{i}"));
             // DropNewest strategy returns error when record is dropped
@@ -595,14 +596,17 @@ mod tests {
             },
             channel_capacity: 2,
             backpressure_strategy: BackpressureStrategy::DropOldest,
-            flush_batch_size: 2,
+            // Same rationale as test_backpressure_drop_newest: the IO thread
+            // never drains, so every write beyond capacity evicts the oldest
+            // entry deterministically.
+            flush_batch_size: 0,
             flush_interval_ms: 1000,
         };
         let tmpl = LogTemplate::default();
         let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
-        // Same rationale as test_backpressure_drop_newest: 10_000 writes
-        // overwhelm the IO thread's drain rate, guaranteeing channel overflow.
+        // With no draining, each write beyond capacity evicts one record and
+        // increments dropped_count deterministically.
         for i in 0..10_000 {
             let rec = make_record(&format!("drop-oldest-{i}"));
             sink.write(&rec).await.unwrap();
