@@ -57,7 +57,7 @@ inklog 目前处于 0.x 预发布阶段（当前版本 **0.3.0-rc.3**），暂�
 
 **首选方式**：
 
-- 邮件：[security@inklog.dev](mailto:security@inklog.dev)
+- 邮件：[Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
 - PGP 密钥：(将在安全页面提供)
 
 **备选方式**：
@@ -1036,6 +1036,6 @@ chown $(whoami):$(whoami) logs/*.enc
 
 **文档版本**: 2.1
 **维护者**: inklog Security Team
-**联系我们**: [security@inklog.dev](mailto:security@inklog.dev)
+**联系我们**: [Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
 
 *本文档遵循 CC BY-SA 4.0 许可协议*

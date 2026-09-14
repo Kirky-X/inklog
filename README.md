@@ -373,7 +373,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 
 发现安全漏洞请**不要**公开披露，按 [docs/SECURITY.md](docs/SECURITY.md) 流程负责任上报：
 
-- **首选**：邮件 [security@inklog.dev](mailto:security@inklog.dev)
+- **首选**：邮件 [Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
 - **备选**：[GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)
 - **响应时限与协调披露流程**：见 [docs/SECURITY.md](docs/SECURITY.md)「漏洞报告流程」。
 

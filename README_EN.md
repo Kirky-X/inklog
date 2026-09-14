@@ -375,7 +375,7 @@ Reproduction steps are documented in the "Reproduction" section of [docs/PERFORM
 
 Please do **not** disclose security vulnerabilities publicly; report responsibly following [docs/SECURITY.md](docs/SECURITY.md):
 
-- **Preferred**: email [security@inklog.dev](mailto:security@inklog.dev)
+- **Preferred**: email [Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
 - **Alternative**: [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)
 - **Response targets and coordinated disclosure**: see [docs/SECURITY.md](docs/SECURITY.md) ("Vulnerability Reporting Process").
 
