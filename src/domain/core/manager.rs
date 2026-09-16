@@ -225,29 +225,37 @@ impl LoggerManager {
                 config.global.auto_fallback = fallback;
             }
 
-            // File sink 配置
-            if config_provider
-                .get_bool("file_sink.enabled")
-                .unwrap_or(false)
-            {
-                let path = config_provider
-                    .get_string("file_sink.path")
-                    .map(PathBuf::from)
-                    .unwrap_or_default();
-                let max_size = config_provider
-                    .get_string("file_sink.max_size")
-                    .unwrap_or_else(|| "100MB".to_string());
-                let compress = config_provider
-                    .get_bool("file_sink.compress")
-                    .unwrap_or(true);
+            // File sink 配置（显式 `enabled = false` 同样要落进 config——
+            // 依赖注入模式下宿主可能已通过 add_sink 挂载自己的文件 sink
+            // （如采样包装），内置通道必须能被关掉，否则同一条记录双写）
+            match config_provider.get_bool("file_sink.enabled") {
+                Some(true) => {
+                    let path = config_provider
+                        .get_string("file_sink.path")
+                        .map(PathBuf::from)
+                        .unwrap_or_default();
+                    let max_size = config_provider
+                        .get_string("file_sink.max_size")
+                        .unwrap_or_else(|| "100MB".to_string());
+                    let compress = config_provider
+                        .get_bool("file_sink.compress")
+                        .unwrap_or(true);
 
-                config.file_sink = Some(FileSinkConfig {
-                    enabled: true,
-                    path,
-                    max_size,
-                    compress,
-                    ..Default::default()
-                });
+                    config.file_sink = Some(FileSinkConfig {
+                        enabled: true,
+                        path,
+                        max_size,
+                        compress,
+                        ..Default::default()
+                    });
+                }
+                Some(false) => {
+                    config.file_sink = Some(FileSinkConfig {
+                        enabled: false,
+                        ..Default::default()
+                    });
+                }
+                None => {}
             }
 
             // HTTP server 配置
@@ -297,8 +305,10 @@ impl LoggerManager {
         let database = deps.database;
 
         // 使用解析后的配置调用现有的构建逻辑
-        let (mut manager, _subscriber, _filter) = Self::build_detached_with_sinks(
-            config,
+        // `_full` 变体额外返回 reload 换装层——全局安装（见
+        // `install_globals_and_start`）需要它；detached 变体不安装全局前端。
+        let (mut manager, subscriber, _filter_compat, filter_layer) = Self::build_detached_full(
+            config.clone(),
             #[cfg(any(
                 feature = "sqlite",
                 feature = "postgres",
@@ -324,7 +334,10 @@ impl LoggerManager {
             manager.database = database;
         }
 
-        Ok(manager)
+        // 与 with_config_and_sinks 一致：安装全局 tracing/log 前端。
+        // 缺失此步骤时，任何使用 add_sink 的宿主（依赖注入路径）都会得到
+        // "构建成功但 log::/tracing:: 全部静默" 的日志系统。
+        Self::install_globals_and_start(manager, subscriber, filter_layer, &config).await
     }
 
     /// Creates a new LoggerManager with the given configuration.
@@ -381,6 +394,21 @@ impl LoggerManager {
         )
         .await?;
 
+        Self::install_globals_and_start(manager, subscriber, filter_layer, &config).await
+    }
+
+    /// 安装全局 tracing/log 前端并启动可选 HTTP 监控服务器。
+    ///
+    /// [`Self::with_config_and_sinks`] 与 [`Self::build_with_deps`] 共用的收尾
+    /// 步骤。此前 `build_with_deps`（`LoggerBuilder::add_sink` 触发的依赖注入
+    /// 路径）从不执行全局安装：宿主一旦追加自定义 sink，`log::`/`tracing::`
+    /// 记录全部落入空 logger，console 与 file 双静默。
+    async fn install_globals_and_start(
+        manager: Self,
+        subscriber: LoggerSubscriber,
+        filter_layer: ReloadFilterLayer,
+        config: &InklogConfig,
+    ) -> Result<Self, InklogError> {
         // 1. 安装 tracing subscriber。
         // filter_layer（reload 包装）先于 subscriber 挂载——与其构造处的
         // `S = Registry` 类型标注一致；组合顺序对过滤语义无影响。

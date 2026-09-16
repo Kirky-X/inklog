@@ -640,6 +640,23 @@ impl LoggerBuilder {
         self
     }
 
+    /// 启用/禁用内置文件 sink。
+    ///
+    /// 依赖注入模式下内置文件通道默认视为启用（`file_sink: None` 等价启用）；
+    /// 宿主若经 [`Self::add_sink`] 挂载自己的文件 sink（如采样包装），必须先
+    /// 关闭内置通道，否则同一条记录会双写两个文件。
+    pub fn file_enabled(mut self, enabled: bool) -> Self {
+        if let Some(ref mut file) = self.config.file_sink {
+            file.enabled = enabled;
+        } else {
+            self.config.file_sink = Some(FileSinkConfig {
+                enabled,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
     #[cfg(any(
         feature = "sqlite",
         feature = "postgres",
