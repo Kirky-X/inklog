@@ -188,7 +188,7 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
         let (circuit_open_record, records_to_flush, should_flush) = {
             let mut inner = self.inner.lock();
 
-            // diting MED-002：结构化字段（fields）同样需要脱敏——
+            // 结构化字段（fields）同样需要脱敏 ——
             // 序列化后统一过 masker，再反序列化还原，避免敏感字段明文落库。
             // 脱敏先于 can_execute：熔断开启走 fallback 时写入的也必须是脱敏记录。
             let masked_fields_json =

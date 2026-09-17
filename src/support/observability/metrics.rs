@@ -2126,7 +2126,7 @@ mod metrics_tests {
 
     #[test]
     fn test_update_sink_health_concurrent_no_lost_updates() {
-        // R-observability-001: concurrent calls must not lose failure counts
+        // concurrent calls must not lose failure counts
         let metrics = std::sync::Arc::new(super::Metrics::new());
         let num_threads = 10;
         let increments_per_thread = 100;

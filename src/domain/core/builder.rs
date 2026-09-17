@@ -859,6 +859,28 @@ impl LoggerBuilder {
 
     // === Console 配置快捷方法 ===
 
+    /// Console sink 输出 JSON（`OutputFormat::Json`）。
+    ///
+    /// 与 `format()`（渲染模板，如 `"{timestamp} [{level}] {message}"`）正交：
+    /// `output_format = Json` 时 sink 输出结构化 JSON 行，模板仅作非 JSON
+    /// 场景的渲染。运维采集（Filebeat/Loki 等）按 JSON 行解析时启用。
+    pub fn console_json(mut self, json: bool) -> Self {
+        let output_format = if json {
+            crate::support::processing::template::OutputFormat::Json
+        } else {
+            crate::support::processing::template::OutputFormat::Text
+        };
+        if let Some(ref mut console) = self.config.console_sink {
+            console.output_format = output_format;
+        } else if json {
+            self.config.console_sink = Some(ConsoleSinkConfig {
+                output_format,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
     pub fn console_colored(mut self, colored: bool) -> Self {
         if let Some(ref mut console) = self.config.console_sink {
             console.colored = colored;

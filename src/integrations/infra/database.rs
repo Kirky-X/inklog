@@ -441,7 +441,6 @@ fn validate_table_name(name: &str) -> Result<(), InklogError> {
 /// ANSI/标准后端（SQLite/PostgreSQL/DuckDB）只需将 `'` 双写即可；
 /// **MySQL 默认把反斜杠视为转义符**，若输入含 `\` 后跟 `'`（如 `\'; DROP ...`），
 /// 仅双写引号仍可逃逸字符串越权执行 SQL。因此 MySQL 需额外转义反斜杠。
-/// （diting MED-001 修复）
 #[inline]
 fn escape_sql_string(s: &str, driver: &DatabaseDriver) -> String {
     match driver {
@@ -1467,7 +1466,7 @@ mod tests {
         assert_eq!(mysql, "2026-01-01T00:00:00''+00\\\\''00");
     }
 
-    /// diting MED-001 回归：MySQL 默认把反斜杠当转义符，
+    /// 回归：MySQL 默认把反斜杠当转义符，
     /// `\` 后跟 `'` 的载荷仅做引号双写仍可逃逸字符串。
     #[cfg(feature = "mysql")]
     #[test]

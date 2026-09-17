@@ -331,8 +331,7 @@ fn bind_failure_outcome(
     }
 }
 
-/// 单条 IP 白名单匹配：`IP` 精确、`前缀.*` 通配（补结尾点防越界前缀匹配，
-/// diting MED-003 修复）、`CIDR` 经 [`parse_cidr`]。
+/// 单条 IP 白名单匹配：`IP` 精确、`前缀.*` 通配（补结尾点防越界前缀匹配）、`CIDR` 经 [`parse_cidr`]。
 ///
 /// CIDR 解析失败的条目 fail-closed（永不匹配），并经 `invalid_warned`
 /// 进程级标志仅首次输出 `tracing::warn`——配置期校验是主防线，此处为

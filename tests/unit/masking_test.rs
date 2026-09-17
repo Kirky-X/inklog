@@ -759,7 +759,7 @@ pattern = "\\bTEST\\b"
         assert_eq!(masker.mask("#FF0000"), "#******");
     }
 
-    // === with_registry 测试 (R-rule-registry-002) ===
+    // === with_registry 测试 ===
 
     #[test]
     fn test_builder_with_registry() {
@@ -851,7 +851,7 @@ pattern = "\\bTEST\\b"
         );
     }
 
-    // === IPv4 负面测试 (R-masking-rules-003) ===
+    // === IPv4 负面测试 ===
 
     #[test]
     fn test_ipv4_invalid_address_not_matched() {

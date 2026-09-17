@@ -131,13 +131,13 @@ impl AsyncHealthCheck for InklogModule {
 mod tests {
     use super::*;
 
-    /// R-inklog-module-003 #1: `InklogModule::NAME == "inklog"`.
+    /// #1: `InklogModule::NAME == "inklog"`.
     #[test]
     fn inklog_module_meta_name() {
         assert_eq!(InklogModule::NAME, "inklog");
     }
 
-    /// R-inklog-module-003 #2: `InklogModule::dependencies()` declares
+    /// #2: `InklogModule::dependencies()` declares
     /// a dependency on `DbNexusModule`.
     #[test]
     fn inklog_module_meta_dependencies() {
@@ -151,7 +151,7 @@ mod tests {
         );
     }
 
-    /// R-inklog-module-003 #3: `InklogModule` satisfies `AsyncAutoBuilder`
+    /// #3: `InklogModule` satisfies `AsyncAutoBuilder`
     /// trait bounds — `Capability: Clone + Send + Sync + 'static` and
     /// `Error: std::error::Error + Send + 'static`.
     #[test]
@@ -162,7 +162,7 @@ mod tests {
         assert_err::<InklogError>();
     }
 
-    /// R-inklog-module-003 #4: Full integration — register OxcacheModule +
+    /// #4: Full integration — register OxcacheModule +
     /// DbNexusModule + InklogModule, set configs, build, require
     /// InklogModule → get a working `Arc<dyn Database + Send + Sync>`.
     #[cfg(feature = "sqlite")]
@@ -197,7 +197,7 @@ mod tests {
         assert!(db.is_healthy().await);
     }
 
-    /// R-inklog-module-003 #5: build fails with a clear error if
+    /// #5: build fails with a clear error if
     /// DbNexusModule is not registered (dependency missing).
     #[cfg(feature = "sqlite")]
     #[tokio::test]
