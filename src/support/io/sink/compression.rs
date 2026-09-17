@@ -6,14 +6,14 @@
 //! supporting multiple compression algorithms (Zstd, Gzip, etc.).
 
 use crate::InklogError;
-#[cfg(any(feature = "compression", feature = "gzip"))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 use std::fs::File;
-#[cfg(any(feature = "compression", feature = "gzip"))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 use std::io::{BufReader, Read};
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-#[cfg(any(feature = "compression", feature = "gzip"))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 use tracing::error;
 
 /// Trait for compression strategies.
@@ -42,13 +42,13 @@ pub trait CompressionStrategy: Send + Sync {
 }
 
 /// Zstd compression strategy.
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 #[derive(Debug, Clone)]
 pub struct ZstdCompression {
     level: i32,
 }
 
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 impl ZstdCompression {
     /// Create a new Zstd compression strategy with the given level (0-22).
     pub fn new(level: i32) -> Self {
@@ -62,14 +62,14 @@ impl ZstdCompression {
     }
 }
 
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 impl Default for ZstdCompression {
     fn default() -> Self {
         Self::new(3)
     }
 }
 
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 impl CompressionStrategy for ZstdCompression {
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>, InklogError> {
         zstd::encode_all(data, self.level).map_err(|e| InklogError::CompressionError(e.to_string()))
@@ -231,7 +231,7 @@ impl CompressionStrategy for GzipCompression {
 }
 
 /// Internal function to compress a file using Zstd.
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf, InklogError> {
     let compressed_path = path.with_extension("zst");
 
@@ -285,20 +285,20 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
 }
 
 /// Compress a single file (legacy function for backward compatibility).
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 pub fn compress_file(path: &Path, compression_level: i32) -> Result<PathBuf, InklogError> {
     compress_file_internal(path, compression_level)
 }
 
 /// Batch compress data.
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 pub fn compress_data(data: &[u8], compression_level: i32) -> Result<Vec<u8>, InklogError> {
     zstd::encode_all(data, compression_level)
         .map_err(|e| InklogError::CompressionError(e.to_string()))
 }
 
 /// Compress string data.
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 pub fn compress_string(data: &str, compression_level: i32) -> Result<Vec<u8>, InklogError> {
     compress_data(data.as_bytes(), compression_level)
 }
@@ -308,7 +308,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_compression() {
         let strategy = ZstdCompression::new(3);
         let data = b"Hello, World! This is a test message for compression.";
@@ -321,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_level_clamping() {
         let strategy = ZstdCompression::new(100);
         assert_eq!(strategy.level(), 22);
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_extension() {
         let zstd = ZstdCompression::default();
         assert_eq!(zstd.extension(), "zst");
@@ -353,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_data() {
         let data = b"Test data for compression";
         let compressed = compress_data(data, 3).unwrap();
@@ -396,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_default_level() {
         let zstd = ZstdCompression::default();
         assert_eq!(zstd.level(), 3);
@@ -404,7 +404,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_compress_empty_data() {
         let strategy = ZstdCompression::new(3);
         let compressed = strategy.compress(b"").unwrap();
@@ -413,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_decompress_invalid_data_errors() {
         let strategy = ZstdCompression::new(3);
         let invalid_data = b"not valid zstd data";
@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_string_function() {
         let data = "Hello, compression!";
         let compressed = compress_string(data, 3).unwrap();
@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_data_empty() {
         let compressed = compress_data(b"", 3).unwrap();
         let decompressed = zstd::decode_all(&compressed[..]).unwrap();
@@ -474,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_legacy_function() {
         use std::io::Write;
         let temp = tempfile::tempdir().unwrap();
@@ -497,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_compress_file_via_strategy() {
         use std::io::Write;
         let temp = tempfile::tempdir().unwrap();
@@ -518,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_compress_file_open_missing_errors() {
         let strategy = ZstdCompression::new(3);
         let result = strategy.compress_file(Path::new("/nonexistent/path/file.log"), 3);
@@ -557,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_large_data_roundtrip() {
         let strategy = ZstdCompression::new(9);
         let data: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
@@ -581,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_with_max_level() {
         let strategy = ZstdCompression::new(22);
         let data = b"max level compression test";
@@ -622,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_compress_file_internal_create_output_fails_errors() {
         // 覆盖行 219-220：compress_file_internal 中 File::create 失败
         // 同样的策略：把 compressed_path 创建为目录
@@ -647,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_zstd_compress_file_internal_invalid_level_clamped() {
         // zstd::stream::Encoder::new 对超出范围的 compression_level 会内部 clamp 到有效级别，
         // 而不是返回 Err。因此行 224-225（Encoder::new 失败分支）在实际中难以可靠触发。

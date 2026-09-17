@@ -7,15 +7,7 @@ pub mod audit_bridge;
 #[cfg(feature = "config-confers")]
 pub mod confers_config;
 pub mod infra;
-#[cfg(all(
-    feature = "kit",
-    any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    )
-))]
+#[cfg(all(feature = "kit", feature = "database"))]
 pub mod kit;
 
 // dbnexus AuditStorage 端口的 inklog 写入桥（审计事件 → 结构化日志 → 落库）
@@ -33,21 +25,8 @@ pub use infra::{
 #[cfg(any(test, feature = "test-utils"))]
 pub use infra::{MockCache, MockConfig, MockDatabaseAdapter};
 
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 pub use infra::DbNexusAdapter;
 
-#[cfg(all(
-    feature = "kit",
-    any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    )
-))]
+#[cfg(all(feature = "kit", feature = "database"))]
 pub use kit::{InklogBuildObserver, InklogModule, create_inklog_scope, populate_inklog_scope};

@@ -13,7 +13,7 @@
 //! ## 运行
 //!
 //! ```bash
-//! cargo run --bin http
+//! cargo run -p inklog-examples --bin http --features http
 //! ```
 //!
 //! ## 端点说明

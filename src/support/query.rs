@@ -107,7 +107,7 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
 
     match path.extension().and_then(|e| e.to_str()) {
         Some("zst") => {
-            #[cfg(feature = "compression")]
+            #[cfg(feature = "zstd")]
             {
                 let mut decoder =
                     zstd::stream::Decoder::new(std::io::Cursor::new(&raw)).map_err(|e| {
@@ -125,7 +125,7 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
                 })?;
                 Ok(out)
             }
-            #[cfg(not(feature = "compression"))]
+            #[cfg(not(feature = "zstd"))]
             {
                 let _ = path;
                 Err(InklogError::ConfigError(

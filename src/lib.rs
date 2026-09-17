@@ -139,18 +139,22 @@ pub mod i18n;
 // one of sqlite / postgres / mysql / duckdb to function.
 #[cfg(all(
     feature = "kit",
-    not(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))
+    not(feature = "database")
 ))]
 compile_error!(
     "The 'kit' feature requires at least one database driver feature: \
      \"sqlite\", \"postgres\", \"mysql\", or \"duckdb\". Enable one or more \
      of these features alongside 'kit'."
 );
+
+// 数据库后端互斥：dbnexus 严格禁止 embedded（sqlite/duckdb）与 server-side
+// （postgres/mysql）驱动混编（含 --all-features 全开场景），上游驱动层已有
+// 同名守卫；此处对齐该红线，在消费侧提前给出可读错误。
+#[cfg(all(
+    any(feature = "sqlite", feature = "duckdb"),
+    any(feature = "postgres", feature = "mysql")
+))]
+compile_error!("Cannot mix embedded (sqlite/duckdb) and server-side (postgres/mysql) database features");
 
 // Backwards compatibility - expose modules at root level
 pub use domain::config;
@@ -188,9 +192,9 @@ pub use support::security::{
 #[cfg(feature = "gzip")]
 pub use support::io::sink::GzipCompression;
 pub use support::io::sink::SinkWriteOutcome;
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 pub use support::io::sink::ZstdCompression;
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 pub use support::io::sink::compression::{compress_data, compress_file, compress_string};
 pub use support::io::sink::encryption::{derive_key_from_password, get_encryption_key};
 pub use support::io::sink::ring_buffered_file::{
@@ -219,22 +223,9 @@ pub use domain::config::{
 pub use domain::types::log_record::LogRecord;
 pub use error::InklogError;
 pub use error::InklogResult;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 pub use integrations::DbNexusAdapter;
-#[cfg(all(
-    feature = "kit",
-    any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    )
-))]
+#[cfg(all(feature = "kit", feature = "database"))]
 pub use integrations::InklogModule;
 
 // Infrastructure trait and adapter re-exports for dependency injection
@@ -242,15 +233,7 @@ pub use integrations::{
     Cache, Config, Database, InklogConfigAdapter, OxCacheAdapter, OxCacheAdapterBuilder,
 };
 // Mock 实现仅对测试面可见（src 内联测试经 cfg(test)，外部消费者需显式 test-utils）
-#[cfg(all(
-    feature = "kit",
-    any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    )
-))]
+#[cfg(all(feature = "kit", feature = "database"))]
 pub use integrations::{InklogBuildObserver, create_inklog_scope, populate_inklog_scope};
 #[cfg(any(test, feature = "test-utils"))]
 pub use integrations::{MockCache, MockConfig, MockDatabaseAdapter};

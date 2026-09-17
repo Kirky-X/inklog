@@ -3,20 +3,10 @@
 pub mod circuit_breaker;
 pub mod compression;
 pub mod console;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 pub mod database;
 pub mod encryption;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 pub mod entity;
 pub mod file;
 pub mod middleware;
@@ -33,16 +23,11 @@ pub mod sampling;
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 #[cfg(feature = "gzip")]
 pub use compression::GzipCompression;
-#[cfg(feature = "compression")]
+#[cfg(feature = "zstd")]
 pub use compression::ZstdCompression;
 pub use compression::{CompressionStrategy, NoCompression};
 pub use console::ConsoleSink;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 pub use database::DatabaseSink;
 pub use file::FileSink;
 pub use middleware::{

@@ -13,6 +13,11 @@
 //! cargo run --bin config_file
 //! ```
 
+// LoggerManager 初始化链的 async 嵌套 future 在 mysql 后端下类型层次较深，
+// 默认递归上限（128）会让 rustc 在布局计算时报 "queries overflow the depth
+// limit"，此处按编译器建议上调。
+#![recursion_limit = "256"]
+
 use inklog::LoggerManager;
 use inklog::config::InklogConfig;
 use inklog_examples::common::{print_section, print_separator};

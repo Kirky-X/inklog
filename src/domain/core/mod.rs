@@ -8,6 +8,7 @@ pub mod subscriber;
 
 // Submodules extracted from manager.rs for maintainability
 mod builder;
+#[cfg(feature = "http")]
 mod http_server;
 mod recovery;
 mod workers;

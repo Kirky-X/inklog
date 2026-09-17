@@ -856,7 +856,7 @@ impl FileSink {
     }
 
     /// 同步压缩文件（可在后台线程调用）
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
         let compressed_path = path.with_extension("zst");
 
@@ -928,7 +928,7 @@ impl FileSink {
     ///
     /// 当 `encrypt = true` 时，与 compression feature 启用时的 zstd 路径行为对齐：
     /// 对压缩产物加密生成 `.gz.enc`，加密失败时保留压缩文件为 `.gz.unencrypted`。
-    #[cfg(all(feature = "gzip", not(feature = "compression")))]
+    #[cfg(all(feature = "gzip", not(feature = "zstd")))]
     fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
         use super::CompressionStrategy;
         use super::GzipCompression;
@@ -964,7 +964,7 @@ impl FileSink {
     ///
     /// `gzip` 与 `compression` 均未启用时无法压缩：跳过压缩但保留加密语义
     /// （`encrypt = true` 时直接加密原文件），避免静默丢弃加密保证。
-    #[cfg(not(any(feature = "compression", feature = "gzip")))]
+    #[cfg(not(any(feature = "zstd", feature = "gzip")))]
     fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
         warn!(
             path = %path.display(),
@@ -2434,7 +2434,7 @@ mod tests {
     // ==================== compress_file 测试 ====================
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_roundtrip() {
         let temp_dir = tempdir().unwrap();
         let original_path = temp_dir.path().join("test.log");
@@ -2468,7 +2468,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_nonexistent_input_returns_error() {
         let temp_dir = tempdir().unwrap();
         let nonexistent = temp_dir.path().join("nonexistent.log");
@@ -2485,7 +2485,7 @@ mod tests {
 
     #[test]
     #[serial]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_with_encryption_roundtrip() {
         let temp_dir = tempdir().unwrap();
         let original_path = temp_dir.path().join("test.log");
@@ -2546,7 +2546,7 @@ mod tests {
 
     #[test]
     #[serial]
-    #[cfg(all(feature = "gzip", not(feature = "compression")))]
+    #[cfg(all(feature = "gzip", not(feature = "zstd")))]
     fn test_compress_file_gzip_fallback_with_encryption_roundtrip() {
         // 覆盖 gzip fallback 路径的 compress + encrypt 行为：
         // compression feature 未启用时，compress_file 应用 gzip 压缩 + AES-GCM 加密，
@@ -2621,7 +2621,7 @@ mod tests {
 
     #[test]
     #[serial]
-    #[cfg(not(any(feature = "compression", feature = "gzip")))]
+    #[cfg(not(any(feature = "zstd", feature = "gzip")))]
     fn test_compress_file_no_backend_leaves_file_uncompressed() {
         // 无任何压缩后端 feature：compress=true 时不压缩、原文件保留
         let temp_dir = tempdir().unwrap();
@@ -2644,7 +2644,7 @@ mod tests {
 
     #[test]
     #[serial]
-    #[cfg(not(any(feature = "compression", feature = "gzip")))]
+    #[cfg(not(any(feature = "zstd", feature = "gzip")))]
     fn test_compress_file_no_backend_still_encrypts() {
         // 无压缩后端但 encrypt=true：跳过压缩但保留加密保证
         let temp_dir = tempdir().unwrap();
@@ -3378,7 +3378,7 @@ mod tests {
     // ==================== compress_file 测试 ====================
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_basic() {
         // 覆盖 compress_file 基本压缩路径（不加密）
         let temp_dir = tempdir().unwrap();
@@ -3407,7 +3407,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_nonexistent_input() {
         // 覆盖 compress_file 错误路径（输入文件不存在）
         let temp_dir = tempdir().unwrap();
@@ -3530,7 +3530,7 @@ mod tests {
 
     #[test]
     #[serial]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_with_encryption() {
         // 覆盖 compress_file 的加密分支（行 640-652）
         let temp_dir = tempdir().unwrap();
@@ -3608,7 +3608,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     async fn test_rotate_inner_with_compression() {
         // 覆盖 rotate_inner 的压缩分支（行 748-755）
         let temp_dir = tempdir().unwrap();
@@ -3700,7 +3700,7 @@ mod tests {
 
     #[test]
     #[serial]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_with_encryption_failure_keeps_compressed() {
         // 覆盖行 666-676：当 encrypt=true 但密钥无效时，
         // compress_file 应将压缩文件重命名为 .unencrypted 后缀并返回错误
@@ -4308,7 +4308,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    #[cfg(feature = "compression")]
+    #[cfg(feature = "zstd")]
     fn test_compress_file_fails_when_output_dir_readonly() {
         // 覆盖行 643-644：File::create(compressed_path) 失败时返回 IoError
         // 通过将父目录设为只读来触发 File::create 失败

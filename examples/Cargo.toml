@@ -14,6 +14,8 @@ sqlite = ["inklog/sqlite", "dep:dbnexus", "dbnexus/sqlite"]
 postgres = ["inklog/postgres", "dep:dbnexus", "dbnexus/postgres"]
 mysql = ["inklog/mysql", "dep:dbnexus", "dbnexus/mysql"]
 duckdb = ["inklog/duckdb", "dep:dbnexus", "dbnexus/duckdb"]
+http = ["inklog/http"]
+cli = ["inklog/cli"]
 compression = ["inklog/compression", "inklog/gzip"]
 parquet = ["inklog/parquet"]
 
@@ -26,7 +28,7 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { version = "1.20", default-features = false, features = ["v4"] }
+uuid = { version = "1.26", default-features = false, features = ["v4"] }
 chrono = { workspace = true }
 aes-gcm = { workspace = true }
 base64 = { workspace = true }
@@ -61,6 +63,7 @@ path = "src/bin/database/database.rs"
 [[bin]]
 name = "http"
 path = "src/bin/network/http.rs"
+required-features = ["http"]
 
 [[bin]]
 name = "fallback"

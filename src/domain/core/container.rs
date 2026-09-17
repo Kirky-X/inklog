@@ -79,12 +79,7 @@ use std::sync::Arc;
 
 use crate::InklogConfig;
 use crate::InklogError;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use crate::integrations::Database;
 #[cfg(test)]
 use crate::integrations::MockCache;
@@ -140,12 +135,7 @@ pub struct InklogContainer {
     config: Arc<dyn Config>,
 
     /// 数据库实例（可选，需要 dbnexus feature）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     database: Option<Arc<dyn Database>>,
 }
 
@@ -181,12 +171,7 @@ impl InklogContainer {
         Ok(Self {
             cache,
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         })
     }
@@ -221,12 +206,7 @@ impl InklogContainer {
         Ok(Self {
             cache,
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         })
     }
@@ -278,12 +258,7 @@ impl InklogContainer {
             cache: Some(Arc::clone(&self.cache)),
             config: Some(Arc::clone(&self.config)),
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: self.database.clone(),
         };
 
@@ -335,12 +310,7 @@ impl InklogContainer {
     ///     let healthy = db.is_healthy().await;
     /// }
     /// ```
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn database(&self) -> Option<Arc<dyn Database>> {
         self.database.clone()
     }
@@ -362,12 +332,7 @@ impl InklogContainer {
     /// let db = DbNexusAdapter::new("postgres://localhost/logs", 10).await?;
     /// container.set_database(Arc::new(db));
     /// ```
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn set_database(&mut self, database: Arc<dyn Database>) {
         self.database = Some(database);
     }
@@ -425,12 +390,7 @@ impl Default for InklogContainer {
         Self {
             cache,
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         }
     }
@@ -442,12 +402,7 @@ impl std::fmt::Debug for InklogContainer {
         builder
             .field("cache", &"Arc<dyn Cache>")
             .field("config", &"Arc<dyn Config>");
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         builder.field(
             "database",
             &self.database.as_ref().map(|_| "Arc<dyn Database>"),
@@ -480,12 +435,7 @@ impl std::fmt::Debug for InklogContainer {
 pub struct InklogContainerBuilder {
     cache: Option<Arc<dyn Cache>>,
     config: Option<Arc<dyn Config>>,
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     database: Option<Arc<dyn Database>>,
 }
 
@@ -520,12 +470,7 @@ impl InklogContainerBuilder {
     /// # Arguments
     ///
     /// * `database` - 实现 `Database` trait 的数据库实例
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn database(mut self, database: Arc<dyn Database>) -> Self {
         self.database = Some(database);
         self
@@ -557,12 +502,7 @@ impl InklogContainerBuilder {
         Ok(InklogContainer {
             cache,
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: self.database,
         })
     }
@@ -817,12 +757,7 @@ mod tests {
     // dbnexus feature 下的 database 方法测试
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[tokio::test]
     async fn test_container_database_returns_none_by_default() {
         // 覆盖 database() 方法（行 301-302）
@@ -839,12 +774,7 @@ mod tests {
         assert!(container.database().is_none());
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[tokio::test]
     async fn test_container_set_database_and_get() {
         // 覆盖 set_database() 方法（行 323-324）
@@ -888,12 +818,7 @@ mod tests {
         assert_eq!(mock_db.record_count(), 1);
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[tokio::test]
     async fn test_container_builder_database() {
         // 覆盖 builder.database() 方法（行 409-411）

@@ -7,10 +7,7 @@
 // Arc 被 db 后端实现（DbNexusAdapter 连接池）与测试 mock 使用；
 // 无 db feature 且非测试面时才未用，故整行条件导入
 #[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb",
+    feature = "database",
     test,
     feature = "test-utils"
 ))]
@@ -84,44 +81,19 @@ pub trait Database: Send + Sync {
 // DbNexusAdapter - dbnexus 适配器实现 (条件编译)
 // ============================================================================
 
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use dbnexus::ConnectionPool;
 // PoolStatus 仅被四驱动门控的 DbNexusAdapter::pool_status 使用；
 // test-utils 不链接 dbnexus，混入门控会在 examples 等仅开 test-utils
 // 的构建下触发 E0433。
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use dbnexus::database::PoolStatus;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use dbnexus::database::pool::DbPool;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use dbnexus::foundation::config::DbConfig;
 
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use crate::domain::config::database::DatabaseDriver;
 
 /// dbnexus 适配器
@@ -149,12 +121,7 @@ use crate::domain::config::database::DatabaseDriver;
 ///     Ok(())
 /// }
 /// ```
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 pub struct DbNexusAdapter {
     pool: Arc<dyn ConnectionPool + Send + Sync>,
     table_name: String,
@@ -163,12 +130,7 @@ pub struct DbNexusAdapter {
     driver: DatabaseDriver,
 }
 
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 impl DbNexusAdapter {
     /// 创建新的 dbnexus 适配器
     ///
@@ -392,12 +354,7 @@ impl DbNexusAdapter {
 ///
 /// Rejects names that don't match `^[a-zA-Z_][a-zA-Z0-9_]*$` to prevent SQL injection
 /// via table name interpolation.
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 fn validate_table_name(name: &str) -> Result<(), InklogError> {
     if name.is_empty() {
         return Err(InklogError::ConfigError(crate::i18n::tr("db-table_empty")));
@@ -430,12 +387,7 @@ fn validate_table_name(name: &str) -> Result<(), InklogError> {
 ///
 /// 所有通过 `insert_batch` 写入的字符串字段必须经过此函数。
 /// 采用标准 SQL 转义规则：将单引号 `'` 替换为双单引号 `''`。
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 /// 转义 SQL 字符串字面量。
 ///
 /// ANSI/标准后端（SQLite/PostgreSQL/DuckDB）只需将 `'` 双写即可；
@@ -456,12 +408,7 @@ fn escape_sql_string(s: &str, driver: &DatabaseDriver) -> String {
 /// - PostgreSQL: `BIGSERIAL PRIMARY KEY`, `TIMESTAMPTZ`, `TEXT`
 /// - MySQL: `BIGINT AUTO_INCREMENT PRIMARY KEY`, `TIMESTAMP`, `TEXT`
 /// - DuckDB: `BIGINT AUTOINCREMENT PRIMARY KEY`, `TIMESTAMP`, `TEXT`
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 fn generate_create_table_sql(table_name: &str, driver: &DatabaseDriver) -> String {
     match driver {
         DatabaseDriver::SQLite => format!(
@@ -524,12 +471,7 @@ fn generate_create_table_sql(table_name: &str, driver: &DatabaseDriver) -> Strin
 }
 
 /// 从数据库 URL 推断驱动类型。
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 fn detect_driver_from_url(url: &str) -> DatabaseDriver {
     if url.starts_with("sqlite:") || url.starts_with("sqlite3:") {
         DatabaseDriver::SQLite
@@ -589,12 +531,7 @@ pub(crate) fn build_duckdb_param_statements(
         .collect()
 }
 
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 #[async_trait]
 impl Database for DbNexusAdapter {
     async fn insert_batch(&self, records: &[LogRecord]) -> Result<usize, InklogError> {
@@ -745,12 +682,7 @@ impl Database for DbNexusAdapter {
 // 非 dbnexus feature 时的占位实现
 // ============================================================================
 
-#[cfg(not(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-)))]
+#[cfg(not(feature = "database"))]
 /// DbNexusAdapter - 仅在启用 `dbnexus` feature 时可用
 ///
 /// 当未启用 `dbnexus` feature 时，此类型不存在。
@@ -759,12 +691,7 @@ pub struct DbNexusAdapter {
     _phantom: (),
 }
 
-#[cfg(not(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-)))]
+#[cfg(not(feature = "database"))]
 impl DbNexusAdapter {
     /// 此方法仅在启用 `dbnexus` feature 时可用
     #[deprecated(note = "Enable 'dbnexus' feature to use DbNexusAdapter")]
@@ -1097,12 +1024,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    #[cfg(not(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    )))]
+    #[cfg(not(feature = "database"))]
     #[allow(deprecated)]
     #[tokio::test]
     async fn test_dbnexus_adapter_not_available_without_feature() {
@@ -1320,12 +1242,7 @@ mod tests {
     // Table name validation
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_table_name_accepts_valid_names() {
         assert!(validate_table_name("logs").is_ok());
@@ -1335,12 +1252,7 @@ mod tests {
         assert!(validate_table_name("a").is_ok());
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_table_name_rejects_sql_injection() {
         // SQL injection attempts
@@ -1360,23 +1272,13 @@ mod tests {
     // escape_sql_string 单元测试
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_escape_sql_string_empty() {
         assert_eq!(escape_sql_string("", &DatabaseDriver::SQLite), "");
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_escape_sql_string_no_special_chars() {
         assert_eq!(
@@ -1389,24 +1291,14 @@ mod tests {
         );
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_escape_sql_string_single_quote() {
         assert_eq!(escape_sql_string("it's", &DatabaseDriver::SQLite), "it''s");
         assert_eq!(escape_sql_string("'", &DatabaseDriver::SQLite), "''");
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_escape_sql_string_multiple_quotes() {
         assert_eq!(
@@ -1419,12 +1311,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_escape_sql_string_unicode() {
         assert_eq!(
@@ -1439,12 +1326,7 @@ mod tests {
 
     /// timestamp 拼入 INSERT 前同样必须转义：含单引号/反斜杠的时间戳形状字符串
     /// 不得破坏 SQL 字符串字面量边界。
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_escape_sql_string_timestamp_quote_and_backslash() {
         // 含单引号与反斜杠的时间戳形状字符串
@@ -1491,12 +1373,7 @@ mod tests {
     // generate_create_table_sql 测试
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_generate_create_table_sql_sqlite() {
         let ddl = generate_create_table_sql("logs", &DatabaseDriver::SQLite);
@@ -1506,12 +1383,7 @@ mod tests {
         assert!(ddl.contains("line INTEGER"));
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_generate_create_table_sql_postgres() {
         let ddl = generate_create_table_sql("logs", &DatabaseDriver::PostgreSQL);
@@ -1521,12 +1393,7 @@ mod tests {
         assert!(ddl.contains("TEXT NOT NULL"));
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_generate_create_table_sql_mysql() {
         let ddl = generate_create_table_sql("logs", &DatabaseDriver::MySQL);

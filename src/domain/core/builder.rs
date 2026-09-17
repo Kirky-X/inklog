@@ -4,12 +4,7 @@
 
 use super::LoggerManager;
 use crate::InklogError;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use crate::integrations::Database;
 use crate::integrations::{Cache, Config};
 use crate::{ConsoleSinkConfig, FileSinkConfig, InklogConfig};
@@ -36,7 +31,7 @@ use std::sync::Arc;
 ///     let deps = LoggerDependencies {
 ///         cache: Some(Arc::new(MockCache::new())),
 ///         config: Some(Arc::new(MockConfig::new())),
-///         #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+///         #[cfg(feature = "database")]
 ///         database: None,
 ///     };
 ///     let logger = LoggerManager::with_dependencies(deps).await?;
@@ -67,12 +62,7 @@ pub struct LoggerDependencies {
     ///
     /// 用于日志记录的持久化存储。
     /// 如果未提供但配置了数据库 sink，LoggerManager 将创建默认连接池。
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub database: Option<Arc<dyn Database>>,
 }
 
@@ -83,12 +73,7 @@ impl std::fmt::Debug for LoggerDependencies {
             .field("cache", &self.cache.as_ref().map(|_| "Arc<dyn Cache>"))
             .field("config", &self.config.as_ref().map(|_| "Arc<dyn Config>"))
             .field("custom_sinks", &self.custom_sinks.len());
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         builder.field(
             "database",
             &self.database.as_ref().map(|_| "Arc<dyn Database>"),
@@ -270,12 +255,7 @@ mod tests {
     // database() 配置 setter 与 driver 推断测试（需要 db 后端 feature）
     // =========================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_pool_size_sets_config() {
         let builder = LoggerBuilder::new()
@@ -286,12 +266,7 @@ mod tests {
         assert!(db.enabled);
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_pool_size_creates_config_when_absent() {
         let builder = LoggerBuilder::new().with_pool_size(3);
@@ -301,12 +276,7 @@ mod tests {
         assert!(!db.enabled);
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_batch_size_sets_config() {
         let builder = LoggerBuilder::new()
@@ -318,12 +288,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_flush_interval_ms_sets_config() {
         let builder = LoggerBuilder::new()
@@ -340,12 +305,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_table_name_sets_config() {
         let builder = LoggerBuilder::new()
@@ -357,12 +317,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_admin_role_sets_config() {
         let builder = LoggerBuilder::new()
@@ -374,12 +329,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_driver_sets_config() {
         let builder = LoggerBuilder::new()
@@ -391,12 +341,7 @@ mod tests {
         assert!(builder.db_driver_explicit);
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_database_infers_postgres_driver() {
         // URL 可推断时使用推断值（旧实现恒为默认 SQLite）
@@ -405,12 +350,7 @@ mod tests {
         assert!(matches!(db.driver, crate::DatabaseDriver::PostgreSQL));
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_database_infers_mysql_driver() {
         let builder = LoggerBuilder::new().database("mysql://localhost/logs");
@@ -420,12 +360,7 @@ mod tests {
         ));
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_database_infers_sqlite_memory_driver() {
         // "sqlite::memory:" 无 "//"，scheme 解析为 "sqlite"
@@ -436,12 +371,7 @@ mod tests {
         ));
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_database_unknown_scheme_keeps_default_driver() {
         // 无法推断时保持默认值（SQLite）
@@ -451,12 +381,7 @@ mod tests {
         assert!(builder.validation_errors.is_empty());
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_infer_driver_common_schemes() {
         use crate::DatabaseDriver;
@@ -497,12 +422,7 @@ mod tests {
         assert_eq!(LoggerBuilder::infer_driver("weird://x"), None);
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_driver_conflicting_url_records_error() {
         // 显式 driver 与 URL 推断冲突 → validation error
@@ -513,12 +433,7 @@ mod tests {
         assert!(builder.validation_errors[0].contains("conflicts with"));
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_database_conflicting_explicit_driver_records_error() {
         // 先显式设置 driver，再提供冲突 scheme 的 URL → validation error
@@ -579,12 +494,7 @@ pub struct LoggerBuilder {
     pub(crate) validation_errors: Vec<String>,
     /// 是否通过 `with_driver` 显式设置过数据库 driver
     /// （用于与 URL scheme 推断结果做冲突校验）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub(crate) db_driver_explicit: bool,
 }
 
@@ -657,12 +567,7 @@ impl LoggerBuilder {
         self
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn database(mut self, url: impl Into<String>) -> Self {
         let url_str = url.into();
         let inferred = Self::infer_driver(&url_str);
@@ -699,12 +604,7 @@ impl LoggerBuilder {
     /// 与 `DatabaseDriver` 的 `FromStr` 接受的名字保持一致：
     /// postgres/postgresql、mysql、sqlite/sqlite3、duckdb。
     /// 无法识别的 scheme 返回 `None`，调用方保持默认值。
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     fn infer_driver(url: &str) -> Option<crate::DatabaseDriver> {
         let scheme = url.split(':').next()?;
         match scheme.to_ascii_lowercase().as_str() {
@@ -722,12 +622,7 @@ impl LoggerBuilder {
     ///
     /// 若与已配置 URL 的 scheme 推断结果冲突，会记录 validation error
     /// （`build()` 时统一返回 `Err`）。
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn with_driver(mut self, driver: crate::DatabaseDriver) -> Self {
         if let Some(ref db) = self.config.database_sink
             && let Some(target) = Self::infer_driver(&db.url)
@@ -751,12 +646,7 @@ impl LoggerBuilder {
     }
 
     /// 设置数据库连接池大小（默认 10）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn with_pool_size(mut self, pool_size: u32) -> Self {
         if let Some(ref mut db) = self.config.database_sink {
             db.pool_size = pool_size;
@@ -770,12 +660,7 @@ impl LoggerBuilder {
     }
 
     /// 设置数据库批量写入大小（默认 100）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn with_batch_size(mut self, batch_size: usize) -> Self {
         if let Some(ref mut db) = self.config.database_sink {
             db.batch_size = batch_size;
@@ -789,12 +674,7 @@ impl LoggerBuilder {
     }
 
     /// 设置数据库 flush 间隔（毫秒，默认 500）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn with_flush_interval_ms(mut self, flush_interval_ms: u64) -> Self {
         if let Some(ref mut db) = self.config.database_sink {
             db.flush_interval_ms = flush_interval_ms;
@@ -808,12 +688,7 @@ impl LoggerBuilder {
     }
 
     /// 设置数据库日志表名（默认 "logs"）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn with_table_name(mut self, table_name: impl Into<String>) -> Self {
         let table_name = table_name.into();
         if let Some(ref mut db) = self.config.database_sink {
@@ -828,12 +703,7 @@ impl LoggerBuilder {
     }
 
     /// 设置数据库管理员角色名（默认 "admin"）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn with_admin_role(mut self, admin_role: impl Into<String>) -> Self {
         let admin_role = admin_role.into();
         if let Some(ref mut db) = self.config.database_sink {
@@ -1150,12 +1020,7 @@ impl LoggerBuilder {
     ///     .with_database(Arc::new(MockDatabaseAdapter::new()))
     ///     .build().await?;
     /// ```
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn with_database(mut self, database: Arc<dyn Database>) -> Self {
         self.deps.database = Some(database);
         self
@@ -1214,21 +1079,11 @@ impl LoggerBuilder {
             || self.deps.config.is_some()
             || !self.deps.custom_sinks.is_empty()
             || {
-                #[cfg(any(
-                    feature = "sqlite",
-                    feature = "postgres",
-                    feature = "mysql",
-                    feature = "duckdb"
-                ))]
+                #[cfg(feature = "database")]
                 {
                     self.deps.database.is_some()
                 }
-                #[cfg(not(any(
-                    feature = "sqlite",
-                    feature = "postgres",
-                    feature = "mysql",
-                    feature = "duckdb"
-                )))]
+                #[cfg(not(feature = "database"))]
                 {
                     false
                 }

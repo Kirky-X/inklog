@@ -38,13 +38,18 @@ crossbeam-channel = { version = "0.5", default-features = false, features = ["st
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 dbnexus = { version = "0.6.0-rc.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 
+# docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥
+# （见 [features] 说明），全开必然编译失败。显式列举一组可共存的 feature——
+# 其中 sqlite 恰好满足 kit 的"至少一个驱动"编译期守卫。
 [package.metadata.docs.rs]
-features = ["default", "http", "cli", "compression", "parquet"]
-all-features = true
+features = ["default", "http", "cli", "compression", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "config-confers"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"sqlite\", \"postgres\", \"mysql\", \"duckdb\", \"kit\", \"compression\", \"parquet\", \"fast-masking\", \"dbnexus-audit\", \"config-confers\", \"kms\", \"net-sink\", \"otlp\"))"] }
+# feature 名由 cargo 自动注册进 check-cfg，无需手工枚举——手工清单一旦与真实
+# feature 集合漂移，反而会把合法 feature 误报成 unexpected。docsrs 仅由上方
+# rustdoc-args 在 docs.rs 文档构建时注入，本地编译不出现，无需注册。
+unexpected_cfgs = { level = "warn" }
 
 [lints]
 workspace = true
@@ -58,11 +63,14 @@ test-utils = []
 # ⚠️ 数据库后端 features（sqlite/postgres/mysql/duckdb）互斥：dbnexus 严格禁止
 # embedded 与 server-side 驱动混合（含 --all-features 全开）。多后端 crate 不适用
 # --all-features 验证，按后端分组启用 features 验证。
-sqlite = ["dep:dbnexus", "dbnexus/sqlite", "dbnexus/runtime-tokio-rustls"]
-postgres = ["dep:dbnexus", "dbnexus/postgres", "dbnexus/runtime-tokio-rustls"]
-mysql = ["dep:dbnexus", "dbnexus/mysql", "dbnexus/runtime-tokio-rustls"]
+sqlite = ["dep:dbnexus", "dbnexus/sqlite", "dbnexus/runtime-tokio-rustls", "database"]
+postgres = ["dep:dbnexus", "dbnexus/postgres", "dbnexus/runtime-tokio-rustls", "database"]
+mysql = ["dep:dbnexus", "dbnexus/mysql", "dbnexus/runtime-tokio-rustls", "database"]
 # DuckDB 数据库后端（通过 dbnexus 连接池）
-duckdb = ["dep:dbnexus", "dbnexus/duckdb", "dbnexus/runtime-tokio-rustls"]
+duckdb = ["dep:dbnexus", "dbnexus/duckdb", "dbnexus/runtime-tokio-rustls", "database"]
+# 内部聚合谓词：任一数据库后端（sqlite/postgres/mysql/duckdb）启用时为真；
+# 供 cfg 谓词收敛使用，本身不引入任何驱动依赖。
+database = []
 http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob"]
 # trait-kit lifecycle/observability integration for DbNexusAdapter and InklogModule.
@@ -70,7 +78,10 @@ cli = ["dep:clap", "dep:glob"]
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit", "trait-kit/observer"]
 # Zstd compression support for rotated log files (optional to avoid zstd-sys
 # symbol conflicts with downstream projects that bundle their own zstd).
-compression = ["dep:zstd"]
+zstd = ["dep:zstd"]
+# Deprecated 兼容别名：等价于 `zstd`，保留既有 `--features compression` 用法；
+# 新代码请直接启用 `zstd`。
+compression = ["zstd"]
 # Gzip compression backend (optional, pure-Rust flate2). FileSink falls back to
 # gzip for rotated-file compression when `compression` is off; without either
 # feature rotated files are left uncompressed.
@@ -100,12 +111,12 @@ crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
 rayon = { version = "1.12", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["executor"] }
-owo-colors = { version = "4.3", default-features = false, features = ["supports-colors"] }
+owo-colors = { version = "4.4", default-features = false, features = ["supports-colors"] }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.4", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+trait-kit = { version = "0.5.0-rc.5", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
 confers = { version = "0.6.0-rc.4", default-features = false, features = ["toml", "watch"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
@@ -121,9 +132,9 @@ zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
-parquet = { version = "59.0", default-features = false, features = ["async", "arrow"], optional = true }
-arrow-array = { version = "59.0", default-features = false, optional = true }
-arrow-schema = { version = "59.0", default-features = false, optional = true }
+parquet = { version = "60.0", default-features = false, features = ["async", "arrow"], optional = true }
+arrow-array = { version = "60.0", default-features = false, optional = true }
+arrow-schema = { version = "60.0", default-features = false, optional = true }
 dbnexus = { workspace = true, optional = true }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
@@ -139,7 +150,7 @@ fluent-bundle = { version = "0.16", default-features = false }
 unic-langid = { version = "0.9", default-features = false }
 intl-memoizer = { version = "0.5", default-features = false }
 sys-locale = { version = "0.3", default-features = false }
-aho-corasick = { version = "1.0", default-features = false, features = ["std", "perf-literal"], optional = true }
+aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 
 [dev-dependencies]

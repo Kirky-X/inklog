@@ -14,12 +14,7 @@ use crate::LogRecord;
 use crate::LogTemplate;
 use crate::domain::core::LoggerSubscriber;
 use crate::integrations::Cache;
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 use crate::integrations::Database;
 use crate::support::io::ConsoleSink;
 use crate::support::io::FileSink;
@@ -76,12 +71,7 @@ pub struct LoggerManager {
     /// 注入的缓存依赖
     cache: Option<Arc<dyn Cache>>,
     /// 注入的数据库依赖（需要 dbnexus feature）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     database: Option<Arc<dyn Database>>,
     /// 当前级别指令集，`set_level` 在此之上做 upsert 后重建 EnvFilter 热换装。
     level_state: Mutex<LevelDirectives>,
@@ -296,12 +286,7 @@ impl LoggerManager {
         // 它们可以通过 LoggerManager 传递给需要的服务（如 DatabaseSink）
         let cache = deps.cache;
         let custom_sinks = deps.custom_sinks;
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let database = deps.database;
 
         // 使用解析后的配置调用现有的构建逻辑
@@ -309,12 +294,7 @@ impl LoggerManager {
         // `install_globals_and_start`）需要它；detached 变体不安装全局前端。
         let (mut manager, subscriber, _filter_compat, filter_layer) = Self::build_detached_full(
             config.clone(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database.clone(),
             custom_sinks,
         )
@@ -324,12 +304,7 @@ impl LoggerManager {
         manager.cache = cache;
 
         // database 已经在 build_detached 中使用，同时也存储在 manager 中
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         {
             manager.database = database;
         }
@@ -373,7 +348,6 @@ impl LoggerManager {
         custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
     ) -> Result<Self, InklogError> {
         // Security audit: Log logger initialization
-        #[cfg(feature = "http")]
         tracing::info!(
             event = "security_logger_initialized",
             sinks = ?config.sinks_enabled(),
@@ -383,12 +357,7 @@ impl LoggerManager {
 
         let (manager, subscriber, _filter_compat, filter_layer) = Self::build_detached_full(
             config.clone(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             None,
             custom_sinks,
         )
@@ -483,12 +452,7 @@ impl LoggerManager {
     /// 这主要用于测试和基准测试。
     pub async fn build_detached(
         config: InklogConfig,
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         database: Option<Arc<dyn Database>>,
     ) -> Result<
         (
@@ -500,12 +464,7 @@ impl LoggerManager {
     > {
         Self::build_detached_with_sinks(
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database,
             Vec::new(),
         )
@@ -518,12 +477,7 @@ impl LoggerManager {
     /// 通用 SinkWorker 消费线程，第三方 Sink 零核心改动接入。
     pub async fn build_detached_with_sinks(
         config: InklogConfig,
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         database: Option<Arc<dyn Database>>,
         custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
     ) -> Result<
@@ -536,12 +490,7 @@ impl LoggerManager {
     > {
         let (manager, subscriber, filter, _filter_layer) = Self::build_detached_full(
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database,
             custom_sinks,
         )
@@ -553,12 +502,7 @@ impl LoggerManager {
     /// 安装到全局 registry，使 [`Self::set_level`] 热调即时生效）。
     pub(crate) async fn build_detached_full(
         config: InklogConfig,
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         database: Option<Arc<dyn Database>>,
         custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
     ) -> Result<
@@ -728,12 +672,7 @@ impl LoggerManager {
         // 上下文创建默认 DbNexusAdapter（连接池归属调用方 runtime）。
         // 核正：此逻辑原先位于 start_workers（同步）内部经 Handle::block_on 创建——
         // start_workers 在 runtime 线程上被调用时必然 panic（runtime-in-runtime），故上移。
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let database = match database {
             Some(db) => {
                 // 注入路径与自动创建路径对齐：db sink 启用且配置的 pool_size 超过
@@ -800,12 +739,7 @@ impl LoggerManager {
             file_sink_factory: Box::new(move || {
                 FileSink::new(file_sink_cfg.clone()).map(|s| Box::new(s) as Box<dyn LogSink>)
             }),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_sink_factory: Box::new({
                 // 核正：factory 在 spawn_blocking 线程上执行，该线程无 reactor context，
                 // Handle::current() 必 panic（worker 静默死亡、记录永不消费）——
@@ -818,12 +752,7 @@ impl LoggerManager {
                     Ok(Box::new(sink) as Box<dyn LogSink>)
                 }
             }),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_receiver,
             custom_sinks: custom_channels
                 .into_iter()
@@ -833,12 +762,7 @@ impl LoggerManager {
                     receiver,
                 })
                 .collect(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database,
         })?;
 
@@ -853,12 +777,7 @@ impl LoggerManager {
             #[cfg(feature = "http")]
             http_server_handle: Mutex::new(None),
             cache: None,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
             level_state,
             level_reloader: Some(level_reloader),
@@ -1050,12 +969,7 @@ impl LoggerManager {
     ///
     /// 该字段由 `with_dependencies`/builder 的 DI 路径写入，供下游服务
     /// 按需取用；未注入时返回 `None`。
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub fn database(&self) -> Option<Arc<dyn Database>> {
         self.database.clone()
     }
@@ -1440,12 +1354,7 @@ mod tests {
             cache: Some(Arc::new(MockCache::new())),
             config: None,
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -1463,12 +1372,7 @@ mod tests {
             cache: Some(Arc::clone(&cache)),
             config: None,
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -1496,12 +1400,7 @@ mod tests {
         let _ = manager.shutdown();
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_manager_database_getter_returns_injected_instance() {
         use crate::integrations::MockDatabaseAdapter;
@@ -1533,12 +1432,7 @@ mod tests {
             cache: None,
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
         let manager = LoggerManager::with_dependencies(deps)
@@ -1781,12 +1675,7 @@ mod tests {
     // LoggerBuilder 特性门控方法测试
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_database_sets_config() {
         let builder = LoggerBuilder::new().database("postgres://localhost/logs");
@@ -1800,12 +1689,7 @@ mod tests {
         assert_eq!(db.name, "default");
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_builder_with_database_injects_dep() {
         use crate::integrations::MockDatabaseAdapter;
@@ -2839,12 +2723,7 @@ worker_threads = 1
             cache: None,
             config: Some(Arc::new(mock_config)),
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
 
@@ -2880,12 +2759,7 @@ worker_threads = 1
             cache: None,
             config: Some(Arc::new(mock_config)),
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
 
@@ -2939,12 +2813,7 @@ worker_threads = 1
             cache: None,
             config: Some(Arc::new(mock_config)),
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
 
@@ -2971,12 +2840,7 @@ worker_threads = 1
             cache: None,
             config: Some(Arc::new(mock_config)),
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
 
@@ -2999,12 +2863,7 @@ worker_threads = 1
     // 需要 dbnexus feature
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_database() {
         // 验证通过 LoggerDependencies.database 注入的 Database 实现不会导致创建失败
@@ -3046,12 +2905,7 @@ worker_threads = 1
         };
         let (_manager, _subscriber, _filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             None,
         )
         .await
@@ -3076,12 +2930,7 @@ worker_threads = 1
 
         let (manager, _subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             None,
         )
         .await
@@ -3128,12 +2977,7 @@ worker_threads = 1
 
         let (manager, _subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             None,
         )
         .await
@@ -3163,12 +3007,7 @@ worker_threads = 1
 
         let (manager, _subscriber, filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             None,
         )
         .await
@@ -3371,12 +3210,7 @@ worker_threads = 1
 
         let (manager, _subscriber, _filter) = LoggerManager::build_detached(
             config,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             None,
         )
         .await
@@ -3395,12 +3229,7 @@ worker_threads = 1
     // （database 字段仅在 dbnexus feature 下存在）
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_logger_dependencies_debug_includes_database_field() {
         use crate::integrations::{MockCache, MockDatabaseAdapter};
@@ -3440,12 +3269,7 @@ worker_threads = 1
             cache: Some(Arc::new(MockCache::new())),
             config: Some(Arc::new(InklogConfigAdapter::from_config(config))),
             custom_sinks: Vec::new(),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
         };
 
@@ -3461,12 +3285,7 @@ worker_threads = 1
     // build_with_deps 同时注入 cache/config/database 测试 (lines 332-345, dbnexus)
     // ============================================================================
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_all_three_deps() {
         use crate::integrations::{InklogConfigAdapter, MockCache, MockDatabaseAdapter};
@@ -3735,20 +3554,10 @@ mod set_level_tests {
         config
             .target_levels
             .insert("hyper".to_string(), "warn".to_string());
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let (manager, _subscriber, filter) =
             LoggerManager::build_detached(config, None).await.unwrap();
-        #[cfg(not(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        )))]
+        #[cfg(not(feature = "database"))]
         let (manager, _subscriber, filter) = LoggerManager::build_detached(config).await.unwrap();
 
         // 初始指令集 = 全局 + target_levels

@@ -168,8 +168,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `http` | ❌ | Axum HTTP 健康与指标端点（axum + axum-server，TLS 走 rustls） |
 | `cli` | ❌ | `inklog-cli` 命令行工具（clap + glob） |
 | `kit` | ❌ | trait-kit 生命周期与可观测集成（`InklogModule`），需至少一个数据库后端 feature |
-| `compression` | ❌ | Zstd 压缩轮转日志文件（zstd） |
-| `gzip` | ❌ | Gzip 压缩后端（flate2 纯 Rust；未启用 `compression` 时 FileSink 轮转回退 gzip） |
+| `zstd` | ❌ | Zstd 压缩轮转日志文件（zstd）；`compression` 为其 deprecated 兼容别名 |
+| `gzip` | ❌ | Gzip 压缩后端（flate2 纯 Rust；未启用 `zstd` 时 FileSink 轮转回退 gzip） |
 | `parquet` | ❌ | Parquet/Arrow 导出（数据库 Sink 归档） |
 | `fast-masking` | ❌ | Aho-Corasick 多模式脱敏加速 |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage 端口适配器，审计事件经 inklog DB sink 落库，可与任一后端组合 |

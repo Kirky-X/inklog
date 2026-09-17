@@ -16,12 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// DatabaseSink 工厂闭包类型
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 type DbSinkFactory = Box<
     dyn Fn(
             Arc<dyn crate::integrations::Database>,
@@ -48,28 +43,13 @@ pub(crate) struct WorkerParams {
     pub(crate) file_sink_factory:
         Box<dyn Fn() -> Result<Box<dyn LogSink>, InklogError> + Send + Sync>,
     /// DatabaseSink 工厂闭包（用于初始创建和恢复，内部处理 set_metrics）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub(crate) db_sink_factory: DbSinkFactory,
     /// 注入的数据库依赖（DI 模式）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub(crate) database: Option<Arc<dyn crate::integrations::Database>>,
     /// 数据库 sink 专用数据 channel 接收端（独立于 file worker 的 receiver）
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     pub(crate) db_receiver: Option<Receiver<Arc<LogRecord>>>,
     /// 动态注册的第三方 sink：每项拥有独立 channel 接收端，
     /// 由通用 SinkWorker 消费。每个条目独立命名用于健康上报。
@@ -315,12 +295,7 @@ const FILE_SINK_WORKER: SinkWorkerDescriptor = SinkWorkerDescriptor {
     auto_recovery_ok_key: "sink-file_auto_recovery_ok",
 };
 
-#[cfg(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "duckdb"
-))]
+#[cfg(feature = "database")]
 const DB_SINK_WORKER: SinkWorkerDescriptor = SinkWorkerDescriptor {
     name: "database",
     label: "Database",
@@ -628,36 +603,16 @@ impl LoggerManager {
             error_sink,
             effective_capacity,
             file_sink_factory,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_sink_factory,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_receiver,
             custom_sinks,
         } = params;
         let file_config = config.file_sink.clone();
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let db_config = config.database_sink.clone();
 
         // database 依赖由调用方（build_detached，async 上下文）保证有效：DI 注入优先，
@@ -804,47 +759,17 @@ impl LoggerManager {
         };
 
         // Thread 2: DB Sink
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let (shutdown_tx_db, shutdown_db) = bounded(1);
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let metrics_db = metrics.clone();
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let console_sink_db = console_sink.clone();
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let error_sink_db = error_sink.clone();
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let control_rx_db = control_rx.clone();
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let handle_db = {
             let runtime_handle = runtime_handle.clone();
             tokio::task::spawn_blocking(move || {
@@ -1028,41 +953,21 @@ impl LoggerManager {
             }
         });
 
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let mut handles = vec![handle_console, handle_file, handle_db, handle_health];
-        #[cfg(not(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        )))]
+        #[cfg(not(feature = "database"))]
         let mut handles = vec![handle_console, handle_file, handle_health];
         handles.extend(custom_handles);
 
         // shutdown_txs 与 handles 一一对应，保持 cfg 一致性
-        #[cfg(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        ))]
+        #[cfg(feature = "database")]
         let mut shutdown_txs = vec![
             shutdown_tx_console,
             shutdown_tx_file,
             shutdown_tx_db,
             shutdown_tx_health,
         ];
-        #[cfg(not(any(
-            feature = "sqlite",
-            feature = "postgres",
-            feature = "mysql",
-            feature = "duckdb"
-        )))]
+        #[cfg(not(feature = "database"))]
         let mut shutdown_txs = vec![shutdown_tx_console, shutdown_tx_file, shutdown_tx_health];
         shutdown_txs.extend(custom_shutdown_txs);
 
@@ -1308,28 +1213,13 @@ mod tests {
             file_sink_factory: Box::new(|| {
                 Err(InklogError::ConfigError("unused in test".to_string()))
             }),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_sink_factory: Box::new(|_db, _metrics| {
                 Err(InklogError::ConfigError("unused in test".to_string()))
             }),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_receiver: None,
             custom_sinks: Vec::new(),
         };
@@ -1440,28 +1330,13 @@ mod tests {
                     "factory always fails in this test".to_string(),
                 ))
             }),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_sink_factory: Box::new(|_db, _metrics| {
                 Err(InklogError::ConfigError("unused in test".to_string()))
             }),
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             database: None,
-            #[cfg(any(
-                feature = "sqlite",
-                feature = "postgres",
-                feature = "mysql",
-                feature = "duckdb"
-            ))]
+            #[cfg(feature = "database")]
             db_receiver: None,
             custom_sinks: Vec::new(),
         };
@@ -1549,22 +1424,12 @@ mod tests {
 
     /// 捕获写入内容的 error sink（验证 error.log 记录）。
     /// 仅 db worker 测试使用，随其 cfg 门控。
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     struct CapturingSink {
         messages: Mutex<Vec<String>>,
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[async_trait::async_trait]
     impl LogSink for CapturingSink {
         async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
@@ -1582,20 +1447,10 @@ mod tests {
     }
 
     /// 写入必然失败的 db sink（模拟运行期写库失败）。
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     struct FailingDbSink;
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[async_trait::async_trait]
     impl LogSink for FailingDbSink {
         async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
@@ -1614,12 +1469,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(
-        feature = "sqlite",
-        feature = "postgres",
-        feature = "mysql",
-        feature = "duckdb"
-    ))]
+    #[cfg(feature = "database")]
     #[test]
     fn test_db_worker_write_failure_writes_error_log_in_main_loop() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
