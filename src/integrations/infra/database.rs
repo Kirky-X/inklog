@@ -6,11 +6,7 @@
 
 // Arc 被 db 后端实现（DbNexusAdapter 连接池）与测试 mock 使用；
 // 无 db feature 且非测试面时才未用，故整行条件导入
-#[cfg(any(
-    feature = "database",
-    test,
-    feature = "test-utils"
-))]
+#[cfg(any(feature = "database", test, feature = "test-utils"))]
 use std::sync::Arc;
 
 use crate::InklogError;

@@ -452,8 +452,7 @@ impl LoggerManager {
     /// 这主要用于测试和基准测试。
     pub async fn build_detached(
         config: InklogConfig,
-        #[cfg(feature = "database")]
-        database: Option<Arc<dyn Database>>,
+        #[cfg(feature = "database")] database: Option<Arc<dyn Database>>,
     ) -> Result<
         (
             Self,
@@ -477,8 +476,7 @@ impl LoggerManager {
     /// 通用 SinkWorker 消费线程，第三方 Sink 零核心改动接入。
     pub async fn build_detached_with_sinks(
         config: InklogConfig,
-        #[cfg(feature = "database")]
-        database: Option<Arc<dyn Database>>,
+        #[cfg(feature = "database")] database: Option<Arc<dyn Database>>,
         custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
     ) -> Result<
         (
@@ -502,8 +500,7 @@ impl LoggerManager {
     /// 安装到全局 registry，使 [`Self::set_level`] 热调即时生效）。
     pub(crate) async fn build_detached_full(
         config: InklogConfig,
-        #[cfg(feature = "database")]
-        database: Option<Arc<dyn Database>>,
+        #[cfg(feature = "database")] database: Option<Arc<dyn Database>>,
         custom_sinks: Vec<Arc<dyn crate::support::io::LogSink>>,
     ) -> Result<
         (

@@ -33,9 +33,7 @@ pub use database_impl::convert_logs_to_parquet;
 #[cfg(feature = "database")]
 pub(crate) use database_impl::effective_db_worker_limit;
 // Import constants for test access (tests use `use super::*;`)
-#[cfg(all(feature = "database",
-    test
-))]
+#[cfg(all(feature = "database", test))]
 use database_impl::{ADAPTIVE_WINDOW_SIZE, MAX_BATCH_SIZE, MAX_BUFFER_SIZE, MIN_BATCH_SIZE};
 
 /// DatabaseSink 的可变内部状态

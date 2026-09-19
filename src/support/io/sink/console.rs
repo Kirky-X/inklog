@@ -445,7 +445,6 @@ mod tests {
         }
     }
 
-
     // 2026-09-19 审计：原 test_apply_color_emits_ansi_codes 已删除——其依赖的
     // owo_colors::set_override/unset_override 位于 owo-colors 的 supports-colors
     // feature 之后，而本 crate 刻意不启用该 feature（见 Cargo.toml 注释，避免

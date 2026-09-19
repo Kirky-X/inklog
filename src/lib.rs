@@ -137,10 +137,7 @@ pub mod i18n;
 // Emit a clear compile error when the `kit` feature is enabled without any
 // database driver.  DbNexusAdapter and InklogModule require at least
 // one of sqlite / postgres / mysql / duckdb to function.
-#[cfg(all(
-    feature = "kit",
-    not(feature = "database")
-))]
+#[cfg(all(feature = "kit", not(feature = "database")))]
 compile_error!(
     "The 'kit' feature requires at least one database driver feature: \
      \"sqlite\", \"postgres\", \"mysql\", or \"duckdb\". Enable one or more \
@@ -154,7 +151,9 @@ compile_error!(
     any(feature = "sqlite", feature = "duckdb"),
     any(feature = "postgres", feature = "mysql")
 ))]
-compile_error!("Cannot mix embedded (sqlite/duckdb) and server-side (postgres/mysql) database features");
+compile_error!(
+    "Cannot mix embedded (sqlite/duckdb) and server-side (postgres/mysql) database features"
+);
 
 // Backwards compatibility - expose modules at root level
 pub use domain::config;
