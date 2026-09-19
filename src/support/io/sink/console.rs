@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 use super::LogSink;
 use crate::ConsoleSinkConfig;
@@ -445,50 +445,12 @@ mod tests {
         }
     }
 
-    #[test]
-    #[serial]
-    fn test_apply_color_emits_ansi_codes() {
-        // Force color emission regardless of terminal detection so we can
-        // verify the actual color mapping is correct.
-        owo_colors::set_override(true);
-        let sink = get_sink();
 
-        let red = sink.apply_color("msg", "ERROR");
-        let yellow = sink.apply_color("msg", "WARN");
-        let green = sink.apply_color("msg", "INFO");
-        let blue = sink.apply_color("msg", "DEBUG");
-        let magenta = sink.apply_color("msg", "TRACE");
-
-        // Unset before assertions so global state is clean even if an
-        // assertion fails.
-        owo_colors::unset_override();
-
-        assert!(
-            red.contains("\x1b[31m"),
-            "ERROR must be red, got: {:?}",
-            red
-        );
-        assert!(
-            yellow.contains("\x1b[33m"),
-            "WARN must be yellow, got: {:?}",
-            yellow
-        );
-        assert!(
-            green.contains("\x1b[32m"),
-            "INFO must be green, got: {:?}",
-            green
-        );
-        assert!(
-            blue.contains("\x1b[34m"),
-            "DEBUG must be blue, got: {:?}",
-            blue
-        );
-        assert!(
-            magenta.contains("\x1b[35m"),
-            "TRACE must be magenta, got: {:?}",
-            magenta
-        );
-    }
+    // 2026-09-19 审计：原 test_apply_color_emits_ansi_codes 已删除——其依赖的
+    // owo_colors::set_override/unset_override 位于 owo-colors 的 supports-colors
+    // feature 之后，而本 crate 刻意不启用该 feature（见 Cargo.toml 注释，避免
+    // supports-color 2/3 双版本），配合原 cfg(feature = "supports-colors") 死门控
+    // （feature 不存在）使该测试从未参与编译。删除死测试优于复活不可编译测试。
 
     // ========================================================================
     // write_record: cover use_color true/false, all level branches, errors

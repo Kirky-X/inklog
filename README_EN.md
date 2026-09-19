@@ -454,7 +454,7 @@ The full version history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md) (Keep a
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE) with the additional [Commons Clause](LICENSE) condition: the software may not be sold without separate authorization. Copyright (c) 2026 Kirky.X.
+This project is licensed under the [MIT License](LICENSE) with the additional [Commons Clause](LICENSE) condition: the software may not be sold without separate authorization. Copyright (c) 2026 Kirky.X🌠.
 
 ---
 
@@ -524,7 +524,7 @@ If you find this project useful, please consider giving it a ⭐️!
 
 **Built with ❤️ by the Inklog Team**
 
-<sub>© 2026 Inklog Project. All rights reserved.</sub>
+<sub>© 2026 Kirky.X🌠. All rights reserved.</sub>
 
 **[⬆ Back to Top](#-table-of-contents)**
 

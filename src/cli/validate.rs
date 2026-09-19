@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -1665,15 +1665,15 @@ level = "INFO"
         }
     }
 
-    // ==================== check_prerequisites 集成测试 (L429-485) ====================
+    // ==================== check_prerequisites 集成测试 (-485) ====================
 
     #[test]
     fn test_check_prerequisites_runs_without_panic() {
-        // 覆盖 check_prerequisites() 整个函数体（L429-485）：
-        // - rustc/cargo 版本检查（L432-448）
-        // - openssl/zstd 可选依赖检查（L450-461）的 if 分支
-        // - 系统配置/本地配置/示例配置存在性检查（L463-483）的 if/else 分支
-        // - 完成输出（L485）
+        // 覆盖 check_prerequisites() 整个函数体（-485）
+        // - rustc/cargo 版本检查（-448）
+        // - openssl/zstd 可选依赖检查（-461）的 if 分支
+        // - 系统配置/本地配置/示例配置存在性检查（-483）的 if/else 分支
+        // - 完成输出
         //
         // 各项检查结果取决于运行环境（openssl/zstd/配置文件存在性）；
         // 验证其不 panic 即可。
@@ -1686,7 +1686,7 @@ level = "INFO"
 
     #[test]
     fn test_validate_file_sink_encrypt_without_key_env() {
-        // 覆盖 L191-198: encrypt=true 但 encryption_key_env 未设置
+        // 覆盖 -198: encrypt=true 但 encryption_key_env 未设置
         let content = "[file]\nenabled = true\nencrypt = true";
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
@@ -1697,7 +1697,7 @@ level = "INFO"
 
     #[test]
     fn test_validate_file_sink_encrypt_with_empty_key_env() {
-        // 覆盖 L207-211: encrypt=true 但 encryption_key_env 为空字符串
+        // 覆盖 -211: encrypt=true 但 encryption_key_env 为空字符串
         let content = "[file]\nenabled = true\nencrypt = true\nencryption_key_env = \"\"";
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());
@@ -1708,7 +1708,7 @@ level = "INFO"
 
     #[test]
     fn test_validate_file_sink_encrypt_with_valid_key_env() {
-        // 覆盖 L213: encrypt=true 且 encryption_key_env 有效 → 成功路径
+        // 覆盖 encrypt=true 且 encryption_key_env 有效 → 成功路径
         let content = "[file]\nenabled = true\nencrypt = true\nencryption_key_env = \"INKLOG_ENCRYPTION_KEY\"";
         let file = write_config(content);
         let result = validate_config(&file.path().to_path_buf());

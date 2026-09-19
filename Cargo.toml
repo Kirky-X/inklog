@@ -16,7 +16,7 @@ members = [".", "examples"]
 version = "0.3.0-rc.4"
 edition = "2024"
 rust-version = "1.97.1"
-authors = ["Kirky.X"]
+authors = ["Kirky-X <Kirky-X@outlook.com>"]
 license = "MIT"
 repository = "https://github.com/Kirky-X/inklog"
 
@@ -36,7 +36,7 @@ tempfile = { version = "3.27", default-features = false }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
-dbnexus = { version = "0.6.0-rc.4", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+dbnexus = { version = "0.6.0-rc.4", path = "../dbnexus", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥
 # （见 [features] 说明），全开必然编译失败。显式列举一组可共存的 feature——
@@ -111,13 +111,15 @@ crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
 rayon = { version = "1.12", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["executor"] }
-owo-colors = { version = "4.4", default-features = false, features = ["supports-colors"] }
+# supports-colors feature 不启用：inklog 自身经 is-terminal 检测 TTY，
+# 且 owo-colors 4.4 的该 feature 会同时拉入 supports-color 2 与 3 两个版本
+owo-colors = { version = "4.4", default-features = false }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.5", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
-confers = { version = "0.6.0-rc.4", default-features = false, features = ["toml", "watch"], optional = true }
+trait-kit = { version = "0.5.0-rc.5", path = "../trait-kit", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+confers = { version = "0.6.0-rc.4", path = "../confers", default-features = false, features = ["toml", "watch"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -127,7 +129,7 @@ axum-server = { version = "0.8", default-features = false, features = ["tls-rust
 is-terminal = { version = "0.4", default-features = false }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
-oxcache = { version = "0.5.0-rc.4", default-features = false, features = ["memory", "serialization"] }
+oxcache = { version = "0.5.0-rc.4", path = "../oxcache", default-features = false, features = ["memory", "serialization"] }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
@@ -144,11 +146,10 @@ clap = { version = "4.6", default-features = false, features = ["derive", "env",
 glob = { version = "0.3", default-features = false, optional = true }
 ipnet = { version = "2.12", default-features = false, features = ["std"] }
 subtle = { version = "2.6", default-features = false }
-icu = { version = "2.3", default-features = false }
+icu = { version = "2.3", default-features = false, features = ["compiled_data"] }
 writeable = { version = "0.6", default-features = false }
 fluent-bundle = { version = "0.16", default-features = false }
 unic-langid = { version = "0.9", default-features = false }
-intl-memoizer = { version = "0.5", default-features = false }
 sys-locale = { version = "0.3", default-features = false }
 aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
@@ -162,7 +163,7 @@ axum = { version = "0.8", default-features = false }
 log = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 filetime = { version = "0.2", default-features = false }
-bytes = { version = "1.12", default-features = false, features = ["std"] }
+bytes = { version = "1", default-features = false, features = ["std"] }
 assert_cmd = { version = "2.2", default-features = false }
 predicates = { version = "3.1", default-features = false }
 ctor = "1.0.13"

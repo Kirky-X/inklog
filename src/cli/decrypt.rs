@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 use aes_gcm::Aes256Gcm;
 use aes_gcm::aead::{Aead, KeyInit};
@@ -1164,7 +1164,7 @@ mod tests {
 
     #[test]
     fn test_validate_file_path_rejects_suspicious_chars() {
-        // 覆盖 L27-29：validate_file_path 的可疑字符错误路径（在 canonicalize 之前拦截）
+        // 覆盖 -29：validate_file_path 的可疑字符错误路径（在 canonicalize 之前拦截）
         let temp_dir = tempfile::tempdir().unwrap();
         let base_dir = temp_dir.path();
         let malicious_path = base_dir.join("file\0.log");
@@ -1177,7 +1177,7 @@ mod tests {
 
     #[test]
     fn test_get_encryption_key_base64_wrong_length() {
-        // 覆盖 L271-277: Base64 解码成功但长度不是 32
+        // 覆盖 -277: Base64 解码成功但长度不是 32
         let wrong_key = general_purpose::STANDARD.encode([0u8; 16]);
         // SAFETY: test-only env var mutation
         unsafe { std::env::set_var("TEST_WRONG_LEN_KEY", &wrong_key) };
@@ -1190,7 +1190,7 @@ mod tests {
 
     #[test]
     fn test_get_encryption_key_password_via_cli() {
-        // 覆盖 L281-288: 通过 get_encryption_key_cli 调用 PBKDF2 派生
+        // 覆盖 -288: 通过 get_encryption_key_cli 调用 PBKDF2 派生
         // "my-short-password" 不是 32 字节，也不是有效 Base64（含 '-'），长度 < 128
         // SAFETY: test-only env var mutation
         unsafe { std::env::set_var("TEST_PASSWORD_KEY_CLI", "my-short-password") };
@@ -1201,7 +1201,7 @@ mod tests {
 
     #[test]
     fn test_get_encryption_key_too_long() {
-        // 覆盖 L291-295: 密钥长度 >= 128 且非有效 Base64
+        // 覆盖 -295: 密钥长度 >= 128 且非有效 Base64
         let long_key = "!".repeat(128);
         // SAFETY: test-only env var mutation
         unsafe { std::env::set_var("TEST_LONG_KEY", &long_key) };

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 use anyhow::{Context, Result};
 use std::fs::File;
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_generate_config_to_directory() {
-        // 覆盖 L17-18: output_path.is_dir() 为 true 的分支
+        // 覆盖 -18: output_path.is_dir() 为 true 的分支
         let dir = tempdir().unwrap();
         let result = generate_config(dir.path(), "file");
         assert!(result.is_ok());
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_generate_config_unknown_type() {
-        // 覆盖 L28-33: unknown config type 错误分支
+        // 覆盖 -33: unknown config type 错误分支
         let dir = tempdir().unwrap();
         let output_path = dir.path().join("config.toml");
         let result = generate_config(&output_path, "unknown");
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_generate_env_example() {
-        // 覆盖 generate_env_example 成功路径（L247-258）
+        // 覆盖 generate_env_example 成功路径（-258）
         let dir = tempdir().unwrap();
         let output_path = dir.path().join(".env.example");
         let result = generate_env_example(&output_path);
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_generate_env_example_to_directory() {
-        // 覆盖 L241-243: output_path.is_dir() 为 true 的分支
+        // 覆盖 -243: output_path.is_dir() 为 true 的分支
         let dir = tempdir().unwrap();
         let result = generate_env_example(dir.path());
         assert!(result.is_ok());

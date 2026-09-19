@@ -188,7 +188,6 @@ pnpm-lock.yaml
 
 # --- Docker 本地覆盖(docker-compose.test.yml 为 CI 基座,纳入版本控制) ---
 .dockerignore.local
-docker-compose.test.yml
 
 # --- 缓存 / 进程文件 ---
 .cache/

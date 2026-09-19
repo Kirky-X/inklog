@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! HTTP server for health checks and metrics.
 
@@ -214,7 +214,7 @@ impl LoggerManager {
 
         let make_svc = app.into_make_service_with_connect_info::<SocketAddr>();
 
-        // diting 修复（HttpErrorMode::Strict 形同虚设）：端口 bind 与 TLS 配置构建
+        // 修复（HttpErrorMode::Strict 形同虚设）：端口 bind 与 TLS 配置构建
         // 从 spawn 出去的任务移到本函数内同步执行——bind 成功后才 spawn 仅含 serve
         // 循环的任务。Strict 模式下失败直接返回 Err（启动失败）；Warn 模式下仅告警
         // 并返回 Ok、不启动服务器（决策见 [`bind_failure_outcome`]）。
@@ -296,7 +296,7 @@ impl LoggerManager {
 }
 
 /// bind / TLS 初始化失败后按 [`crate::HttpErrorMode`] 决策启动行为
-/// （diting 修复：此前失败被吞在 spawn 任务内，Strict 形同虚设）。
+/// （修复：此前失败被吞在 spawn 任务内，Strict 形同虚设）。
 ///
 /// - [`crate::HttpErrorMode::Strict`]：启动失败，返回 `Err`（配置要求失败即拒）。
 /// - [`crate::HttpErrorMode::Warn`]：降级——记录 warn 后返回 `Ok`，但 HTTP 服务器
@@ -449,7 +449,7 @@ mod tests {
     }
 
     // ========================================================================
-    // diting 修复（Strict 形同虚设）：bind 失败按 HttpErrorMode 传播
+    // 修复（Strict 形同虚设）：bind 失败按 HttpErrorMode 传播
     // ========================================================================
 
     #[test]

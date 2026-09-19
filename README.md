@@ -452,7 +452,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 
 ## 📄 许可证
 
-本项目基于 [MIT License](LICENSE) 发布，附加 [Commons Clause](LICENSE) 条件：未经单独授权，不得销售本软件。版权所有 (c) 2026 Kirky.X。
+本项目基于 [MIT License](LICENSE) 发布，附加 [Commons Clause](LICENSE) 条件：未经单独授权，不得销售本软件。版权所有 (c) 2026 Kirky.X🌠。
 
 ---
 
@@ -522,7 +522,7 @@ inklog 的实现依赖这些优秀的开源项目：
 
 **由 ❤️ Inklog 团队构建**
 
-<sub>© 2026 Inklog Project. 版权所有。</sub>
+<sub>© 2026 Kirky.X🌠. 版权所有。</sub>
 
 **[⬆ 返回顶部](#-目录)**
 

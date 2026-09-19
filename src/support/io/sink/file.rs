@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! File-based log sink with rotation, compression, and encryption support.
 //!
@@ -4278,7 +4278,7 @@ mod tests {
         );
     }
 
-    // ==================== open_file_inner: OpenOptions 失败分支 (L320-322) ====================
+    // ==================== open_file_inner: OpenOptions 失败分支 (-322) ====================
 
     #[test]
     fn test_open_file_inner_fails_when_path_is_directory() {
@@ -4304,7 +4304,7 @@ mod tests {
         assert!(inner.current_file.is_none());
     }
 
-    // ==================== compress_file: File::create 失败分支 (L643-644) ====================
+    // ==================== compress_file: File::create 失败分支 (-644) ====================
 
     #[test]
     #[cfg(unix)]
@@ -4352,7 +4352,7 @@ mod tests {
         }
     }
 
-    // ==================== encrypt_file: File::create 失败分支 (L716-717) ====================
+    // ==================== encrypt_file: File::create 失败分支 (-717) ====================
 
     #[test]
     #[cfg(unix)]
@@ -4410,7 +4410,7 @@ mod tests {
         }
     }
 
-    // ==================== rotate_inner: rename 失败 fallback 分支 (L753-758) ====================
+    // ==================== rotate_inner: rename 失败 fallback 分支 (-758) ====================
 
     #[test]
     #[cfg(unix)]
@@ -4458,11 +4458,11 @@ mod tests {
         }
     }
 
-    // ==================== shutdown: fallback_sink.shutdown() 调用 (L1011-1014) ====================
+    // ==================== shutdown: fallback_sink.shutdown() 调用 (-1014) ====================
 
     #[tokio::test]
     async fn test_shutdown_calls_fallback_sink_shutdown() {
-        // 覆盖 L1013：当 fallback_sink 存在时，shutdown() 应调用其 shutdown()
+        // 覆盖：当 fallback_sink 存在时，shutdown() 应调用其 shutdown()
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,
@@ -4817,7 +4817,7 @@ mod tests {
     }
 
     // ========================================================================
-    // 缺陷修复回归测试（diting 审查）
+    // 缺陷修复回归测试
     // ========================================================================
 
     // ---- 缺陷 #2: monthly 轮转实际每天轮转 ----
