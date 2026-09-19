@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 // 熔断器功能测试
 // 测试熔断器模式在外部服务故障时的保护机制

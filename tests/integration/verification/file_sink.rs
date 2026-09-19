@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! FileSink 压缩/加密轮转验证 + DatabaseSink 写入落库验证。
 //!

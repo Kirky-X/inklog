@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! LoggerManager 运行时操作 API 示例
 //!

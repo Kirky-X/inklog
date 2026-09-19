@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! 归档文件防篡改 HMAC 链（复用工作区 HMAC-SHA256(prev||event) 模式）。
 //!

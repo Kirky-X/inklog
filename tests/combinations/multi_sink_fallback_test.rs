@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 // 多 Sink 降级功能测试
 // 测试 File Sink 故障时降级到 Database，Database 故障时降级到 Console

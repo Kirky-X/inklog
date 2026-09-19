@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! `InklogModule` — trait-kit 0.4 `AsyncKit` integration for inklog.
 //!

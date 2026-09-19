@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 #![doc(html_root_url = "https://docs.rs/inklog/0.3.0-rc.3")]
 #![cfg_attr(test, allow(clippy::field_reassign_with_default))]

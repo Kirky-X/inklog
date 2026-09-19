@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 // CLI 工具集成测试
 // 测试 decrypt、generate、validate 命令的完整功能

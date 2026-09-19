@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! 日志模板示例
 //!

@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! 速率限制器示例（Layer 0 零依赖）
 //!

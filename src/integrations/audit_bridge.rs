@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! dbnexus `AuditStorage` 端口的 inklog 适配器（feature `dbnexus-audit`）。
 //!

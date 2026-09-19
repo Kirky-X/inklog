@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! rc4 轮新增/受影响路径的性能基准（写入 / 序列化 / 加密）。
 //!

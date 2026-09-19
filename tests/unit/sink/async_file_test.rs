@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 // 异步文件 I/O 功能测试
 // 测试 AsyncFileSink 的性能和功能

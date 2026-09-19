@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 // 加密文件功能测试
 // 测试加密日志文件写入、密钥管理，确保生产环境中的敏感日志数据安全。
