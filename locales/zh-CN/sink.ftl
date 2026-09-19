@@ -56,3 +56,6 @@ warn-db_health_check_failed = 数据库健康检查失败: { $err }
 warn-fallback_write_failed = 降级 sink 写入失败: { $err }
 info-db_shutdown_complete = 数据库 sink 关闭完成
 warn-cache_ttl_zero = OxCacheAdapterBuilder: TTL 为零，使用默认 TTL
+
+# Subscriber 消息
+subscriber-drop-fallback-pending = LoggerSubscriber 已丢弃，尚有 { $count } 条回退记录未刷写

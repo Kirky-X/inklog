@@ -56,3 +56,6 @@ warn-db_health_check_failed = Database health check failed: { $err }
 warn-fallback_write_failed = Fallback sink write failed: { $err }
 info-db_shutdown_complete = Database sink shutdown complete
 warn-cache_ttl_zero = OxCacheAdapterBuilder: TTL is zero, using default TTL
+
+# Subscriber messages
+subscriber-drop-fallback-pending = LoggerSubscriber dropped with { $count } unflushed fallback records

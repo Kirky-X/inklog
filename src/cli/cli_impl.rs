@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 use anyhow::Result;
 use clap::Parser;
@@ -19,7 +19,13 @@ pub fn run_cli() -> i32 {
                     serde_json::json!({ "status": "error", "message": e.to_string() })
                 );
             } else {
-                eprintln!("Error: {}", e);
+                // 本地化输出：InklogError 走 FTL 前缀（localized_message 路径）；
+                // 其余错误（CLI 层多为已本地化的 anyhow 消息）按 Display 原样输出
+                let msg = e
+                    .downcast_ref::<inklog::InklogError>()
+                    .map(|err| err.localized_message())
+                    .unwrap_or_else(|| e.to_string());
+                eprintln!("{}: {}", inklog::i18n::tr("cli-err-prefix"), msg);
             }
             1
         }

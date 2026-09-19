@@ -142,3 +142,34 @@ cli-decrypt-err-subdir-symlink = Subdirectory entry is a symbolic link (skipping
 
 cli-generate-err-path-traversal = Output path contains traversal pattern: { $path }
 cli-generate-err-path-absolute = Output path must be relative: { $path }
+
+# CLI help texts (clap about/help, dynamically generated)
+
+cli-about = inklog - Enterprise-grade Rust logging infrastructure CLI
+cli-help-json = Emit machine-readable JSON output
+cli-err-prefix = Error
+
+cli-decrypt-about = Decrypt encrypted log files
+cli-decrypt-help-input = Input encrypted file or directory
+cli-decrypt-help-output = Output file or directory
+cli-decrypt-help-key-env = Environment variable name containing the decryption key
+cli-decrypt-help-recursive = Recursive decrypt directories
+cli-decrypt-help-batch = Enable batch mode for multiple files
+
+cli-generate-about = Generate inklog configuration files
+cli-generate-help-output = Output directory or file path
+cli-generate-help-config-type = Config type: minimal, full, database, file
+cli-generate-help-env-example = Generate environment variable example file
+
+cli-validate-about = Validate inklog configuration files (default: inklog_config.toml)
+cli-validate-help-config = Path to configuration file
+cli-validate-help-prerequisites = Check system prerequisites instead of config file
+
+cli-query-about = Search local log files by time range/level/keyword (unpacks encrypted/compressed archives)
+cli-query-help-path = Log file or directory to search (recursive; repeatable)
+cli-query-help-since = Only records at/after this time (RFC3339, e.g. 2026-09-11T00:00:00Z)
+cli-query-help-until = Only records at/before this time (RFC3339)
+cli-query-help-level = Minimum level: trace/debug/info/warn/error/fatal
+cli-query-help-grep = Substring filter applied to message and target
+cli-query-help-limit = Maximum number of records to return (0 = unlimited)
+cli-query-help-key-env = Environment variable name holding the decryption key for .enc files

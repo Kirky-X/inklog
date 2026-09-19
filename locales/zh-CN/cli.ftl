@@ -142,3 +142,34 @@ cli-decrypt-err-subdir-symlink = 子目录条目是符号链接（已跳过）: 
 
 cli-generate-err-path-traversal = 输出路径包含遍历模式: { $path }
 cli-generate-err-path-absolute = 输出路径必须是相对路径: { $path }
+
+# CLI 帮助文本（clap about/help，动态生成）
+
+cli-about = inklog - 企业级 Rust 日志基础设施 CLI
+cli-help-json = 输出机器可读的 JSON 结果
+cli-err-prefix = 错误
+
+cli-decrypt-about = 解密已加密的日志文件
+cli-decrypt-help-input = 输入的加密文件或目录
+cli-decrypt-help-output = 输出文件或目录
+cli-decrypt-help-key-env = 存放解密密钥的环境变量名
+cli-decrypt-help-recursive = 递归解密目录
+cli-decrypt-help-batch = 启用多文件批量解密模式
+
+cli-generate-about = 生成 inklog 配置文件
+cli-generate-help-output = 输出目录或文件路径
+cli-generate-help-config-type = 配置类型: minimal、full、database、file
+cli-generate-help-env-example = 生成环境变量示例文件
+
+cli-validate-about = 校验 inklog 配置文件（默认: inklog_config.toml）
+cli-validate-help-config = 配置文件路径
+cli-validate-help-prerequisites = 检查系统前置条件而非配置文件
+
+cli-query-about = 按时间范围/级别/关键字搜索本地日志文件（自动解包加密/压缩归档）
+cli-query-help-path = 要搜索的日志文件或目录（递归；可多次指定）
+cli-query-help-since = 仅返回该时间之后的记录（RFC3339，如 2026-09-11T00:00:00Z）
+cli-query-help-until = 仅返回该时间之前的记录（RFC3339）
+cli-query-help-level = 最低级别: trace/debug/info/warn/error/fatal
+cli-query-help-grep = 对消息与 target 应用子串过滤
+cli-query-help-limit = 最大返回记录数（0 = 不限制）
+cli-query-help-key-env = 存放 .enc 文件解密密钥的环境变量名

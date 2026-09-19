@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 use crate::LogRecord;
 use crate::Metrics;
@@ -290,9 +290,12 @@ impl Drop for LoggerSubscriber {
             let remaining = self.fallback_buffer.lock().len();
             if remaining > 0 {
                 // Drop 阶段不依赖 tracing 全局状态：格式化到 String 后直接输出
-                let warning =
-                    format!("LoggerSubscriber dropped with {remaining} unflushed fallback records");
-                eprintln!("{warning}");
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("count", remaining.to_string());
+                eprintln!(
+                    "{}",
+                    crate::i18n::tr_args("subscriber-drop-fallback-pending", args)
+                );
             }
         }
     }
@@ -842,7 +845,7 @@ mod tests {
     }
 
     // =========================================================================
-    // 敏感键判定单一事实源（diting R3）：subscriber 的 sanitizer 路径直接引用
+    // 敏感键判定单一事实源：subscriber 的 sanitizer 路径直接引用
     // `LogRecord::is_sensitive_key`（token 边界语义），本测试钉住该语义，
     // 防止有人再引入按子串匹配的本地副本（子串匹配会把 "author" 误判为敏感）。
     // =========================================================================

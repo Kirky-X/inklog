@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! Locale manager for runtime internationalization.
 //!
@@ -209,6 +209,7 @@ const EMBEDDED_LOCALES: &[(&str, &[(&str, &str)])] = &[
                 include_str!("../../locales/en/log_level.ftl"),
             ),
             ("sink.ftl", include_str!("../../locales/en/sink.ftl")),
+            ("metrics.ftl", include_str!("../../locales/en/metrics.ftl")),
             (
                 "validation.ftl",
                 include_str!("../../locales/en/validation.ftl"),
@@ -226,6 +227,10 @@ const EMBEDDED_LOCALES: &[(&str, &[(&str, &str)])] = &[
                 include_str!("../../locales/zh-CN/log_level.ftl"),
             ),
             ("sink.ftl", include_str!("../../locales/zh-CN/sink.ftl")),
+            (
+                "metrics.ftl",
+                include_str!("../../locales/zh-CN/metrics.ftl"),
+            ),
             (
                 "validation.ftl",
                 include_str!("../../locales/zh-CN/validation.ftl"),

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! # 健康监控模块
 //!
@@ -53,6 +53,7 @@
 //! | `inklog_sink_healthy` | Gauge | Sink 健康状态 |
 //! | `inklog_uptime_seconds` | Gauge | 运行时间（秒）|
 
+use crate::i18n::{tr, tr_args};
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -494,10 +495,8 @@ impl Metrics {
         let status = if healthy {
             SinkStatus::Healthy
         } else {
-            let error_msg = error
-                .as_ref()
-                .unwrap_or(&"Unknown error".to_string())
-                .clone();
+            let unknown = tr("metrics-unknown_error");
+            let error_msg = error.as_ref().unwrap_or(&unknown).clone();
             SinkStatus::Unhealthy { error: error_msg }
         };
 
@@ -942,7 +941,8 @@ impl SinkHealthMonitor {
             self.handle_recovery(sink_name, &current_state, &mut states, &mut retries)
         } else {
             // Sink 故障，触发降级
-            let error_msg = error.unwrap_or("Unknown error").to_string();
+            let unknown = tr("metrics-unknown_error");
+            let error_msg = error.unwrap_or(unknown.as_str()).to_string();
             self.handle_failure(
                 sink_name,
                 &error_msg,
@@ -972,9 +972,13 @@ impl SinkHealthMonitor {
                     event = "sink_recovering",
                     sink = sink_name,
                     fallback_target = target,
-                    "Sink {} 正在从 {} 恢复",
-                    sink_name,
-                    target
+                    "{}",
+                    tr_args("metrics-sink_recovering", {
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("sink", sink_name);
+                        args.set("target", target.as_str());
+                        args
+                    })
                 );
 
                 let attempt = retries.get(sink_name).cloned().unwrap_or(0) + 1;
@@ -985,9 +989,13 @@ impl SinkHealthMonitor {
                         event = "sink_recovery_max_retries",
                         sink = sink_name,
                         max_retries = self.config.max_retries,
-                        "Sink {} exceeded max recovery attempts ({})",
-                        sink_name,
-                        self.config.max_retries
+                        "{}",
+                        tr_args("metrics-sink_recovery_max_retries", {
+                            let mut args = fluent_bundle::FluentArgs::new();
+                            args.set("sink", sink_name);
+                            args.set("max_retries", self.config.max_retries.to_string());
+                            args
+                        })
                     );
                     return FallbackAction::None;
                 }
@@ -1013,7 +1021,11 @@ impl SinkHealthMonitor {
                         .get(sink_name)
                         .cloned()
                         .unwrap_or(current_state.clone()),
-                    format!("尝试恢复，延迟 {}ms", delay_ms),
+                    tr_args("metrics-recovery_attempt_delay", {
+                        let mut args = fluent_bundle::FluentArgs::new();
+                        args.set("delay_ms", delay_ms.to_string());
+                        args
+                    }),
                 );
 
                 FallbackAction::AttemptRecovery {
@@ -1050,8 +1062,12 @@ impl SinkHealthMonitor {
                 event = "sink_failed_disabled_fallback",
                 sink = sink_name,
                 error = error,
-                "Sink {} 故障但自动降级已禁用",
-                sink_name
+                "{}",
+                tr_args("metrics-sink_failed_fallback_disabled", {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("sink", sink_name);
+                    args
+                })
             );
             return FallbackAction::None;
         }
@@ -1075,10 +1091,14 @@ impl SinkHealthMonitor {
                 fallback_target = fallback_target,
                 error = error,
                 failure_count = failure_count,
-                "Sink {} 降级到 {}，原因: {}",
-                sink_name,
-                fallback_target,
-                error
+                "{}",
+                tr_args("metrics-sink_fallback_triggered", {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("sink", sink_name);
+                    args.set("target", fallback_target.as_str());
+                    args.set("error", error);
+                    args
+                })
             );
 
             states.insert(sink_name.to_string(), new_state.clone());
@@ -1101,9 +1121,13 @@ impl SinkHealthMonitor {
                 error = error,
                 failure_count = failure_count,
                 threshold = self.config.failure_threshold,
-                "Sink {} 连续第 {} 次故障",
-                sink_name,
-                failure_count
+                "{}",
+                tr_args("metrics-sink_failure_warning", {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("sink", sink_name);
+                    args.set("count", failure_count.to_string());
+                    args
+                })
             );
 
             FallbackAction::Retry {
@@ -1124,7 +1148,11 @@ impl SinkHealthMonitor {
                     FallbackAction::Fallback {
                         sink_name: sink_name.to_string(),
                         target: "file".to_string(),
-                        reason: format!("Database 故障: {}", error),
+                        reason: tr_args("metrics-fallback_reason_database", {
+                            let mut args = fluent_bundle::FluentArgs::new();
+                            args.set("error", error);
+                            args
+                        }),
                     },
                 )
             }
@@ -1140,7 +1168,11 @@ impl SinkHealthMonitor {
                         FallbackAction::Fallback {
                             sink_name: sink_name.to_string(),
                             target: "console".to_string(),
-                            reason: format!("磁盘空间不足: {}", error),
+                            reason: tr_args("metrics-fallback_reason_disk_full", {
+                                let mut args = fluent_bundle::FluentArgs::new();
+                                args.set("error", error);
+                                args
+                            }),
                         },
                     )
                 } else {
@@ -1150,7 +1182,11 @@ impl SinkHealthMonitor {
                         FallbackAction::Fallback {
                             sink_name: sink_name.to_string(),
                             target: "console".to_string(),
-                            reason: format!("FileSink 故障: {}", error),
+                            reason: tr_args("metrics-fallback_reason_file", {
+                                let mut args = fluent_bundle::FluentArgs::new();
+                                args.set("error", error);
+                                args
+                            }),
                         },
                     )
                 }
@@ -1162,7 +1198,11 @@ impl SinkHealthMonitor {
                     FallbackAction::Fallback {
                         sink_name: sink_name.to_string(),
                         target: "console".to_string(),
-                        reason: format!("未知故障: {}", error),
+                        reason: tr_args("metrics-fallback_reason_unknown", {
+                            let mut args = fluent_bundle::FluentArgs::new();
+                            args.set("error", error);
+                            args
+                        }),
                     },
                 )
             }
@@ -1177,7 +1217,8 @@ impl SinkHealthMonitor {
             event = "encryption_error_fallback",
             sink = sink_name,
             error = error,
-            "加密密钥错误，降级为明文写入"
+            "{}",
+            tr("metrics-encryption_error_fallback")
         );
 
         let mut states = self.fallback_states.lock();
@@ -1188,7 +1229,11 @@ impl SinkHealthMonitor {
 
         let new_state = FallbackState::Fallback {
             target: "plaintext".to_string(),
-            reason: format!("加密密钥错误: {}", error),
+            reason: tr_args("metrics-fallback_reason_encryption", {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("error", error);
+                args
+            }),
         };
 
         states.insert(sink_name.to_string(), new_state.clone());
@@ -1197,7 +1242,11 @@ impl SinkHealthMonitor {
         FallbackAction::Fallback {
             sink_name: sink_name.to_string(),
             target: "plaintext".to_string(),
-            reason: format!("明文写入（加密错误）: {}", error),
+            reason: tr_args("metrics-fallback_reason_plaintext", {
+                let mut args = fluent_bundle::FluentArgs::new();
+                args.set("error", error);
+                args
+            }),
         }
     }
 
@@ -1215,8 +1264,12 @@ impl SinkHealthMonitor {
             tracing::info!(
                 event = "sink_recovery_confirmed",
                 sink = sink_name,
-                "Sink {} 恢复成功，已切回正常模式",
-                sink_name
+                "{}",
+                tr_args("metrics-sink_recovery_confirmed", {
+                    let mut args = fluent_bundle::FluentArgs::new();
+                    args.set("sink", sink_name);
+                    args
+                })
             );
 
             states.insert(sink_name.to_string(), FallbackState::Active);
@@ -1225,7 +1278,7 @@ impl SinkHealthMonitor {
                 sink_name,
                 current_state,
                 FallbackState::Active,
-                "恢复成功".to_string(),
+                tr("metrics-recovery_succeeded"),
             );
         }
     }
