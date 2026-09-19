@@ -79,6 +79,8 @@ kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit", "trait-kit/observer"]
 # Zstd compression support for rotated log files (optional to avoid zstd-sys
 # symbol conflicts with downstream projects that bundle their own zstd).
 zstd = ["dep:zstd"]
+# 通用业务指标 registry（CounterVec/GaugeVec/HistogramVec + Prometheus 文本导出）
+metrics-registry = []
 # Deprecated 兼容别名：等价于 `zstd`，保留既有 `--features compression` 用法；
 # 新代码请直接启用 `zstd`。
 compression = ["zstd"]
