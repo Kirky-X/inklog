@@ -2621,6 +2621,7 @@ dependencies = [
  "log",
  "rand 0.10.2",
  "regex",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

@@ -26,6 +26,11 @@ dbnexus = { workspace = true, optional = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+# serde 必须声明为直接依赖：`#[derive(Serialize)]` 展开时 serde_derive 生成
+# `extern crate serde as _serde;`，该路径在展开期解析的是**本 crate 自身的
+# extern prelude**，无法经 `inklog::serde` 再导出别名满足（同 src/lib.rs
+# “Re-export underlying dependencies” 一节对 L2/L3 宏路径的说明）。
+serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { version = "1.26", default-features = false, features = ["v4"] }
 chrono = { workspace = true }
