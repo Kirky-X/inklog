@@ -38,7 +38,6 @@ db-ensure_table_failed = 确保表存在失败: { $err }
 cache-get_failed = 获取缓存键 '{ $key }' 失败: { $err }
 cache-set_failed = 设置缓存键 '{ $key }' 失败: { $err }
 cache-delete_failed = 删除缓存键 '{ $key }' 失败: { $err }
-cache-exists_failed = 缓存键 '{ $key }' 存在性检查失败: { $err }
 cache-check_failed = 检查缓存键 '{ $key }' 是否存在失败: { $err }
 cache-build_failed = 构建 oxcache 失败: { $err }
 cache-capacity_zero = OxCacheAdapterBuilder: capacity 必须 > 0

@@ -75,7 +75,6 @@ config-http_serialize_failed = Failed to serialize health status: { $err }
 config-https_server_error = HTTPS server error: { $err }
 config-http_bind_failed = Failed to bind HTTP server to { $addr }: { $err }
 config-http_server_error = HTTP server error: { $err }
-config-http_lock_poisoned = HTTP server handle lock poisoned: { $err }
 config-json_serialize_failed = Failed to serialize log fields to JSON: { $err }
 config-compression_remove_failed = Failed to remove original file after compression: { $err }
 config-open_input_failed = Failed to open input file: { $path }

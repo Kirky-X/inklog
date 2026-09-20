@@ -75,7 +75,6 @@ config-http_serialize_failed = 序列化健康状态失败: { $err }
 config-https_server_error = HTTPS 服务器错误: { $err }
 config-http_bind_failed = 绑定 HTTP 服务器到 { $addr } 失败: { $err }
 config-http_server_error = HTTP 服务器错误: { $err }
-config-http_lock_poisoned = HTTP 服务器句柄锁中毒: { $err }
 config-json_serialize_failed = 序列化日志字段为 JSON 失败: { $err }
 config-compression_remove_failed = 压缩后删除原始文件失败: { $err }
 config-open_input_failed = 打开输入文件失败: { $path }

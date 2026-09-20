@@ -116,7 +116,6 @@ cli-decrypt-err-glob-prefix = 不允许路径前缀
 cli-decrypt-err-glob-root = 不允许根目录引用
 cli-decrypt-err-header = 无效的文件头: 不是 inklog 加密文件
 cli-decrypt-err-version = 不支持的文件版本: { $version }
-cli-decrypt-err-algo = 不支持的加密算法: { $algo }
 cli-decrypt-err-read-header = 读取文件头失败
 cli-decrypt-err-read-cipher = 读取密文失败
 cli-decrypt-err-decrypt = 解密失败: { $err }
@@ -128,7 +127,6 @@ cli-decrypt-err-small-v1 = 文件太小，不是有效的 V1 格式
 cli-decrypt-err-key = 从环境变量获取加密密钥失败: { $env }
 cli-decrypt-err-input-dir = 输入目录不存在: { $path }
 cli-decrypt-err-create-dir = 创建输出目录失败: { $path }
-cli-decrypt-err-output-dir = 无效的输出目录: { $err }
 cli-decrypt-err-read-dir = 读取输入目录失败: { $path }
 cli-decrypt-err-no-filename = 路径没有文件名: { $path }
 cli-decrypt-err-glob = 无效的 glob 模式: { $err }
@@ -141,7 +139,6 @@ cli-decrypt-err-subdir-symlink = 子目录条目是符号链接（已跳过）: 
 # CLI generate 路径验证
 
 cli-generate-err-path-traversal = 输出路径包含遍历模式: { $path }
-cli-generate-err-path-absolute = 输出路径必须是相对路径: { $path }
 
 # CLI 帮助文本（clap about/help，动态生成）
 

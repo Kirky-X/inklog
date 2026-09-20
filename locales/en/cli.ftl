@@ -116,7 +116,6 @@ cli-decrypt-err-glob-prefix = Path prefixes are not allowed
 cli-decrypt-err-glob-root = Root directory references are not allowed
 cli-decrypt-err-header = Invalid file header: not an encrypted inklog file
 cli-decrypt-err-version = Unsupported file version: { $version }
-cli-decrypt-err-algo = Unsupported encryption algorithm: { $algo }
 cli-decrypt-err-read-header = Failed to read file header
 cli-decrypt-err-read-cipher = Failed to read ciphertext
 cli-decrypt-err-decrypt = Decryption failed: { $err }
@@ -128,7 +127,6 @@ cli-decrypt-err-small-v1 = File too small for V1 format
 cli-decrypt-err-key = Failed to get encryption key from env var: { $env }
 cli-decrypt-err-input-dir = Input directory does not exist: { $path }
 cli-decrypt-err-create-dir = Failed to create output directory: { $path }
-cli-decrypt-err-output-dir = Invalid output directory: { $err }
 cli-decrypt-err-read-dir = Failed to read input directory: { $path }
 cli-decrypt-err-no-filename = path has no file name: { $path }
 cli-decrypt-err-glob = Invalid glob pattern: { $err }
@@ -141,7 +139,6 @@ cli-decrypt-err-subdir-symlink = Subdirectory entry is a symbolic link (skipping
 # CLI generate path validation
 
 cli-generate-err-path-traversal = Output path contains traversal pattern: { $path }
-cli-generate-err-path-absolute = Output path must be relative: { $path }
 
 # CLI help texts (clap about/help, dynamically generated)
 

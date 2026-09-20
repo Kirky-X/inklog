@@ -38,7 +38,6 @@ db-ensure_table_failed = Failed to ensure table exists: { $err }
 cache-get_failed = Failed to get cache key '{ $key }': { $err }
 cache-set_failed = Failed to set cache key '{ $key }': { $err }
 cache-delete_failed = Failed to delete cache key '{ $key }': { $err }
-cache-exists_failed = exists check failed for '{ $key }': { $err }
 cache-check_failed = Failed to check existence of cache key '{ $key }': { $err }
 cache-build_failed = Failed to build oxcache: { $err }
 cache-capacity_zero = OxCacheAdapterBuilder: capacity must be > 0
