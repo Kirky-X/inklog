@@ -1,0 +1,22 @@
+# typos 白名单 —— 仅登记「确为真词/真实标识符」的命中，不放宽任何门禁。
+#
+# 原则：只把 typos 对真实 crate 名、厂商名、图节点 ID、测试夹具字符串的误判
+# 逐条登记为「正确拼写即自身」（key == value 即 Status::Valid）；真正的拼写
+# 错误仍由 typos 报告并阻断提交。
+# 词条大小写不敏感（查找走 UniCase），故 `flate` 一条同时覆盖 `Flate`。
+[default.extend-words]
+# flate2 —— 真实 crate 名（纯 Rust gzip 后端）。typos 把 `flate2` 切成 `flate`，
+# 误判为 `flat`。README/ARCHITECTURE/API_REFERENCE 中均有引用。
+flate = "flate"
+# HashiCorp —— 真实公司名（Vault 厂商）。typos 把 `HashiCorp` 切成 `Hashi`
+# + `Corp`，误判 `Hashi` 为 `Hash`。
+Hashi = "Hashi"
+# THR —— docs/ARCHITECTURE.md 的 Mermaid 图节点 ID（threshold 缩写），
+# 非自然语言词汇，不参与拼写检查。
+THR = "THR"
+# ERRO —— src/domain/core/subscriber.rs 注释中 "100 ERRORs"（日志级别名 ERROR
+# 的复数）被 typos 切出的片段；保留大写以指代日志级别，改写注释反而损失语义。
+ERRO = "ERRO"
+# byt —— src/support/io/sink/file.rs 测试夹具里刻意的 16 字节盐值字符串
+# `b"fixed-salt-16byt"`（字面量长度即 16 字节，改名会破坏夹具语义）。
+byt = "byt"
