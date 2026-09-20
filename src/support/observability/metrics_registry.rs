@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Kirky.X
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 
 //! 通用业务指标 registry（Prometheus 文本格式 0.0.4 兼容导出）。
