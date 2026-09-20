@@ -66,9 +66,9 @@ run_check() {
     local check_name=$1
     local check_command=$2
     local error_message=$3
-    
+
     print_info "Running: $check_name..."
-    
+
     if eval "$check_command" > /dev/null 2>&1; then
         print_success "$check_name passed"
         return 0
@@ -86,9 +86,9 @@ run_check_with_output() {
     local check_name=$1
     local check_command=$2
     local error_message=$3
-    
+
     print_info "Running: $check_name..."
-    
+
     if eval "$check_command" 2>&1; then
         print_success "$check_name passed"
         return 0

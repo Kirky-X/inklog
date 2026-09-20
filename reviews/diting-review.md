@@ -107,7 +107,7 @@
 | Location | Tag | What | Replacement |
 |---|---|---|---|
 | `ring_buffered_file.rs:61-63` | `yagni` | `Option<BufWriter<File>>` kept "for future runtime rotation… not currently exercised", plus a second flush thread | Drop the Option; the two-thread design duplicates `FileSink`. Unify with `FileSink` (`Net: -400+` if merged/removed) |
-| `src/domain/core/workers.rs:122` `update_adaptive_capacity` | `yagni` | "Adaptive channel capacity" only writes an `effective_capacity` atomic read by the health monitor — the crossbeam channel is `bounded()` once and never resized; the metric is cosmetic | Delete the resize illusion; report real `sender.len()`/capacity | 
+| `src/domain/core/workers.rs:122` `update_adaptive_capacity` | `yagni` | "Adaptive channel capacity" only writes an `effective_capacity` atomic read by the health monitor — the crossbeam channel is `bounded()` once and never resized; the metric is cosmetic | Delete the resize illusion; report real `sender.len()`/capacity |
 | `log_record.rs:314` `mask_sensitive_fields` | `delete` | Prod sinks use `DataMasker`; this method is test-only | Delete (`~60 lines`) |
 | `decrypt.rs:560,593` | `delete` | `let _canonical_output` / `let _ = canonical_input` — canonicalize then discard | Delete the dead statements (`4 lines`) |
 | `decrypt.rs` legacy + v1 format parse | `shrink` | Two decrypt functions + two hand-rolled header parsers for a format that never shipped | One parser over the shared header constant (`Net: -30`) |

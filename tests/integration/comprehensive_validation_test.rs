@@ -124,19 +124,19 @@ async fn test_comprehensive_real_data_writing() {
 
     // 2. 写入敏感数据测试掩码
     for i in 0..500 {
-        tracing::warn!(target: "masking_test", "敏感数据测试 - 用户邮箱: user{}@example.com, 电话: {}", 
+        tracing::warn!(target: "masking_test", "敏感数据测试 - 用户邮箱: user{}@example.com, 电话: {}",
                 i, "13812345678");
     }
 
     // 3. 写入加密数据
     for i in 0..1000 {
-        tracing::error!(target: "encryption_test", "加密测试 - 秘密数据: {}", 
+        tracing::error!(target: "encryption_test", "加密测试 - 秘密数据: {}",
                 format!("secret_data_{}", i));
     }
 
     // 4. 写入数据库数据
     for i in 0..500 {
-        tracing::debug!(target: "database_test", "数据库测试 - 批处理数据 {}", 
+        tracing::debug!(target: "database_test", "数据库测试 - 批处理数据 {}",
                 format!("db_batch_{}", i));
     }
 

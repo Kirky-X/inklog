@@ -130,15 +130,15 @@ fn show_health_verification() {
     println!(
         r#"  let logger = LoggerManager::new().await?;
   let health = logger.get_health_status();
-  
+
   // 验证整体状态
   assert!(health.overall_status.is_operational());
-  
+
   // 查看 Channel 使用情况
   let capacity = logger.effective_channel_capacity();
   let queued = logger.channel_len();
   println!("Channel: {{}}/{{}}", queued, capacity);
-  
+
   // 遍历各 Sink 状态
   for (name, sink) in &health.sinks {{
       println!("  Sink '{{}}': {{:?}}", name, sink.status);

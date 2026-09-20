@@ -17,16 +17,16 @@ mod cli_test {
     async fn test_generate_default_config() {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("config.toml");
-        
+
         let mut cmd = Command::cargo_bin("inklog-cli").unwrap();
         cmd.arg("generate")
             .arg("--output")
             .arg(&output_path)
             .assert()
             .success();
-        
+
         assert!(output_path.exists());
-        
+
         let content = fs::read_to_string(&output_path).unwrap();
         assert!(content.contains("[global]"));
         assert!(content.contains("[console_sink]"));
@@ -37,7 +37,7 @@ mod cli_test {
     async fn test_generate_with_options() {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("custom_config.toml");
-        
+
         let mut cmd = Command::cargo_bin("inklog-cli").unwrap();
         cmd.arg("generate")
             .arg("--output")
@@ -48,9 +48,9 @@ mod cli_test {
             .arg("custom")
             .assert()
             .success();
-        
+
         assert!(output_path.exists());
-        
+
         let content = fs::read_to_string(&output_path).unwrap();
         assert!(content.contains("level = \"debug\""));
     }
@@ -61,7 +61,7 @@ mod cli_test {
     async fn test_validate_valid_config() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("valid_config.toml");
-        
+
         let valid_config = r#"
 [global]
 level = "info"
@@ -71,10 +71,10 @@ format = "{timestamp} [{level}] {message}"
 enabled = true
 colored = true
 "#;
-        
+
         let mut file = File::create(&config_path).unwrap();
         file.write_all(valid_config.as_bytes()).unwrap();
-        
+
         let mut cmd = Command::cargo_bin("inklog-cli").unwrap();
         cmd.arg("validate")
             .arg("--config")
@@ -88,16 +88,16 @@ colored = true
     async fn test_validate_invalid_config() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("invalid_config.toml");
-        
+
         let invalid_config = r#"
 [global]
 level = "invalid_level"
 format = ""
 "#;
-        
+
         let mut file = File::create(&config_path).unwrap();
         file.write_all(invalid_config.as_bytes()).unwrap();
-        
+
         let mut cmd = Command::cargo_bin("inklog-cli").unwrap();
         cmd.arg("validate")
             .arg("--config")
@@ -123,14 +123,14 @@ format = ""
         let temp_dir = TempDir::new().unwrap();
         let encrypted_path = temp_dir.path().join("encrypted.log.enc");
         let output_path = temp_dir.path().join("decrypted.log");
-        
+
         // 创建测试加密文件
         // 注意：这里需要使用有效的加密文件格式
         let test_content = b"Test log entry\n";
         fs::write(&encrypted_path, test_content).unwrap();
-        
+
         let key = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=";
-        
+
         let mut cmd = Command::cargo_bin("inklog-cli").unwrap();
         cmd.arg("decrypt")
             .arg("--input")
@@ -141,7 +141,7 @@ format = ""
             .arg(key)
             .assert()
             .success();
-        
+
         // 验证输出文件存在
         assert!(output_path.exists());
     }
@@ -151,10 +151,10 @@ format = ""
         let temp_dir = TempDir::new().unwrap();
         let encrypted_path = temp_dir.path().join("encrypted.log.enc");
         let output_path = temp_dir.path().join("decrypted.log");
-        
+
         // 创建测试文件
         fs::write(&encrypted_path, b"some encrypted content").unwrap();
-        
+
         let mut cmd = Command::cargo_bin("inklog-cli").unwrap();
         cmd.arg("decrypt")
             .arg("--input")
@@ -227,57 +227,57 @@ mod cli_test {
     async fn test_generate_default_config() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_generate_with_options() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_validate_valid_config() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_validate_invalid_config() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_validate_nonexistent_config() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_decrypt_valid_encrypted_file() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_decrypt_with_invalid_key() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_cli_help() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_generate_help() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_validate_help() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_decrypt_help() {
         println!("Skipping test: requires --features \"cli\"");
     }
-    
+
     #[tokio::test]
     async fn test_cli_version() {
         println!("Skipping test: requires --features \"cli\"");
