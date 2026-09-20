@@ -12,6 +12,16 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=1000']
       - id: detect-private-key
+        # 假密钥测试夹具白名单(精确到文件，钩子对其余全部文件仍然生效)：
+        #   src/domain/config/config.rs、src/domain/config/http.rs —
+        #     仅写入裸 PEM 头(无 key body)作为「路径存在性」校验夹具，
+        #     断言只比对路径名，内容非真实密钥；
+        #   tests/unit/masking_test.rs — 脱敏规则 ***REDACTED_PRIVATE_KEY***
+        #     的断言输入，key body 为占位省略号 "MIIBogIBAAJ..."。
+        # detect-private-key 只做字节级子串匹配、无 inline allowlist 机制，
+        # 故只能在此按文件排除；args 未放宽，其余文件仍全量检测
+        # (已用新增假密钥探针验证：probe 文件会被拦下)。
+        exclude: '^(src/domain/config/config\.rs|src/domain/config/http\.rs|tests/unit/masking_test\.rs)$'
       - id: check-merge-conflict
         args: ['--assume-in-merge']
       - id: no-commit-to-branch
