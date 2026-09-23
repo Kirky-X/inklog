@@ -50,7 +50,7 @@ unsafe extern "system" {
 /// 通过 `RwLock` 实现内部可变性。
 struct FileSinkInner {
     /// 当前文件句柄
-    current_file: Option<File>,
+    current_file: Option<std::io::BufWriter<File>>,
     /// 当前文件大小
     current_size: u64,
     /// 上次轮转时间
@@ -111,12 +111,49 @@ pub struct FileSink {
     lost_records: AtomicU64,
     /// 数据脱敏器（只读）
     masker: DataMasker,
-    /// 可变内部状态
-    inner: RwLock<FileSinkInner>,
+    /// 归档审计链（audit_chain_enabled 时启用；轮转成功后 append 并写穿 manifest）
+    audit_chain: Option<Arc<parking_lot::Mutex<crate::support::audit_chain::ArchiveChain>>>,
+    /// 可变内部状态（Arc 共享给轮转定时线程执行空闲 flush）
+    inner: Arc<RwLock<FileSinkInner>>,
 }
 
 /// FileSink 的实现，包含所有文件日志操作的核心逻辑
 impl FileSink {
+    /// 注入自定义 masker（含自定义规则；fast-masking feature 下 literal
+    /// 规则经 builder 构建走 AC 加速）。注：轮转重建的派生实例不继承注入。
+    pub fn with_masker(mut self, masker: DataMasker) -> Self {
+        self.masker = masker;
+        self
+    }
+
+    /// 归档产物 SHA-256（轮转审计链条目用）。
+    fn sha256_file(path: &std::path::Path) -> Option<String> {
+        use sha2::Digest;
+        let data = fs::read(path).ok()?;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&data);
+        Some(
+            hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect(),
+        )
+    }
+
+    /// manifest 路径：`<stem>.chain.jsonl`（与活动日志同目录）。
+    fn audit_manifest_path(log_path: &std::path::Path) -> std::path::PathBuf {
+        let stem = log_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        let name = format!("{stem}.chain.jsonl");
+        match log_path.parent() {
+            Some(parent) => parent.join(name),
+            None => std::path::PathBuf::from(name),
+        }
+    }
+
     /// Creates a new FileSink with the given configuration.
     pub fn new(config: FileSinkConfig) -> Result<Self, InklogError> {
         let rotation_interval = match config.rotation_time.as_str() {
@@ -125,6 +162,23 @@ impl FileSink {
             "weekly" => StdDuration::from_secs(604800),
             "monthly" => StdDuration::from_secs(2592000),
             _ => StdDuration::from_secs(86400),
+        };
+        // 归档审计链：audit_chain_enabled 时以 INKLOG_AUDIT_KEY 为链密钥；
+        // 缺失则禁用（随机密钥会让 manifest 事后不可验，宁缺毋滥）
+        let audit_chain = if config.audit_chain_enabled {
+            match std::env::var("INKLOG_AUDIT_KEY") {
+                Ok(key) if !key.is_empty() => Some(Arc::new(parking_lot::Mutex::new(
+                    crate::support::audit_chain::ArchiveChain::new(key.as_bytes()),
+                ))),
+                _ => {
+                    warn!(
+                        "audit_chain_enabled but INKLOG_AUDIT_KEY is not set; audit chain disabled"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
         };
 
         let rotation_timer = Arc::new(parking_lot::Mutex::new(Instant::now()));
@@ -155,7 +209,8 @@ impl FileSink {
             write_unhealthy: AtomicBool::new(false),
             lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
-            inner: RwLock::new(inner),
+            audit_chain,
+            inner: Arc::new(RwLock::new(inner)),
         };
 
         // 初始化轮转时间
@@ -294,6 +349,11 @@ impl FileSink {
             )));
         }
 
+        let parent_newly_created = self
+            .config
+            .path
+            .parent()
+            .is_some_and(|p| !p.as_os_str().is_empty() && !p.exists());
         if let Some(parent) = self.config.path.parent()
             && let Err(e) = fs::create_dir_all(parent)
         {
@@ -303,6 +363,12 @@ impl FileSink {
             error!("{}", crate::i18n::tr_args("sink-file_mkdir_failed", args));
             return Err(InklogError::IoError(e));
         }
+        // 审计级加固：新建的日志目录收敛为 0700（已存在目录不回改用户权限）
+        #[cfg(unix)]
+        if parent_newly_created && let Some(parent) = self.config.path.parent() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+        }
 
         // vuln-0004: 打开时在内核层拒绝末段符号链接（O_NOFOLLOW）。
         // 上方 PathValidator 的符号链接检查与实际 open 之间存在 validate-then-use
@@ -311,9 +377,11 @@ impl FileSink {
         #[cfg(unix)]
         let open_result = {
             use std::os::unix::fs::OpenOptionsExt;
+            // 0600：日志可能含 PII/敏感上下文，默认不给组/其他用户可读
             OpenOptions::new()
                 .create(true)
                 .append(true)
+                .mode(0o600)
                 .custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits())
                 .open(&self.config.path)
         };
@@ -325,7 +393,7 @@ impl FileSink {
 
         match open_result {
             Ok(file) => {
-                inner.current_file = Some(file);
+                inner.current_file = Some(std::io::BufWriter::with_capacity(64 * 1024, file));
                 inner.current_size = self.config.path.metadata().map(|m| m.len()).unwrap_or(0);
                 debug!(
                     "Opened log file: {} (size: {} bytes)",
@@ -488,41 +556,44 @@ impl FileSink {
         let keep_newest = config.keep_files as usize;
         let deletable = candidates.len().saturating_sub(keep_newest);
 
-        if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size) {
-            if total_size > max_total_size_bytes {
-                let excess_size = total_size.saturating_sub(max_total_size_bytes);
-                let mut deleted_size: u64 = 0;
+        // 大小清理：仅超限时删除最旧文件以回到上限以内
+        if let Some(max_total_size_bytes) = Self::parse_size(&config.max_total_size)
+            && total_size > max_total_size_bytes
+        {
+            let excess_size = total_size.saturating_sub(max_total_size_bytes);
+            let mut deleted_size: u64 = 0;
 
-                for (path, _) in candidates.iter().take(deletable) {
-                    if deleted_size >= excess_size {
-                        break;
-                    }
-
-                    if let Ok(metadata) = path.metadata() {
-                        deleted_size += metadata.len();
-                    }
-
-                    if let Err(e) = fs::remove_file(path) {
-                        warn!(
-                            "Failed to remove {} during size cleanup: {}",
-                            path.display(),
-                            e
-                        );
-                    }
+            for (path, _) in candidates.iter().take(deletable) {
+                if deleted_size >= excess_size {
+                    break;
                 }
-            } else {
-                for (path, modified) in candidates.iter().take(deletable) {
-                    let modified_utc: DateTime<Utc> = (*modified).into();
-                    if modified_utc < cutoff_date
-                        && let Err(e) = fs::remove_file(path)
-                    {
-                        warn!(
-                            "Failed to remove {} during expiry cleanup: {}",
-                            path.display(),
-                            e
-                        );
-                    }
+
+                if let Ok(metadata) = path.metadata() {
+                    deleted_size += metadata.len();
                 }
+
+                if let Err(e) = fs::remove_file(path) {
+                    warn!(
+                        "Failed to remove {} during size cleanup: {}",
+                        path.display(),
+                        e
+                    );
+                }
+            }
+        }
+
+        // 年龄清理：独立于大小分支执行——此前藏在 else 里，max_total_size
+        // 不可解析时过期文件永远不会被清理（审计 M14 修复）
+        for (path, modified) in candidates.iter().take(deletable) {
+            let modified_utc: DateTime<Utc> = (*modified).into();
+            if modified_utc < cutoff_date
+                && let Err(e) = fs::remove_file(path)
+            {
+                warn!(
+                    "Failed to remove {} during expiry cleanup: {}",
+                    path.display(),
+                    e
+                );
             }
         }
 
@@ -709,8 +780,13 @@ impl FileSink {
         inner.next_rotation_time = Self::calculate_next_rotation_time(&self.config.rotation_time);
     }
 
-    /// 启动轮转定时器
+    /// 启动轮转定时器（默认 60s tick）
     fn start_rotation_timer(&self) {
+        self.start_rotation_timer_with_tick(StdDuration::from_secs(60));
+    }
+
+    /// tick 间隔可注入：空闲 flush 测试用短 tick 驱动同一实现。
+    fn start_rotation_timer_with_tick(&self, check_interval: StdDuration) {
         let rotation_interval = self.rotation_interval;
         let last_rotation;
         {
@@ -724,10 +800,11 @@ impl FileSink {
 
         // Clone the shutdown flag for the timer thread
         let shutdown_flag = self.shutdown_flag.clone();
+        // 空闲 flush 需要 inner（Arc 共享）与 config 快照
+        let inner_shared = Arc::clone(&self.inner);
+        let config = self.config.clone();
 
         let timer_handle = thread::spawn(move || {
-            let check_interval = StdDuration::from_secs(60); // Check every minute
-
             // Wrap thread body in catch_unwind to make panics observable
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 loop {
@@ -760,6 +837,47 @@ impl FileSink {
                         *last_rotation_guard =
                             Instant::now() - rotation_interval + StdDuration::from_secs(1);
                     }
+                    drop(last_rotation_guard);
+
+                    // 空闲期兜底刷盘：日志停止产生后，batch 缓冲不再等
+                    // "下一条写入"触发——超过 flush_interval_ms 即由本线程落盘。
+                    // （定时线程经 Arc 共享 inner；写语义在此内联而非复用
+                    // flush_batch_inner，避免计时线程与实例方法的生命周期耦合。）
+                    if let Some(mut inner) = inner_shared.try_write()
+                        && !inner.batch_buffer.is_empty()
+                        && inner.last_flush_time.elapsed()
+                            >= StdDuration::from_millis(config.flush_interval_ms)
+                    {
+                        let pending = std::mem::take(&mut inner.batch_buffer);
+                        if let Some(file) = &mut inner.current_file {
+                            use std::io::Write as _;
+                            for record in &pending {
+                                let line = if config.output_format == OutputFormat::Json {
+                                    serde_json::to_string(record)
+                                        .unwrap_or_else(|_| "{}".to_string())
+                                } else {
+                                    format!(
+                                        "{} [{}] {} - {}",
+                                        record.timestamp.to_rfc3339(),
+                                        record.level,
+                                        record.target,
+                                        record.message
+                                    )
+                                };
+                                let _ = writeln!(file, "{line}");
+                            }
+                            let _ = file.flush();
+                            if config.fsync {
+                                let _ = file.get_ref().sync_all();
+                            }
+                            inner.current_size = file
+                                .get_ref()
+                                .metadata()
+                                .map(|m| m.len())
+                                .unwrap_or(inner.current_size);
+                        }
+                        inner.last_flush_time = Instant::now();
+                    }
                 }
             }));
 
@@ -787,9 +905,9 @@ impl FileSink {
         }
 
         let records = std::mem::take(&mut inner.batch_buffer);
+        let mut write_failed = false;
 
         if let Some(file) = &mut inner.current_file {
-            let mut write_failed = false;
             for (index, record) in records.iter().enumerate() {
                 let write_result = if self.config.output_format == OutputFormat::Json {
                     // NDJSON: each record is a single-line JSON object
@@ -828,21 +946,46 @@ impl FileSink {
                     }
                 }
             }
-            if !write_failed {
-                inner.circuit_breaker.record_success();
-                // 全量刷盘成功：清除终态写失败的健康标记（瞬时磁盘满等故障
-                // 恢复后 sink 自动转回健康）。
-                self.write_unhealthy.store(false, Ordering::Relaxed);
-            }
         } else {
             // 无文件句柄：没有任何记录被写入，全部回填等待重试
-            inner.batch_buffer = records;
+            inner.batch_buffer.extend_from_slice(&records);
+        }
+
+        // 每批一次 flush：BufWriter 摊销了逐条 syscall，批末 flush 保证
+        // "flush_batch_inner 返回即落盘"的外部契约（轮转/关停依赖它）。
+        // 独立借用作用域：错误路径已在循环内重开句柄。
+        if !write_failed
+            && let Some(file) = &mut inner.current_file
+            && let Err(e) = file.flush()
+        {
+            error!("Batch flush error: {}", e);
+            inner.circuit_breaker.record_failure();
+            // BufWriter 层整批写失败（如 /dev/full）：无法确定部分写入边界，
+            // 整批回填重试（at-least-once，与"无句柄"分支语义一致）
+            inner.batch_buffer.extend_from_slice(&records);
+            write_failed = true;
+        }
+
+        if !write_failed {
+            inner.circuit_breaker.record_success();
+            // 全量刷盘成功：清除终态写失败的健康标记（瞬时磁盘满等故障
+            // 恢复后 sink 自动转回健康）。
+            self.write_unhealthy.store(false, Ordering::Relaxed);
+            // fsync（可选）：崩溃一致性增强，等保/审计场景开启。
+            // 数据已写入 BufWriter，先 flush 再 sync_all 落盘。
+            if self.config.fsync
+                && let Some(file) = &mut inner.current_file
+                && let Err(e) = file.flush().and_then(|_| file.get_ref().sync_all())
+            {
+                error!("fsync after batch write failed: {}", e);
+                inner.circuit_breaker.record_failure();
+            }
         }
 
         // Sync estimated size with actual file position to prevent drift
         if let Some(file) = &inner.current_file {
             // Use metadata() instead of stream_position() to avoid borrow conflicts
-            if let Ok(meta) = file.metadata() {
+            if let Ok(meta) = file.get_ref().metadata() {
                 inner.current_size = meta.len();
             }
         }
@@ -1035,7 +1178,22 @@ impl FileSink {
             }
         })?;
 
-        // 写入加密文件
+        // 写入加密文件（0600：密文同样不该给组/其他用户可读）
+        #[cfg(unix)]
+        let mut output = {
+            use std::os::unix::fs::OpenOptionsExt;
+            OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(output_path)
+                .map_err(|e| {
+                    error!("Failed to create encrypted file: {}", e);
+                    InklogError::IoError(e)
+                })?
+        };
+        #[cfg(not(unix))]
         let mut output = fs::File::create(output_path).map_err(|e| {
             error!("Failed to create encrypted file: {}", e);
             InklogError::IoError(e)
@@ -1136,6 +1294,32 @@ impl FileSink {
 
         info!("Log rotated to: {}", new_path.display());
 
+        // 归档审计链：轮转成功即登记（path + SHA-256 + 时间戳），写穿 manifest
+        if let Some(chain) = self.audit_chain.as_ref() {
+            let mut chain = chain.lock();
+            let digest = Self::sha256_file(&new_path).unwrap_or_else(|| "unavailable".to_string());
+            let event = serde_json::json!({
+                "path": new_path.display().to_string(),
+                "sha256": digest,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+            .to_string();
+            chain.append(&event);
+            let manifest = Self::audit_manifest_path(&self.config.path);
+            let mut body = String::new();
+            for entry in chain.entries() {
+                body.push_str(&serde_json::to_string(entry).unwrap_or_default());
+                body.push('\n');
+            }
+            if let Err(e) = fs::write(&manifest, body) {
+                error!(
+                    "Failed to write audit chain manifest {}: {}",
+                    manifest.display(),
+                    e
+                );
+            }
+        }
+
         // 如果启用压缩，在后台线程处理
         if self.config.compress {
             let config = self.config.clone();
@@ -1169,10 +1353,16 @@ impl FileSink {
                         write_unhealthy: AtomicBool::new(false),
                         lost_records: AtomicU64::new(0),
                         masker: DataMasker::new(),
-                        inner: RwLock::new(inner),
+                        audit_chain: None,
+                        inner: Arc::new(RwLock::new(inner)),
                     };
                     if let Err(e) = sink.compress_file(&path) {
                         error!("Failed to compress rotated log: {}", e);
+                        crate::support::ops_event::publish_internal(
+                            "sink_degraded",
+                            Some("file"),
+                            serde_json::json!({ "op": "compress", "error": e.to_string() }),
+                        );
                     }
                 }));
                 if let Err(panic_info) = result {
@@ -1219,11 +1409,17 @@ impl FileSink {
                         write_unhealthy: AtomicBool::new(false),
                         lost_records: AtomicU64::new(0),
                         masker: DataMasker::new(),
-                        inner: RwLock::new(inner),
+                        audit_chain: None,
+                        inner: Arc::new(RwLock::new(inner)),
                     };
                     let encrypted_path = path.with_extension("enc");
                     if let Err(e) = sink.encrypt_file(&path, &encrypted_path) {
                         error!("Failed to encrypt rotated log: {}", e);
+                        crate::support::ops_event::publish_internal(
+                            "sink_degraded",
+                            Some("file"),
+                            serde_json::json!({ "op": "encrypt", "error": e.to_string() }),
+                        );
                     } else if let Err(e) = fs::remove_file(&path) {
                         warn!(
                             "Failed to remove original file after encryption during rotation: {}",
@@ -1563,7 +1759,8 @@ impl Clone for FileSink {
             write_unhealthy: AtomicBool::new(false),
             lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
-            inner: RwLock::new(inner),
+            audit_chain: self.audit_chain.clone(),
+            inner: Arc::new(RwLock::new(inner)),
         }
     }
 }
@@ -1622,7 +1819,8 @@ mod tests {
             write_unhealthy: AtomicBool::new(false),
             lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
-            inner: RwLock::new(inner),
+            audit_chain: None,
+            inner: Arc::new(RwLock::new(inner)),
         }
     }
 
@@ -1656,6 +1854,8 @@ mod tests {
             cleanup_interval_minutes: 60,
             batch_size: 100,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             masking_enabled: true,
             output_format: Default::default(),
         };
@@ -2859,6 +3059,277 @@ mod tests {
         }
     }
 
+    // ==================== T016-T019 审计加固测试 ====================
+
+    #[cfg(unix)]
+    #[test]
+    fn test_log_file_created_with_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("perm.log");
+        let config = FileSinkConfig {
+            path: path.clone(),
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let record = crate::LogRecord::new(
+            tracing::Level::INFO,
+            "perm::test".to_string(),
+            "perm check".to_string(),
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(sink.write(&record)).unwrap();
+        rt.block_on(sink.flush()).unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        assert_eq!(
+            meta.permissions().mode() & 0o777,
+            0o600,
+            "log file must be 0600"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_encrypted_output_created_with_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let plain = dir.path().join("plain.log");
+        std::fs::write(&plain, "sensitive content").unwrap();
+        unsafe {
+            // 原始 32 字节密钥（直用分支），字符多样以通过熵校验
+            std::env::set_var(
+                "INKLOG_TEST_ENC_PERM_KEY",
+                "abcdefghijklmnopqrstuvwxyz123456",
+            );
+        }
+        let config = FileSinkConfig {
+            path: plain.clone(),
+            encrypt: true,
+            encryption_key_env: Some("INKLOG_TEST_ENC_PERM_KEY".to_string()),
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let out = dir.path().join("plain.enc");
+        sink.encrypt_file(&plain, &out).unwrap();
+        let meta = std::fs::metadata(&out).unwrap();
+        assert_eq!(
+            meta.permissions().mode() & 0o777,
+            0o600,
+            "enc file must be 0600"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_ENC_PERM_KEY");
+        }
+    }
+
+    #[test]
+    fn test_age_cleanup_runs_when_max_total_size_unparsable() {
+        // 审计 M14：年龄清理曾被 max_total_size 分支遮蔽——parse 失败时
+        // 过期文件永远不会被清理。修复后年龄清理独立执行。
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+        let old1 = dir.path().join("test_20260101_000000.log");
+        let old2 = dir.path().join("test_20260102_000000.log");
+        std::fs::write(&old1, "old-1").unwrap();
+        std::fs::write(&old2, "old-2").unwrap();
+        std::fs::write(&log_path, "active").unwrap();
+        // 两个文件都置为 3 天前；old1 再早一小时，确保排序后最旧者唯一
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mtime_old2 = filetime::FileTime::from_unix_time(now_secs - 3 * 86400, 0);
+        let mtime_old1 = filetime::FileTime::from_unix_time(now_secs - 3 * 86400 - 3600, 0);
+        filetime::set_file_mtime(&old1, mtime_old1).unwrap();
+        filetime::set_file_mtime(&old2, mtime_old2).unwrap();
+
+        let config = FileSinkConfig {
+            retention_days: 1,
+            keep_files: 1,
+            max_total_size: "not-a-size".to_string(), // 不可解析：旧代码两个分支都不执行
+            ..Default::default()
+        };
+        FileSink::perform_cleanup(&config, &log_path).unwrap();
+
+        assert!(
+            !old1.exists(),
+            "oldest expired file must be removed by age cleanup"
+        );
+        assert!(old2.exists(), "file within keep_files must be kept");
+        assert!(log_path.exists(), "active file must never be deleted");
+    }
+
+    #[test]
+    fn test_fsync_roundtrip_writes_are_visible_immediately() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("fsync.log");
+        let config = FileSinkConfig {
+            path: path.clone(),
+            fsync: true,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let record = crate::LogRecord::new(
+            tracing::Level::INFO,
+            "fsync::test".to_string(),
+            "fsync visible marker 13812345678".to_string(),
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(sink.write(&record)).unwrap();
+        rt.block_on(sink.flush()).unwrap();
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            data.contains("fsync visible marker"),
+            "fsync=true writes must be on disk right after flush"
+        );
+        rt.block_on(sink.shutdown()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_writes_produce_intact_lines() {
+        // T017：多任务并发写 1000 条后行数完整、每行可解析（BufWriter 无交错）
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("concurrent.log");
+        let config = FileSinkConfig {
+            path: path.clone(),
+            ..Default::default()
+        };
+        let sink = std::sync::Arc::new(FileSink::new(config).unwrap());
+
+        let mut tasks = Vec::new();
+        for t in 0..4 {
+            let sink = std::sync::Arc::clone(&sink);
+            tasks.push(tokio::spawn(async move {
+                for i in 0..250 {
+                    let rec = crate::LogRecord::new(
+                        tracing::Level::INFO,
+                        format!("task{t}"),
+                        format!("task-{t}-line-{i}"),
+                    );
+                    sink.write(&rec).await.unwrap();
+                }
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = data.lines().collect();
+        assert_eq!(lines.len(), 1000, "all 1000 records must be intact");
+        for (i, line) in lines.iter().enumerate() {
+            assert!(
+                line.contains("task-") && line.contains("-line-"),
+                "line {i} must be a complete record: {line}"
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_audit_chain_appends_on_rotation_and_verifies() {
+        use crate::support::audit_chain::{ArchiveChain, ArchiveChainEntry};
+
+        unsafe {
+            std::env::set_var("INKLOG_AUDIT_KEY", "audit-chain-test-key-01");
+        }
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("chained.log");
+        let config = FileSinkConfig {
+            path: path.clone(),
+            max_size: "200".to_string(),
+            audit_chain_enabled: true,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // 200 字节上限：数条记录即触发轮转
+        for i in 0..12 {
+            let rec = crate::LogRecord::new(
+                tracing::Level::INFO,
+                "chain::test".to_string(),
+                format!("audit chain record {i} with some padding text"),
+            );
+            rt.block_on(sink.write(&rec)).unwrap();
+        }
+        rt.block_on(sink.flush()).unwrap();
+        rt.block_on(sink.shutdown()).unwrap();
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+        }
+
+        let manifest = FileSink::audit_manifest_path(&path);
+        let data = std::fs::read_to_string(&manifest).expect("manifest must exist after rotation");
+        let entries: Vec<ArchiveChainEntry> = data
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("manifest line must be JSON"))
+            .collect();
+        assert!(
+            !entries.is_empty(),
+            "at least one rotation entry expected, got {}",
+            entries.len()
+        );
+        assert!(
+            ArchiveChain::verify_entries(&entries, b"audit-chain-test-key-01"),
+            "manifest chain must verify with the correct key"
+        );
+        // 篡改任一事件（改 sha256 摘要）→ 校验失败
+        let mut tampered = entries.clone();
+        tampered[0].event = tampered[0].event.replace("sha256", "sha256_tampered");
+        assert!(
+            !ArchiveChain::verify_entries(&tampered, b"audit-chain-test-key-01"),
+            "tampered manifest must fail verification"
+        );
+    }
+
+    #[test]
+    fn test_idle_flush_lands_within_one_tick() {
+        // R-rel-003：空闲期（无后续写入）batch 中的记录在一个 tick 内落盘
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("idle.log");
+        let config = FileSinkConfig {
+            path: path.clone(),
+            batch_size: 100,
+            flush_interval_ms: 100,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(sink.write(&create_test_record("idle flush marker")))
+            .unwrap();
+
+        // 注入 1s tick：空闲 flush 由轮转定时器线程代执行
+        sink.start_rotation_timer_with_tick(StdDuration::from_secs(1));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut landed = false;
+        while std::time::Instant::now() < deadline {
+            if let Ok(data) = std::fs::read_to_string(&path)
+                && data.contains("idle flush marker")
+            {
+                landed = true;
+                break;
+            }
+            thread::sleep(StdDuration::from_millis(50));
+        }
+        assert!(landed, "idle batch must flush within one tick");
+        rt.block_on(sink.shutdown()).unwrap();
+    }
+
     // ==================== perform_cleanup 测试 ====================
 
     #[test]
@@ -2886,6 +3357,8 @@ mod tests {
             cleanup_interval_minutes: 60,
             batch_size: 100,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             masking_enabled: true,
             output_format: Default::default(),
         };
@@ -3100,6 +3573,8 @@ mod tests {
             path: log_path.clone(),
             batch_size: 2, // 小批量触发刷新
             flush_interval_ms: 1000,
+            fsync: false,
+            audit_chain_enabled: false,
             ..Default::default()
         };
         let sink = FileSink::new(config).unwrap();
@@ -4781,6 +5256,8 @@ mod tests {
             max_size: "100".to_string(), // Very small to trigger rotation
             batch_size: 2,               // Small batch size
             flush_interval_ms: 10000,    // Long interval so size triggers flush
+            fsync: false,
+            audit_chain_enabled: false,
             rotation_time: "daily".to_string(),
             compress: false,
             encrypt: false,
@@ -5022,6 +5499,8 @@ mod tests {
             encrypt: false,
             batch_size: 1,
             flush_interval_ms: 1000,
+            fsync: false,
+            audit_chain_enabled: false,
             ..Default::default()
         };
         let sink = create_test_file_sink(config);

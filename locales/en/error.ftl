@@ -12,3 +12,6 @@ error-compression_error = Compression error
 error-runtime_error = Runtime error
 error-http_server_error = HTTP server error
 error-unknown_error = Unknown error
+query-decompression_limit_exceeded = Decompressed output exceeds the 1 GiB safety limit (possible decompression bomb); query aborted
+masking-limit-exceeded = Masking skipped: input exceeds the 1 MiB limit
+file-retention-compliance-hint = encrypt is enabled with retention_days below 180: compliance (等保 2.0) requires at least 6 months of log retention; consider raising retention_days and keep_files

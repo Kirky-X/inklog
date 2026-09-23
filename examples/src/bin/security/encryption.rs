@@ -110,6 +110,8 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
         encrypt: false, // 先写入明文
         batch_size: 10,
         flush_interval_ms: 100,
+        fsync: false,
+        audit_chain_enabled: false,
         ..Default::default()
     };
 

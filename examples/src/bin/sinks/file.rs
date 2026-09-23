@@ -64,6 +64,8 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_interval_minutes: 60,
         batch_size: 100,
         flush_interval_ms: 1000,
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -133,6 +135,8 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_interval_minutes: 60,
         batch_size: 1,         // 每条日志立即 flush
         flush_interval_ms: 10, // 10ms flush 间隔
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -239,6 +243,8 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_interval_minutes: 60,
         batch_size: 1,         // 每条日志立即 flush
         flush_interval_ms: 10, // 10ms flush 间隔
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     };

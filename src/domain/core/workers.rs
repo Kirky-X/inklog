@@ -374,21 +374,28 @@ impl SinkWorker<'_> {
     fn handle_record(
         &self,
         state: &mut SinkWorkerState,
-        record: &Arc<LogRecord>,
+        record: Arc<LogRecord>,
         create_sink: SinkFactory<'_>,
     ) {
-        self.metrics.record_latency(record_age(record));
+        self.metrics.record_latency(record_age(&record));
 
         // 降级模式（工厂持续失败）：无 sink 可写——保底到
         // error sink 并计为 failed，绝不无声丢弃
         let Some(sink) = state.sink.as_mut() else {
-            self.handle_sink_unavailable(record);
+            self.handle_sink_unavailable(&record);
             return;
         };
 
-        let write_succeeded = self.write_with_retry(sink, record, &mut state.failures);
+        let write_succeeded = self.write_with_retry(sink, &record, &mut state.failures);
         if !write_succeeded {
             self.maybe_auto_recover(&mut state.failures, sink, create_sink);
+        }
+
+        // 归还对象池：写路径完成后 Arc 引用归一（try_unwrap 成功）时回收
+        // LogRecord（put 内部 reset 清空字段），下次 get_log_record 复用——
+        // 池"只取不还"导致零分配目标落空的问题由此闭合。仍被共享时自然 drop。
+        if let Ok(owned) = Arc::try_unwrap(record) {
+            crate::support::processing::object_pool::put_log_record(owned);
         }
     }
 
@@ -402,6 +409,11 @@ impl SinkWorker<'_> {
             self.desc.name,
             false,
             Some("sink unavailable: factory keeps failing".to_string()),
+        );
+        crate::support::ops_event::publish_internal(
+            "sink_degraded",
+            Some(self.desc.name),
+            serde_json::json!({ "reason": "factory keeps failing" }),
         );
         let error_sink_handle = self.error_sink.lock().ok().and_then(|guard| guard.clone());
         if let Some(error_sink) = error_sink_handle {
@@ -521,6 +533,11 @@ impl SinkWorker<'_> {
                     state.failures.last_failure_time = None;
                     self.metrics.update_sink_health(self.desc.name, true, None);
                     tracing::info!("{}", crate::i18n::tr(self.desc.recovered_key));
+                    crate::support::ops_event::publish_internal(
+                        "sink_recovered",
+                        Some(self.desc.name),
+                        serde_json::json!({ "attempts": state.failures.consecutive_failures }),
+                    );
                 } else {
                     tracing::error!("{}", crate::i18n::tr(self.desc.recovery_failed_key));
                 }
@@ -569,7 +586,7 @@ impl SinkWorker<'_> {
     ) {
         let deadline = Instant::now() + timeout;
         while let Ok(record) = receiver.try_recv() {
-            self.handle_record(state, &record, create_sink);
+            self.handle_record(state, record, create_sink);
             if Instant::now() > deadline {
                 break;
             }
@@ -742,7 +759,7 @@ impl LoggerManager {
 
                         match rx_file.recv_timeout(Duration::from_millis(100)) {
                             Ok(record) => {
-                                worker.handle_record(&mut state, &record, &mut create_sink);
+                                worker.handle_record(&mut state, record, &mut create_sink);
                             }
                             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                                 // Timeout, flush buffer
@@ -817,7 +834,7 @@ impl LoggerManager {
 
                         match rx_db.recv_timeout(Duration::from_millis(100)) {
                             Ok(record) => {
-                                worker.handle_record(&mut state, &record, &mut create_sink);
+                                worker.handle_record(&mut state, record, &mut create_sink);
                             }
                             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                                 // Timeout, flush buffer

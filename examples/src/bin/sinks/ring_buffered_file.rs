@@ -65,6 +65,8 @@ fn show_config_default() {
         backpressure_strategy: BackpressureStrategy::DropNewest,
         flush_batch_size: 16,
         flush_interval_ms: 20,
+        fsync: false,
+        audit_chain_enabled: false,
     };
     println!("channel_capacity    = {}", cfg.channel_capacity);
     println!("flush_batch_size    = {}", cfg.flush_batch_size);
@@ -89,6 +91,8 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
         backpressure_strategy: BackpressureStrategy::Block,
         flush_batch_size: 8,
         flush_interval_ms: 10,
+        fsync: false,
+        audit_chain_enabled: false,
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
@@ -143,6 +147,8 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
         backpressure_strategy: BackpressureStrategy::DropNewest,
         flush_batch_size: 2,
         flush_interval_ms: 1000, // 拉长 flush 间隔，迫使 channel 被填满
+        fsync: false,
+        audit_chain_enabled: false,
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
@@ -188,6 +194,8 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
         backpressure_strategy: BackpressureStrategy::DropOldest,
         flush_batch_size: 2,
         flush_interval_ms: 1000,
+        fsync: false,
+        audit_chain_enabled: false,
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
@@ -233,6 +241,8 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
         backpressure_strategy: BackpressureStrategy::Block,
         flush_batch_size: 4,
         flush_interval_ms: 10,
+        fsync: false,
+        audit_chain_enabled: false,
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;

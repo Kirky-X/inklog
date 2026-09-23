@@ -116,14 +116,8 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
                             path.display()
                         ))
                     })?;
-                let mut out = String::new();
-                decoder.read_to_string(&mut out).map_err(|e| {
-                    InklogError::ConfigError(format!(
-                        "zstd decode failed for '{}': {e}",
-                        path.display()
-                    ))
-                })?;
-                Ok(out)
+                // 流式读取 + 输出上限：恶意高压缩比样本不再可 OOM 查询进程
+                read_with_limit(&mut decoder, path, "zstd")
             }
             #[cfg(not(feature = "zstd"))]
             {
@@ -136,16 +130,8 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
         Some("gz") => {
             #[cfg(feature = "gzip")]
             {
-                use std::io::Read as _;
                 let mut decoder = flate2::read::GzDecoder::new(std::io::Cursor::new(&raw));
-                let mut out = String::new();
-                decoder.read_to_string(&mut out).map_err(|e| {
-                    InklogError::ConfigError(format!(
-                        "gzip decode failed for '{}': {e}",
-                        path.display()
-                    ))
-                })?;
-                Ok(out)
+                read_with_limit(&mut decoder, path, "gzip")
             }
             #[cfg(not(feature = "gzip"))]
             {
@@ -164,8 +150,88 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
     }
 }
 
+#[cfg(test)]
+mod bomb_guard_tests {
+    use super::*;
+    use std::io::Read;
+
+    /// 无限输出流：生产实现 read_with_limit_inner 在超限时必须报错而非继续分配。
+    #[test]
+    fn test_read_with_limit_rejects_oversized_output() {
+        struct EndlessZeros;
+        impl Read for EndlessZeros {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                for b in buf.iter_mut() {
+                    *b = 0;
+                }
+                Ok(buf.len())
+            }
+        }
+        let path = std::path::Path::new("/tmp/bomb.log");
+        let mut reader = EndlessZeros;
+        let Err(err) = read_with_limit_inner(&mut reader, path, "zstd", 2 * 1024 * 1024) else {
+            panic!("oversized stream must be rejected");
+        };
+        assert!(
+            err.to_string().contains("1 GiB") || err.to_string().contains("bomb"),
+            "error must describe the decompression limit, got: {err}"
+        );
+    }
+}
+
 /// `ENCLOG1\0`
 const ENCRYPTED_MAGIC: &[u8] = b"ENCLOG1\0";
+
+/// 解压输出上限（默认 1 GiB）：压缩炸弹防护（审计 M16b）。
+#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+pub(crate) const DECOMPRESSION_OUTPUT_LIMIT: u64 = 1024 * 1024 * 1024;
+
+/// 流式解压读取：超过 [`DECOMPRESSION_OUTPUT_LIMIT`] 立即报错而非继续分配。
+#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+fn read_with_limit(
+    reader: &mut impl std::io::Read,
+    path: &Path,
+    codec: &str,
+) -> Result<String, InklogError> {
+    read_with_limit_inner(reader, path, codec, DECOMPRESSION_OUTPUT_LIMIT)
+}
+
+/// [`read_with_limit`] 的可注入上限版本（测试用小 limit 驱动同一实现）。
+#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+pub(crate) fn read_with_limit_inner(
+    reader: &mut impl std::io::Read,
+    path: &Path,
+    codec: &str,
+    limit: u64,
+) -> Result<String, InklogError> {
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 65536];
+    let mut total: u64 = 0;
+    loop {
+        let n = reader.read(&mut chunk).map_err(|e| {
+            InklogError::ConfigError(format!(
+                "{codec} decode failed for '{}': {e}",
+                path.display()
+            ))
+        })?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > limit {
+            return Err(InklogError::RuntimeError(crate::i18n::tr(
+                "query-decompression_limit_exceeded",
+            )));
+        }
+        out.extend_from_slice(&chunk[..n]);
+    }
+    String::from_utf8(out).map_err(|e| {
+        InklogError::ConfigError(format!(
+            "decompressed log file '{}' is not valid UTF-8: {e}",
+            path.display()
+        ))
+    })
+}
 
 /// AES-256-GCM 解密（与 `inklog-cli decrypt` 的 v1(algo=1)/v2/legacy 格式对齐）。
 fn decrypt_bytes(raw: &[u8], path: &Path, key_env: &str) -> Result<Vec<u8>, InklogError> {

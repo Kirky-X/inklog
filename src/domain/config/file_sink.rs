@@ -102,6 +102,18 @@ pub struct FileSinkConfig {
     #[serde(default = "default_flush_interval_ms")]
     pub flush_interval_ms: u64,
 
+    /// 每批写盘后执行 `sync_all`（fsync）：崩溃一致性增强。
+    /// 默认关闭（吞吐优先）；等保/审计场景建议开启。
+    #[serde(default)]
+    pub fsync: bool,
+
+    /// 归档审计链（HMAC-SHA256 前向链）：每次轮转成功后向
+    /// `<stem>.chain.jsonl` manifest 追加 `{path, sha256, timestamp}` 条目，
+    /// 检测归档篡改/删除/重排。密钥读 `INKLOG_AUDIT_KEY` 环境变量；
+    /// 缺失时链禁用并告警。默认关闭。
+    #[serde(default)]
+    pub audit_chain_enabled: bool,
+
     /// Enable PII masking for file output: structured PII (emails, phone
     /// numbers, ID/bank card numbers) and values under sensitive field names
     /// are masked before the record is persisted.
@@ -173,6 +185,8 @@ impl Default for FileSinkConfig {
             cleanup_interval_minutes: default_cleanup_interval_minutes(),
             batch_size: default_batch_size(),
             flush_interval_ms: default_flush_interval_ms(),
+            fsync: false,
+            audit_chain_enabled: false,
             masking_enabled: default_true(),
             output_format: OutputFormat::default(),
         }
@@ -209,6 +223,15 @@ impl FileSinkConfig {
                     ));
                 }
                 Some(_) => {}
+            }
+            // 等保 2.0/《网络安全法》第 21 条：日志留存不少于 6 个月。
+            // 加密归档（审计级）场景下 retention_days 过短给出提示（不阻断配置）。
+            if self.retention_days < 180 {
+                tracing::warn!(
+                    retention_days = self.retention_days,
+                    "{}",
+                    crate::i18n::tr("file-retention-compliance-hint")
+                );
             }
         }
         Ok(())

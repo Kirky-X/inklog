@@ -36,6 +36,8 @@ pub fn create_file_config(path: &str, max_size: &str, compress: bool) -> FileSin
         cleanup_interval_minutes: 60,
         batch_size: 100,
         flush_interval_ms: 1000,
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     }

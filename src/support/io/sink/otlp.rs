@@ -26,6 +26,7 @@ use async_trait::async_trait;
 
 use crate::support::io::LogSink;
 use crate::{InklogError, LogRecord};
+use std::sync::Arc;
 
 /// OTLP sink 配置。
 #[derive(Debug, Clone)]
@@ -38,6 +39,13 @@ pub struct OtlpConfig {
     pub timeout: Duration,
     /// Service name（OTel 语义资源属性 `service.name`）
     pub service_name: String,
+    /// 导出前 PII 掩码开关（默认开启；OTLP 常出进程边界，默认不得裸奔）
+    pub masking_enabled: bool,
+    /// https endpoint 的 CA 证书 PEM 路径（与 `danger_accept_invalid_certs`
+    /// 二选一；仅 net-sink feature 下生效，语义与 TcpSink 的 TlsClientConfig 一致）
+    pub ca_pem_path: Option<std::path::PathBuf>,
+    /// https endpoint 跳过证书校验（仅测试用途）
+    pub danger_accept_invalid_certs: bool,
 }
 
 impl Default for OtlpConfig {
@@ -47,11 +55,29 @@ impl Default for OtlpConfig {
             max_batch_size: 100,
             timeout: Duration::from_secs(5),
             service_name: "inklog".to_string(),
+            masking_enabled: true,
+            ca_pem_path: None,
+            danger_accept_invalid_certs: false,
         }
     }
 }
 
+/// severityText → OTLP severityNumber（Logs Data Model 标准映射）。
+fn severity_number(level: &str) -> u8 {
+    match level.to_ascii_uppercase().as_str() {
+        "TRACE" | "DEBUG" => 5,
+        "INFO" => 9,
+        "WARN" => 13,
+        "ERROR" => 17,
+        "FATAL" => 21,
+        _ => 0,
+    }
+}
+
 /// 单条记录的 OTLP LogRecord JSON 片段。
+///
+/// `traceId`/`spanId` 来自 LogRecord 顶层字段（16/32 hex），使 Collector
+/// 侧可以做日志↔trace 关联；无上下文时缺省（不输出空串字段）。
 fn encode_log_record(record: &LogRecord) -> serde_json::Value {
     let mut attributes: Vec<serde_json::Value> = record
         .fields
@@ -67,12 +93,18 @@ fn encode_log_record(record: &LogRecord) -> serde_json::Value {
         "key": "target",
         "value": { "stringValue": record.target },
     }));
-    serde_json::json!({
+    let mut encoded = serde_json::json!({
         "timeUnixNano": record.timestamp.timestamp_nanos_opt().unwrap_or_default(),
         "severityText": record.level,
+        "severityNumber": severity_number(&record.level),
         "body": { "stringValue": record.message },
         "attributes": attributes,
-    })
+    });
+    if let (Some(trace_id), Some(span_id)) = (&record.trace_id, &record.span_id) {
+        encoded["traceId"] = serde_json::Value::String(trace_id.clone());
+        encoded["spanId"] = serde_json::Value::String(span_id.clone());
+    }
+    encoded
 }
 
 /// 组装 OTLP/HTTP JSON 请求体（导出供下游复用同一编码）。
@@ -94,9 +126,16 @@ pub fn encode_otlp_body(records: &[LogRecord], service_name: &str) -> String {
     .to_string()
 }
 
-/// 手写 HTTP/1.1 POST（明文；worker 阻塞线程上执行）。
+/// 手写 HTTP/1.1 POST（明文 http；https 走 https_post_json；worker 阻塞线程执行）。
 fn http_post_json(endpoint: &str, body: &str, timeout: Duration) -> Result<(), InklogError> {
-    let (host, port, path) = parse_http_endpoint(endpoint)?;
+    let (scheme, host, port, path) = parse_endpoint(endpoint)?;
+    if scheme == Scheme::Https {
+        return Err(InklogError::ConfigError(
+            "OTLP https endpoint requires the 'net-sink' feature (rustls transport); \
+             either use http:// or rebuild with --features net-sink"
+                .to_string(),
+        ));
+    }
     // CR/LF 注入防护：host/path 直接内插进原始请求头，出现换行控制符
     // 即可注入额外头部/拆分响应
     if host.contains(['\r', '\n']) || path.contains(['\r', '\n']) {
@@ -150,16 +189,95 @@ fn http_post_json(endpoint: &str, body: &str, timeout: Duration) -> Result<(), I
     Ok(())
 }
 
-/// 解析 `http://host[:port]/path`。
-fn parse_http_endpoint(endpoint: &str) -> Result<(String, u16, String), InklogError> {
-    let rest = endpoint.strip_prefix("http://").ok_or_else(|| {
-        InklogError::ConfigError(format!(
-            "OTLP endpoint '{endpoint}' must be http:// (MVP; HTTPS 演进中)"
-        ))
+/// https 传输：rustls StreamOwned 包装 TcpStream（复用 net-sink 的连接语义）。
+/// `tls_config` 来自构造期校验（`build_tls_config`），此处不再重复解析 CA。
+#[cfg(feature = "net-sink")]
+fn https_post_json(
+    endpoint: &str,
+    host: &str,
+    port: u16,
+    path: &str,
+    body: &str,
+    timeout: Duration,
+    tls_config: Arc<rustls::ClientConfig>,
+) -> Result<(), InklogError> {
+    let addr = format!("{host}:{port}");
+    let stream = std::net::TcpStream::connect(&addr).map_err(|e| {
+        InklogError::IoError(std::io::Error::other(format!(
+            "OTLP connect to '{endpoint}': {e}"
+        )))
     })?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .and_then(|_| stream.set_read_timeout(Some(timeout)))
+        .map_err(|e| {
+            InklogError::IoError(std::io::Error::other(format!("OTLP timeout setup: {e}")))
+        })?;
+
+    // server_name 取 host（不含端口）
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
+        .map_err(|e| InklogError::ConfigError(format!("OTLP TLS server name '{host}': {e}")))?;
+    let conn = rustls::ClientConnection::new(tls_config, server_name)
+        .map_err(|e| InklogError::IoError(std::io::Error::other(format!("OTLP TLS: {e}"))))?;
+    let mut tls_stream = rustls::StreamOwned::new(conn, stream);
+
+    use std::io::Write;
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    tls_stream
+        .write_all(request.as_bytes())
+        .map_err(|e| InklogError::IoError(std::io::Error::other(format!("OTLP send: {e}"))))?;
+    tls_stream.flush().ok();
+
+    // 读状态行，2xx 视为成功
+    use std::io::Read as _;
+    let mut response = Vec::new();
+    tls_stream
+        .take(8192)
+        .read_to_end(&mut response)
+        .map_err(|e| InklogError::IoError(std::io::Error::other(format!("OTLP read: {e}"))))?;
+    let text = String::from_utf8_lossy(&response);
+    let status = text
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .unwrap_or(0);
+    if !(200..300).contains(&status) {
+        return Err(InklogError::RuntimeError(format!(
+            "OTLP export to '{endpoint}' failed with HTTP status {status}"
+        )));
+    }
+    Ok(())
+}
+
+/// endpoint scheme。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scheme {
+    Http,
+    Https,
+}
+
+/// 解析 `http(s)://host[:port]/path`，https 缺省端口 443、http 缺省 80。
+fn parse_endpoint(endpoint: &str) -> Result<(Scheme, String, u16, String), InklogError> {
+    let (scheme, rest) = if let Some(rest) = endpoint.strip_prefix("https://") {
+        (Scheme::Https, rest)
+    } else if let Some(rest) = endpoint.strip_prefix("http://") {
+        (Scheme::Http, rest)
+    } else {
+        return Err(InklogError::ConfigError(format!(
+            "OTLP endpoint '{endpoint}' must start with http:// or https://"
+        )));
+    };
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
+    };
+    let default_port = match scheme {
+        Scheme::Http => 80,
+        Scheme::Https => 443,
     };
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) => (
@@ -167,24 +285,104 @@ fn parse_http_endpoint(endpoint: &str) -> Result<(String, u16, String), InklogEr
             p.parse::<u16>()
                 .map_err(|_| InklogError::ConfigError(format!("bad OTLP port in '{endpoint}'")))?,
         ),
-        None => (authority.to_string(), 80),
+        None => (authority.to_string(), default_port),
     };
-    Ok((host, port, path.to_string()))
+    Ok((scheme, host, port, path.to_string()))
 }
 
 /// OTLP 日志导出 sink（批量 + 手写 HTTP/1.1 传输）。
 pub struct OtlpSink {
     config: OtlpConfig,
     batch: Mutex<Vec<LogRecord>>,
+    /// None = masking_enabled=false（导出原样）
+    masker: Option<crate::DataMasker>,
+    /// https 传输配置（构造期由 build_tls_config 校验生成；http 为 None）
+    #[cfg(feature = "net-sink")]
+    tls: Option<Arc<rustls::ClientConfig>>,
 }
 
 impl OtlpSink {
     pub fn new(config: OtlpConfig) -> Result<Self, InklogError> {
-        parse_http_endpoint(&config.endpoint)?;
+        let (scheme, ..) = parse_endpoint(&config.endpoint)?;
+        if scheme == Scheme::Https {
+            // https 需要 net-sink feature（复用其 rustls 依赖与传输模式）
+            #[cfg(not(feature = "net-sink"))]
+            {
+                let _ = &config;
+                return Err(InklogError::ConfigError(
+                    "OTLP https endpoint requires the 'net-sink' feature (rustls transport); \
+                     either use http:// or rebuild with --features net-sink"
+                        .to_string(),
+                ));
+            }
+            #[cfg(feature = "net-sink")]
+            Self::build_tls_config(&config)?;
+        }
+        let masker = config.masking_enabled.then(crate::DataMasker::new);
+        #[cfg(feature = "net-sink")]
+        let tls = match scheme {
+            Scheme::Https => Some(Arc::new(Self::build_tls_config(&config)?)),
+            Scheme::Http => None,
+        };
         Ok(Self {
             config,
             batch: Mutex::new(Vec::new()),
+            masker,
+            #[cfg(feature = "net-sink")]
+            tls,
         })
+    }
+
+    /// https 传输的 rustls 客户端配置（构造期校验，避免发送期才发现 CA 问题）。
+    #[cfg(all(feature = "net-sink"))]
+    fn build_tls_config(config: &OtlpConfig) -> Result<rustls::ClientConfig, InklogError> {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .map_err(|e| InklogError::ConfigError(format!("TLS protocol versions: {e}")))?;
+        if config.danger_accept_invalid_certs {
+            return Ok(builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(super::net::AcceptAnyVerifier {
+                    provider: (*provider).clone(),
+                }))
+                .with_no_client_auth());
+        }
+        let Some(ca_path) = &config.ca_pem_path else {
+            return Err(InklogError::ConfigError(
+                "OTLP https endpoint requires ca_pem_path (or danger_accept_invalid_certs for tests)"
+                    .to_string(),
+            ));
+        };
+        let mut roots = rustls::RootCertStore::empty();
+        for cert in super::net::load_certs_pem(ca_path)? {
+            roots
+                .add(cert)
+                .map_err(|e| InklogError::ConfigError(format!("CA cert rejected: {e}")))?;
+        }
+        Ok(builder.with_root_certificates(roots).with_no_client_auth())
+    }
+
+    /// 注入自定义 masker（覆盖 masking_enabled 的默认构造）。
+    pub fn with_masker(mut self, masker: crate::DataMasker) -> Self {
+        self.masker = Some(masker);
+        self
+    }
+
+    /// 入批前脱敏：message 过值掩码，fields 过键值遍历掩码。
+    fn mask_record(&self, record: &LogRecord) -> LogRecord {
+        match self.masker.as_ref() {
+            Some(masker) => {
+                let mut fields = record.fields.clone();
+                masker.mask_hashmap(&mut fields);
+                LogRecord {
+                    message: masker.mask(&record.message),
+                    fields,
+                    ..record.clone()
+                }
+            }
+            None => record.clone(),
+        }
     }
 
     /// 当前批内记录数（诊断）。
@@ -199,7 +397,34 @@ impl OtlpSink {
         }
         let body = encode_otlp_body(batch, &self.config.service_name);
         batch.clear();
-        http_post_json(&self.config.endpoint, &body, self.config.timeout)
+        let (scheme, ..) = parse_endpoint(&self.config.endpoint)?;
+        match scheme {
+            Scheme::Http => http_post_json(&self.config.endpoint, &body, self.config.timeout),
+            #[cfg(feature = "net-sink")]
+            Scheme::Https => {
+                let (_, host, port, path) = parse_endpoint(&self.config.endpoint)?;
+                let tls = Arc::clone(self.tls.as_ref().ok_or_else(|| {
+                    InklogError::ConfigError(
+                        "OTLP TLS config missing for https endpoint".to_string(),
+                    )
+                })?);
+                https_post_json(
+                    &self.config.endpoint,
+                    &host,
+                    port,
+                    &path,
+                    &body,
+                    self.config.timeout,
+                    tls,
+                )
+            }
+            #[cfg(not(feature = "net-sink"))]
+            Scheme::Https => Err(InklogError::ConfigError(
+                "OTLP https endpoint requires the 'net-sink' feature (rustls transport); \
+                 either use http:// or rebuild with --features net-sink"
+                    .to_string(),
+            )),
+        }
     }
 }
 
@@ -211,7 +436,7 @@ impl LogSink for OtlpSink {
                 .batch
                 .lock()
                 .map_err(|_| InklogError::ConfigError("otlp batch poisoned".to_string()))?;
-            batch.push(record.clone());
+            batch.push(self.mask_record(record));
             batch.len() >= self.config.max_batch_size
         };
         if should_send {
@@ -279,15 +504,66 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_endpoint_rejects_non_http() {
-        assert!(parse_http_endpoint("https://collector:4318/v1/logs").is_err());
-        assert!(parse_http_endpoint("not-a-url").is_err());
-        assert!(parse_http_endpoint("http://host:99999").is_err());
-        let (host, port, path) = parse_http_endpoint("http://127.0.0.1:4318/v1/logs").unwrap();
+    fn test_parse_endpoint_schemes_and_defaults() {
+        assert!(parse_endpoint("not-a-url").is_err());
+        assert!(parse_endpoint("ftp://host/x").is_err());
+        assert!(parse_endpoint("http://host:99999").is_err());
+
+        let (scheme, host, port, path) = parse_endpoint("http://127.0.0.1:4318/v1/logs").unwrap();
+        assert_eq!(scheme, Scheme::Http);
         assert_eq!(
             (host.as_str(), port, path.as_str()),
             ("127.0.0.1", 4318, "/v1/logs")
         );
+
+        let (scheme, host, port, path) = parse_endpoint("https://collector/v1/logs").unwrap();
+        assert_eq!(scheme, Scheme::Https);
+        assert_eq!(
+            (host.as_str(), port, path.as_str()),
+            ("collector", 443, "/v1/logs")
+        );
+    }
+
+    /// https 无 net-sink feature：构造期即报错并提示 feature。
+    #[cfg(not(feature = "net-sink"))]
+    #[test]
+    fn test_https_endpoint_rejected_without_net_sink_feature() {
+        let err = match OtlpSink::new(OtlpConfig {
+            endpoint: "https://collector:4318/v1/logs".to_string(),
+            ..Default::default()
+        }) {
+            Err(e) => e,
+            Ok(_) => panic!("https must be rejected without net-sink feature"),
+        };
+        assert!(
+            err.to_string().contains("net-sink"),
+            "error must mention the net-sink feature, got: {err}"
+        );
+    }
+
+    /// https 有 feature 但缺 CA 且未显式放行：构造期报 CA 配置错误。
+    #[cfg(feature = "net-sink")]
+    #[test]
+    fn test_https_endpoint_requires_ca_or_danger_flag() {
+        let err = match OtlpSink::new(OtlpConfig {
+            endpoint: "https://collector:4318/v1/logs".to_string(),
+            ..Default::default()
+        }) {
+            Err(e) => e,
+            Ok(_) => panic!("https without CA and without danger flag must fail"),
+        };
+        assert!(
+            err.to_string().contains("ca_pem_path"),
+            "error must mention CA configuration, got: {err}"
+        );
+
+        // danger 标志放行：构造成功（不发起连接）
+        let sink = OtlpSink::new(OtlpConfig {
+            endpoint: "https://collector:4318/v1/logs".to_string(),
+            danger_accept_invalid_certs: true,
+            ..Default::default()
+        });
+        assert!(sink.is_ok());
     }
 
     /// mock collector：接受一次 POST，捕获请求体并回 200。
@@ -354,6 +630,9 @@ mod tests {
             max_batch_size: 10,
             timeout: Duration::from_secs(5),
             service_name: "inklog-test".to_string(),
+            masking_enabled: true,
+            ca_pem_path: None,
+            danger_accept_invalid_certs: false,
         })
         .unwrap();
 
@@ -401,6 +680,9 @@ mod tests {
             max_batch_size: 2,
             timeout: Duration::from_secs(5),
             service_name: "inklog-test".to_string(),
+            masking_enabled: true,
+            ca_pem_path: None,
+            danger_accept_invalid_certs: false,
         })
         .unwrap();
 
@@ -431,6 +713,9 @@ mod tests {
             max_batch_size: 1,
             timeout: Duration::from_secs(5),
             service_name: "inklog-test".to_string(),
+            masking_enabled: true,
+            ca_pem_path: None,
+            danger_accept_invalid_certs: false,
         })
         .unwrap();
 
@@ -440,5 +725,68 @@ mod tests {
             "collector failure must surface, got {err}"
         );
         server.join().unwrap();
+    }
+
+    #[test]
+    fn test_encode_log_record_includes_trace_fields_and_severity_number() {
+        let mut rec = record("with context");
+        // W3C 规范文档中的示例 ID（非凭据）—— pragma 放行 detect-secrets 高熵启发式
+        rec.trace_id = Some("0af7651916cd43dd8448eb211c80319c".to_string()); // pragma: allowlist secret
+        rec.span_id = Some("b7ad6b7169203331".to_string()); // pragma: allowlist secret
+        let encoded = encode_log_record(&rec);
+        assert_eq!(
+            encoded["traceId"],
+            "0af7651916cd43dd8448eb211c80319c", // pragma: allowlist secret
+            "32-hex trace id must be exported for log-trace correlation"
+        );
+        assert_eq!(encoded["spanId"], "b7ad6b7169203331"); // pragma: allowlist secret
+        assert_eq!(encoded["severityNumber"], 17, "ERROR maps to 17");
+
+        // 无上下文：字段缺省而不是空串
+        let plain = encode_log_record(&record("no context"));
+        assert!(plain.get("traceId").is_none());
+        assert!(plain.get("spanId").is_none());
+        // 级别映射表
+        assert_eq!(severity_number("INFO"), 9);
+        assert_eq!(severity_number("WARN"), 13);
+        assert_eq!(severity_number("FATAL"), 21);
+        assert_eq!(severity_number("debug"), 5);
+    }
+
+    /// 出站掩码：message 与 fields 中的明文 PII 不得进入导出请求体。
+    #[tokio::test]
+    async fn test_otlp_sink_masks_pii_before_export() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let captured = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let server = serve_one_request(
+            listener,
+            captured.clone(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+
+        let sink = OtlpSink::new(OtlpConfig {
+            endpoint: format!("http://{addr}/v1/logs"),
+            max_batch_size: 10,
+            timeout: Duration::from_secs(5),
+            service_name: "inklog-test".to_string(),
+            masking_enabled: true,
+            ca_pem_path: None,
+            danger_accept_invalid_certs: false,
+        })
+        .unwrap();
+
+        let mut rec = record("user phone 13812345678 login");
+        rec.fields
+            .insert("phone".to_string(), serde_json::json!("13912345678"));
+        sink.write(&rec).await.unwrap();
+        sink.flush().await.unwrap();
+        server.join().unwrap();
+
+        let raw = String::from_utf8_lossy(&captured.lock().unwrap()).to_string();
+        assert!(
+            !raw.contains("13812345678") && !raw.contains("13912345678"),
+            "export body must not carry plaintext PII"
+        );
     }
 }

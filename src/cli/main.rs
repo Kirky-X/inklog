@@ -120,6 +120,20 @@ enum Commands {
         #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
         key_env: Option<String>,
     },
+
+    #[command(name = "verify-chain")]
+    #[command(about = inklog::i18n::tr("cli-verify-chain-about"))]
+    VerifyChain {
+        /// 审计链 manifest（`<stem>.chain.jsonl`）
+        #[arg(long = "manifest")]
+        #[arg(help = inklog::i18n::tr("cli-verify-chain-help-manifest"))]
+        manifest: PathBuf,
+
+        #[arg(long, env = "INKLOG_AUDIT_KEY")]
+        #[arg(help = inklog::i18n::tr("cli-verify-chain-help-key-env"))]
+        #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        key_env: String,
+    },
 }
 
 /// Configuration template type for the generate command.

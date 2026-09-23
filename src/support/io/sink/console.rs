@@ -18,7 +18,8 @@ pub struct ConsoleSink {
     config: ConsoleSinkConfig,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     template: LogTemplate,
-    masker: DataMasker,
+    /// None = masking_enabled=false（输出原样）
+    masker: Option<DataMasker>,
 }
 
 impl fmt::Debug for ConsoleSink {
@@ -32,12 +33,20 @@ impl fmt::Debug for ConsoleSink {
 
 impl ConsoleSink {
     pub fn new(config: ConsoleSinkConfig, template: LogTemplate) -> Self {
+        let masker = config.masking_enabled.then(DataMasker::new);
         Self {
             config,
             writer: Arc::new(Mutex::new(Box::new(io::stdout()))),
             template,
-            masker: DataMasker::new(),
+            masker,
         }
+    }
+
+    /// 注入自定义 masker（如经 DataMasker::builder() 构建的 literal 规则，
+    /// fast-masking feature 下走 AC 加速路径）。
+    pub fn with_masker(mut self, masker: DataMasker) -> Self {
+        self.masker = Some(masker);
+        self
     }
 
     fn write_record<W: Write>(
@@ -118,8 +127,10 @@ impl LogSink for ConsoleSink {
         // 应用数据脱敏（如果启用）
         let masked_record = if self.config.masking_enabled {
             let mut masked = record.clone();
-            masked.message = self.masker.mask(&record.message);
-            self.masker.mask_hashmap(&mut masked.fields);
+            if let Some(masker) = self.masker.as_ref() {
+                masked.message = masker.mask(&record.message);
+                masker.mask_hashmap(&mut masked.fields);
+            }
             masked
         } else {
             record.clone()
@@ -178,10 +189,8 @@ impl Clone for ConsoleSink {
             // Clone shares the same writer (Arc ensures reference counting)
             writer: Arc::clone(&self.writer),
             template: self.template.clone(),
-            // Note: Clone creates a fresh DataMasker instance. Any learned state
-            // (e.g., dynamically added patterns) from the original masker is not shared.
-            // This is intentional: each cloned sink gets independent masking configuration.
-            masker: DataMasker::new(),
+            // Clone carries the same masker（含 with_masker 注入的自定义规则）
+            masker: self.masker.clone(),
         }
     }
 }

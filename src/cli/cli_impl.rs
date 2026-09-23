@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -201,6 +201,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             }
         }
 
+        Commands::VerifyChain { manifest, key_env } => verify_chain_manifest(&manifest, &key_env),
         Commands::Query {
             path,
             since,
@@ -228,6 +229,50 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
 // ============================================================================
 // 全子命令 --json + 稳定退出码（0/1/2）契约单测
 // ============================================================================
+
+/// `verify-chain`：重算 HMAC 链并核对 manifest 完整性。
+///
+/// 退出码契约：`0` = 链完整，`1` = 错误，`2` = 篡改/校验失败。
+fn verify_chain_manifest(manifest: &std::path::Path, key_env: &str) -> Result<i32> {
+    use inklog::support::audit_chain::ArchiveChainEntry;
+
+    let data = std::fs::read_to_string(manifest)
+        .with_context(|| inklog::i18n::tr("cli-verify-chain-err-manifest-unreadable"))?;
+    let mut entries: Vec<ArchiveChainEntry> = Vec::new();
+    for (lineno, line) in data.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let entry: ArchiveChainEntry = serde_json::from_str(line).map_err(|e| {
+            anyhow::anyhow!(
+                "{}:{}: {e}",
+                inklog::i18n::tr("cli-verify-chain-err-line-invalid"),
+                lineno + 1
+            )
+        })?;
+        entries.push(entry);
+    }
+    let key = std::env::var(key_env)
+        .with_context(|| inklog::i18n::tr("cli-verify-chain-err-key-missing"))?;
+
+    let intact =
+        inklog::support::audit_chain::ArchiveChain::verify_entries(&entries, key.as_bytes());
+    if intact {
+        println!(
+            "{}: {} ({} entries)",
+            inklog::i18n::tr("cli-verify-chain-ok"),
+            manifest.display(),
+            entries.len()
+        );
+    } else {
+        println!(
+            "{}: {}",
+            inklog::i18n::tr("cli-verify-chain-tampered"),
+            manifest.display()
+        );
+    }
+    Ok(if intact { 0 } else { 2 })
+}
 
 #[cfg(test)]
 mod exit_code_tests {
@@ -347,5 +392,56 @@ mod exit_code_tests {
         ))
         .unwrap();
         assert_eq!(code, 2, "no matches must exit 2");
+    }
+}
+
+#[cfg(all(test, feature = "cli"))]
+mod verify_chain_tests {
+    use super::*;
+
+    /// ok 路径：真实轮转产物 manifest → 退出码 0；篡改后 → 退出码 2。
+    #[test]
+    fn test_verify_chain_ok_and_tampered_paths() {
+        use inklog::support::audit_chain::ArchiveChain;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let manifest = dir.path().join("chained.chain.jsonl");
+
+        // 用与 FileSink 审计链一致的语义构造真实链
+        let key = "verify-chain-ok-test-key";
+        let mut chain = ArchiveChain::new(key.as_bytes());
+        let entry_json = |p: &str| {
+            serde_json::json!({
+                "path": p,
+                "sha256": format!("{:064x}", p.len()),
+                "timestamp": "2026-09-23T00:00:00+00:00",
+            })
+            .to_string()
+        };
+        let mut body = String::new();
+        for p in ["chained_20260923_000001.log", "chained_20260923_000002.log"] {
+            chain.append(&entry_json(p));
+        }
+        for e in chain.entries() {
+            body.push_str(&serde_json::to_string(e).unwrap());
+            body.push('\n');
+        }
+        std::fs::write(&manifest, &body).unwrap();
+
+        unsafe {
+            std::env::set_var("INKLOG_TEST_VERIFY_KEY", key);
+        }
+        let code = verify_chain_manifest(&manifest, "INKLOG_TEST_VERIFY_KEY").unwrap();
+        assert_eq!(code, 0, "intact manifest must verify with exit code 0");
+
+        // 篡改：改 sha256 键名破坏 HMAC
+        let tampered = body.replace("sha256", "sha256x");
+        let tampered_path = dir.path().join("tampered.chain.jsonl");
+        std::fs::write(&tampered_path, tampered).unwrap();
+        let code = verify_chain_manifest(&tampered_path, "INKLOG_TEST_VERIFY_KEY").unwrap();
+        assert_eq!(code, 2, "tampered manifest must yield exit code 2");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_VERIFY_KEY");
+        }
     }
 }

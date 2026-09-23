@@ -328,6 +328,11 @@ pub fn put_string_buffer(s: String) {
     GLOBAL_STRING_POOL.put(s)
 }
 
+/// 当前线程 LogRecord 池大小（测试/诊断；池为 thread-local，跨线程不可比）。
+pub fn log_record_pool_len() -> usize {
+    GLOBAL_LOG_RECORD_POOL.len()
+}
+
 /// Internal pool statistics
 #[derive(Debug, Default)]
 struct PoolStats {
@@ -679,5 +684,30 @@ mod tests {
         // Retrieved string should be empty, not contain previous data
         let retrieved = pool.get();
         assert_eq!(retrieved, "", "pooled string should be cleared on put");
+    }
+    #[test]
+    fn test_pool_roundtrip_reuses_records() {
+        // 归还→复用闭环：put 后池非空，get 命中池（不再新建）且字段被 reset
+        let before = crate::support::processing::object_pool::log_record_pool_len();
+        let record = crate::support::processing::object_pool::get_log_record();
+        let mut record = record;
+        record.message = "dirty data".to_string();
+        crate::support::processing::object_pool::put_log_record(record);
+        let after_put = crate::support::processing::object_pool::log_record_pool_len();
+        assert_eq!(
+            after_put,
+            before + 1,
+            "put must push into the calling thread's pool"
+        );
+        let reused = crate::support::processing::object_pool::get_log_record();
+        assert!(
+            reused.message != "dirty data",
+            "pooled record must be reset before reuse"
+        );
+        assert_eq!(
+            crate::support::processing::object_pool::log_record_pool_len(),
+            before,
+            "get must pop from the pool"
+        );
     }
 }

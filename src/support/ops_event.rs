@@ -95,3 +95,79 @@ mod tests {
         assert_eq!(event.to_log_record().level, "INFO");
     }
 }
+
+// ============================================================================
+// 内部故障路径的 ops 事件发布（审计 M16c）
+// ============================================================================
+
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+
+use crossbeam_channel::Sender;
+
+static OPS_EVENT_HUB: LazyLock<parking_lot::RwLock<Vec<Sender<Arc<LogRecord>>>>> =
+    LazyLock::new(|| parking_lot::RwLock::new(Vec::new()));
+
+/// 注册 ops 事件通道（manager 构建期装配；内部故障路径经
+/// [`publish_internal`] 广播到这些通道）。
+pub fn register_ops_channel(sender: Sender<Arc<LogRecord>>) {
+    OPS_EVENT_HUB.write().push(sender);
+}
+
+/// 清空注册（测试隔离用）。
+#[cfg(test)]
+pub fn reset_ops_hub_for_tests() {
+    OPS_EVENT_HUB.write().clear();
+}
+
+/// 内部故障/恢复路径的轻量发布入口：轮转失败、压缩/加密失败、sink
+/// 降级与恢复等站点调用。无注册通道时为 no-op（事件通道满/关闭时
+/// 静默丢弃——不得反压主日志链路，与 manager 侧语义一致）。
+pub fn publish_internal(kind: &str, sink: Option<&str>, detail: serde_json::Value) {
+    let senders = OPS_EVENT_HUB.read();
+    if senders.is_empty() {
+        return;
+    }
+    let event = InklogOpsEvent::now(kind, sink, detail);
+    let record = Arc::new(event.to_log_record());
+    for sender in senders.iter() {
+        let _ = sender.send_timeout(Arc::clone(&record), Duration::from_millis(100));
+    }
+}
+
+#[cfg(test)]
+mod internal_publish_tests {
+    use super::*;
+    use crossbeam_channel::bounded;
+
+    #[test]
+    fn test_publish_internal_delivers_to_registered_channels() {
+        reset_ops_hub_for_tests();
+        let (tx, rx) = bounded(8);
+        register_ops_channel(tx);
+
+        publish_internal(
+            "sink_degraded",
+            Some("file"),
+            serde_json::json!({ "op": "rotate", "error": "EACCES" }),
+        );
+
+        let record = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        assert_eq!(record.target, "inklog::ops");
+        assert_eq!(record.level, "WARN");
+        assert!(
+            record.message.contains("sink_degraded") || record.fields.contains_key("kind"),
+            "record must carry the event kind: {} {:?}",
+            record.message,
+            record.fields
+        );
+        reset_ops_hub_for_tests();
+    }
+
+    #[test]
+    fn test_publish_internal_is_noop_without_channels() {
+        reset_ops_hub_for_tests();
+        // 无注册通道：不得 panic、不得反压
+        publish_internal("sink_recovered", None, serde_json::json!({}));
+    }
+}

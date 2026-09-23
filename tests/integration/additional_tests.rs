@@ -525,6 +525,8 @@ async fn test_manager_block_strategy_high_load_sampling() {
         path: log_path,
         batch_size: 1,
         flush_interval_ms: 10,
+        fsync: false,
+        audit_chain_enabled: false,
         ..Default::default()
     });
     config.performance.channel_capacity = 4;
@@ -613,6 +615,8 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
         path: log_path,
         batch_size: 1,
         flush_interval_ms: 10,
+        fsync: false,
+        audit_chain_enabled: false,
         ..Default::default()
     });
     config.performance.channel_capacity = 10;
@@ -1077,4 +1081,48 @@ fn test_error_display() {
     let error = inklog::InklogError::ConfigError("test error".to_string());
     let error_str = format!("{}", error);
     assert!(error_str.contains("test error"));
+}
+
+#[tokio::test]
+async fn test_database_sink_masks_sensitive_field_keys() {
+    // 键值遍历式脱敏：password 等敏感键整值替换，不再依赖值正则的偶然命中
+    let mock_db = Arc::new(inklog::MockDatabaseAdapter::new());
+    let config = make_test_db_config("test", true);
+    let sink = inklog::sink::DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
+    let mut fields = std::collections::HashMap::new();
+    fields.insert(
+        "password".to_string(),
+        serde_json::Value::String("supersecretvalue123456".to_string()),
+    );
+    fields.insert(
+        "note".to_string(),
+        serde_json::Value::String("plain note".to_string()),
+    );
+    let record = inklog::LogRecord {
+        timestamp: chrono::Utc::now(),
+        level: "INFO".to_string(),
+        target: "test".to_string(),
+        message: "db key masking test".to_string(),
+        fields,
+        file: None,
+        line: None,
+        thread_id: "test".to_string(),
+        trace_id: None,
+        span_id: None,
+    };
+    sink.write(&record).await.unwrap();
+    sink.flush().await.unwrap();
+    let stored = mock_db.get_records();
+    assert_eq!(stored.len(), 1);
+    let stored_password = stored[0].fields.get("password").unwrap();
+    assert_eq!(
+        stored_password,
+        &serde_json::Value::String("***MASKED***".to_string()),
+        "password field must be fully masked by key detection"
+    );
+    // 非敏感键内容不被破坏
+    assert_eq!(
+        stored[0].fields.get("note").unwrap(),
+        &serde_json::Value::String("plain note".to_string())
+    );
 }

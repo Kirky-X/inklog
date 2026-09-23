@@ -69,9 +69,33 @@ pub struct ChannelBufferedFileSink {
     flush_count: Arc<AtomicUsize>,
     dropped_count: Arc<AtomicUsize>,
     write_error_count: Arc<AtomicUsize>,
+    /// None = base_config.masking_enabled=false（落盘原样）
+    masker: Option<crate::DataMasker>,
 }
 
 impl ChannelBufferedFileSink {
+    /// 注入自定义 masker（覆盖 base_config.masking_enabled 的默认构造）。
+    pub fn with_masker(mut self, masker: crate::DataMasker) -> Self {
+        self.masker = Some(masker);
+        self
+    }
+
+    /// 渲染前按 base_config.masking_enabled 对记录做 PII 掩码。
+    fn render_masked(&self, record: &LogRecord) -> String {
+        match self.masker.as_ref() {
+            Some(masker) => {
+                let mut fields = record.fields.clone();
+                masker.mask_hashmap(&mut fields);
+                let masked = LogRecord {
+                    message: masker.mask(&record.message),
+                    fields,
+                    ..record.clone()
+                };
+                self.template.render(&masked)
+            }
+            None => self.template.render(record),
+        }
+    }
     pub fn new(config: ChannelBufferedConfig, template: LogTemplate) -> Result<Self, InklogError> {
         // vuln-0002 对齐：与 FileSink.open_file_inner 相同的路径校验语义，
         // 在 create_dir_all / open 之前拒绝路径遍历与敏感组件。
@@ -114,6 +138,10 @@ impl ChannelBufferedFileSink {
             )));
         }
 
+        let masker = config
+            .base_config
+            .masking_enabled
+            .then(crate::DataMasker::new);
         let (sender, receiver) = crossbeam_channel::bounded(config.channel_capacity);
         let file_path = config.base_config.path.clone();
         let file = Self::open_file(&file_path)?;
@@ -140,6 +168,7 @@ impl ChannelBufferedFileSink {
             flush_count,
             dropped_count,
             write_error_count,
+            masker,
         };
 
         sink.start_io_thread();
@@ -292,7 +321,7 @@ impl ChannelBufferedFileSink {
     }
 
     fn try_write(&self, record: &LogRecord) -> bool {
-        let entry = self.template.render(record);
+        let entry = self.render_masked(record);
         match self.config.backpressure_strategy {
             // Block 的重试等待由 async write 路径的 write_blocking 处理，
             // 这里只做单次非阻塞尝试。
@@ -348,7 +377,7 @@ impl ChannelBufferedFileSink {
     /// 让出线程休眠 1ms 后重试，避免卡死 tokio worker 线程。channel 断开
     /// （sink 关闭中）时不计为丢弃，返回 false。
     async fn write_blocking(&self, record: &LogRecord) -> bool {
-        let mut entry = self.template.render(record);
+        let mut entry = self.render_masked(record);
         loop {
             match self.sender.try_send(entry) {
                 Ok(()) => return true,
@@ -505,6 +534,71 @@ mod tests {
         let data = std::fs::read_to_string(&path).unwrap();
         assert!(data.contains("hello-0"));
         assert!(data.contains("hello-19"));
+    }
+
+    #[tokio::test]
+    async fn test_render_masks_pii_when_enabled() {
+        // 出口掩码：默认（masking_enabled=true）落盘内容不得含明文手机号
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring-masked.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 16,
+            flush_interval_ms: 50,
+        };
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        let mut rec = make_record("user phone 13812345678 login");
+        rec.fields.insert(
+            "contact".to_string(),
+            serde_json::Value::String("13912345678".to_string()),
+        );
+        sink.write(&rec).await.unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !data.contains("13812345678") && !data.contains("13912345678"),
+            "rendered file must not contain plaintext PII: {data}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_render_passes_through_when_masking_disabled() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring-raw.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                masking_enabled: false,
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 16,
+            flush_interval_ms: 50,
+        };
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        sink.write(&make_record("raw phone 13812345678"))
+            .await
+            .unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            data.contains("13812345678"),
+            "masking off must pass through verbatim: {data}"
+        );
     }
 
     #[tokio::test]

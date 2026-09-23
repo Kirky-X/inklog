@@ -188,17 +188,13 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
         let (circuit_open_record, records_to_flush, should_flush) = {
             let mut inner = self.inner.lock();
 
-            // 结构化字段（fields）同样需要脱敏 ——
-            // 序列化后统一过 masker，再反序列化还原，避免敏感字段明文落库。
-            // 脱敏先于 can_execute：熔断开启走 fallback 时写入的也必须是脱敏记录。
-            let masked_fields_json =
-                serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
-            let masked = self.masker.mask(&masked_fields_json);
-            let fields =
-                serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(
-                    &masked,
-                )
-                .unwrap_or_else(|_| record.fields.clone());
+            // 结构化字段（fields）脱敏：直接走键值遍历的 mask_hashmap——
+            // 敏感键（password/token 等）整值替换，不受"序列化成 JSON 字符串
+            // 后引号形态躲过值正则"的影响；值模式掩码与递归深度限制由
+            // DataMasker 内部保证。脱敏先于 can_execute：熔断开启走 fallback
+            // 时写入的也必须是脱敏记录。
+            let mut fields = record.fields.clone();
+            self.masker.mask_hashmap(&mut fields);
             let masked_record = LogRecord {
                 message: self.masker.mask(&record.message),
                 fields,

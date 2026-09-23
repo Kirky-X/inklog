@@ -33,6 +33,8 @@ mod async_file_test {
             channel_capacity: 20_000,
             flush_batch_size: 2000,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             compression_strategy: CompressionStrategy::Batch,
             compression_level: 5,
             runtime_threads: 4,
@@ -69,6 +71,8 @@ mod async_file_test {
             channel_capacity: 1000,
             flush_batch_size: 100,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             compression_strategy: CompressionStrategy::None,
             compression_level: 3,
             runtime_threads: 1,
@@ -94,6 +98,8 @@ mod async_file_test {
             channel_capacity: 100,
             flush_batch_size: 10,
             flush_interval_ms: 50,
+            fsync: false,
+            audit_chain_enabled: false,
             compression_strategy: CompressionStrategy::None,
             ..Default::default()
         };
@@ -141,6 +147,8 @@ mod async_file_test {
             channel_capacity: 1000,
             flush_batch_size: 50,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             compression_strategy: CompressionStrategy::None,
             ..Default::default()
         };
@@ -251,6 +259,8 @@ mod async_file_test {
             channel_capacity: 10000,
             flush_batch_size: 500,
             flush_interval_ms: 10,
+            fsync: false,
+            audit_chain_enabled: false,
             compression_strategy: CompressionStrategy::None,
             runtime_threads: 2,
             ..Default::default()
@@ -303,6 +313,8 @@ mod async_file_test {
             channel_capacity: 1000,
             flush_batch_size: 100,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             compression_strategy: CompressionStrategy::Batch,
             compression_level: 5,
             ..Default::default()
@@ -349,6 +361,8 @@ mod async_file_test {
             channel_capacity: 10, // 小容量以触发背压
             flush_batch_size: 5,
             flush_interval_ms: 1000, // 长间隔
+            fsync: false,
+            audit_chain_enabled: false,
             ..Default::default()
         };
 

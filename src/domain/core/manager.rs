@@ -74,7 +74,8 @@ pub struct LoggerManager {
     #[cfg(feature = "database")]
     database: Option<Arc<dyn Database>>,
     /// 当前级别指令集，`set_level` 在此之上做 upsert 后重建 EnvFilter 热换装。
-    level_state: Mutex<LevelDirectives>,
+    /// Arc 共享给 log 门面（LogAdapter::enabled 的 per-target 过滤单一事实源）。
+    level_state: Arc<Mutex<LevelDirectives>>,
     /// 级别热调执行器，包装 `reload::Handle<EnvFilter, Registry>::reload`。
     /// `None` 表示构建路径未提供 reload 能力。
     level_reloader: Option<LevelReloader>,
@@ -116,6 +117,29 @@ impl LevelDirectives {
             targets,
             extra_raw,
         }
+    }
+
+    /// 判定 log 门面记录（target, level）是否放行：命中 per-target 指令用其
+    /// 级别，否则回落全局级别。级别序与 log/tracing 一致（error 最严、trace
+    /// 最宽），record 级别 ≤ 指令级别 才放行。
+    pub(crate) fn allows(&self, target: &str, level: log::Level) -> bool {
+        fn rank(s: &str) -> u8 {
+            match s {
+                "trace" => 5,
+                "debug" => 4,
+                "info" => 3,
+                "warn" => 2,
+                "error" => 1,
+                _ => 3,
+            }
+        }
+        let directive = self
+            .targets
+            .iter()
+            .find(|(name, _)| name == target)
+            .map(|(_, l)| l.as_str())
+            .unwrap_or(&self.global);
+        rank(&level.as_str().to_lowercase()) <= rank(directive)
     }
 
     /// upsert 一条级别指令（None target 覆盖全局，Some 覆盖同 target 或追加）。
@@ -396,7 +420,8 @@ impl LoggerManager {
             manager.console_sender.clone(),
             manager.sender.clone(),
             manager.metrics.clone(),
-        );
+        )
+        .with_level_state(Arc::clone(&manager.level_state));
         let max_level = config
             .global
             .level
@@ -552,6 +577,11 @@ impl LoggerManager {
             ops_senders.push(db_sender.clone().expect("db sender"));
         }
         ops_senders.extend(custom_senders.iter().cloned());
+        // 内部故障路径（file.rs 轮转/压缩/加密失败、workers.rs 降级/恢复）
+        // 经全局 hub 复用同一组 ops 通道（审计 M16c 装配点）
+        for sender in &ops_senders {
+            crate::support::ops_event::register_ops_channel(sender.clone());
+        }
 
         let console_sink: Arc<dyn LogSink> = Arc::new(ConsoleSink::new(
             config.console_sink.clone().unwrap_or_default(),
@@ -600,6 +630,26 @@ impl LoggerManager {
             subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(rate)));
         }
 
+        // ERROR/FATAL 兜底缓冲运行期补发：60s 周期任务兜底；通道恢复半满的
+        // 即时触发在 subscriber 内部实现。定时线程随进程存续（与轮转定时器
+        // 同生命周期语义），clone 的 subscriber 共享同一 fallback 缓冲。
+        {
+            let ticker = subscriber.clone();
+            if let Err(e) = std::thread::Builder::new()
+                .name("inklog-fallback-flush".to_string())
+                .spawn(move || {
+                    const FALLBACK_FLUSH_INTERVAL: std::time::Duration =
+                        std::time::Duration::from_secs(60);
+                    loop {
+                        std::thread::sleep(FALLBACK_FLUSH_INTERVAL);
+                        ticker.try_flush_fallback();
+                    }
+                })
+            {
+                tracing::warn!(error = %e, "failed to spawn fallback flush ticker; ERROR/FATAL fallback only drains on exit");
+            }
+        }
+
         // Filter — use EnvFilter to support RUST_LOG per-module filtering
         // Configured level serves as the global default; RUST_LOG overrides
         // specific modules (e.g. RUST_LOG=nebulaid=debug,hyper=warn).
@@ -638,7 +688,7 @@ impl LoggerManager {
                 .reload(new_filter)
                 .map_err(|e| format!("level reload failed: {e}"))
         });
-        let level_state = Mutex::new(LevelDirectives::new(
+        let level_state = Arc::new(Mutex::new(LevelDirectives::new(
             level_str.to_string(),
             config
                 .target_levels
@@ -646,7 +696,7 @@ impl LoggerManager {
                 .map(|(t, l)| (t.clone(), l.clone()))
                 .collect(),
             std::env::var("RUST_LOG").ok().filter(|v| !v.is_empty()),
-        ));
+        )));
 
         // Create error sink for logging system errors
         let error_sink_config = FileSinkConfig {
@@ -913,6 +963,20 @@ impl LoggerManager {
                     "set_level: no live installed filter to swap (detached build?); directives updated anyway"
                 );
             }
+        }
+        // 双门面级别同步：热调只 reload 了 EnvFilter（tracing 侧），log 门面的
+        // 过滤由 log::max_level 把关——不同步会让 log::debug! 等在门面处被旧
+        // 级别拦截。per-target 指令对 log 门面不可表达，仅在全局级别变更时同步。
+        if target.is_none() {
+            let filter = match normalized.as_str() {
+                "trace" => log::LevelFilter::Trace,
+                "debug" => log::LevelFilter::Debug,
+                "info" => log::LevelFilter::Info,
+                "warn" => log::LevelFilter::Warn,
+                "error" => log::LevelFilter::Error,
+                _ => log::LevelFilter::Off,
+            };
+            log::set_max_level(filter);
         }
         match target {
             None => tracing::info!(level = %normalized, "log level changed at runtime"),
@@ -3596,5 +3660,34 @@ mod set_level_tests {
             "debug,hyper=error,my_crate=trace",
             "failed set_level must leave directives unchanged"
         );
+    }
+
+    #[tokio::test]
+    async fn test_global_set_level_syncs_log_max_level() {
+        // 双门面同步：全局热调必须把 log::max_level 一起抬到新级别
+        log::set_max_level(log::LevelFilter::Off);
+        let mut config = InklogConfig::default();
+        config.global.level = "info".to_string();
+        #[cfg(feature = "database")]
+        let (manager, _subscriber, _filter) =
+            LoggerManager::build_detached(config, None).await.unwrap();
+        #[cfg(not(feature = "database"))]
+        let (manager, _subscriber, _filter) = LoggerManager::build_detached(config).await.unwrap();
+
+        manager.set_level(None, "debug").unwrap();
+        assert_eq!(
+            log::max_level(),
+            log::LevelFilter::Debug,
+            "global set_level must sync log::max_level"
+        );
+
+        // per-target 调级不动全局 log::max_level（log 门面无 target 语义）
+        manager.set_level(Some("my_crate"), "trace").unwrap();
+        assert_eq!(log::max_level(), log::LevelFilter::Debug);
+
+        // 收紧同步
+        manager.set_level(None, "error").unwrap();
+        assert_eq!(log::max_level(), log::LevelFilter::Error);
+        log::set_max_level(log::LevelFilter::Off);
     }
 }

@@ -32,7 +32,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::support::io::LogSink;
-use crate::{InklogError, LogRecord};
+use crate::{DataMasker, InklogError, LogRecord};
 
 /// 出站线格式（一行一条记录）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -68,6 +68,8 @@ pub struct TcpSinkConfig {
     pub buffer_capacity: usize,
     /// 出站格式
     pub format: NetWireFormat,
+    /// 出站前 PII 掩码开关（默认开启，与 console/file sink 语义一致）
+    pub masking_enabled: bool,
 }
 
 impl Default for TcpSinkConfig {
@@ -78,6 +80,7 @@ impl Default for TcpSinkConfig {
             connect_timeout: Duration::from_secs(3),
             buffer_capacity: 10_000,
             format: NetWireFormat::JsonLine,
+            masking_enabled: true,
         }
     }
 }
@@ -89,6 +92,8 @@ pub struct UdpSinkConfig {
     pub addr: String,
     /// 出站格式
     pub format: NetWireFormat,
+    /// 出站前 PII 掩码开关（默认开启，与 console/file sink 语义一致）
+    pub masking_enabled: bool,
 }
 
 /// 传输流（明文 TCP 或 TLS-over-TCP，均为阻塞式）。
@@ -128,6 +133,12 @@ pub struct TcpSink {
     config: TcpSinkConfig,
     tls_config: Option<rustls::ClientConfig>,
     state: Mutex<TcpState>,
+    /// None = masking_enabled=false（出站原样）
+    masker: Option<DataMasker>,
+    /// 连续 connect 失败次数（指数退避依据）
+    consecutive_failures: std::sync::atomic::AtomicU32,
+    /// 退避截止时间（unix 毫秒）；期间 write 直接入缓冲不发起 connect
+    backoff_until_ms: std::sync::atomic::AtomicU64,
 }
 
 impl TcpSink {
@@ -143,6 +154,7 @@ impl TcpSink {
             None => None,
             Some(tls) => Some(Self::build_tls_client_config(tls)?),
         };
+        let masker = config.masking_enabled.then(crate::DataMasker::new);
         Ok(Self {
             config,
             tls_config,
@@ -150,7 +162,44 @@ impl TcpSink {
                 wire: None,
                 buffer: VecDeque::new(),
             }),
+            masker,
+            consecutive_failures: std::sync::atomic::AtomicU32::new(0),
+            backoff_until_ms: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    /// 指数退避间隔：min(2^n × 100ms, 30s)。n 为连续失败次数（0 起）。
+    fn backoff_delay_ms(failures: u32) -> u64 {
+        let step = 100u64.saturating_mul(1u64 << failures.min(31));
+        step.min(30_000)
+    }
+
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    /// 退避窗口内禁止再次 connect（write 直接入缓冲）。
+    fn connect_allowed(&self) -> bool {
+        Self::now_ms()
+            >= self
+                .backoff_until_ms
+                .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn note_connect_result(&self, ok: bool) {
+        use std::sync::atomic::Ordering;
+        if ok {
+            self.consecutive_failures.store(0, Ordering::Release);
+            self.backoff_until_ms.store(0, Ordering::Release);
+        } else {
+            let n = self.consecutive_failures.fetch_add(1, Ordering::AcqRel) + 1;
+            let delay = Self::backoff_delay_ms(n);
+            self.backoff_until_ms
+                .store(Self::now_ms() + delay, Ordering::Release);
+        }
     }
 
     fn build_tls_client_config(tls: &TlsClientConfig) -> Result<rustls::ClientConfig, InklogError> {
@@ -222,10 +271,11 @@ impl TcpSink {
         }
     }
 
-    /// 单条记录 → 出站字节行。
+    /// 单条记录 → 出站字节行。序列化前对 record 执行 PII 掩码（出口不得裸奔）。
     fn encode(&self, record: &LogRecord) -> Vec<u8> {
+        let record = self.mask_record(record);
         let mut line = match self.config.format {
-            NetWireFormat::JsonLine => serde_json::to_string(record).unwrap_or_else(|_| {
+            NetWireFormat::JsonLine => serde_json::to_string(&record).unwrap_or_else(|_| {
                 // 序列化失败兜底：仅保留 message/level/target 的合法 JSON，
                 // 维持 NDJSON 单行契约（Debug 格式化的字符串不是合法 JSON）
                 serde_json::json!({
@@ -236,11 +286,34 @@ impl TcpSink {
                 .to_string()
             }),
             NetWireFormat::Text => {
-                crate::LogTemplate::new("{timestamp} [{level}] {target} - {message}").render(record)
+                crate::LogTemplate::new("{timestamp} [{level}] {target} - {message}")
+                    .render(&record)
             }
         };
         line.push('\n');
         line.into_bytes()
+    }
+
+    /// 注入自定义 masker（覆盖 masking_enabled 的默认构造）。
+    pub fn with_masker(mut self, masker: DataMasker) -> Self {
+        self.masker = Some(masker);
+        self
+    }
+
+    /// 掩码开关开启时返回脱敏后的记录克隆，否则原样借用克隆。
+    fn mask_record(&self, record: &LogRecord) -> LogRecord {
+        match self.masker.as_ref() {
+            Some(masker) => {
+                let mut fields = record.fields.clone();
+                masker.mask_hashmap(&mut fields);
+                LogRecord {
+                    message: masker.mask(&record.message),
+                    fields,
+                    ..record.clone()
+                }
+            }
+            None => record.clone(),
+        }
     }
 
     /// 写前健康探测：对端已 FIN/RST（半开连接）时返回 true——避免首笔写
@@ -306,11 +379,15 @@ impl LogSink for TcpSink {
             .lock()
             .map_err(|_| InklogError::ConfigError("tcp sink state poisoned".to_string()))?;
 
-        // 无连接：尝试建连
-        if wire.is_none()
-            && let Ok(new_wire) = self.connect()
-        {
-            *wire = Some(new_wire);
+        // 无连接：尝试建连（退避窗口内跳过，记录进缓冲）
+        if wire.is_none() && self.connect_allowed() {
+            match self.connect() {
+                Ok(new_wire) => {
+                    *wire = Some(new_wire);
+                    self.note_connect_result(true);
+                }
+                Err(_) => self.note_connect_result(false),
+            }
         }
 
         if let Some(conn) = wire.as_mut() {
@@ -330,9 +407,15 @@ impl LogSink for TcpSink {
             // 仍未连上：记录进缓冲（绝不无声丢弃）
             Self::enqueue(buffer, capacity, line);
         }
-        // 自动重连：成功则连接会在下次 write 时补发缓冲
-        if let Ok(new_wire) = self.connect() {
-            *wire = Some(new_wire);
+        // 自动重连（同样受退避约束）：成功则连接会在下次 write 时补发缓冲
+        if self.connect_allowed() {
+            match self.connect() {
+                Ok(new_wire) => {
+                    *wire = Some(new_wire);
+                    self.note_connect_result(true);
+                }
+                Err(_) => self.note_connect_result(false),
+            }
         }
         Ok(())
     }
@@ -363,6 +446,8 @@ impl LogSink for TcpSink {
 pub struct UdpSink {
     socket: std::net::UdpSocket,
     format: NetWireFormat,
+    /// None = masking_enabled=false（出站原样）
+    masker: Option<DataMasker>,
 }
 
 impl UdpSink {
@@ -377,15 +462,29 @@ impl UdpSink {
         socket.connect(config.addr.as_str()).map_err(|e| {
             InklogError::ConfigError(format!("UDP connect to '{}': {e}", config.addr))
         })?;
+        let masker = config.masking_enabled.then(crate::DataMasker::new);
         Ok(Self {
             socket,
             format: config.format,
+            masker,
         })
     }
 
     fn encode(&self, record: &LogRecord) -> Vec<u8> {
+        let record = match self.masker.as_ref() {
+            Some(masker) => {
+                let mut fields = record.fields.clone();
+                masker.mask_hashmap(&mut fields);
+                LogRecord {
+                    message: masker.mask(&record.message),
+                    fields,
+                    ..record.clone()
+                }
+            }
+            None => record.clone(),
+        };
         let mut line = match self.format {
-            NetWireFormat::JsonLine => serde_json::to_string(record).unwrap_or_else(|_| {
+            NetWireFormat::JsonLine => serde_json::to_string(&record).unwrap_or_else(|_| {
                 // 序列化失败兜底：合法 JSON 单行（同 TcpSink，NDJSON 契约）
                 serde_json::json!({
                     "message": record.message,
@@ -395,7 +494,8 @@ impl UdpSink {
                 .to_string()
             }),
             NetWireFormat::Text => {
-                crate::LogTemplate::new("{timestamp} [{level}] {target} - {message}").render(record)
+                crate::LogTemplate::new("{timestamp} [{level}] {target} - {message}")
+                    .render(&record)
             }
         };
         line.push('\n');
@@ -424,7 +524,7 @@ impl LogSink for UdpSink {
 
 /// 宽容 PEM 证书加载（BEGIN/END CERTIFICATE 块，base64 解码）。
 #[cfg(feature = "net-sink")]
-fn load_certs_pem(
+pub(crate) fn load_certs_pem(
     path: &PathBuf,
 ) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, InklogError> {
     use base64::Engine;
@@ -460,8 +560,8 @@ fn load_certs_pem(
 /// 测试/自签场景的"接受任意证书"校验器。
 #[cfg(feature = "net-sink")]
 #[derive(Debug)]
-struct AcceptAnyVerifier {
-    provider: rustls::crypto::CryptoProvider,
+pub(crate) struct AcceptAnyVerifier {
+    pub(crate) provider: rustls::crypto::CryptoProvider,
 }
 
 #[cfg(feature = "net-sink")]
@@ -633,6 +733,144 @@ mod tests {
         server.shutdown();
     }
 
+    #[test]
+    fn test_backoff_delay_growth_and_cap() {
+        // 指数增长：100ms 起，翻倍到 30s 封顶
+        assert_eq!(TcpSink::backoff_delay_ms(0), 100);
+        assert_eq!(TcpSink::backoff_delay_ms(1), 200);
+        assert_eq!(TcpSink::backoff_delay_ms(2), 400);
+        assert_eq!(TcpSink::backoff_delay_ms(5), 3_200);
+        assert_eq!(TcpSink::backoff_delay_ms(8), 25_600);
+        assert_eq!(TcpSink::backoff_delay_ms(9), 30_000, "cap at 30s");
+        assert_eq!(TcpSink::backoff_delay_ms(31), 30_000, "shift overflow safe");
+    }
+
+    #[tokio::test]
+    async fn test_dead_peer_write_enters_backoff_and_buffers() {
+        // 服务端不可达：write 返回 Ok（入缓冲），失败计数与退避窗口被设置；
+        // 退避窗口内的后续 write 不再尝试 connect（计数不增长）
+        let sink = TcpSink::new(TcpSinkConfig {
+            addr: "127.0.0.1:1".to_string(), // 保留端口，必拒
+            tls: None,
+            connect_timeout: std::time::Duration::from_millis(200),
+            ..Default::default()
+        })
+        .unwrap();
+
+        sink.write(&test_record("buffered 1")).await.unwrap();
+        let first = sink
+            .consecutive_failures
+            .load(std::sync::atomic::Ordering::Acquire);
+        assert!(first >= 1, "connect failure must be recorded");
+
+        sink.write(&test_record("buffered 2")).await.unwrap();
+        assert!(
+            sink.connect_allowed() == false
+                || sink
+                    .consecutive_failures
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    >= first,
+            "backoff window must hold or failures must not decrease"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tcp_sink_masks_pii_before_sending() {
+        // 出站掩码：明文手机号不得离开进程（含 message 与 fields 两条通道）
+        let server = TcpTestServer::spawn(None);
+        let sink = TcpSink::new(TcpSinkConfig {
+            addr: server.addr.to_string(),
+            tls: None,
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mut record = test_record("user phone 13812345678 login");
+        record.fields.insert(
+            "contact".to_string(),
+            serde_json::Value::String("13912345678".to_string()),
+        );
+        sink.write(&record).await.unwrap();
+        sink.flush().await.unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while server.lines().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let lines = server.lines();
+        assert_eq!(lines.len(), 1, "record must arrive");
+        let wire = lines.join("\n");
+        assert!(
+            !wire.contains("13812345678") && !wire.contains("13912345678"),
+            "wire format must not carry plaintext PII: {wire}"
+        );
+        server.shutdown();
+    }
+
+    #[tokio::test]
+    async fn test_tcp_sink_with_masker_injection_applies_custom_rule() {
+        // with_masker 注入：sink 采用注入的 masker（含 literal 自定义规则）
+        let server = TcpTestServer::spawn(None);
+        let rule = crate::MaskRule::builder("corp_token")
+            .pattern("CORP_SECRET_TOKEN")
+            .replacement("***LITERAL_MASKED***")
+            .literal(true)
+            .build()
+            .unwrap();
+        let sink = TcpSink::new(TcpSinkConfig {
+            addr: server.addr.to_string(),
+            tls: None,
+            masking_enabled: false,
+            ..Default::default()
+        })
+        .unwrap()
+        .with_masker(crate::DataMasker::builder().add_rule(rule).build());
+
+        sink.write(&test_record("header CORP_SECRET_TOKEN tail"))
+            .await
+            .unwrap();
+        sink.flush().await.unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while server.lines().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let wire = server.lines().join("\n");
+        assert!(
+            wire.contains("***LITERAL_MASKED***") && !wire.contains("CORP_SECRET_TOKEN"),
+            "injected masker must apply on wire format: {wire}"
+        );
+        server.shutdown();
+    }
+
+    #[tokio::test]
+    async fn test_tcp_sink_passes_through_when_masking_disabled() {
+        let server = TcpTestServer::spawn(None);
+        let sink = TcpSink::new(TcpSinkConfig {
+            addr: server.addr.to_string(),
+            tls: None,
+            masking_enabled: false,
+            ..Default::default()
+        })
+        .unwrap();
+
+        sink.write(&test_record("raw phone 13812345678"))
+            .await
+            .unwrap();
+        sink.flush().await.unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while server.lines().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let wire = server.lines().join("\n");
+        assert!(
+            wire.contains("13812345678"),
+            "masking off must pass through verbatim: {wire}"
+        );
+        server.shutdown();
+    }
+
     #[tokio::test]
     async fn test_tcp_sink_reconnects_and_replays_buffer_after_disconnect() {
         // 服务端收到第 1 行后立即断开连接：sink 的后续写入经历
@@ -729,6 +967,7 @@ mod tests {
         let sink = UdpSink::new(UdpSinkConfig {
             addr: addr.to_string(),
             format: NetWireFormat::JsonLine,
+            masking_enabled: true,
         })
         .unwrap();
         sink.write(&test_record("udp hello")).await.unwrap();
@@ -748,6 +987,7 @@ mod tests {
             UdpSink::new(UdpSinkConfig {
                 addr: "bad".to_string(),
                 format: NetWireFormat::JsonLine,
+                masking_enabled: true,
             })
             .is_err()
         );

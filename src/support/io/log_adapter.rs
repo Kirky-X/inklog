@@ -46,6 +46,8 @@ pub struct LogAdapter {
     metrics: Arc<Metrics>,
     /// 与主路径一致的脱敏器（ANSI 剥离、换行/控制字符转义、敏感信息打码）
     sanitizer: LogSanitizer,
+    /// 共享级别指令集：per-target 过滤的单一事实源（None = 仅全局 max_level）
+    level_state: Option<Arc<std::sync::Mutex<crate::domain::core::manager::LevelDirectives>>>,
 }
 
 impl LogAdapter {
@@ -65,7 +67,18 @@ impl LogAdapter {
             async_sender,
             metrics,
             sanitizer: LogSanitizer::new(),
+            level_state: None,
         }
+    }
+
+    /// 共享级别指令集（manager 的 level_state）：启用后 log 门面在
+    /// `enabled()` 中按 per-target 指令过滤，与 tracing 侧 EnvFilter 语义对齐。
+    pub(crate) fn with_level_state(
+        mut self,
+        state: Arc<std::sync::Mutex<crate::domain::core::manager::LevelDirectives>>,
+    ) -> Self {
+        self.level_state = Some(state);
+        self
     }
 
     /// 以自定义脱敏器创建 LogAdapter（其余同 [`LogAdapter::new`]）
@@ -92,6 +105,10 @@ impl LogAdapter {
     /// 堵住经外部 log crate 注入伪造日志行的入口。
     /// `fields` 恒为空（`log` crate 无结构化字段），见结构体文档。
     fn record_to_log_record(&self, record: &Record) -> LogRecord {
+        // 桥接 tracing span 上下文：宿主在 span 内调用 log::info! 时记录同样
+        // 携带链路 ID（与 tracing 路径共享同一派生逻辑），不再硬编码 None
+        let (trace_id, span_id) =
+            crate::domain::core::subscriber::LoggerSubscriber::derive_trace_ids_from_current();
         LogRecord {
             timestamp: Utc::now(),
             level: Self::level_to_string(record.level()).to_string(),
@@ -100,18 +117,27 @@ impl LogAdapter {
             file: record.file().map(|s| s.to_string()),
             line: record.line(),
             thread_id: format!("{:?}", std::thread::current().id()),
-            trace_id: None,
-            span_id: None,
+            trace_id,
+            span_id,
             fields: Default::default(),
         }
     }
 }
 
 impl log::Log for LogAdapter {
-    /// 检查给定级别的日志是否启用
+    /// 检查给定级别的日志是否启用：先过全局 max_level，再按共享级别指令集
+    /// 做 per-target 过滤（如 `myapp=warn` 时 target=myapp 的 info 被丢弃）。
     fn enabled(&self, metadata: &Metadata) -> bool {
-        // 允许所有级别的日志，由全局 LevelFilter 过滤
-        metadata.level() <= log::max_level()
+        if metadata.level() > log::max_level() {
+            return false;
+        }
+        match self.level_state.as_ref() {
+            Some(state) => {
+                let directives = state.lock().expect("level_state mutex poisoned");
+                directives.allows(metadata.target(), metadata.level())
+            }
+            None => true,
+        }
     }
 
     /// 处理日志记录
@@ -206,6 +232,96 @@ mod tests {
         assert_eq!(LogAdapter::level_to_string(Level::Info), "INFO");
         assert_eq!(LogAdapter::level_to_string(Level::Debug), "DEBUG");
         assert_eq!(LogAdapter::level_to_string(Level::Trace), "TRACE");
+    }
+
+    #[test]
+    fn test_log_facade_bridges_tracing_span_context() {
+        use crossbeam_channel::unbounded;
+
+        let (console_tx, console_rx) = unbounded();
+        let (async_tx, async_rx) = unbounded();
+        let adapter = LogAdapter::new(console_tx, async_tx, Arc::new(Metrics::new()));
+        // 宏在块内完成调用（format_args! 借用块内局部值，不可跨块返回 Record）
+        macro_rules! call_with_record {
+            ($msg:expr, $method:ident) => {{
+                let metadata = log::Metadata::builder()
+                    .target("test::bridge")
+                    .level(Level::Info)
+                    .build();
+                let message = format!($msg);
+                // 构造与调用同语句：format_args!/Arguments 临时值生命周期
+                // 覆盖整个语句，Record 的借用不会悬空
+                adapter.$method(
+                    &log::Record::builder()
+                        .metadata(metadata)
+                        .target("test::bridge")
+                        .level(Level::Info)
+                        .args(format_args!("{}", message))
+                        .build(),
+                )
+            }};
+        }
+
+        // 无 subscriber / span：trace_id/span_id 保持 None
+        let outside = call_with_record!("outside", record_to_log_record);
+        assert!(outside.trace_id.is_none() && outside.span_id.is_none());
+
+        // 线程级默认 subscriber（测试自持守卫，不污染全局）
+        let _dispatch_guard =
+            tracing::subscriber::set_default(tracing_subscriber::registry::Registry::default());
+        {
+            let span = tracing::info_span!("bridge_span");
+            let _guard = span.enter();
+            let inside = call_with_record!("inside", record_to_log_record);
+            assert!(inside.span_id.is_some(), "span_id must be bridged");
+            assert!(
+                inside.trace_id.is_some(),
+                "trace_id must be derived from root span"
+            );
+
+            // 同一 span 内两条记录的 trace_id 一致
+            let second = call_with_record!("again", record_to_log_record);
+            assert_eq!(inside.trace_id, second.trace_id);
+
+            // 记录仍经通道投递（桥接不破坏投递路径）
+            call_with_record!("through channels", log);
+            assert!(console_rx.try_recv().is_ok());
+            assert!(async_rx.try_recv().is_ok());
+        }
+    }
+
+    #[test]
+    fn test_per_target_filter_via_shared_level_state() {
+        // per-target 指令对 log 门面生效：myapp=warn 时 myapp 的 info 被丢弃
+        let (console_tx, _cr) = bounded(10);
+        let (async_tx, _ar) = bounded(10);
+        let state = Arc::new(std::sync::Mutex::new(
+            crate::domain::core::manager::LevelDirectives::new(
+                "info".to_string(),
+                vec![("myapp".to_string(), "warn".to_string())],
+                None,
+            ),
+        ));
+        let adapter =
+            LogAdapter::new(console_tx, async_tx, Arc::new(Metrics::new())).with_level_state(state);
+
+        macro_rules! meta_for {
+            ($target:expr, $level:expr) => {{
+                let metadata = log::Metadata::builder()
+                    .target($target)
+                    .level($level)
+                    .build();
+                metadata
+            }};
+        }
+
+        // 全局 info：other 的 info 放行
+        assert!(adapter.enabled(&meta_for!("other", Level::Info)));
+        // myapp=warn：myapp 的 info 被丢弃、error 放行
+        assert!(!adapter.enabled(&meta_for!("myapp", Level::Info)));
+        assert!(adapter.enabled(&meta_for!("myapp", Level::Error)));
+        // 未命中 target 指令回落全局
+        assert!(adapter.enabled(&meta_for!("fallback", Level::Warn)));
     }
 
     #[test]

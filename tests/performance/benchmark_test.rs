@@ -32,6 +32,8 @@ mod performance_test {
                 max_size: "1GB".into(),
                 batch_size: 1000,
                 flush_interval_ms: 100,
+                fsync: false,
+                audit_chain_enabled: false,
                 ..Default::default()
             }),
             console_sink: Some(inklog::config::ConsoleSinkConfig {
@@ -89,6 +91,8 @@ mod performance_test {
                 max_size: "1GB".into(),
                 batch_size: 2000,
                 flush_interval_ms: 50,
+                fsync: false,
+                audit_chain_enabled: false,
                 ..Default::default()
             }),
             console_sink: Some(inklog::config::ConsoleSinkConfig {
@@ -231,6 +235,8 @@ mod performance_test {
                 max_size: "1GB".into(),
                 batch_size: 5000,
                 flush_interval_ms: 200,
+                fsync: false,
+                audit_chain_enabled: false,
                 ..Default::default()
             }),
             console_sink: Some(inklog::config::ConsoleSinkConfig {
@@ -433,6 +439,8 @@ mod performance_test {
                 max_size: "100MB".into(),
                 batch_size: 1000,
                 flush_interval_ms: 100,
+                fsync: false,
+                audit_chain_enabled: false,
                 ..Default::default()
             }),
             console_sink: Some(inklog::config::ConsoleSinkConfig {

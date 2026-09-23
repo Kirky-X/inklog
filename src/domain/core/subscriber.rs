@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use serde_json::value;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::Layer;
@@ -51,6 +51,7 @@ impl Clone for LoggerSubscriber {
             sanitizer: self.sanitizer.clone(),
             rate_limiter: self.rate_limiter.clone(),
             error_sample_counter: AtomicU64::new(self.error_sample_counter.load(Ordering::Relaxed)),
+            fallback_pending: Arc::clone(&self.fallback_pending),
         }
     }
 }
@@ -75,6 +76,9 @@ pub struct LoggerSubscriber {
     rate_limiter: Option<Arc<RateLimiter>>,
     /// Counter for ERROR/FATAL sampling when rate-limited
     error_sample_counter: AtomicU64,
+    /// 兜底缓冲存在待补发记录（ERROR/FATAL 入队置位；半满触发补发后按
+    /// 缓冲是否清空复位）。Arc 跨 Clone 共享，manager 的周期补发任务可见。
+    fallback_pending: Arc<AtomicBool>,
 }
 
 impl LoggerSubscriber {
@@ -93,6 +97,7 @@ impl LoggerSubscriber {
             sanitizer: None,
             rate_limiter: None,
             error_sample_counter: AtomicU64::new(0),
+            fallback_pending: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -139,6 +144,34 @@ impl LoggerSubscriber {
 
     fn is_critical_level(level: &str) -> bool {
         level == "ERROR" || level == "FATAL"
+    }
+
+    /// 从当前线程激活的 dispatch 派生 (trace_id, span_id)。
+    ///
+    /// log 门面桥接共享入口（`LogAdapter::record_to_log_record`）：无 subscriber
+    /// 激活或事件在 span 之外时返回 (None, None)。根 span 派生依赖 dispatch 可
+    /// 下转（downcast）到 `tracing_subscriber::registry::Registry`（inklog 自身装配栈满足）；
+    /// 下转失败时保留 span_id、trace_id 置 None（退化但不伪造）。
+    pub(crate) fn derive_trace_ids_from_current() -> (Option<String>, Option<String>) {
+        use tracing_subscriber::registry::LookupSpan;
+
+        let span = tracing::Span::current();
+        let Some(id) = span.id() else {
+            return (None, None);
+        };
+        let span_id = Some(format!("{:016x}", id.into_u64()));
+        let trace_id = tracing::dispatcher::get_default(|dispatch| {
+            dispatch
+                .downcast_ref::<tracing_subscriber::Registry>()
+                .and_then(|registry| {
+                    registry.span(&id).and_then(|s| {
+                        s.scope()
+                            .last()
+                            .map(|root| format!("{:032x}", root.id().into_u64()))
+                    })
+                })
+        });
+        (trace_id, span_id)
     }
 
     /// 从当前 tracing span 上下文提取 trace_id/span_id。
@@ -192,13 +225,28 @@ impl LoggerSubscriber {
     }
 
     /// 递归脱敏字段值：字符串值一律 sanitize；Object 按键递归（敏感键的
-    /// 字符串值同样被脱敏，不再被跳过）；Array 逐元素递归。
+    /// 字符串值同样被脱敏，不再被跳过）；Array 逐元素递归。递归深度上限
+    /// 16 层，超限子树整体替换为截断标记（防深嵌套栈溢出）。
     fn sanitize_field_value(sanitizer: &LogSanitizer, value: &mut value::Value) {
+        const MAX_SANITIZE_DEPTH: usize = 16;
+        Self::sanitize_field_value_depth(sanitizer, value, 0, MAX_SANITIZE_DEPTH);
+    }
+
+    fn sanitize_field_value_depth(
+        sanitizer: &LogSanitizer,
+        value: &mut value::Value,
+        depth: usize,
+        max_depth: usize,
+    ) {
+        if depth >= max_depth {
+            *value = value::Value::String("***TRUNCATED***".to_string());
+            return;
+        }
         match value {
             value::Value::String(s) => *s = sanitizer.sanitize(s),
             value::Value::Array(items) => {
                 for item in items.iter_mut() {
-                    Self::sanitize_field_value(sanitizer, item);
+                    Self::sanitize_field_value_depth(sanitizer, item, depth + 1, max_depth);
                 }
             }
             value::Value::Object(map) => {
@@ -208,10 +256,20 @@ impl LoggerSubscriber {
                         if let value::Value::String(s) = nested_value {
                             *s = sanitizer.sanitize(s);
                         } else {
-                            Self::sanitize_field_value(sanitizer, nested_value);
+                            Self::sanitize_field_value_depth(
+                                sanitizer,
+                                nested_value,
+                                depth + 1,
+                                max_depth,
+                            );
                         }
                     } else {
-                        Self::sanitize_field_value(sanitizer, nested_value);
+                        Self::sanitize_field_value_depth(
+                            sanitizer,
+                            nested_value,
+                            depth + 1,
+                            max_depth,
+                        );
                     }
                 }
             }
@@ -359,12 +417,23 @@ where
                     buffer.pop_front();
                 }
                 buffer.push_back(FallbackEntry { record, delivered });
+                self.fallback_pending.store(true, Ordering::Release);
             } else {
                 // Timeout on non-critical log: message is lost (send_timeout returns
                 // ownership but we have nowhere to buffer it). Only count as dropped,
                 // not as channel_blocked, to keep metric semantics distinct:
                 // channel_blocked = backpressure event, logs_dropped = data loss.
                 self.metrics.inc_logs_dropped();
+            }
+        } else if self.fallback_pending.load(Ordering::Acquire) {
+            // ERROR/FATAL 兜底运行期补发（除进程退出 Drain 外的第二触发点）：
+            // 通道从满恢复并排空到半满以下时立即补发，不再等周期任务或 Drop。
+            let half = self.async_sender.capacity().unwrap_or(0) / 2;
+            if self.async_sender.len() <= half {
+                self.try_flush_fallback();
+                let still_pending = !self.fallback_buffer.lock().is_empty();
+                self.fallback_pending
+                    .store(still_pending, Ordering::Release);
             }
         }
     }
@@ -425,6 +494,48 @@ mod tests {
         // Drain channels to verify messages were sent
         while console_rx.try_recv().is_ok() {}
         while async_rx.try_recv().is_ok() {}
+    }
+
+    #[test]
+    fn test_fallback_replays_when_channel_recovers() {
+        // 运行期补发：ERROR 进 fallback 后，通道恢复（排空到半满）即补发，
+        // 不再依赖进程退出时的 Drop drain
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(2);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            // 打满通道（容量 2）并让 ERROR 进 fallback
+            _ = tracing::Level::ERROR;
+            for _ in 0..5 {
+                tracing::error!(target: "test::fallback", message = "critical failure");
+            }
+            // 通道恢复：drain 后再投一条 INFO（成功路径）应触发半满补发
+            while async_rx.try_recv().is_ok() {}
+            tracing::info!(target: "test::fallback", message = "recovery probe");
+        });
+
+        // 一个补发窗口内（无需进程退出）：兜底中的 ERROR 被补发到通道
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut recovered_error = false;
+        while std::time::Instant::now() < deadline {
+            match async_rx.try_recv() {
+                Ok(record) => {
+                    if record.level == "ERROR" {
+                        recovered_error = true;
+                        break;
+                    }
+                }
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
+        }
+        assert!(
+            recovered_error,
+            "ERROR record in fallback must be replayed once the channel recovers"
+        );
     }
 
     #[test]

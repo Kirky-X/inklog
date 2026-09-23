@@ -25,6 +25,8 @@ mod large_volume {
                 max_size: "1GB".into(),
                 batch_size: 1000,
                 flush_interval_ms: 500,
+                fsync: false,
+                audit_chain_enabled: false,
                 compress: true,
                 ..Default::default()
             }),

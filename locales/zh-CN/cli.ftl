@@ -170,3 +170,12 @@ cli-query-help-level = 最低级别: trace/debug/info/warn/error/fatal
 cli-query-help-grep = 对消息与 target 应用子串过滤
 cli-query-help-limit = 最大返回记录数（0 = 不限制）
 cli-query-help-key-env = 存放 .enc 文件解密密钥的环境变量名
+
+cli-verify-chain-about = 校验归档审计链（HMAC-SHA256）manifest 是否被篡改
+cli-verify-chain-help-manifest = 审计链 manifest（<stem>.chain.jsonl）
+cli-verify-chain-help-key-env = 存放审计链密钥的环境变量名
+cli-verify-chain-err-manifest-unreadable = 无法读取审计链 manifest
+cli-verify-chain-err-line-invalid = manifest 行格式非法
+cli-verify-chain-err-key-missing = 审计链密钥环境变量未设置
+cli-verify-chain-ok = 链完整
+cli-verify-chain-tampered = 链已被篡改（检测到删除/重排/内容修改）

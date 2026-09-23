@@ -1476,6 +1476,8 @@ async fn test_concurrent_file_writes() {
             max_size: "100MB".into(),
             batch_size: 100,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             ..Default::default()
         }),
         performance: inklog::config::PerformanceConfig {
@@ -1568,6 +1570,8 @@ async fn test_memory_stability() {
             max_size: "100MB".into(),
             batch_size: 100,
             flush_interval_ms: 100,
+            fsync: false,
+            audit_chain_enabled: false,
             ..Default::default()
         }),
         ..Default::default()

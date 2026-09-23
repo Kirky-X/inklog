@@ -29,10 +29,10 @@
 //! ## 基于模式的检测
 //!
 //! 除了字段名，以下模式也会被检测：
-//! - **邮箱地址**（部分脱敏：`***@***.***`）
-//! - **电话号码**（显示后4位：`138****5678`）
-//! - **身份证号**（部分脱敏）
-//! - **银行卡号**（部分脱敏）
+//! - **邮箱地址**（整体替换：`**@**.***`）
+//! - **电话号码**（整体替换：`***-****-****`，不保留尾号）
+//! - **身份证号**（保留末 1 位：`******X`）
+//! - **银行卡号**（保留末 4 位：`****-****-****-1234`）
 //! - **JWT 令牌**
 //! - **AWS 访问密钥**
 //! - **通用 API 密钥**
@@ -63,7 +63,9 @@
 //! - 批量处理时使用缓存
 //! - 支持禁用特定检测规则以减少开销
 
-use regex::Regex;
+// 规则引擎用 fancy-regex：支持 lookbehind/lookahead 环视（regex crate 不支持），
+// 数字类 PII 规则依赖环视实现 CJK 友好边界。键名检测等纯 \b 场景仍用 regex crate。
+use fancy_regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -72,35 +74,35 @@ use crate::error::InklogError;
 
 /// Word-boundary regex patterns for sensitive field detection.
 /// Uses \b (word boundary) to avoid false positives like "cakey" matching "key".
-static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
     vec![
         // Authentication patterns
-        Regex::new(r"(?i)\b(password|passwd|pwd)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(password|passwd|pwd)\b").unwrap(),
         // token/bearer/auth: preceded by a non-word separator (space, -, _, etc.) or at start
         // This excludes cases like "cakey" where 'token' is inside a word.
         // Covers: "token" (start), "api_token" (underscore), "bearer_token", "auth_token"
         // The (?:[^a-zA-Z0-9_])? makes the preceding char optional (for start-of-string case)
-        Regex::new(r"(?i)(?:[^a-zA-Z0-9_])?(token|bearer|auth)\b").unwrap(),
-        Regex::new(r"(?i)\b(secret|credential)\b").unwrap(),
+        regex::Regex::new(r"(?i)(?:[^a-zA-Z0-9_])?(token|bearer|auth)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(secret|credential)\b").unwrap(),
         // Key patterns
-        Regex::new(r"(?i)\b(api[_-]?key|apikey|api[_-]?secret)\b").unwrap(),
-        Regex::new(r"(?i)\b(access[_-]?key|access[_-]?key[_-]?id)\b").unwrap(),
-        Regex::new(r"(?i)\b(secret[_-]?key|private[_-]?key|public[_-]?key)\b").unwrap(),
-        Regex::new(r"(?i)\b(encryption[_-]?key|decryption[_-]?key|master[_-]?key)\b").unwrap(),
-        Regex::new(r"(?i)\b(session[_-]?key|session[_-]?id|session[_-]?token)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(api[_-]?key|apikey|api[_-]?secret)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(access[_-]?key|access[_-]?key[_-]?id)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(secret[_-]?key|private[_-]?key|public[_-]?key)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(encryption[_-]?key|decryption[_-]?key|master[_-]?key)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(session[_-]?key|session[_-]?id|session[_-]?token)\b").unwrap(),
         // OAuth patterns
-        Regex::new(r"(?i)\b(oauth|oauth[_-]?token|oauth[_-]?secret)\b").unwrap(),
-        Regex::new(r"(?i)\b(jwt(_[a-zA-Z0-9]+)?|bearer[_-]?token)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(oauth|oauth[_-]?token|oauth[_-]?secret)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(jwt(_[a-zA-Z0-9]+)?|bearer[_-]?token)\b").unwrap(),
         // AWS patterns
-        Regex::new(r"(?i)\b(aws[_-]?secret|aws[_-]?key|aws[_-]?token|aws[_-]?credentials)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(aws[_-]?secret|aws[_-]?key|aws[_-]?token|aws[_-]?credentials)\b").unwrap(),
         // Database patterns
-        Regex::new(r"(?i)\b(database[_-]?url|db[_-]?password|db[_-]?user|connection[_-]?string)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(database[_-]?url|db[_-]?password|db[_-]?user|connection[_-]?string)\b").unwrap(),
         // Payment patterns
-        Regex::new(r"(?i)\b(credit[_-]?card|card[_-]?number|cvv|ssn|social[_-]?security)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(credit[_-]?card|card[_-]?number|cvv|ssn|social[_-]?security)\b").unwrap(),
         // Client patterns
-        Regex::new(r"(?i)\b(client[_-]?secret|client[_-]?id)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(client[_-]?secret|client[_-]?id)\b").unwrap(),
         // Other sensitive patterns
-        Regex::new(r"(?i)\b(refresh[_-]?token|pin|pin[_-]?code|two[_-]?factor|totp|backup[_-]?code|recovery[_-]?code)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(refresh[_-]?token|pin|pin[_-]?code|two[_-]?factor|totp|backup[_-]?code|recovery[_-]?code)\b").unwrap(),
     ]
 });
 
@@ -267,6 +269,19 @@ impl DataMasker {
     /// 时视为已被上游处理，直接原样返回、不再套用规则——双开关叠加下不会
     /// 产生 REDACTED 套 REDACTED 的嵌套标记。
     pub fn mask(&self, text: &str) -> String {
+        const MAX_MASK_INPUT_BYTES: usize = 1024 * 1024;
+        // 超大输入跳过掩码：21 趟线性扫描对 1 MiB+ 文本是 CPU 放大器，
+        // 且此类输入通常是误用（整段请求体贴进日志），原样放行并留痕
+        if text.len() > MAX_MASK_INPUT_BYTES {
+            tracing::warn!(
+                size = text.len(),
+                limit = MAX_MASK_INPUT_BYTES,
+                "{}",
+                crate::i18n::tr("masking-limit-exceeded")
+            );
+            return text.to_string();
+        }
+
         // 标记幂等短路（契约见 doc）
         if crate::validation::sanitize::contains_redaction_marker(text) {
             return text.to_string();
@@ -292,13 +307,38 @@ impl DataMasker {
     }
 
     pub fn mask_value(&self, value: &mut Value) {
+        self.mask_value_depth(value, 0);
+    }
+
+    fn mask_value_depth(&self, value: &mut Value, depth: usize) {
+        const MAX_MASK_DEPTH: usize = 16;
+        if depth >= MAX_MASK_DEPTH {
+            // 深嵌套子树整体截断：防恶意/意外深嵌套导致递归栈溢出
+            *value = Value::String("***TRUNCATED***".to_string());
+            return;
+        }
         match value {
             Value::String(s) => {
                 *s = self.mask(s);
             }
+            Value::Number(n) => {
+                // 数字/布尔形态的敏感值（如 JSON 里的裸手机号）同样参与掩码
+                let rendered = n.to_string();
+                let masked = self.mask(&rendered);
+                if masked != rendered {
+                    *value = Value::String(masked);
+                }
+            }
+            Value::Bool(b) => {
+                let rendered = b.to_string();
+                let masked = self.mask(&rendered);
+                if masked != rendered {
+                    *value = Value::String(masked);
+                }
+            }
             Value::Array(arr) => {
                 for item in arr {
-                    self.mask_value(item);
+                    self.mask_value_depth(item, depth + 1);
                 }
             }
             Value::Object(map) => {
@@ -306,7 +346,7 @@ impl DataMasker {
                     if Self::is_sensitive_field(k) {
                         *v = Value::String("***MASKED***".to_string());
                     } else {
-                        self.mask_value(v);
+                        self.mask_value_depth(v, depth + 1);
                     }
                 }
             }
@@ -448,14 +488,23 @@ use std::sync::LazyLock;
 static EMAIL_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+").expect("Invalid email regex"));
 
-static PHONE_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b1[3-9]\d{9}\b").expect("Invalid phone regex"));
+static PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    // 负向断言而非 \b：regex 的 \b 是 Unicode 词边界，CJK 汉字属词字符，
+    // "电话13812345678" 这类数字紧贴汉字的文本在 \b 语义下无边界、会漏报。
+    Regex::new(r"(?<![0-9A-Za-z])1[3-9]\d{9}(?![0-9A-Za-z])").expect("Invalid phone regex")
+});
 
-static ID_CARD_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b(\d{6})(\d{8})(\d{3}[\dX])\b").expect("Invalid ID card regex"));
+static ID_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    // [\dXx]：身份证校验位小写 x 同样合法；两侧负向断言理由同 PHONE_REGEX。
+    Regex::new(r"(?<![0-9A-Za-z])(\d{6})(\d{8})(\d{3}[\dXx])(?![0-9A-Za-z])")
+        .expect("Invalid ID card regex")
+});
 
-static BANK_CARD_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b(\d{4})(\d{5,11})(\d{4})\b").expect("Invalid bank card regex"));
+static BANK_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    // 收紧为 16-19 位（4 + 8..11 + 4）：13 位毫秒时间戳曾被 5,11 中段误掩。
+    Regex::new(r"(?<![0-9A-Za-z])(\d{4})(\d{8,11})(\d{4})(?![0-9A-Za-z])")
+        .expect("Invalid bank card regex")
+});
 
 /// API Key 模式 - 匹配常见的 API key 格式
 static API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -490,7 +539,7 @@ static INTERNATIONAL_PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Credit card (major card networks)
 static CREDIT_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|35[0-9]{14})\b")
+    Regex::new(r"(?<![0-9])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|35[0-9]{14})(?![0-9])")
         .expect("Invalid credit card regex")
 });
 
@@ -513,12 +562,19 @@ static MAC_ADDRESS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 // === Medium-priority rules (regional identity) ===
 
 /// Passport number (Chinese international passport format)
-static PASSPORT_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b[EeGg][A-Za-z0-9]{8}\b").expect("Invalid passport regex"));
+///
+/// 排除"混合 hex"形态（前缀后 8 位含 [a-fA-F] 的十六进制串，如 git 短 SHA
+/// `e1a2b3c4d`）：真实护照序列以前缀字母 + 纯数字为主（如 E12345678），
+/// 纯数字后缀不受前瞻影响。
+static PASSPORT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?<![0-9A-Za-z])[EeGg](?![0-9a-fA-F]{0,7}[a-fA-F][0-9a-fA-F]{0,7}(?![0-9A-Za-z]))[A-Za-z0-9]{8}(?![0-9A-Za-z])")
+        .expect("Invalid passport regex")
+});
 
 /// US Social Security Number
-static SSN_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("Invalid SSN regex"));
+static SSN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?<![0-9A-Za-z])\d{3}-\d{2}-\d{4}(?![0-9A-Za-z])").expect("Invalid SSN regex")
+});
 
 /// Database connection string (password in URI)
 static DB_CONNECTION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -582,7 +638,7 @@ impl MaskRule {
             100,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
-                    .replace_all(text, |caps: &regex::Captures| {
+                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
                         let matched = caps.get(0).unwrap().as_str();
                         if matched.len() >= 12 {
                             let last_four = &matched[matched.len() - 4..];
@@ -648,6 +704,8 @@ impl MaskRule {
             enabled: true,
             apply_fn: apply_fn.unwrap_or_else(|| {
                 Arc::new(|regex: &Regex, text: &str, replacement: &str| {
+                    // fancy-regex 的 &str replacer 支持 ${1}/$1 组展开；匹配期
+                    // 错误对已编译规则实际不可达，兜底返回原文（日志路径禁 panic）
                     regex.replace_all(text, replacement).to_string()
                 })
             }),
@@ -675,7 +733,7 @@ impl MaskRule {
             15,
             Some(Arc::new(|regex: &Regex, text: &str, replacement: &str| {
                 regex
-                    .replace_all(text, |caps: &regex::Captures| {
+                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
                         let number = caps.get(0).unwrap().as_str();
                         let digits: Vec<u32> =
                             number.chars().filter_map(|c| c.to_digit(10)).collect();
@@ -716,7 +774,7 @@ impl MaskRule {
             20,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
-                    .replace_all(text, |caps: &regex::Captures| {
+                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
                         let ip = caps.get(0).unwrap().as_str();
                         if let Some(pos) = ip.rfind('.') {
                             format!("***.***.***.{}", &ip[pos + 1..])
@@ -737,7 +795,7 @@ impl MaskRule {
             21,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
-                    .replace_all(text, |caps: &regex::Captures| {
+                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
                         let ip = caps.get(0).unwrap().as_str();
                         if let Some(pos) = ip.rfind(':') {
                             let last_group = &ip[pos + 1..];
@@ -766,7 +824,7 @@ impl MaskRule {
             19,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
-                    .replace_all(text, |caps: &regex::Captures| {
+                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
                         let mac = caps.get(0).unwrap().as_str();
                         let sep = if mac.contains(':') { ':' } else { '-' };
                         let parts: Vec<&str> = mac.split(sep).collect();
@@ -794,7 +852,7 @@ impl MaskRule {
             30,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
-                    .replace_all(text, |caps: &regex::Captures| {
+                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
                         let passport = caps.get(0).unwrap().as_str();
                         let first = &passport[..1];
                         let last2 = &passport[passport.len() - 2..];
@@ -813,7 +871,7 @@ impl MaskRule {
             35,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 regex
-                    .replace_all(text, |caps: &regex::Captures| {
+                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
                         let ssn = caps.get(0).unwrap().as_str();
                         let last4 = &ssn[ssn.len() - 4..];
                         format!("***-**-{}", last4)
@@ -1646,5 +1704,151 @@ mod tests {
             result, "ref no: REF1234567890123456END",
             "digits embedded in a word must not be treated as a bank card"
         );
+    }
+
+    #[test]
+    fn test_cjk_adjacent_numbers_are_masked() {
+        // CJK 汉字属 Unicode 词字符，\b 在汉字-数字交界无边界导致漏报；
+        // 负向断言修复后，数字紧贴汉字的文本必须被掩码
+        let masker = DataMasker::new();
+        let result = masker.mask("电话13812345678，请回电");
+        assert!(
+            !result.contains("13812345678"),
+            "phone glued to CJK text must be masked: {result}"
+        );
+        let result = masker.mask("身份证110101199001011234号");
+        assert!(
+            !result.contains("110101199001011234"),
+            "ID card glued to CJK text must be masked: {result}"
+        );
+    }
+
+    #[test]
+    fn test_id_card_lowercase_x_suffix_is_masked() {
+        let masker = DataMasker::new();
+        let result = masker.mask("11010119900101123x");
+        assert!(
+            !result.contains("11010119900101123x"),
+            "lowercase x checksum must be masked: {result}"
+        );
+        assert!(result.contains("******"), "Result: {result}");
+    }
+
+    #[test]
+    fn test_13_digit_timestamp_not_masked_as_bank_card() {
+        // bank_card 收紧为 16-19 位后，13 位毫秒时间戳不再误伤
+        let masker = DataMasker::new();
+        let result = masker.mask("created_at=1695000000000 done");
+        assert_eq!(
+            result, "created_at=1695000000000 done",
+            "13-digit epoch millis must stay untouched: {result}"
+        );
+    }
+
+    #[test]
+    fn test_git_short_sha_not_masked_as_passport() {
+        let masker = DataMasker::new();
+        let result = masker.mask("commit e1a2b3c4d fixed it"); // pragma: allowlist secret — 测试夹具（git 短 SHA 形态字符串，非凭据）
+        assert!(
+            result.contains("e1a2b3c4d"), // pragma: allowlist secret — 同上，测试夹具
+            "9-char mixed-hex git short SHA must not be masked as passport: {result}"
+        );
+        // 真实护照形态（前缀 + 纯数字后缀）仍被掩码
+        let result = masker.mask("护照E12345678已签发");
+        assert!(
+            !result.contains("E12345678"),
+            "passport E+8digits must be masked: {result}"
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_value_does_not_overflow_stack() {
+        // 1000 层嵌套对象：递归深度上限 16 层，超限子树替换为截断标记而非栈溢出
+        let masker = DataMasker::new();
+        let mut nested = serde_json::json!({"leaf": "phone 13812345678"});
+        for _ in 0..1000 {
+            nested = serde_json::json!({ "wrap": nested });
+        }
+        let mut value = nested;
+        // 正常返回（不 panic / 不栈溢出）即为通过
+        masker.mask_value(&mut value);
+    }
+
+    #[test]
+    fn test_depth_limit_truncates_beyond_16_levels() {
+        let masker = DataMasker::new();
+        // 恰好在第 17 层放一个值：应被截断标记替换
+        let mut inner = serde_json::json!({"v": "x"});
+        for _ in 0..17 {
+            inner = serde_json::json!({ "wrap": inner });
+        }
+        masker.mask_value(&mut inner);
+        let rendered = inner.to_string();
+        assert!(
+            rendered.contains("***TRUNCATED***"),
+            "17-level nesting must be truncated: {rendered}"
+        );
+    }
+
+    #[test]
+    fn test_numeric_phone_value_is_masked() {
+        // 非字符串值：JSON 裸数字形态的手机号同样被掩码
+        let masker = DataMasker::new();
+        let mut fields = serde_json::json!({
+            "count": 13812345678_i64,
+            "flag": true,
+            "nothing": null
+        });
+        masker.mask_value(&mut fields);
+        let rendered = fields.to_string();
+        assert!(
+            !rendered.contains("13812345678"),
+            "numeric phone value must be masked: {rendered}"
+        );
+        // null 保持 null，true 不误伤
+        assert!(rendered.contains("null") && rendered.contains("true"));
+    }
+
+    #[test]
+    fn test_builder_literal_rule_masks_via_configured_rule() {
+        // builder 构建的 literal 自定义规则参与掩码（fast-masking 下经 AC 路径）
+        let rule = MaskRule::builder("corp_token")
+            .pattern("CORP_SECRET_TOKEN")
+            .replacement("***LITERAL_MASKED***")
+            .literal(true)
+            .build()
+            .unwrap();
+        let masker = DataMasker::builder().add_rule(rule).build();
+        let result = masker.mask("header CORP_SECRET_TOKEN tail");
+        assert!(
+            result.contains("***LITERAL_MASKED***") && !result.contains("CORP_SECRET_TOKEN"),
+            "literal rule must apply: {result}"
+        );
+    }
+
+    #[cfg(feature = "fast-masking")]
+    #[test]
+    fn test_builder_wires_ac_masker_for_literal_rules() {
+        // fast-masking 下 builder 自动为 literal 规则构建 AC 加速器（接线不缺席）
+        let rule = MaskRule::builder("corp_token")
+            .pattern("CORP_SECRET_TOKEN")
+            .replacement("***LITERAL_MASKED***")
+            .literal(true)
+            .build()
+            .unwrap();
+        let masker = DataMasker::builder().add_rule(rule).build();
+        assert!(masker.ac_masker.is_some(), "AC masker must be wired");
+        let result = masker.mask("header CORP_SECRET_TOKEN tail");
+        assert!(result.contains("***LITERAL_MASKED***"));
+    }
+
+    #[test]
+    fn test_oversized_input_skips_masking() {
+        let masker = DataMasker::new();
+        let big = format!("user 13812345678 {}", "x".repeat(1024 * 1024 + 1));
+        let result = masker.mask(&big);
+        // 超过 1 MiB 的输入原样返回（不做 21 趟扫描）
+        assert!(result.contains("13812345678"));
+        assert_eq!(result.len(), big.len());
     }
 }

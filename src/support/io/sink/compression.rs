@@ -16,6 +16,49 @@ use std::path::{Path, PathBuf};
 #[cfg(any(feature = "zstd", feature = "gzip"))]
 use tracing::error;
 
+/// 解压输出上限：1 GiB（压缩炸弹防护，与 query 路径共用语义）。
+#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+pub(crate) const DECOMPRESSION_OUTPUT_LIMIT: u64 = 1024 * 1024 * 1024;
+
+/// 受限解压：读取至多 limit+1 字节以区分"恰好到限"与"超限"。
+#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+pub(crate) fn decompress_limited<R: std::io::Read>(
+    reader: &mut R,
+    codec: &str,
+) -> Result<Vec<u8>, InklogError> {
+    use std::io::Read;
+    let mut limited = reader.take(DECOMPRESSION_OUTPUT_LIMIT);
+    let mut out = Vec::new();
+    limited
+        .read_to_end(&mut out)
+        .map_err(|e| InklogError::CompressionError(format!("{codec}: {e}")))?;
+    if out.len() as u64 > DECOMPRESSION_OUTPUT_LIMIT {
+        return Err(InklogError::RuntimeError(crate::i18n::tr(
+            "query-decompression_limit_exceeded",
+        )));
+    }
+    Ok(out)
+}
+
+/// 创建 0600 权限的压缩产物文件（unix；其余平台退化为默认权限）。
+#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+fn create_compressed_output(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        File::create(path)
+    }
+}
+
 /// Trait for compression strategies.
 ///
 /// Implement this trait to define custom compression algorithms.
@@ -76,7 +119,9 @@ impl CompressionStrategy for ZstdCompression {
     }
 
     fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, InklogError> {
-        zstd::decode_all(data).map_err(|e| InklogError::CompressionError(e.to_string()))
+        let mut decoder = zstd::stream::Decoder::new(data)
+            .map_err(|e| InklogError::CompressionError(e.to_string()))?;
+        decompress_limited(&mut decoder, "zstd")
     }
 
     fn extension(&self) -> &'static str {
@@ -162,14 +207,9 @@ impl CompressionStrategy for GzipCompression {
 
     fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, InklogError> {
         use flate2::read::GzDecoder;
-        use std::io::Read;
 
         let mut decoder = GzDecoder::new(data);
-        let mut decompressed = Vec::new();
-        decoder
-            .read_to_end(&mut decompressed)
-            .map_err(|e| InklogError::CompressionError(e.to_string()))?;
-        Ok(decompressed)
+        decompress_limited(&mut decoder, "gzip")
     }
 
     fn extension(&self) -> &'static str {
@@ -192,7 +232,7 @@ impl CompressionStrategy for GzipCompression {
         })?;
 
         let mut reader = BufReader::new(input_file);
-        let output_file = File::create(&compressed_path).map_err(|e| {
+        let output_file = create_compressed_output(&compressed_path).map_err(|e| {
             error!("Failed to create compressed file: {}", e);
             InklogError::IoError(e)
         })?;
@@ -241,7 +281,7 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
     })?;
 
     let mut reader = BufReader::new(input_file);
-    let output_file = File::create(&compressed_path).map_err(|e| {
+    let output_file = create_compressed_output(&compressed_path).map_err(|e| {
         error!("Failed to create compressed file: {}", e);
         InklogError::IoError(e)
     })?;
@@ -671,5 +711,31 @@ mod tests {
         let compressed_path = result.unwrap();
         assert!(compressed_path.exists());
         assert!(compressed_path.extension().is_some_and(|ext| ext == "zst"));
+    }
+}
+
+#[cfg(all(test, feature = "gzip", unix))]
+mod output_permission_tests {
+    use super::*;
+
+    /// R-sec-001：压缩产物（.gz）必须以 0600 创建。
+    #[test]
+    fn test_gzip_output_created_with_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let plain = dir.path().join("perm.log");
+        std::fs::write(&plain, b"compress me 0600").unwrap();
+
+        let gz = GzipCompression::default();
+        gz.compress_file(&plain, 6).unwrap();
+
+        let out = plain.with_extension("gz");
+        let meta = std::fs::metadata(&out).unwrap();
+        assert_eq!(
+            meta.permissions().mode() & 0o777,
+            0o600,
+            "compressed artifact must be 0600"
+        );
     }
 }

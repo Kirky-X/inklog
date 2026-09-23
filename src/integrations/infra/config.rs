@@ -878,6 +878,8 @@ mod tests {
                 cleanup_interval_minutes: 30,
                 batch_size: 200,
                 flush_interval_ms: 50,
+                fsync: false,
+                audit_chain_enabled: false,
                 masking_enabled: false,
                 output_format: Default::default(),
             }),

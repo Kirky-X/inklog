@@ -55,6 +55,8 @@ async fn test_comprehensive_real_data_writing() {
             keep_files: 5, // 保留5个文件，测试轮转
             batch_size: 1000,
             flush_interval_ms: 1000,
+            fsync: false,
+            audit_chain_enabled: false,
             compress: true,
             compression_level: 3,
             encrypt: true,

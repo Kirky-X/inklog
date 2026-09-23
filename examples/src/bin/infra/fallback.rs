@@ -200,6 +200,8 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_interval_minutes: 60,
         batch_size: 10,
         flush_interval_ms: 100,
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -314,6 +316,8 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_interval_minutes: 60,
         batch_size: 1,
         flush_interval_ms: 10,
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -492,6 +496,8 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_interval_minutes: 60,
         batch_size: 10,
         flush_interval_ms: 100,
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -512,6 +518,8 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_interval_minutes: 60,
         batch_size: 10,
         flush_interval_ms: 100,
+        fsync: false,
+        audit_chain_enabled: false,
         masking_enabled: false,
         output_format: Default::default(),
     };

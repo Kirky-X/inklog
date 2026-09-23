@@ -170,3 +170,12 @@ cli-query-help-level = Minimum level: trace/debug/info/warn/error/fatal
 cli-query-help-grep = Substring filter applied to message and target
 cli-query-help-limit = Maximum number of records to return (0 = unlimited)
 cli-query-help-key-env = Environment variable name holding the decryption key for .enc files
+
+cli-verify-chain-about = Verify the archive audit chain (HMAC-SHA256) manifest for tampering
+cli-verify-chain-help-manifest = Audit chain manifest (<stem>.chain.jsonl)
+cli-verify-chain-help-key-env = Environment variable name holding the audit chain key
+cli-verify-chain-err-manifest-unreadable = Cannot read audit chain manifest
+cli-verify-chain-err-line-invalid = Invalid manifest line
+cli-verify-chain-err-key-missing = Audit key environment variable is not set
+cli-verify-chain-ok = chain intact
+cli-verify-chain-tampered = chain TAMPERED (deletion, reorder or content change detected)
