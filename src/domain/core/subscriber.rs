@@ -52,6 +52,7 @@ impl Clone for LoggerSubscriber {
             rate_limiter: self.rate_limiter.clone(),
             error_sample_counter: AtomicU64::new(self.error_sample_counter.load(Ordering::Relaxed)),
             fallback_pending: Arc::clone(&self.fallback_pending),
+            journal: self.journal.clone(),
         }
     }
 }
@@ -79,6 +80,9 @@ pub struct LoggerSubscriber {
     /// 兜底缓冲存在待补发记录（ERROR/FATAL 入队置位；半满触发补发后按
     /// 缓冲是否清空复位）。Arc 跨 Clone 共享，manager 的周期补发任务可见。
     fallback_pending: Arc<AtomicBool>,
+    /// 磁盘持久化 fallback journal（deferred-capabilities C4）：
+    /// LRU 淘汰的关键日志落盘，进程启动重放。None = 未启用（零开销）。
+    journal: Option<Arc<crate::support::fallback_journal::FallbackJournal>>,
 }
 
 impl LoggerSubscriber {
@@ -98,7 +102,17 @@ impl LoggerSubscriber {
             rate_limiter: None,
             error_sample_counter: AtomicU64::new(0),
             fallback_pending: Arc::new(AtomicBool::new(false)),
+            journal: None,
         }
+    }
+
+    /// 启用磁盘持久化 fallback journal（LRU 淘汰的关键日志落盘）。
+    pub fn with_journal(
+        mut self,
+        journal: Arc<crate::support::fallback_journal::FallbackJournal>,
+    ) -> Self {
+        self.journal = Some(journal);
+        self
     }
 
     /// Add an additional async sink channel. Each enabled async sink must have
@@ -161,15 +175,16 @@ impl LoggerSubscriber {
         };
         let span_id = Some(format!("{:016x}", id.into_u64()));
         let trace_id = tracing::dispatcher::get_default(|dispatch| {
-            dispatch
-                .downcast_ref::<tracing_subscriber::Registry>()
-                .and_then(|registry| {
-                    registry.span(&id).and_then(|s| {
-                        s.scope()
-                            .last()
-                            .map(|root| format!("{:032x}", root.id().into_u64()))
-                    })
-                })
+            let registry = dispatch.downcast_ref::<tracing_subscriber::Registry>()?;
+            let span = registry.span(&id)?;
+            // otel extension 最高优先（与 tracing 路径同链）
+            #[cfg(feature = "otel")]
+            if let Some((trace_id, _span_id)) = Self::otel_ids_from_extensions(&span.extensions()) {
+                return Some(trace_id);
+            }
+            span.scope()
+                .last()
+                .map(|root| format!("{:032x}", root.id().into_u64()))
         });
         (trace_id, span_id)
     }
@@ -191,6 +206,24 @@ impl LoggerSubscriber {
         };
         record.span_id = Some(format!("{:016x}", id.into_u64()));
 
+        // 优先级链（deferred-capabilities C2）：otel extension > traceparent
+        // 字段 > 显式字段覆盖 > 根 span 派生
+        #[cfg(feature = "otel")]
+        if let Some(span) = ctx.span(id)
+            && let Some((trace_id, span_id)) = Self::otel_ids_from_extensions(&span.extensions())
+        {
+            record.trace_id = Some(trace_id);
+            record.span_id = Some(span_id);
+            return;
+        }
+        if let Some(value::Value::String(tp)) = record.fields.get("traceparent")
+            && let Some((trace_id, span_id)) = Self::parse_traceparent(tp)
+        {
+            record.trace_id = Some(trace_id);
+            record.span_id = Some(span_id);
+            return;
+        }
+
         // 事件字段显式携带的 trace_id 优先
         if let Some(value::Value::String(explicit)) = record.fields.get("trace_id") {
             record.trace_id = Some(explicit.clone());
@@ -206,6 +239,43 @@ impl LoggerSubscriber {
         if let Some(value::Value::String(explicit)) = record.fields.get("span_id") {
             record.span_id = Some(explicit.clone());
         }
+    }
+
+    /// 解析 W3C traceparent（`00-<32hex>-<16hex>-<2hex>`）。
+    ///
+    /// 版本段 `ff`（禁用）或格式不符返回 None。两条提取路径共用
+    /// （deferred-capabilities C2b）。
+    fn parse_traceparent(tp: &str) -> Option<(String, String)> {
+        let parts: Vec<&str> = tp.trim().split('-').collect();
+        if parts.len() != 4 || parts[0].eq_ignore_ascii_case("ff") {
+            return None;
+        }
+        let (trace_id, span_id) = (parts[1], parts[2]);
+        if trace_id.len() != 32
+            || span_id.len() != 16
+            || !trace_id.chars().all(|c| c.is_ascii_hexdigit())
+            || !span_id.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        Some((trace_id.to_ascii_lowercase(), span_id.to_ascii_lowercase()))
+    }
+
+    /// otel feature：从 registry span extensions 读取宿主
+    /// tracing-opentelemetry layer 写入的 SpanContext。
+    #[cfg(feature = "otel")]
+    fn otel_ids_from_extensions(
+        extensions: &tracing_subscriber::registry::Extensions<'_>,
+    ) -> Option<(String, String)> {
+        let span_context = extensions.get::<opentelemetry::trace::SpanContext>()?;
+        if !span_context.is_valid() {
+            return None;
+        }
+        // otel 的 Display 即零填充小写 hex（TraceId 32 位 / SpanId 16 位）
+        Some((
+            format!("{}", span_context.trace_id()),
+            format!("{}", span_context.span_id()),
+        ))
     }
 
     // 敏感键判定不再有本地副本：统一引用 `LogRecord::is_sensitive_key`
@@ -414,7 +484,13 @@ where
             if Self::is_critical_level(&record.level) {
                 let mut buffer = self.fallback_buffer.lock();
                 if buffer.len() >= FALLBACK_BUFFER_SIZE {
-                    buffer.pop_front();
+                    // LRU 淘汰的最旧关键日志落 journal（deferred-capabilities C4：
+                    // 内存缓冲 100 条之外不再静默丢失）
+                    if let Some(evicted) = buffer.pop_front()
+                        && let Some(journal) = self.journal.as_ref()
+                    {
+                        journal.spill(&evicted.record);
+                    }
                 }
                 buffer.push_back(FallbackEntry { record, delivered });
                 self.fallback_pending.store(true, Ordering::Release);
@@ -494,6 +570,170 @@ mod tests {
         // Drain channels to verify messages were sent
         while console_rx.try_recv().is_ok() {}
         while async_rx.try_recv().is_ok() {}
+    }
+
+    #[test]
+    fn test_traceparent_field_parsing_and_priority() {
+        // R-trace-002：合法 traceparent 字段 → 提取；非法/版本 ff → 回退派生
+        let (_console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(_console_tx, async_tx, metrics);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        let tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"; // pragma: allowlist secret — W3C 规范示例 ID
+        with_default(registry, || {
+            let span = tracing::info_span!("tp-span");
+            let _guard = span.enter();
+            tracing::info!(target: "test::tp", traceparent = tp, message = "with tp");
+        });
+
+        let record = async_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(
+            record.trace_id.as_deref(),
+            Some("0af7651916cd43dd8448eb211c80319c")
+        );
+        assert_eq!(record.span_id.as_deref(), Some("b7ad6b7169203331"));
+
+        // 解析函数边界：版本 ff / 非 hex / 段长不符
+        assert!(
+            LoggerSubscriber::parse_traceparent(
+                "ff-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+            )
+            .is_none()
+        );
+        assert!(
+            LoggerSubscriber::parse_traceparent(
+                "00-0af7651916cd43dd8448eb211c80319z-b7ad6b7169203331-01"
+            )
+            .is_none()
+        );
+        assert!(LoggerSubscriber::parse_traceparent("00-short-short-01").is_none());
+    }
+
+    #[test]
+    fn test_traceparent_invalid_falls_back_to_derivation() {
+        let (_console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(_console_tx, async_tx, metrics);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            let span = tracing::info_span!("tp-bad");
+            let _guard = span.enter();
+            tracing::info!(target: "test::tp", traceparent = "00-bad-bad-01", message = "bad tp");
+        });
+
+        let record = async_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        // 回退根 span 派生：trace_id 仍存在（派生值），span_id 为当前 span
+        assert!(record.trace_id.is_some());
+        assert!(record.span_id.is_some());
+    }
+
+    #[cfg(feature = "otel")]
+    #[test]
+    fn test_otel_span_context_extraction_from_extensions() {
+        use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+        use tracing_subscriber::registry::LookupSpan;
+
+        // 完整栈（Registry + inklog layer）作为一个 dispatch：扩展插入与
+        // 事件发射必须在同一 registry 数据上（与生产 downcast 路径一致）
+        let (_console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(_console_tx, async_tx, metrics);
+        let subscriber = tracing_subscriber::registry::Registry::default().with(layer);
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("otel-ext-span");
+            let id = span.id().unwrap();
+            {
+                let _enter = span.enter();
+                // 模拟宿主 tracing-opentelemetry layer 写入 SpanContext 扩展
+                tracing::dispatcher::get_default(|dispatch| {
+                    let registry = dispatch
+                        .downcast_ref::<tracing_subscriber::registry::Registry>()
+                        .expect("inner registry must be downcastable");
+                    let span_ref = registry.span(&id).expect("span data in registry");
+                    span_ref.extensions_mut().insert(SpanContext::new(
+                        TraceId::from_bytes(
+                            0x1234_5678_9abc_def0_1122_3344_5566_7788u128.to_be_bytes(),
+                        ),
+                        SpanId::from_bytes(0xaabb_ccdd_1122_3344u64.to_be_bytes()),
+                        TraceFlags::SAMPLED,
+                        false,
+                        TraceState::from_key_value(Vec::<(String, String)>::new()).unwrap(),
+                    ));
+                });
+                tracing::info!(target: "test::otel", message = "otel extraction probe");
+            }
+        });
+
+        let record = async_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(
+            record.trace_id.as_deref(),
+            Some("123456789abcdef01122334455667788"), // pragma: allowlist secret — W3C 规范示例 ID
+            "real OTel trace id must win over derived id"
+        );
+        assert_eq!(record.span_id.as_deref(), Some("aabbccdd11223344"));
+    }
+
+    #[test]
+    fn test_fallback_eviction_spills_to_journal() {
+        // C4：兜底缓冲（100）打满后 LRU 淘汰的关键日志落 journal
+        let dir = tempfile::TempDir::new().unwrap();
+        let journal_path = dir.path().join("fb.journal");
+        let journal = crate::support::fallback_journal::FallbackJournal::open(&journal_path);
+
+        let (_console_tx, _console_rx) = bounded(10);
+        // 0 容量 rendezvous 通道且无接收端：send_timeout 必然失败 → 全部进兜底
+        let (async_tx, async_rx) = bounded(0);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(_console_tx, async_tx, metrics)
+            .with_timeout(1)
+            .with_journal(Arc::new(journal));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            for i in 0..105 {
+                tracing::error!(target: "test::journal", message = format!("spill probe {i}"));
+            }
+        });
+        drop(async_rx);
+
+        let journal = crate::support::fallback_journal::FallbackJournal::open(&journal_path);
+        let (records, skipped) = journal.replay();
+        assert_eq!(skipped, 0);
+        assert_eq!(
+            records.len(),
+            5,
+            "105 pushes into a 100-cap buffer must spill 5 evicted entries"
+        );
+        assert!(records[0].message.contains("spill probe"));
+    }
+
+    #[test]
+    fn test_fallback_journal_disabled_means_no_spill() {
+        // 开关关闭：行为与既往一致，无文件产生
+        let dir = tempfile::TempDir::new().unwrap();
+        let (_console_tx, _console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(0);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(_console_tx, async_tx, metrics).with_timeout(1);
+        let registry = tracing_subscriber::registry().with(layer);
+        with_default(registry, || {
+            for _ in 0..105 {
+                tracing::error!(target: "test::journal", message = "no journal here");
+            }
+        });
+        drop(async_rx);
+        assert!(!dir.path().join("fb.journal").exists());
     }
 
     #[test]

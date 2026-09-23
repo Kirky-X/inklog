@@ -153,6 +153,23 @@ pub struct GlobalConfig {
     /// `OutputFormat::Text`
     #[serde(default)]
     pub output_format: OutputFormat,
+
+    /// 磁盘持久化 fallback 队列（deferred-capabilities C4）：兜底缓冲溢出/
+    /// 淘汰的 ERROR/FATAL 记录落盘 JSONL，进程启动时重放一次后清空。
+    ///
+    /// # Default
+    ///
+    /// `false`（关闭时全链路零文件 IO，行为与既往一致）
+    #[serde(default)]
+    pub fallback_journal: bool,
+
+    /// fallback journal 文件路径（`fallback_journal` 开启时生效）。
+    ///
+    /// # Default
+    ///
+    /// `logs/fallback.journal`
+    #[serde(default = "default_fallback_journal_path")]
+    pub fallback_journal_path: String,
 }
 
 fn default_global_level() -> String {
@@ -166,6 +183,9 @@ fn default_fallback_initial_delay() -> u64 {
 }
 fn default_fallback_max_delay() -> u64 {
     60000
+}
+fn default_fallback_journal_path() -> String {
+    "logs/fallback.journal".to_string()
 }
 fn default_fallback_max_retries() -> u32 {
     10
@@ -182,6 +202,8 @@ impl Default for GlobalConfig {
             fallback_max_delay_ms: default_fallback_max_delay(),
             fallback_max_retries: default_fallback_max_retries(),
             output_format: OutputFormat::default(),
+            fallback_journal: false,
+            fallback_journal_path: default_fallback_journal_path(),
         }
     }
 }

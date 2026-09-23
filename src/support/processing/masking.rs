@@ -106,6 +106,23 @@ static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| 
     ]
 });
 
+/// 姓名族键词表（与通用敏感键分离：命中后走"保留首字 + **"的形态化掩码，
+/// 而非整值 ***MASKED***）。
+///
+/// 刻意排除裸 `name` 与 `user_name`：两者最常见的语义是登录 ID/文件名，
+/// 误伤面不可控。中文键（姓名/真实姓名/客户姓名）不受 \b 词边界影响
+/// （词表自身按整串匹配）。
+static NAME_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+    vec![
+        // 英文姓名族（前缀限定，避免裸 name）
+        regex::Regex::new(r"(?i)^(full|real|legal|customer|owner|contact)[_-]?name$").unwrap(),
+        // 姓/名分列字段
+        regex::Regex::new(r"(?i)^(surname|family[_-]?name|given[_-]?name)$").unwrap(),
+        // 中文姓名族
+        regex::Regex::new(r"^(姓名|真实姓名|客户姓名)$").unwrap(),
+    ]
+});
+
 /// Data masking utility for sensitive information protection.
 ///
 /// The `DataMasker` struct provides functionality to detect and mask sensitive
@@ -255,6 +272,16 @@ impl DataMasker {
             .any(|pattern| pattern.is_match(field_name))
     }
 
+    /// 检查字段名是否为姓名族键（`NAME_FIELD_PATTERNS` 精确匹配）。
+    ///
+    /// 命中后的掩码形态是"保留首字 + `**`"（见 [`Self::mask_value_depth`]），
+    /// 与通用敏感键的整值 `***MASKED***` 不同。
+    pub fn is_name_field(field_name: &str) -> bool {
+        NAME_FIELD_PATTERNS
+            .iter()
+            .any(|pattern| pattern.is_match(field_name))
+    }
+
     /// Mask sensitive data in a log message.
     ///
     /// # 脱敏分工（three sanitization entry points）
@@ -345,6 +372,11 @@ impl DataMasker {
                 for (k, v) in map.iter_mut() {
                     if Self::is_sensitive_field(k) {
                         *v = Value::String("***MASKED***".to_string());
+                    } else if Self::is_name_field(k)
+                        && let Value::String(s) = v
+                        && let Some(masked) = Self::mask_cjk_name(s)
+                    {
+                        *v = Value::String(masked);
                     } else {
                         self.mask_value_depth(v, depth + 1);
                     }
@@ -354,10 +386,27 @@ impl DataMasker {
         }
     }
 
+    /// 中文姓名形态掩码：2–4 个汉字 → 保留首字 + `**`（如 `张三丰` → `张**`）。
+    /// 非纯汉字 / 长度不符返回 None（调用方保持原值）。
+    fn mask_cjk_name(value: &str) -> Option<String> {
+        static CJK_NAME_SHAPE: LazyLock<fancy_regex::Regex> = LazyLock::new(|| {
+            fancy_regex::Regex::new(r"^[\p{Han}]{2,4}$").expect("Invalid CJK name shape regex")
+        });
+        if !CJK_NAME_SHAPE.is_match(value).unwrap_or(false) {
+            return None;
+        }
+        value.chars().next().map(|first| format!("{first}**"))
+    }
+
     pub fn mask_hashmap(&self, map: &mut HashMap<String, Value>) {
         for (k, v) in map.iter_mut() {
             if Self::is_sensitive_field(k) {
                 *v = Value::String("***MASKED***".to_string());
+            } else if Self::is_name_field(k)
+                && let Value::String(s) = v
+                && let Some(masked) = Self::mask_cjk_name(s)
+            {
+                *v = Value::String(masked);
             } else {
                 self.mask_value(v);
             }
@@ -1807,6 +1856,80 @@ mod tests {
         );
         // null 保持 null，true 不误伤
         assert!(rendered.contains("null") && rendered.contains("true"));
+    }
+
+    #[test]
+    fn test_name_field_patterns_coverage() {
+        // R-maskcn-001：命中集
+        for key in [
+            "full_name",
+            "real_name",
+            "legal_name",
+            "customer_name",
+            "owner_name",
+            "contact_name",
+            "Real-Name",
+            "family_name",
+            "surname",
+            "given_name",
+            "姓名",
+            "真实姓名",
+            "客户姓名",
+        ] {
+            assert!(
+                DataMasker::is_name_field(key),
+                "name-family key must hit: {key}"
+            );
+        }
+        // 不命中集：裸 name / user_name / 非姓名键
+        for key in ["name", "user_name", "file_name", "password", "nickname"] {
+            assert!(
+                !DataMasker::is_name_field(key),
+                "generic key must not hit name patterns: {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cjk_name_value_masked_by_key_context() {
+        // R-maskcn-002：姓名键 + 2-4 汉字值 → 保留首字 + **
+        let masker = DataMasker::new();
+        let mut fields = serde_json::json!({
+            "real_name": "张三丰",
+            "姓名": "欧阳文长",
+            "given_name": "李四"
+        });
+        masker.mask_value(&mut fields);
+        assert_eq!(fields["real_name"], "张**");
+        assert_eq!(fields["姓名"], "欧**");
+        assert_eq!(fields["given_name"], "李**");
+    }
+
+    #[test]
+    fn test_non_cjk_or_wrong_shape_name_values_untouched() {
+        let masker = DataMasker::new();
+        let mut fields = serde_json::json!({
+            "real_name": "John Smith",
+            "contact_name": "张三123",
+            "legal_name": "达尔文进化论研究小组"
+        });
+        masker.mask_value(&mut fields);
+        assert_eq!(fields["real_name"], "John Smith", "非纯汉字不动");
+        assert_eq!(fields["contact_name"], "张三123", "含非汉字字符不动");
+        assert_eq!(fields["legal_name"], "达尔文进化论研究小组", "超长不动");
+    }
+
+    #[test]
+    fn test_generic_name_keys_not_name_masked() {
+        // 裸 name / user_name 刻意不在词表（登录 ID 误伤面）
+        let masker = DataMasker::new();
+        let mut fields = serde_json::json!({
+            "name": "张三",
+            "user_name": "张三"
+        });
+        masker.mask_value(&mut fields);
+        assert_eq!(fields["name"], "张三");
+        assert_eq!(fields["user_name"], "张三");
     }
 
     #[test]

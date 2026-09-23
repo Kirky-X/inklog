@@ -290,6 +290,23 @@ let config = InklogConfig {
 
 ### 文件输出配置
 
+#### 文件写入双路径（ChannelBufferedFileSink 转正）
+
+满足"简单配置"（`compress = false` 且 `encrypt = false` 且 `audit_chain_enabled = false` 且 `rotation_time = "daily"` 默认值）时，manager 自动使用 `ChannelBufferedFileSink`：独立 flush 线程（默认 100ms 强刷）+ 可配背压策略（`Block` 默认）+ PII 掩码。任一高级能力启用即回落 `FileSink`。
+
+| 能力 | ChannelBufferedFileSink（简单配置） | FileSink（高级配置回落） |
+|------|-------------------------------------|--------------------------|
+| PII 掩码 | ✓ | ✓ |
+| 独立 flush 线程 / 批量刷盘 | ✓ | 批量刷盘（无独立线程） |
+| 背压策略（Block/DropOldest/DropNewest） | ✓ | 固定丢弃+计数 |
+| 按大小/时间轮转 | ✗ | ✓ |
+| 压缩 / 加密归档 | ✗ | ✓ |
+| 审计链（`audit_chain_enabled`） | ✗ | ✓ |
+| 留存清理（`retention_days`/`keep_files`） | ✗ | ✓ |
+| `fsync` | ✗ | ✓ |
+
+需要高级能力时显式配置任一项（如 `rotation_time = "hourly"` 或 `compress = true`）即自动回落。
+
 #### FileSinkConfig 字段
 
 | 字段 | 类型 | 默认值 | 描述 |

@@ -106,6 +106,12 @@ pub(crate) struct LevelDirectives {
     extra_raw: Option<String>,
 }
 
+/// C3：file 配置是否走 ChannelBufferedFileSink（"简单配置"转正）。
+/// 任一高级能力（非默认轮转/压缩/加密/审计链）启用即回落 FileSink。
+pub(crate) fn file_uses_channel_buffered(cfg: &crate::FileSinkConfig) -> bool {
+    !cfg.compress && !cfg.encrypt && !cfg.audit_chain_enabled && cfg.rotation_time == "daily"
+}
+
 impl LevelDirectives {
     pub(crate) fn new(
         global: String,
@@ -630,6 +636,45 @@ impl LoggerManager {
             subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(rate)));
         }
 
+        // C4 磁盘持久化 fallback journal：构建期重放一次（记录带 replayed=true
+        // 防重放循环）后清空；随后把 journal 挂到 subscriber 供运行期溢出落盘
+        if config.global.fallback_journal {
+            let journal_path = std::path::PathBuf::from(&config.global.fallback_journal_path);
+            if let Some(parent) = journal_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let journal = Arc::new(crate::support::fallback_journal::FallbackJournal::open(
+                journal_path,
+            ));
+            let (records, skipped) = journal.replay();
+            if skipped > 0 {
+                tracing::warn!(skipped, "fallback journal replay skipped corrupt lines");
+            }
+            if !records.is_empty() {
+                let replay_target = if file_enabled {
+                    Some(sender.clone())
+                } else {
+                    custom_senders.first().cloned()
+                };
+                match replay_target {
+                    Some(target) => {
+                        for mut record in records {
+                            record
+                                .fields
+                                .insert("replayed".to_string(), serde_json::Value::Bool(true));
+                            let record = Arc::new(record);
+                            let _ = target.send_timeout(record, Duration::from_millis(100));
+                        }
+                    }
+                    None => tracing::warn!(
+                        count = records.len(),
+                        "fallback journal replay skipped: no durable sink configured"
+                    ),
+                }
+            }
+            subscriber = subscriber.with_journal(Arc::clone(&journal));
+        }
+
         // ERROR/FATAL 兜底缓冲运行期补发：60s 周期任务兜底；通道恢复半满的
         // 即时触发在 subscriber 内部实现。定时线程随进程存续（与轮转定时器
         // 同生命周期语义），clone 的 subscriber 共享同一 fallback 缓冲。
@@ -773,6 +818,8 @@ impl LoggerManager {
                 }
             }
         };
+        let channel_capacity = config.performance.channel_capacity;
+        let global_format = config.global.format.clone();
         let (handles, shutdown_txs) = Self::start_workers(WorkerParams {
             config,
             receiver,
@@ -784,6 +831,22 @@ impl LoggerManager {
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
             file_sink_factory: Box::new(move || {
+                // C3 CBFS 转正：简单配置（默认轮转 + 无压缩/加密/审计链）用
+                // ChannelBufferedFileSink（独立 flush 线程 + 可配背压 + 掩码）；
+                // 高级能力配置回落 FileSink。能力矩阵见 docs/USER_GUIDE.md。
+                let simple = file_uses_channel_buffered(&file_sink_cfg);
+                if simple {
+                    let cbfs_config = crate::ChannelBufferedConfig {
+                        base_config: file_sink_cfg.clone(),
+                        channel_capacity,
+                        backpressure_strategy: Default::default(),
+                        flush_batch_size: file_sink_cfg.batch_size,
+                        flush_interval_ms: file_sink_cfg.flush_interval_ms,
+                    };
+                    let template = crate::LogTemplate::new(&global_format);
+                    return crate::ChannelBufferedFileSink::new(cbfs_config, template)
+                        .map(|s| Box::new(s) as Box<dyn LogSink>);
+                }
                 FileSink::new(file_sink_cfg.clone()).map(|s| Box::new(s) as Box<dyn LogSink>)
             }),
             #[cfg(feature = "database")]
@@ -3660,6 +3723,144 @@ mod set_level_tests {
             "debug,hyper=error,my_crate=trace",
             "failed set_level must leave directives unchanged"
         );
+    }
+
+    #[test]
+    fn test_file_uses_channel_buffered_predicate() {
+        // 简单配置 → CBFS；任一高级能力 → FileSink
+        // 注意 compress 默认 true：显式关闭压缩才视为简单配置（默认磁盘行为不变）
+        let mut simple = crate::FileSinkConfig::default();
+        simple.compress = false;
+        assert!(file_uses_channel_buffered(&simple));
+
+        let mut advanced = crate::FileSinkConfig::default();
+        advanced.encrypt = true;
+        assert!(!file_uses_channel_buffered(&advanced));
+
+        let mut advanced = crate::FileSinkConfig::default();
+        advanced.compress = true;
+        assert!(!file_uses_channel_buffered(&advanced));
+
+        let mut advanced = crate::FileSinkConfig::default();
+        advanced.audit_chain_enabled = true;
+        assert!(!file_uses_channel_buffered(&advanced));
+
+        let mut advanced = crate::FileSinkConfig::default();
+        advanced.rotation_time = "hourly".to_string();
+        assert!(!file_uses_channel_buffered(&advanced));
+    }
+
+    #[tokio::test]
+    async fn test_default_file_config_builds_channel_buffered_and_writes() {
+        // 转正冒烟：简单配置（显式 compress=false）构建 CBFS 路径，写入落盘可用
+        let dir = tempfile::TempDir::new().unwrap();
+        let out = dir.path().join("cbfs-default.log");
+        let mut config = InklogConfig::default();
+        config.global.level = "info".to_string();
+        config.file_sink = Some(crate::FileSinkConfig {
+            enabled: true,
+            path: out.clone(),
+            compress: false,
+            ..Default::default()
+        });
+        #[cfg(feature = "database")]
+        let (manager, subscriber, _filter) =
+            LoggerManager::build_detached(config, None).await.unwrap();
+        #[cfg(not(feature = "database"))]
+        let (manager, subscriber, _filter) = LoggerManager::build_detached(config).await.unwrap();
+
+        // file 配置为简单配置：判定函数确认走 CBFS
+        let cfg = crate::FileSinkConfig {
+            enabled: true,
+            path: out.clone(),
+            compress: false,
+            ..Default::default()
+        };
+        assert!(file_uses_channel_buffered(&cfg));
+
+        // build_detached 不装全局 subscriber：经返回的 subscriber 显式发事件
+        let registry = tracing_subscriber::registry().with(subscriber);
+        tracing::subscriber::with_default(registry, || {
+            tracing::info!(target: "cbfs::smoke", message = "cbfs promotion smoke marker");
+        });
+        // 等待落盘（CBFS 100ms flush 线程）
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut landed = false;
+        while std::time::Instant::now() < deadline && !landed {
+            if let Ok(data) = std::fs::read_to_string(&out)
+                && data.contains("cbfs promotion smoke marker")
+            {
+                landed = true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(landed, "CBFS default path must land records on disk");
+        let _ = manager;
+    }
+
+    #[tokio::test]
+    async fn test_fallback_journal_replay_on_startup() {
+        // C4：启动重放——journal 中的记录注入 file sink 且带 replayed=true，
+        // journal 文件重放后清空
+        use crate::support::fallback_journal::FallbackJournal;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let journal_path = dir.path().join("fb.journal");
+        {
+            let journal = FallbackJournal::open(&journal_path);
+            let mut rec = crate::LogRecord::new(
+                tracing::Level::ERROR,
+                "journal::replay".to_string(),
+                "replay-me-1".to_string(),
+            );
+            rec.level = "ERROR".to_string();
+            journal.spill(&rec);
+        }
+
+        let out_path = dir.path().join("out.log");
+        let mut config = InklogConfig::default();
+        config.global.fallback_journal = true;
+        config.global.fallback_journal_path = journal_path.display().to_string();
+        config.global.level = "error".to_string();
+        config.file_sink = Some(crate::FileSinkConfig {
+            enabled: true,
+            path: out_path.clone(),
+            output_format: crate::support::processing::template::OutputFormat::Json,
+            ..Default::default()
+        });
+        #[cfg(feature = "database")]
+        let (manager, _subscriber, _filter) =
+            LoggerManager::build_detached(config, None).await.unwrap();
+        #[cfg(not(feature = "database"))]
+        let (manager, _subscriber, _filter) = LoggerManager::build_detached(config).await.unwrap();
+
+        // 重放后 journal 清空
+        let (remaining, _) = FallbackJournal::open(&journal_path).replay();
+        assert!(remaining.is_empty(), "journal must be cleared after replay");
+
+        // 等待 file worker 把重放记录写盘（JSON 格式可断言 replayed 字段）
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut found = false;
+        while std::time::Instant::now() < deadline && !found {
+            if let Ok(data) = std::fs::read_to_string(&out_path) {
+                for line in data.lines() {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
+                        && json["message"] == "replay-me-1"
+                        && json["fields"]["replayed"] == serde_json::Value::Bool(true)
+                    {
+                        found = true;
+                    }
+                }
+            }
+            if !found {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+        assert!(
+            found,
+            "replayed record must reach file sink with replayed=true field"
+        );
+        let _ = manager.shutdown();
     }
 
     #[tokio::test]
