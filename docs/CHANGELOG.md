@@ -26,6 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **全出口 PII 掩码覆盖**：net 转发、OTLP 导出、`ChannelBufferedFileSink` 三个出口此前绕过 DataMasker（仅上游弱版 LogSanitizer 兜底），现统一接入 21 条规则掩码（`masking_enabled` 门控，默认开启）；DB sink 改键值遍历式掩码——`password` 等敏感键整值替换，不再依赖值正则的偶然命中
+- **Sink masker 注入点**：console/file/net/otlp/ChannelBufferedFileSink 新增 `with_masker()`，支持经 `DataMasker::builder()` 注入自定义规则（`fast-masking` feature 下 literal 规则自动走 Aho-Corasick 加速路径，接线从死代码转为可用）
+- **脱敏正则修复**：phone/id_card/bank_card/ssn 等数字类规则以负向断言替代 `\b`（CJK 汉字紧贴数字不再漏报）；身份证支持小写 `x` 校验位；bank_card 收紧为 16–19 位（13 位毫秒时间戳不再误伤）；passport 排除混合 hex 形态（git 短 SHA 不再误掩）；脱敏递归深度 16 层上限（深嵌套 JSON 防栈溢出）、单条输入 1 MiB 上限；JSON Number/Bool 形态的敏感值参与掩码
+- **ERROR/FATAL 兜底运行期补发**：async 通道打满时进入兜底缓冲的关键日志，在通道恢复半满时立即补发，并有 60s 周期任务兜底——不再依赖进程退出时的 Drop drain
+- **崩溃一致性**：`FileSinkConfig.fsync`（默认 false）每批写盘后 `sync_all`；空闲期批量缓冲由轮转定时线程代为落盘（不再依赖"下一条写入"触发）
+- **文件权限加固**：FileSink 活动日志、轮转加密产物（`.enc`）、压缩产物（`.zst`/`.gz`）以 0600 创建；新建日志目录 0700（已存在目录不回改）
+- **留存合规**：年龄清理与大小清理拆为独立阶段（`max_total_size` 不可解析时过期清理仍执行）；`encrypt=true` 且 `retention_days < 180` 输出等保 2.0 留存提示
+- **审计链接入轮转管线**：`audit_chain_enabled = true` 后每次轮转向 `<stem>.chain.jsonl` 追加 `{path, sha256, timestamp}` 条目；新增 `inklog-cli verify-chain` 子命令（链完整退出码 0、篡改退出码 2，密钥读 `INKLOG_AUDIT_KEY`）
+- **log 门面补齐**：桥接当前 tracing span 的 trace_id/span_id（与 tracing 路径共享派生逻辑）；per-target 级别过滤（共享 manager 指令集，`RUST_LOG`/`target_levels` 对 log 来源生效）
+- **OTLP 导出补链路字段**：编码输出 `traceId`/`spanId`/`severityNumber`（标准映射 DEBUG=5/INFO=9/WARN=13/ERROR=17/FATAL=21）；https endpoint 经 rustls 传输（`net-sink` feature，CA PEM 或显式跳过校验二选一；feature 未启用时构造期报错）
+- **net 重连指数退避**：connect 失败按 `min(2^n × 100ms, 30s)` 退避，窗口内 write 直接入缓冲不再发起连接，成功清零
+- **解压炸弹防护**：查询与内存解压路径施加 1 GiB 输出上限（流式读取，超限报 i18n 错误）
+- **内部故障 ops 事件**：轮转 rename 失败、轮转产物压缩/加密失败、sink 降级与恢复路径自动发布 `sink_degraded`/`sink_recovered` 事件（全局 hub 复用 manager ops 通道）
+
+### Changed
+
+- **脱敏规则引擎切换 fancy-regex**：正则环视（lookbehind/lookahead）是 CJK 友好边界的前提，`regex` crate 不支持；新增 `fancy-regex` 依赖（规则热路径行为不变，编译期 expect 守卫）
+- **FileSink 写路径**：文件句柄改 64 KiB `BufWriter`（每批一次 flush 摊销逐条 syscall）；`inner` 状态升级 `Arc<RwLock<>>` 供定时线程执行空闲 flush；批末 flush 失败整批回填重试（at-least-once）
+- **对象池闭环**：worker 消费端 `Arc::try_unwrap` 成功即归还 `LogRecord`（池此前只取不还，零分配目标落空）
+- **`set_level` 双门面同步**：运行时热调级别时同步 `log::set_max_level`（此前 log 门面被旧级别拦截）
+
 ## [0.3.0-rc.3] - 2026-09-10
 
 ### Added

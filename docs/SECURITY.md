@@ -162,12 +162,12 @@ inklog 是安全优先的 Rust 日志基础设施，为需要严格数据保护�
 | 密钥派生 | 同上 | PBKDF2-HMAC-SHA256 600k 迭代，每次轮转至多一次 |
 | 密钥内存清零 | `zeroize` | 密钥离开作用域自动清零 |
 | KMS 密钥提供 | `support::security`（`kms` feature） | `EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP |
-| 数据脱敏 | `support::processing::masking` | 21 条内置正则规则 + 敏感字段名检测 + 自定义注册表 |
+| 数据脱敏 | `support::processing::masking` | 21 条内置正则规则（fancy-regex 环视实现 CJK 友好边界）+ 敏感字段名检测 + 自定义注册表；console/file/database/net/otlp 全部出口默认掩码（`masking_enabled` 门控），递归深度 16 层上限、单条 1 MiB 上限 |
 | 路径安全 | `validation::path`（PathValidator） | 路径穿越防护，禁止写入用户主目录与密钥文件 |
 | 内容净化 | `validation::sanitize`（LogSanitizer） | 日志注入与控制字符防护 |
 | SQL 注入防护 | DatabaseSink / `integrations::infra::database` | 表名白名单校验 + 参数化查询 |
 | HTTP 访问控制 | `http` feature | 认证 token 启动期缓存、失败 fail-closed；IP 白名单；TLS |
-| 归档防篡改 | `support::audit_chain`（ArchiveChain） | HMAC-SHA256 归档链（随机链首盐），防删除、重排与伪造 |
+| 归档防篡改 | `support::audit_chain`（ArchiveChain） | HMAC-SHA256 归档链（随机链首盐），防删除、重排与伪造；`audit_chain_enabled = true` 后每次轮转自动登记 `{path, sha256, timestamp}` 并写穿 `<stem>.chain.jsonl` manifest，`inklog-cli verify-chain --manifest <file> --key-env INKLOG_AUDIT_KEY` 校验（链完整退出码 0、篡改退出码 2） |
 | 供应链安全 | `deny.toml` / lefthook | `cargo deny check` + `cargo audit` + pre-commit 私钥扫描 |
 
 > 说明：仓库维护 [`deny.toml`](../deny.toml)，CI 的 security job 与 lefthook pre-push 分别运行 `cargo deny check`（漏洞/许可证/重复依赖）与 `cargo audit`（RustSec 公告）。
@@ -565,7 +565,19 @@ inklog 在文件、数据库和网络层面实施严格的访问控制。
 **磁盘空间管理**（FileSink）：
 
 - 可用空间不足（< 5% 或 < 100MB）时告警并降级；
-- 自动清理旧日志（按 `retention_days` / `max_total_size` 策略）。
+- 自动清理旧日志：大小清理与年龄清理独立执行——`max_total_size` 不可解析时过期清理仍然生效；
+- 等保场景：`encrypt=true` 且 `retention_days < 180` 时输出留存合规提示（等保 2.0 要求日志留存 ≥ 6 个月）。
+
+**文件权限（审计加固）**：
+
+- FileSink 活动日志文件以 `0600` 创建（此前仅 CLI 解密输出为 0600）；
+- 轮转加密产物（`.enc`）与压缩产物（`.zst`/`.gz`）同样以 `0600` 创建；
+- 新建的日志目录以 `0700` 设置权限（已存在目录不回改用户权限）。
+
+**崩溃一致性（可选）**：
+
+- `FileSinkConfig.fsync = true` 时每批写盘后执行 `sync_all`（默认关闭，吞吐优先）；
+- 空闲期兜底刷盘：日志停止产生后，批量缓冲由轮转定时线程代为落盘，不再滞留内存。
 
 ### 数据库访问控制
 
