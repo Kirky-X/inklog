@@ -107,8 +107,19 @@ impl MaskRuleRegistry {
     ///
     /// 规则按 priority 升序（稳定排序）重排为内部存储；不做重名查重，
     /// 重名约束由调用方保证（如 [`load_from_toml()`](Self::load_from_toml)
-    /// 的输出已满足）。
+    /// 的输出已满足）——重名规则的后果是检测面按名归因不可区分
+    /// （[`MaskMatch`](super::masking::MaskMatch).rule 同名），debug 构建
+    /// 下直接断言暴露违约。
     pub fn from_rules(mut rules: Vec<MaskRule>) -> Self {
+        debug_assert!(
+            {
+                let mut names: Vec<&str> = rules.iter().map(|r| r.name()).collect();
+                names.sort_unstable();
+                names.dedup();
+                names.len() == rules.len()
+            },
+            "from_rules: duplicate rule names make detect attribution ambiguous"
+        );
         rules.sort_by_key(|r| r.priority());
         Self { rules }
     }

@@ -356,6 +356,8 @@ impl DataMasker {
     ///
     /// 各规则在原始文本上独立报告；`mask` 按优先级串行改写，前序规则
     /// 的改写可能使后序规则不再命中，两侧仅在各规则独立观察时一一对应。
+    /// 归因键是规则名——经 `from_rules` 绕过查重进入的重名规则在结果中
+    /// 不可区分（debug 构建下构造器会断言暴露）。
     pub fn detect(&self, text: &str) -> Vec<MaskMatch> {
         let mut matches = Vec::new();
         for rule in &self.rules {
@@ -374,12 +376,13 @@ impl DataMasker {
     }
 
     /// 检测面布尔形式：是否存在任一命中。与 [`Self::detect`] 同源
-    /// （不做标记短路），找到首个命中即提前返回。
+    /// （不做标记短路），找到首个命中即提前返回——存在性判断只做
+    /// 首匹配查找，不物化全部命中区间。
     pub fn has_match(&self, text: &str) -> bool {
         self.rules
             .iter()
             .filter(|r| r.is_enabled())
-            .any(|rule| !rule.find_matches(text).is_empty())
+            .any(|rule| matches!(rule.pattern.find(text), Ok(Some(_))))
     }
 
     /// 行级 key=value 文本脱敏：命中行只替换 `=` 之后的值侧，
@@ -1106,6 +1109,13 @@ impl MaskRule {
                         rule = self.name.as_str(),
                         error = %e,
                         "regex match error during detect; skipping this match"
+                    );
+                    // 跳过该次命中属 fail-open 漏报，接入 ops 事件广播
+                    // 使漏脱敏可观测（hub 无注册通道时为 no-op）
+                    crate::support::ops_event::publish_internal(
+                        "masking_engine_error",
+                        Some(self.name.as_str()),
+                        serde_json::json!({ "error": e.to_string() }),
                     );
                     None
                 }
