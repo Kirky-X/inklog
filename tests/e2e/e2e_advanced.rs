@@ -2954,7 +2954,8 @@ mod compression_e2e {
 // i18n: LogI18nFormatter E2E
 // ============================================================================
 
-#[cfg(test)]
+// LogI18nFormatter 是 ICU4X 面，仅 i18n feature 下存在
+#[cfg(all(test, feature = "i18n"))]
 mod i18n_e2e {
     use inklog::i18n::{I18nError, LogI18nFormatter};
     use std::cmp::Ordering;

@@ -173,7 +173,7 @@ impl TimeBasedRotation {
         } else if trimmed.eq_ignore_ascii_case("monthly") {
             (2592000, "monthly")
         } else {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("interval", interval);
             args.set("valid", "hourly, daily, weekly, monthly");
             return Err(crate::i18n::tr_args(
@@ -319,13 +319,13 @@ pub fn parse_size(size_str: &str) -> Result<u64, String> {
 
     let num_str = &size_str[..size_str.len() - suffix_len];
     let num: u64 = num_str.parse().map_err(|_| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("num", num_str);
         crate::i18n::tr_args("config-invalid_size_number", args)
     })?;
 
     num.checked_mul(multiplier).ok_or_else(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("num", num_str);
         crate::i18n::tr_args("config-invalid_size_number", args)
     })

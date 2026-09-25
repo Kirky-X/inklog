@@ -53,7 +53,7 @@ impl MaskRuleRegistry {
     /// 若已存在同名规则，返回 `Err(InklogError)`。
     pub fn register(&mut self, rule: MaskRule) -> Result<(), InklogError> {
         if self.rules.iter().any(|r| r.name() == rule.name()) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("name", rule.name());
             return Err(InklogError::ConfigError(crate::i18n::tr_args(
                 "config-rule_already_registered",
@@ -144,7 +144,7 @@ impl MaskRuleRegistry {
     /// - 无效正则在构建规则时返回 `Err(InklogError)`
     pub fn load_from_toml(toml_str: &str) -> Result<Vec<MaskRule>, InklogError> {
         let parsed: toml::Value = toml::from_str(toml_str).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-failed_parse_toml", args))
         })?;
@@ -172,7 +172,7 @@ impl MaskRuleRegistry {
                 .get("pattern")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("name", name);
                     InklogError::ConfigError(crate::i18n::tr_args(
                         "config-masking_missing_pattern",

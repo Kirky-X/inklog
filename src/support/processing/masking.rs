@@ -1231,7 +1231,7 @@ impl MaskRuleBuilder {
     /// Returns `Err(InklogError)` if the pattern is missing or an invalid regex.
     pub fn build(self) -> Result<MaskRule, InklogError> {
         let pattern_str = self.pattern.ok_or_else(|| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("name", &self.name);
             InklogError::ConfigError(crate::i18n::tr_args(
                 "config-mask_rule_requires_pattern",
@@ -1239,7 +1239,7 @@ impl MaskRuleBuilder {
             ))
         })?;
         let regex = Regex::new(&pattern_str).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("name", &self.name);
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-invalid_regex_in_rule", args))

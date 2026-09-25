@@ -141,7 +141,7 @@ impl InklogConfig {
     /// Load configuration synchronously from the default search paths.
     pub fn load_sync() -> Result<Self, InklogError> {
         Self::from_search_paths().map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-load_failed", args))
         })
@@ -162,7 +162,7 @@ impl InklogConfig {
             if crate::LogLevel::is_valid_level(&val) {
                 config.global.level = val;
             } else {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("val", &val);
                 args.set("current", &config.global.level);
                 tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_level", args));
@@ -197,7 +197,7 @@ impl InklogConfig {
                 .any(|c| c == std::path::Component::ParentDir);
             let has_null = val.contains('\0');
             if has_traversal || has_null {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("path", &val);
                 tracing::warn!("{}", crate::i18n::tr_args("config-env_unsafe_path", args));
             } else {
@@ -210,7 +210,7 @@ impl InklogConfig {
             let trimmed = val.trim();
             let has_numeric = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
             if has_numeric == 0 {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("val", &val);
                 tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_size", args));
             } else {
@@ -241,7 +241,7 @@ impl InklogConfig {
                 let http_config = config.http_server.get_or_insert_with(Default::default);
                 http_config.metrics_path = val;
             } else {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("path", &val);
                 args.set("env_var", "INKLOG_HTTP_SERVER_METRICS_PATH");
                 tracing::warn!(
@@ -257,7 +257,7 @@ impl InklogConfig {
                 let http_config = config.http_server.get_or_insert_with(Default::default);
                 http_config.health_path = val;
             } else {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("path", &val);
                 args.set("env_var", "INKLOG_HTTP_SERVER_HEALTH_PATH");
                 tracing::warn!(
@@ -273,7 +273,7 @@ impl InklogConfig {
             } else if val.eq_ignore_ascii_case("warn") {
                 HttpErrorMode::Warn
             } else {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("val", &val);
                 tracing::warn!(
                     "{}",
@@ -353,7 +353,7 @@ impl InklogConfig {
                 if let Ok(meta) = std::fs::metadata(&path_opt)
                     && meta.len() > MAX_CONFIG_SIZE
                 {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("path", path_opt.clone());
                     args.set("size", meta.len().to_string());
                     args.set("max", MAX_CONFIG_SIZE.to_string());
@@ -363,13 +363,13 @@ impl InklogConfig {
                     )));
                 }
                 let content = std::fs::read_to_string(&path_opt).map_err(|e| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("path", path_opt.clone());
                     args.set("err", e.to_string());
                     InklogError::ConfigError(crate::i18n::tr_args("config-read_failed", args))
                 })?;
                 let mut config: Self = toml::from_str(&content).map_err(|e| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("path", path_opt.clone());
                     args.set("err", e.to_string());
                     InklogError::ConfigError(crate::i18n::tr_args("config-parse_failed", args))
@@ -466,7 +466,7 @@ impl InklogConfig {
             )));
         }
         if self.performance.max_capacity < self.performance.min_capacity {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("max", self.performance.max_capacity.to_string());
             args.set("min", self.performance.min_capacity.to_string());
             return Err(InklogError::ConfigError(crate::i18n::tr_args(
@@ -477,7 +477,7 @@ impl InklogConfig {
 
         // --- Global log level ---
         if !crate::LogLevel::is_valid_level(&self.global.level) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("level", self.global.level.clone());
             args.set("valid", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
             return Err(InklogError::ConfigError(crate::i18n::tr_args(
@@ -549,7 +549,7 @@ impl InklogConfig {
         if let Some(ref console) = self.console_sink
             && let Some(invalid) = console.invalid_stderr_levels().first()
         {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("level", *invalid);
             args.set("valid", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
             return Err(InklogError::ConfigError(crate::i18n::tr_args(

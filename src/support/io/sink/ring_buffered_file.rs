@@ -126,11 +126,11 @@ impl ChannelBufferedFileSink {
             let reason = validation_result
                 .error
                 .unwrap_or_else(|| "unknown".to_string());
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("path", config.base_config.path.display().to_string());
             args.set("reason", reason.clone());
             tracing::warn!("{}", crate::i18n::tr_args("sink-file_reject_path", args));
-            let mut err_args = fluent_bundle::FluentArgs::new();
+            let mut err_args = crate::i18n::MsgArgs::new();
             err_args.set("reason", reason);
             return Err(InklogError::ConfigError(crate::i18n::tr_args(
                 "config-unsafe_path_rejected",
@@ -457,7 +457,7 @@ impl LogSink for ChannelBufferedFileSink {
             }
         };
         if !sent {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set(
                 "count",
                 self.dropped_count

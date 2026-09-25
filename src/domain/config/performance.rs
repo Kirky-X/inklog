@@ -28,7 +28,7 @@ impl std::str::FromStr for ChannelStrategy {
         } else if s.eq_ignore_ascii_case("adaptive") {
             Ok(ChannelStrategy::Adaptive)
         } else {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("strategy", s);
             args.set("valid", "fixed, adaptive");
             Err(crate::i18n::tr_args(

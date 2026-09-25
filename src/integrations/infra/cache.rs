@@ -165,7 +165,7 @@ impl OxCacheAdapter {
 impl Cache for OxCacheAdapter {
     async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
         self.inner.get(&key.to_string()).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("key", key.to_string());
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-get_failed", args))
@@ -174,7 +174,7 @@ impl Cache for OxCacheAdapter {
 
     async fn set(&self, key: &str, value: String) -> Result<(), InklogError> {
         self.inner.set(&key.to_string(), &value).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("key", key.to_string());
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-set_failed", args))
@@ -186,7 +186,7 @@ impl Cache for OxCacheAdapter {
         // 不做 exists 预检以消除 TOCTOU 竞态；后端无法区分键是否原本存在，
         // 成功时统一返回 true
         self.inner.delete(&key.to_string()).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("key", key.to_string());
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-delete_failed", args))
@@ -196,7 +196,7 @@ impl Cache for OxCacheAdapter {
 
     async fn exists(&self, key: &str) -> Result<bool, InklogError> {
         self.inner.exists(&key.to_string()).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("key", key.to_string());
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-check_failed", args))
@@ -257,7 +257,7 @@ impl OxCacheAdapterBuilder {
             builder = builder.capacity(capacity);
         }
         let cache = builder.build().await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-build_failed", args))
         })?;

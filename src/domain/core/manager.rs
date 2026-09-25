@@ -463,7 +463,7 @@ impl LoggerManager {
         {
             match http_cfg.error_mode {
                 crate::HttpErrorMode::Warn => {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("err", e.to_string());
                     tracing::warn!(
                         "{}",
@@ -921,12 +921,12 @@ impl LoggerManager {
     /// ```
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
         let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-failed_read_config", args))
         })?;
         let config: InklogConfig = toml::from_str(&content).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-failed_parse_config", args))
         })?;
@@ -956,7 +956,7 @@ impl LoggerManager {
     /// ```
     pub async fn load() -> Result<Self, InklogError> {
         let config = InklogConfig::load_sync().map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-failed_load_config", args))
         })?;
@@ -973,7 +973,7 @@ impl LoggerManager {
         self.control_tx
             .send(SinkControlMessage::RecoverSink(sink_name.to_string()))
             .map_err(|e| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 InklogError::ChannelError(crate::i18n::tr_args("config-failed_send_recovery", args))
             })

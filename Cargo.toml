@@ -57,7 +57,14 @@ unexpected_cfgs = { level = "warn" }
 workspace = true
 
 [features]
-default = []
+# i18n 在 default 中：既有消费者（含隐式 default）的编译产物与 API 面不变；
+# 以 default-features=false 引入的组合（裁掉 icu/fluent 依赖树）改用
+# 内嵌英文文案表的 fallback 翻译路径。
+default = ["i18n"]
+# 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + sys-locale 检测。
+# 关闭后 crate::i18n 入口保留（tr/tr_args 回退到内嵌 en 文案表），
+# 依赖树不含 icu/fluent-bundle。
+i18n = ["dep:icu", "dep:writeable", "dep:fluent-bundle", "dep:unic-langid", "dep:sys-locale"]
 # 测试面 mock 导出（MockCache/MockConfig/MockDatabaseAdapter）的门控 feature：
 # 不入 default 与任何生产组合；src 内联测试经 cfg(test) 直接可见，
 # 外部测试消费者需显式启用。
@@ -156,11 +163,11 @@ clap = { version = "4.6", default-features = false, features = ["derive", "env",
 glob = { version = "0.3", default-features = false, optional = true }
 ipnet = { version = "2.12", default-features = false, features = ["std"] }
 subtle = { version = "2.6", default-features = false }
-icu = { version = "2.3", default-features = false, features = ["compiled_data"] }
-writeable = { version = "0.6", default-features = false }
-fluent-bundle = { version = "0.16", default-features = false }
-unic-langid = { version = "0.9", default-features = false }
-sys-locale = { version = "0.3", default-features = false }
+icu = { version = "2.3", default-features = false, features = ["compiled_data"], optional = true }
+writeable = { version = "0.6", default-features = false, optional = true }
+fluent-bundle = { version = "0.16", default-features = false, optional = true }
+unic-langid = { version = "0.9", default-features = false, optional = true }
+sys-locale = { version = "0.3", default-features = false, optional = true }
 aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 

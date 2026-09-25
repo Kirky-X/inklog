@@ -23,7 +23,7 @@ fn check_path_syntax(path: &Path) -> Result<()> {
     let suspicious_chars = ['~', '\0', '\u{2024}', '\u{2025}', '\u{FE52}'];
     for c in path_str.chars() {
         if suspicious_chars.contains(&c) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             return Err(anyhow!(
                 "{}",
@@ -33,7 +33,7 @@ fn check_path_syntax(path: &Path) -> Result<()> {
     }
     let path_str_lower = path_str.to_lowercase();
     if path_str_lower.contains("..") || path_str_lower.contains("~/") {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", path.display().to_string());
         return Err(anyhow!(
             "{}",
@@ -52,7 +52,7 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
     if let Ok(metadata) = file_path.symlink_metadata()
         && metadata.file_type().is_symlink()
     {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", file_path.display().to_string());
         return Err(anyhow!(
             "{}",
@@ -62,7 +62,7 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
 
     // 规范化路径
     let canonical_path = file_path.canonicalize().map_err(|e| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("err", e.to_string());
         anyhow!(
             "{}",
@@ -71,13 +71,13 @@ fn validate_file_path(file_path: &Path, base_dir: &Path) -> Result<()> {
     })?;
 
     let canonical_base = base_dir.canonicalize().map_err(|e| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("err", e.to_string());
         anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-base", args))
     })?;
 
     if !canonical_path.starts_with(&canonical_base) {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", file_path.display().to_string());
         args.set("base", base_dir.display().to_string());
         return Err(anyhow!(
@@ -98,7 +98,7 @@ fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
     if let Ok(metadata) = output_path.symlink_metadata()
         && metadata.file_type().is_symlink()
     {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_path.display().to_string());
         return Err(anyhow!(
             "{}",
@@ -110,7 +110,7 @@ fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
     if let Some(file_name) = output_path.file_name() {
         let name_str = file_name.to_string_lossy();
         if name_str.contains('\0') || name_str.contains('/') || name_str.contains('\\') {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", output_path.display().to_string());
             return Err(anyhow!(
                 "{}",
@@ -125,7 +125,7 @@ fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
         .ok_or_else(|| anyhow!("{}", inklog::i18n::tr("cli-decrypt-err-no-parent")))?;
 
     let canonical_parent = parent.canonicalize().map_err(|e| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", parent.display().to_string());
         args.set("err", e.to_string());
         anyhow!(
@@ -135,7 +135,7 @@ fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
     })?;
 
     let canonical_base = base_dir.canonicalize().map_err(|e| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", base_dir.display().to_string());
         args.set("err", e.to_string());
         anyhow!(
@@ -145,7 +145,7 @@ fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
     })?;
 
     if !canonical_parent.starts_with(&canonical_base) {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_path.display().to_string());
         args.set("base", base_dir.display().to_string());
         return Err(anyhow!(
@@ -222,7 +222,7 @@ const MAGIC_HEADER: &[u8] = b"ENCLOG1\0";
 #[cfg(test)]
 pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) -> Result<()> {
     let mut file = File::open(input_path).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", input_path.display().to_string());
         inklog::i18n::tr_args("config-open_input_failed", args)
     })?;
@@ -237,7 +237,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
 
     let version = u16::from_le_bytes([header[8], header[9]]);
     if version != 1 {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("version", version.to_string());
         return Err(anyhow!(
             "{}",
@@ -247,7 +247,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
 
     let algo = u16::from_le_bytes([header[10], header[11]]);
     if algo != 1 {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("algo", algo.to_string());
         return Err(anyhow!(
             "{}",
@@ -256,7 +256,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     }
 
     let key = get_encryption_key_cli(key_env).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("env", key_env);
         inklog::i18n::tr_args("config-get_key_failed", args)
     })?;
@@ -273,7 +273,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     let cipher = Aes256Gcm::new((&*key).into());
 
     let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("err", e.to_string());
         anyhow!(
             "{}",
@@ -282,7 +282,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
     })?;
 
     let mut output_file = File::create(output_path).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_path.display().to_string());
         inklog::i18n::tr_args("config-create_output_failed", args)
     })?;
@@ -297,7 +297,7 @@ pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) 
 pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &str) -> Result<()> {
     // O_NOFOLLOW 打开：关闭校验后输入路径被替换为符号链接的竞态
     let mut file = inklog::open_validated_file(input_path).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", input_path.display().to_string());
         inklog::i18n::tr_args("cli-decrypt-err-open", args)
     })?;
@@ -335,7 +335,7 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
                 ));
             }
             let key = get_encryption_key_cli(key_env).with_context(|| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = inklog::i18n::MsgArgs::new();
                 args.set("env", key_env.to_string());
                 inklog::i18n::tr_args("cli-decrypt-err-key", args)
             })?;
@@ -354,7 +354,7 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
 
                 let cipher = Aes256Gcm::new((&*key).into());
                 cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("err", e.to_string());
                     anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
                 })?
@@ -377,7 +377,7 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
 
                 let cipher = Aes256Gcm::new((&*key).into());
                 cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("err", e.to_string());
                     anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
                 })?
@@ -394,7 +394,7 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
             let header_salt: [u8; 16] = header[12..28].try_into().unwrap();
             let key =
                 get_encryption_key_with_salt_cli(key_env, &header_salt).with_context(|| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("env", key_env.to_string());
                     inklog::i18n::tr_args("cli-decrypt-err-key", args)
                 })?;
@@ -408,13 +408,13 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
 
             let cipher = Aes256Gcm::new((&*key).into());
             cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = inklog::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-decrypt", args))
             })?
         }
         other => {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("version", other.to_string());
             return Err(anyhow!(
                 "{}",
@@ -425,7 +425,7 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
 
     // O_NOFOLLOW 创建：关闭校验后输出路径被替换为符号链接的竞态
     let mut output_file = inklog::create_validated_file(output_path).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_path.display().to_string());
         inklog::i18n::tr_args("cli-decrypt-err-create", args)
     })?;
@@ -455,7 +455,7 @@ pub fn decrypt_directory_compatible(
     recursive: bool,
 ) -> Result<()> {
     if !input_dir.exists() {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", input_dir.display().to_string());
         return Err(anyhow!(
             "{}",
@@ -467,7 +467,7 @@ pub fn decrypt_directory_compatible(
     if let Ok(metadata) = input_dir.symlink_metadata()
         && metadata.file_type().is_symlink()
     {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", input_dir.display().to_string());
         return Err(anyhow!(
             "{}",
@@ -477,7 +477,7 @@ pub fn decrypt_directory_compatible(
 
     // 先创建输出目录，再验证（canonicalize 要求目录存在）
     std::fs::create_dir_all(output_dir).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_dir.display().to_string());
         inklog::i18n::tr_args("cli-decrypt-err-create-dir", args)
     })?;
@@ -486,7 +486,7 @@ pub fn decrypt_directory_compatible(
     if let Ok(metadata) = output_dir.symlink_metadata()
         && metadata.file_type().is_symlink()
     {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_dir.display().to_string());
         return Err(anyhow!(
             "{}",
@@ -495,7 +495,7 @@ pub fn decrypt_directory_compatible(
     }
 
     let entries = std::fs::read_dir(input_dir).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", input_dir.display().to_string());
         inklog::i18n::tr_args("cli-decrypt-err-read-dir", args)
     })?;
@@ -511,7 +511,7 @@ pub fn decrypt_directory_compatible(
             {
                 // 验证待解密文件相对其所在输入目录的包含关系（含符号链接检查）
                 if let Err(e) = validate_file_path(&path, input_dir) {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("path", path.display().to_string());
                     args.set("err", e.to_string());
                     eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-path-fail", args));
@@ -520,7 +520,7 @@ pub fn decrypt_directory_compatible(
                 }
 
                 let file_name = path.file_name().ok_or_else(|| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("path", path.display().to_string());
                     anyhow!(
                         "{}",
@@ -531,7 +531,7 @@ pub fn decrypt_directory_compatible(
 
                 // 验证输出路径（不要求文件已存在）
                 if let Err(e) = validate_output_path(&output_path, output_dir) {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("path", output_path.display().to_string());
                     args.set("err", e.to_string());
                     eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-path-fail", args));
@@ -539,13 +539,13 @@ pub fn decrypt_directory_compatible(
                     continue;
                 }
 
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = inklog::i18n::MsgArgs::new();
                 args.set("input", path.display().to_string());
                 args.set("output", output_path.display().to_string());
                 println!("{}", inklog::i18n::tr_args("cli-decrypt-progress", args));
 
                 if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("path", path.display().to_string());
                     args.set("err", e.to_string());
                     eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-fail", args));
@@ -557,7 +557,7 @@ pub fn decrypt_directory_compatible(
             if let Ok(metadata) = path.symlink_metadata()
                 && metadata.file_type().is_symlink()
             {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = inklog::i18n::MsgArgs::new();
                 args.set("path", path.display().to_string());
                 eprintln!(
                     "{}",
@@ -568,7 +568,7 @@ pub fn decrypt_directory_compatible(
             }
 
             let file_name = path.file_name().ok_or_else(|| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = inklog::i18n::MsgArgs::new();
                 args.set("path", path.display().to_string());
                 anyhow!(
                     "{}",
@@ -579,7 +579,7 @@ pub fn decrypt_directory_compatible(
 
             // 验证子目录输出路径（不要求目录已存在）
             if let Err(e) = validate_output_path(&sub_output_dir, output_dir) {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = inklog::i18n::MsgArgs::new();
                 args.set("path", sub_output_dir.display().to_string());
                 args.set("err", e.to_string());
                 eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-path-fail", args));
@@ -592,7 +592,7 @@ pub fn decrypt_directory_compatible(
     }
 
     if failure_count > 0 {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("count", failure_count.to_string());
         return Err(anyhow!(
             "{}",
@@ -608,7 +608,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
 
     // 先创建输出目录，再验证（canonicalize 要求目录存在）
     std::fs::create_dir_all(output_dir).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_dir.display().to_string());
         inklog::i18n::tr_args("cli-decrypt-err-create-dir", args)
     })?;
@@ -617,7 +617,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
     if let Ok(metadata) = output_dir.symlink_metadata()
         && metadata.file_type().is_symlink()
     {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_dir.display().to_string());
         return Err(anyhow!(
             "{}",
@@ -632,14 +632,14 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
     let canonical_base = std::env::current_dir()
         .and_then(|base| base.canonicalize())
         .map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-base", args))
         })?;
 
     let paths = glob::glob(input_pattern)
         .map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             anyhow!("{}", inklog::i18n::tr_args("cli-decrypt-err-glob", args))
         })?
@@ -654,7 +654,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
         if let Ok(metadata) = path.symlink_metadata()
             && metadata.file_type().is_symlink()
         {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             eprintln!(
                 "{}",
@@ -668,7 +668,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
         if let Ok(canonical_input) = path.canonicalize()
             && !canonical_input.starts_with(&canonical_base)
         {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             args.set("base", canonical_base.display().to_string());
             eprintln!(
@@ -680,7 +680,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
         }
 
         let file_name = path.file_name().ok_or_else(|| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             anyhow!(
                 "{}",
@@ -691,7 +691,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
 
         // 验证输出路径（不要求文件已存在）
         if let Err(e) = validate_output_path(&output_path, output_dir) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", output_path.display().to_string());
             args.set("err", e.to_string());
             eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-path-fail", args));
@@ -699,13 +699,13 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
             continue;
         }
 
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("input", path.display().to_string());
         args.set("output", output_path.display().to_string());
         println!("{}", inklog::i18n::tr_args("cli-decrypt-progress", args));
 
         if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             args.set("err", e.to_string());
             eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-fail", args));
@@ -716,7 +716,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
     }
 
     if failure_count > 0 {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("ok", success_count.to_string());
         args.set("fail", failure_count.to_string());
         return Err(anyhow!(
@@ -764,7 +764,7 @@ mod tests {
         let cipher = Aes256Gcm::new(key.into());
         let nonce = aes_gcm::Nonce::from(nonce_bytes);
         let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             anyhow!("{}", inklog::i18n::tr_args("config-encryption_error", args))
         })?;
@@ -792,7 +792,7 @@ mod tests {
         let cipher = Aes256Gcm::new(key.into());
         let nonce = aes_gcm::Nonce::from(nonce_bytes);
         let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             anyhow!("{}", inklog::i18n::tr_args("config-encryption_error", args))
         })?;

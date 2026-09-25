@@ -128,7 +128,7 @@ impl std::fmt::Display for LogLevelParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LogLevelParseError::Unknown(level) => {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("level", level);
                 write!(
                     f,

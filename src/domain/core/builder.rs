@@ -1066,7 +1066,7 @@ impl LoggerBuilder {
     pub async fn build(self) -> Result<LoggerManager, InklogError> {
         // Report all accumulated validation errors at once
         if !self.validation_errors.is_empty() {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("count", self.validation_errors.len());
             return Err(InklogError::ConfigError(crate::i18n::tr_args(
                 "config-builder_validation_failed",

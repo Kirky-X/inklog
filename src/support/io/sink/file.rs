@@ -337,11 +337,11 @@ impl FileSink {
             let reason = validation_result
                 .error
                 .unwrap_or_else(|| "unknown".to_string());
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("path", self.config.path.display().to_string());
             args.set("reason", reason.clone());
             warn!("{}", crate::i18n::tr_args("sink-file_reject_path", args));
-            let mut err_args = fluent_bundle::FluentArgs::new();
+            let mut err_args = crate::i18n::MsgArgs::new();
             err_args.set("reason", reason);
             return Err(InklogError::ConfigError(crate::i18n::tr_args(
                 "config-unsafe_path_rejected",
@@ -357,7 +357,7 @@ impl FileSink {
         if let Some(parent) = self.config.path.parent()
             && let Err(e) = fs::create_dir_all(parent)
         {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("dir", parent.display().to_string());
             args.set("err", e.to_string());
             error!("{}", crate::i18n::tr_args("sink-file_mkdir_failed", args));
@@ -472,7 +472,7 @@ impl FileSink {
                 } else {
                     "unknown panic".to_string()
                 };
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("msg", msg.to_string());
                 tracing::error!("{}", crate::i18n::tr_args("sink-file_cleanup_panic", args));
             }
@@ -889,7 +889,7 @@ impl FileSink {
                 } else {
                     "unknown panic".to_string()
                 };
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("msg", msg.to_string());
                 tracing::error!("{}", crate::i18n::tr_args("sink-file_rotation_panic", args));
             }
@@ -1148,7 +1148,7 @@ impl FileSink {
         // 获取密钥（密码模式用上面的盐确定性派生）
         let key_bytes = self.get_encryption_key(&salt)?;
         let cipher = Aes256Gcm::new_from_slice(&*key_bytes).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::EncryptionError {
                 message: crate::i18n::tr_args("config-invalid_encryption_key", args),

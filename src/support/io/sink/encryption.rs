@@ -103,7 +103,7 @@ pub fn env_key_is_password(env_var: &str) -> bool {
 /// 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
 fn read_key_env_value(env_var: &str) -> Result<Zeroizing<String>, InklogError> {
     let value = std::env::var(env_var).map_err(|_| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("env", env_var);
         InklogError::ConfigError(crate::i18n::tr_args("config-encryption_key_not_set", args))
     })?;
@@ -144,7 +144,7 @@ fn key_from_env_value(
             return Ok(Zeroizing::new(result));
         }
         // Base64 解码成功但长度不对，拒绝使用
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("got", decoded.len());
         return Err(InklogError::ConfigError(crate::i18n::tr_args(
             "config-encryption_base64_wrong_length",
@@ -160,7 +160,7 @@ fn key_from_env_value(
     }
 
     // 密钥长度无效
-    let mut args = fluent_bundle::FluentArgs::new();
+    let mut args = crate::i18n::MsgArgs::new();
     args.set("got", raw_bytes.len());
     Err(InklogError::ConfigError(crate::i18n::tr_args(
         "config-encryption_key_wrong_length",
@@ -184,7 +184,7 @@ pub fn derive_key_from_password(
 ) -> Result<([u8; 32], Vec<u8>), InklogError> {
     // Security: enforce minimum password length
     if password.len() < 12 {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("got", password.len());
         return Err(InklogError::ConfigError(crate::i18n::tr_args(
             "config-encryption_password_too_short",

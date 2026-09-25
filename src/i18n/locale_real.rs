@@ -15,11 +15,48 @@
 //! 2. System locale via `sys-locale`
 //! 3. Fallback to `"en"`
 
-use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
+use fluent_bundle::{FluentArgs, FluentBundle, FluentResource, FluentValue};
 use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use unic_langid::LanguageIdentifier;
+
+/// 消息插值参数载体：键值有序集合，经 [`tr_args`](super::tr_args) 传入
+/// fluent 消息的 `{ $key }` 占位。
+///
+/// 值统一按 `Display` 渲染为字符串——调用点的实参形态（错误链、路径
+/// display、命名切片）全部无需转换。
+#[derive(Debug, Clone, Default)]
+pub struct MsgArgs {
+    entries: Vec<(String, String)>,
+}
+
+impl MsgArgs {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 追加一个参数；同名键后者覆盖前者（与 fluent `FluentArgs::set`
+    /// 的覆盖语义一致）。
+    pub fn set(&mut self, key: &str, value: impl std::fmt::Display) -> &mut Self {
+        let value = value.to_string();
+        match self.entries.iter_mut().find(|(k, _)| k == key) {
+            Some(slot) => slot.1 = value,
+            None => self.entries.push((key.to_string(), value)),
+        }
+        self
+    }
+}
+
+impl<'a> From<MsgArgs> for FluentArgs<'a> {
+    fn from(args: MsgArgs) -> Self {
+        let mut fluent = FluentArgs::new();
+        for (key, value) in args.entries {
+            fluent.set(key, FluentValue::from(value));
+        }
+        fluent
+    }
+}
 
 /// Global locale manager state.
 /// Parsed resources are leaked as `&'static` so each thread's bundle

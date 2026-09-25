@@ -52,7 +52,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
 
             if batch {
                 let input_str = input.to_str().ok_or_else(|| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = inklog::i18n::MsgArgs::new();
                     args.set("path", format!("{:?}", input));
                     anyhow::anyhow!(
                         "{}",
@@ -65,7 +65,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             } else if !input.exists() {
                 // 不存在的路径在分支判定里两个谓词都是 false，会静默滑进
                 // 目录解密分支——显式拦截给出明确错误
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = inklog::i18n::MsgArgs::new();
                 args.set("path", input.display().to_string());
                 return Err(anyhow::anyhow!(
                     "{}",
@@ -86,7 +86,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
                     })
                 );
             } else {
-                let mut fluent = fluent_bundle::FluentArgs::new();
+                let mut fluent = inklog::i18n::MsgArgs::new();
                 fluent.set("input", input.display().to_string());
                 fluent.set("output", output.display().to_string());
                 println!(

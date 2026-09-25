@@ -124,7 +124,7 @@ impl PathValidator {
                         crate::i18n::tr("validation-dangerous_component"),
                         name_str
                     );
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("component", name_str.to_string());
                     return ValidationResult::invalid(&crate::i18n::tr_args(
                         "validation-dangerous_component",
