@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FileSink 写路径**：文件句柄改 64 KiB `BufWriter`（每批一次 flush 摊销逐条 syscall）；`inner` 状态升级 `Arc<RwLock<>>` 供定时线程执行空闲 flush；批末 flush 失败整批回填重试（at-least-once）
 - **对象池闭环**：worker 消费端 `Arc::try_unwrap` 成功即归还 `LogRecord`（池此前只取不还，零分配目标落空）
 - **`set_level` 双门面同步**：运行时热调级别时同步 `log::set_max_level`（此前 log 门面被旧级别拦截）
+- **行为变更：console sink `enabled=false` 不再输出**：`ConsoleSink::write` 此前不检查 `enabled` 字段，显式禁用组合仍全量写 stdout/stderr；现禁用态在 write 处丢弃记录（默认组合 `enabled=true` 行为逐字节不变）。该语义落实使性能基准等声明禁用 console 的场景不再向 stdout 泄漏海量输出
 
 ## [0.3.0-rc.3] - 2026-09-10
 

@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 // 大数据量性能测试
+// 测量口径变更（2026-09-26，commit a491563）：console sink 统一 enabled=false
+// （禁用丢弃语义），console 路径退出测量；与历史基线不可比，需重采基线。
 //
 // 核正：with_config 内部 set_global_default 为进程级单次语义，多用例并发时后装者
 // 日志流向首个 logger 导致记录丢失（metadata.len() 断言随机失败）。统一改造为
