@@ -57,13 +57,14 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 | **运行时热调** | `set_level` 即时调整全局与 per-target 日志级别 |
 | **健康监控** | Sink 状态、通道水位与指标追踪 |
 | **动态 Sink** | `LoggerBuilder::add_sink` 注册第三方 Sink，每 Sink 独立通道 |
-| **i18n** | 错误消息经 Fluent + ICU 按系统 locale 渲染 |
+| **i18n** | 错误消息经 Fluent + ICU 按系统 locale 渲染（`i18n` feature，默认开启；关闭后回退内嵌英文文案） |
 
 ### 可选功能（feature 门控）
 
 | 功能 | 描述 |
 |------|------|
 | **数据库 Sink** | PostgreSQL、MySQL、SQLite、DuckDB（经 dbnexus，批量落库、分区表） |
+| **i18n 关闭** | `default-features = false` 裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退内嵌英文文案表 |
 | **压缩** | Zstd（`compression`）/ Gzip（`gzip`）压缩轮转文件 |
 | **加密** | AES-256-GCM 轮转归档加密 |
 | **Parquet 导出** | 分析就绪的列式归档格式 |
@@ -76,7 +77,7 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ## 📦 安装
 
-将以下内容添加到 `Cargo.toml`（`default = []`，默认仅启用核心能力）：
+将以下内容添加到 `Cargo.toml`（`default = ["i18n"]`，默认启用核心能力 + 国际化）：
 
 ```toml
 [dependencies]
