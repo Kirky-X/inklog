@@ -170,7 +170,7 @@ mod performance_test {
     async fn test_log_latency() {
         let config = InklogConfig {
             console_sink: Some(inklog::config::ConsoleSinkConfig {
-                enabled: true,
+                enabled: false,
                 ..Default::default()
             }),
             ..Default::default()

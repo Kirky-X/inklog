@@ -124,6 +124,12 @@ impl ConsoleSink {
 #[async_trait]
 impl LogSink for ConsoleSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        // enabled=false 的语义落实：禁用态的 console sink 丢弃记录。
+        // 装配路径（build_detached 等）无论 enabled 都会构造并接线
+        // console sink，若 write 不检查该字段，禁用组合仍会全量输出。
+        if !self.config.enabled {
+            return Ok(());
+        }
         // 应用数据脱敏（如果启用）
         let masked_record = if self.config.masking_enabled {
             let mut masked = record.clone();
@@ -305,6 +311,25 @@ mod tests {
         let template = LogTemplate::default();
         let sink = ConsoleSink::new(config, template);
         assert!(!sink.config.enabled);
+    }
+
+    #[tokio::test]
+    async fn test_log_sink_write_disabled_drops_records() {
+        // enabled=false 的语义落实：装配路径无论 enabled 都接线 console
+        // sink，禁用态必须在 write 处丢弃记录，否则禁用组合仍全量输出
+        let config = ConsoleSinkConfig {
+            enabled: false,
+            colored: false,
+            ..Default::default()
+        };
+        let (sink, writer) = sink_with_test_writer(config);
+        let record = make_record("INFO", "should not appear");
+        sink.write(&record).await.unwrap();
+        assert!(
+            writer.is_empty(),
+            "disabled console sink must drop records, got: {}",
+            writer.output()
+        );
     }
 
     #[test]

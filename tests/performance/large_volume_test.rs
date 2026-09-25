@@ -30,6 +30,10 @@ mod large_volume {
                 compress: true,
                 ..Default::default()
             }),
+            console_sink: Some(inklog::config::ConsoleSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
             performance: inklog::config::PerformanceConfig {
                 worker_threads: 4,
                 channel_capacity: 50000,
