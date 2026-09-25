@@ -189,6 +189,20 @@ pub struct DataMasker {
 /// Type alias for the custom apply function used in masking rules.
 type ApplyFn = Arc<dyn Fn(&Regex, &str, &str) -> String + Send + Sync>;
 
+/// 检测面单条命中：哪条规则命中、命中在文本的哪个字节区间。
+///
+/// `start`/`end` 是对送入 [`DataMasker::detect`] 的原文本的字节偏移
+/// （`end` 不含），`&text[start..end]` 即命中原文。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaskMatch {
+    /// 命中的规则名（同 [`MaskRule::name`]）。
+    pub rule: String,
+    /// 命中起始字节偏移（含）。
+    pub start: usize,
+    /// 命中结束字节偏移（不含）。
+    pub end: usize,
+}
+
 /// A masking rule that defines how to detect and replace sensitive data patterns.
 ///
 /// # Fields
@@ -331,6 +345,41 @@ impl DataMasker {
             }
         }
         result
+    }
+
+    /// 检测面：报告全部已启用规则在 `text` 中的命中（规则名 + 字节区间）。
+    ///
+    /// 与 [`Self::mask`] 的两点刻意差异（fail-closed）：
+    /// - 不走标记幂等短路——已含 `***REDACTED***` 等标记的输入仍要
+    ///   检测出伴随的未脱敏 PII，检测面不能因上游已处理过而失明；
+    /// - 不做超大输入跳过——检测是显式诊断调用，不在日志热路径上。
+    ///
+    /// 各规则在原始文本上独立报告；`mask` 按优先级串行改写，前序规则
+    /// 的改写可能使后序规则不再命中，两侧仅在各规则独立观察时一一对应。
+    pub fn detect(&self, text: &str) -> Vec<MaskMatch> {
+        let mut matches = Vec::new();
+        for rule in &self.rules {
+            if !rule.is_enabled() {
+                continue;
+            }
+            for (start, end) in rule.find_matches(text) {
+                matches.push(MaskMatch {
+                    rule: rule.name.clone(),
+                    start,
+                    end,
+                });
+            }
+        }
+        matches
+    }
+
+    /// 检测面布尔形式：是否存在任一命中。与 [`Self::detect`] 同源
+    /// （不做标记短路），找到首个命中即提前返回。
+    pub fn has_match(&self, text: &str) -> bool {
+        self.rules
+            .iter()
+            .filter(|r| r.is_enabled())
+            .any(|rule| !rule.find_matches(text).is_empty())
     }
 
     /// 行级 key=value 文本脱敏：命中行只替换 `=` 之后的值侧，
@@ -1034,6 +1083,34 @@ impl MaskRule {
 
     fn apply(&self, text: &str) -> String {
         (self.apply_fn)(&self.pattern, text, &self.replacement)
+    }
+
+    /// Returns the source pattern string of this rule.
+    pub fn pattern(&self) -> &str {
+        self.pattern.as_str()
+    }
+
+    /// 收集本规则在 `text` 中的全部命中区间（字节偏移对）。
+    ///
+    /// 与 [`Self::apply`] 的对齐依据：库内全部规则的 apply_fn 都在正则
+    /// match 集上逐个改写（含 Luhn 失败 fall back 到 replacement 的
+    /// credit_card），正则命中即 apply 的操作点。引擎级匹配错误
+    /// （fancy_regex 回溯上限等）记 warn 后跳过该次匹配，不中断其余命中。
+    fn find_matches(&self, text: &str) -> Vec<(usize, usize)> {
+        self.pattern
+            .find_iter(text)
+            .filter_map(|m| match m {
+                Ok(found) => Some((found.start(), found.end())),
+                Err(e) => {
+                    tracing::warn!(
+                        rule = self.name.as_str(),
+                        error = %e,
+                        "regex match error during detect; skipping this match"
+                    );
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Returns the name of this rule.
@@ -2127,5 +2204,144 @@ mod tests {
         let masker = DataMasker::new();
         let result = masker.mask_kv_lines("password = x", &["password"], "[REDACTED]");
         assert_eq!(result, "password =[REDACTED]");
+    }
+
+    // ---- detect-only 检测面：detect/has_match 与 mask 的一致性 ----
+
+    #[test]
+    fn test_pattern_accessor_returns_source_pattern() {
+        let rule = MaskRule::builder("probe")
+            .pattern(r"\bPROBE-\d{3}\b")
+            .build()
+            .unwrap();
+        assert_eq!(rule.pattern(), r"\bPROBE-\d{3}\b");
+    }
+
+    #[test]
+    fn test_detect_reports_email_with_exact_positions() {
+        let masker = DataMasker::new();
+        let text = "contact user@example.com thanks";
+        let matches = masker.detect(text);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].rule, "email");
+        assert_eq!(&text[matches[0].start..matches[0].end], "user@example.com");
+    }
+
+    #[test]
+    fn test_detect_credit_card_luhn_pass_matches_mask() {
+        let masker = DataMasker::new();
+        let text = "card 4111111111111111 end";
+        let matches = masker.detect(text);
+        assert!(
+            matches.iter().any(|m| m.rule == "credit_card"),
+            "Luhn-passing card must be detected: {:?}",
+            matches
+        );
+        // detect 命中位置与 mask 改写区域对齐
+        let cc = matches.iter().find(|m| m.rule == "credit_card").unwrap();
+        assert_eq!(&text[cc.start..cc.end], "4111111111111111");
+        let masked = masker.mask(text);
+        assert!(masked.contains("****-****-****-1111"));
+        assert!(!masked.contains("4111111111111111"));
+    }
+
+    #[test]
+    fn test_detect_credit_card_luhn_fail_matches_mask() {
+        // apply_fn 规则自洽的关键用例：credit_card 的 apply_fn 对 Luhn
+        // 失败的卡形数字 fall back 到 replacement（仍改写），
+        // detect 必须同样报告命中——不能只报 Luhn 通过的
+        let masker = DataMasker::new();
+        let text = "card 4111111111111112 end";
+        let matches = masker.detect(text);
+        assert!(
+            matches.iter().any(|m| m.rule == "credit_card"),
+            "Luhn-failing card-shaped number must still be detected: {:?}",
+            matches
+        );
+        let masked = masker.mask(text);
+        assert!(!masked.contains("4111111111111112"));
+    }
+
+    #[test]
+    fn test_detect_bank_card_matches_mask() {
+        let masker = DataMasker::new();
+        let text = "iban 6011000990139424 ok";
+        let matches = masker.detect(text);
+        assert!(
+            matches.iter().any(|m| m.rule == "bank_card"),
+            "bank_card rule must fire on 16-digit number: {:?}",
+            matches
+        );
+        let masked = masker.mask(text);
+        assert!(
+            masked.contains("****-****-****-9424"),
+            "bank_card apply_fn formats with last four visible: {}",
+            masked
+        );
+    }
+
+    #[test]
+    fn test_detect_fail_closed_on_marked_input() {
+        // fail-closed：detect 不走标记幂等短路——已含 REDACTED 标记的
+        // 输入仍要检测出伴随的未脱敏 PII；mask() 的幂等契约保持不变
+        let masker = DataMasker::new();
+        let text = "user@example.com ***REDACTED***";
+        let matches = masker.detect(text);
+        assert!(
+            matches.iter().any(|m| m.rule == "email"),
+            "detect must not be blinded by existing redaction markers: {:?}",
+            matches
+        );
+        // mask() 幂等短路契约保持：含标记输入原样返回
+        assert_eq!(masker.mask(text), text);
+    }
+
+    #[test]
+    fn test_has_match_agrees_with_detect() {
+        let masker = DataMasker::new();
+        assert!(masker.has_match("mail bob@example.com"));
+        assert!(masker.has_match("user@example.com ***REDACTED***"));
+        assert!(!masker.has_match("nothing sensitive here"));
+        assert!(!masker.has_match(""));
+        // has_match 与 detect 的布尔一致性
+        for text in ["", "plain", "bob@example.com", "4111111111111111"] {
+            assert_eq!(masker.has_match(text), !masker.detect(text).is_empty());
+        }
+    }
+
+    #[test]
+    fn test_detect_respects_disabled_rules() {
+        let mut registry =
+            crate::support::processing::masking_registry::MaskRuleRegistry::with_builtins();
+        registry.set_enabled("email", false);
+        let masker = DataMasker::builder().with_registry(registry).build();
+
+        let text = "mail bob@example.com";
+        assert!(!masker.detect(text).iter().any(|m| m.rule == "email"));
+        assert!(!masker.has_match(text));
+        assert_eq!(masker.mask(text), text);
+    }
+
+    #[test]
+    fn test_detect_empty_input_and_no_matches() {
+        let masker = DataMasker::new();
+        assert!(masker.detect("").is_empty());
+        assert!(masker.detect("no pii at all").is_empty());
+    }
+
+    #[test]
+    fn test_detect_reports_each_rule_independently() {
+        // 各规则在原始文本上独立报告（email 与 id_card 等可在同一文本
+        // 各自命中）；mask 按优先级串行改写
+        let masker = DataMasker::new();
+        let text = "mail a@b.com id 110101199001011234";
+        let matches = masker.detect(text);
+        let rules: Vec<&str> = matches.iter().map(|m| m.rule.as_str()).collect();
+        assert!(rules.contains(&"email"));
+        assert!(rules.contains(&"id_card"));
+        // 位置切片都还原原文
+        for m in &matches {
+            assert!(!&text[m.start..m.end].is_empty());
+        }
     }
 }

@@ -248,9 +248,9 @@ pub use support::observability::{
     SinkHealthMonitor, SinkStatus,
 };
 pub use support::processing::{
-    DataMasker, DataMaskerBuilder, LogTemplate, MaskRule, MaskRuleBuilder, MaskRuleRegistry,
-    ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, get_log_record, get_string_buffer,
-    put_log_record, put_string_buffer,
+    DataMasker, DataMaskerBuilder, LogTemplate, MaskMatch, MaskRule, MaskRuleBuilder,
+    MaskRuleRegistry, ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, get_log_record,
+    get_string_buffer, put_log_record, put_string_buffer,
 };
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig,
