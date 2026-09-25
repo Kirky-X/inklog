@@ -1405,6 +1405,15 @@ mod tests {
             .expect("Failed to create manager");
         // 验证基本属性
         assert!(manager.effective_channel_capacity() > 0);
+        // 新建实例无积压。进程级全局 subscriber / log logger 由先完成
+        // try_init 的实例持有（install_globals_and_start），并发测试下
+        // 其他实例的偶发日志事件可能恰落入本实例通道并被 worker 正常
+        // 消费，同步点断言会撞上这条竞态；故断言取「短窗口内排空」——
+        // 真正的新建积压（事件持续滞留不被消费）仍会使断言失败。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+        while manager.channel_len() > 0 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         assert_eq!(manager.channel_len(), 0);
         // 清理
         let _ = manager.shutdown();
