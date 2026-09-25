@@ -1869,6 +1869,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key() {
         let config = FileSinkConfig {
             enabled: true,
@@ -2060,6 +2061,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_missing_env() {
         let config = FileSinkConfig {
             enabled: true,
@@ -2170,6 +2172,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_too_short() {
         let config = FileSinkConfig {
             enabled: true,
@@ -3093,6 +3096,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[serial]
     fn test_encrypted_output_created_with_0600() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempdir().unwrap();
@@ -4830,6 +4834,7 @@ mod tests {
     // ==================== encrypt_file: File::create 失败分支 (-717) ====================
 
     #[test]
+    #[serial]
     #[cfg(unix)]
     fn test_encrypt_file_fails_when_output_dir_readonly() {
         // 覆盖行 716-717：File::create(output_path) 失败时返回 IoError
