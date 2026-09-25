@@ -1400,20 +1400,32 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_logger_manager_new_creates_instance() {
+        // 预占进程级全局（tracing subscriber + log logger）：并发测试下
+        // 全局由先完成 install 的实例持有，其余实例的日志事件会持续落入
+        // 全局实例通道，使「新建无积压」的同步断言撞上竞态（短窗口排空
+        // 也挡不住持续事件流）。预占后本测试的 install 走良性降级分支，
+        // 通道只可能收到本实例自身的事件——new() 不产生事件，断言确定。
+        // 占位对其他测试无转移影响：本文件内的事件断言均已用
+        // with_default 线程局部 registry，不依赖进程全局。
+        struct SilentLogger;
+        impl log::Log for SilentLogger {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                false
+            }
+            fn log(&self, _: &log::Record) {}
+            fn flush(&self) {}
+        }
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing_subscriber::filter::LevelFilter::OFF)
+            .with_writer(std::io::sink)
+            .try_init();
+        let _ = log::set_boxed_logger(Box::new(SilentLogger));
+
         let manager = LoggerManager::new()
             .await
             .expect("Failed to create manager");
         // 验证基本属性
         assert!(manager.effective_channel_capacity() > 0);
-        // 新建实例无积压。进程级全局 subscriber / log logger 由先完成
-        // try_init 的实例持有（install_globals_and_start），并发测试下
-        // 其他实例的偶发日志事件可能恰落入本实例通道并被 worker 正常
-        // 消费，同步点断言会撞上这条竞态；故断言取「短窗口内排空」——
-        // 真正的新建积压（事件持续滞留不被消费）仍会使断言失败。
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
-        while manager.channel_len() > 0 && std::time::Instant::now() < deadline {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
         assert_eq!(manager.channel_len(), 0);
         // 清理
         let _ = manager.shutdown();
