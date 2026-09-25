@@ -333,6 +333,46 @@ impl DataMasker {
         result
     }
 
+    /// 行级 key=value 文本脱敏：命中行只替换 `=` 之后的值侧，
+    /// `=` 之前的原文（缩进、键名、等号前的空白）逐字保留。
+    ///
+    /// 命中条件：行经 `trim_start` 后以 `keys` 之一开头，且键名与 `=` 之间
+    /// 仅隔空白——`password_debug = x` 不会因 `password` 前缀而误命中。
+    /// 这是行级方言的独立入口，不经过规则集与标记幂等短路；
+    /// 保留「= 前原文」的重组形态，用于逐行 config 类文本的确定性改写
+    /// （正则规则集会改写键名等号间的空白形态，不满足此类场景的逐字要求）。
+    pub fn mask_kv_lines(&self, text: &str, keys: &[&str], marker: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        for (i, line) in text.split('\n').enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            let trimmed = line.trim_start();
+            let mut hit_eq_pos: Option<usize> = None;
+            for key in keys {
+                let Some(rest) = trimmed.strip_prefix(key) else {
+                    continue;
+                };
+                let after_ws = rest.trim_start();
+                if after_ws.starts_with('=') {
+                    let eq_in_line =
+                        (line.len() - trimmed.len()) + (trimmed.len() - after_ws.len());
+                    hit_eq_pos = Some(eq_in_line);
+                    break;
+                }
+            }
+            match hit_eq_pos {
+                Some(eq_pos) => {
+                    out.push_str(&line[..eq_pos]);
+                    out.push('=');
+                    out.push_str(marker);
+                }
+                None => out.push_str(line),
+            }
+        }
+        out
+    }
+
     pub fn mask_value(&self, value: &mut Value) {
         self.mask_value_depth(value, 0);
     }
@@ -1973,5 +2013,119 @@ mod tests {
         // 超过 1 MiB 的输入原样返回（不做 21 趟扫描）
         assert!(result.contains("13812345678"));
         assert_eq!(result.len(), big.len());
+    }
+
+    // ---- mask_kv_lines：行级 key=value 脱敏（= 前原文逐字保留） ----
+
+    #[test]
+    fn test_mask_kv_lines_basic_space() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password = secret123", &["password"], "***MASKED***");
+        assert_eq!(result, "password =***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_no_space() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password=secret123", &["password"], "***MASKED***");
+        assert_eq!(result, "password=***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_indent_preserved() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("  password = secret", &["password"], "***MASKED***");
+        assert_eq!(result, "  password =***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_multi_key() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines(
+            "password = a\napi_key = b",
+            &["password", "api_key"],
+            "***MASKED***",
+        );
+        assert_eq!(result, "password =***MASKED***\napi_key =***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_non_matching_key_line_untouched() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("username = alice", &["password"], "***MASKED***");
+        assert_eq!(result, "username = alice");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_line_without_eq_untouched() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password", &["password"], "***MASKED***");
+        assert_eq!(result, "password");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_prefix_key_no_false_hit() {
+        // 仅要求「以 key 开头且后随 =」会让 password_debug 误命中，
+        // 键名与 = 之间只允许空白
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password_debug = x", &["password"], "***MASKED***");
+        assert_eq!(result, "password_debug = x");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_preserves_text_before_eq() {
+        // = 前原文（含 key 与 = 之间的全部空白）逐字保留，只重组 = 之后
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password   =   secret", &["password"], "***MASKED***");
+        assert_eq!(result, "password   =***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_empty_value() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password =", &["password"], "***MASKED***");
+        assert_eq!(result, "password =***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_trailing_whitespace_replaced() {
+        // = 之后的全部内容（含行尾空白）都参与替换
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password = secret  ", &["password"], "***MASKED***");
+        assert_eq!(result, "password =***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_multiline_mixed() {
+        // 命中行、不命中行混合；尾行无换行符时输出同样不以换行结尾
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines(
+            "token = abc\nplain text line\npassword = xyz",
+            &["token", "password"],
+            "***MASKED***",
+        );
+        assert_eq!(
+            result,
+            "token =***MASKED***\nplain text line\npassword =***MASKED***"
+        );
+    }
+
+    #[test]
+    fn test_mask_kv_lines_crlf_value_side_replaced() {
+        // CRLF 下 \r 位于 = 之后，属于被替换的值侧；行结构以 \n 保留
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines(
+            "password = a\r\napi_key = b",
+            &["password", "api_key"],
+            "***MASKED***",
+        );
+        assert_eq!(result, "password =***MASKED***\napi_key =***MASKED***");
+    }
+
+    #[test]
+    fn test_mask_kv_lines_custom_marker() {
+        let masker = DataMasker::new();
+        let result = masker.mask_kv_lines("password = x", &["password"], "[REDACTED]");
+        assert_eq!(result, "password =[REDACTED]");
     }
 }
