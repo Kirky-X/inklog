@@ -10,6 +10,10 @@ use crate::error::InklogError;
 
 /// 脱敏规则注册中心，管理内置和自定义规则。
 ///
+/// 本类型不做跨线程共享：不含内部同步，多线程需要各自的
+/// [`DataMasker`](super::masking::DataMasker) 时按既有模式把规则快照
+/// 克隆进各自的 masker（`DataMasker::builder().with_registry(registry)`）。
+///
 /// # Example
 ///
 /// ```rust
@@ -57,6 +61,9 @@ impl MaskRuleRegistry {
             )));
         }
         self.rules.push(rule);
+        // 内部存储保持 priority 升序（稳定排序，同优先级保留注册顺序），
+        // 作为 rules() 有序快照的不变量；active_rules() 自行排序，不受影响
+        self.rules.sort_by_key(|r| r.priority());
         Ok(())
     }
 
@@ -86,6 +93,24 @@ impl MaskRuleRegistry {
         let mut active: Vec<&MaskRule> = self.rules.iter().filter(|r| r.is_enabled()).collect();
         active.sort_by_key(|r| r.priority());
         active
+    }
+
+    /// 全量规则快照（含已禁用的），按 priority 升序排列。
+    ///
+    /// 与 [`active_rules()`](Self::active_rules) 的差别：本方法不过滤
+    /// `enabled`，适合规则清单导出、诊断展示等需要看到禁用项的场景。
+    pub fn rules(&self) -> &[MaskRule] {
+        &self.rules
+    }
+
+    /// 从既有规则集合构造注册中心。
+    ///
+    /// 规则按 priority 升序（稳定排序）重排为内部存储；不做重名查重，
+    /// 重名约束由调用方保证（如 [`load_from_toml()`](Self::load_from_toml)
+    /// 的输出已满足）。
+    pub fn from_rules(mut rules: Vec<MaskRule>) -> Self {
+        rules.sort_by_key(|r| r.priority());
+        Self { rules }
     }
 
     /// 返回注册中心所有规则的数量（含禁用的）。
@@ -325,5 +350,78 @@ pattern = "\\bOTHER-\\d+\\b"
             rules[0]
         );
         assert_eq!(rules[1].name(), "other_rule");
+    }
+
+    #[test]
+    fn test_rules_returns_full_snapshot_including_disabled() {
+        let mut registry = MaskRuleRegistry::with_builtins();
+        let total = registry.len();
+        assert!(registry.set_enabled("email", false));
+
+        // rules() 是全量快照：禁用的规则仍在，len 不变
+        assert_eq!(registry.rules().len(), total);
+        assert!(registry.rules().iter().any(|r| r.name() == "email"));
+        // active_rules() 只含已启用的
+        assert_eq!(registry.active_rules().len(), total - 1);
+    }
+
+    #[test]
+    fn test_rules_sorted_by_priority() {
+        let registry = MaskRuleRegistry::with_builtins();
+        let snapshot = registry.rules();
+        for window in snapshot.windows(2) {
+            assert!(
+                window[0].priority() <= window[1].priority(),
+                "snapshot must be priority-ascending: {} > {}",
+                window[0].priority(),
+                window[1].priority()
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_rules_sorts_and_keeps_disabled() {
+        let low = MaskRule::builder("low_p")
+            .pattern(r"\bLOWP-\d+\b")
+            .priority(500)
+            .build()
+            .unwrap();
+        let high = MaskRule::builder("high_p")
+            .pattern(r"\bHIGHP-\d+\b")
+            .priority(1)
+            .build()
+            .unwrap();
+        let disabled = MaskRule::builder("disabled_p")
+            .pattern(r"\bDISP-\d+\b")
+            .priority(10)
+            .enabled(false)
+            .build()
+            .unwrap();
+
+        let registry = MaskRuleRegistry::from_rules(vec![low, disabled, high]);
+        let snapshot = registry.rules();
+
+        assert_eq!(snapshot.len(), 3, "disabled rules must be kept");
+        assert_eq!(snapshot[0].name(), "high_p");
+        assert_eq!(snapshot[1].name(), "disabled_p");
+        assert_eq!(snapshot[2].name(), "low_p");
+        assert!(!snapshot[1].is_enabled());
+    }
+
+    #[test]
+    fn test_register_maintains_sorted_snapshot() {
+        let mut registry = MaskRuleRegistry::with_builtins();
+        let late = MaskRule::builder("late_rule")
+            .pattern(r"\bLATE-\d+\b")
+            .priority(10_000)
+            .build()
+            .unwrap();
+        registry.register(late).unwrap();
+
+        for window in registry.rules().windows(2) {
+            assert!(window[0].priority() <= window[1].priority());
+        }
+        // 后注册的规则也能以全量快照读到
+        assert!(registry.rules().iter().any(|r| r.name() == "late_rule"));
     }
 }
