@@ -334,6 +334,21 @@ impl DbNexusAdapter {
                 source: Some(Box::new(e)),
             }
         })?;
+        // DuckDB 连接不支持 SeaORM 的 execute_raw_ddl 路径（内部 as_sea_orm
+        // 对 DuckDb 连接返回错误），改走 dbnexus 的 DuckDB 专用通道——
+        // admin 角色 + DdlGuard 对 DDL 的放行语义与 execute_raw_ddl 一致。
+        #[cfg(feature = "duckdb")]
+        if driver == DatabaseDriver::DuckDB {
+            session.execute_duckdb_raw(&ddl).await.map_err(|e| {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", e.to_string());
+                InklogError::DatabaseError {
+                    message: crate::i18n::tr_args("db-ensure_table_failed", args),
+                    source: Some(Box::new(e)),
+                }
+            })?;
+            return Ok(());
+        }
         session.execute_raw_ddl(&ddl).await.map_err(|e| {
             let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
@@ -403,7 +418,7 @@ fn escape_sql_string(s: &str, driver: &DatabaseDriver) -> String {
 /// - SQLite: `INTEGER PRIMARY KEY AUTOINCREMENT`, `TEXT`
 /// - PostgreSQL: `BIGSERIAL PRIMARY KEY`, `TIMESTAMPTZ`, `TEXT`
 /// - MySQL: `BIGINT AUTO_INCREMENT PRIMARY KEY`, `TIMESTAMP`, `TEXT`
-/// - DuckDB: `BIGINT AUTOINCREMENT PRIMARY KEY`, `TIMESTAMP`, `TEXT`
+/// - DuckDB: 无自增 id 列（duckdb-rs 绑定不支持自增约束），`TIMESTAMP`, `TEXT`
 #[cfg(feature = "database")]
 fn generate_create_table_sql(table_name: &str, driver: &DatabaseDriver) -> String {
     match driver {
@@ -449,9 +464,11 @@ fn generate_create_table_sql(table_name: &str, driver: &DatabaseDriver) -> Strin
             )",
             table_name
         ),
+        // DuckDB 分支不含自增 id 列：写入路径显式插入其余 8 列（id 留空会因
+        // 无默认值失败），且 duckdb-rs 绑定对 AUTOINCREMENT/IDENTITY 约束报
+        // "Constraint not implemented"；行标识由 DuckDB 隐式 rowid 提供。
         DatabaseDriver::DuckDB => format!(
             "CREATE TABLE IF NOT EXISTS {} (\
-                id BIGINT AUTOINCREMENT PRIMARY KEY, \
                 timestamp TIMESTAMP NOT NULL, \
                 level TEXT NOT NULL, \
                 target TEXT NOT NULL, \
@@ -1397,6 +1414,21 @@ mod tests {
         assert!(ddl.contains("BIGINT AUTO_INCREMENT PRIMARY KEY"));
         assert!(ddl.contains("TIMESTAMP NOT NULL"));
         assert!(ddl.contains("TEXT NOT NULL"));
+    }
+
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_generate_create_table_sql_duckdb() {
+        let ddl = generate_create_table_sql("logs", &DatabaseDriver::DuckDB);
+        assert!(ddl.contains("CREATE TABLE IF NOT EXISTS logs"));
+        // duckdb-rs 绑定不支持自增/主键约束组合（AUTOINCREMENT/IDENTITY 报
+        // "Constraint not implemented"），DuckDB 分支不含 id 列与主键约束
+        assert!(!ddl.contains("PRIMARY KEY"));
+        assert!(!ddl.contains("AUTOINCREMENT"));
+        assert!(!ddl.contains("IDENTITY"));
+        assert!(ddl.contains("TIMESTAMP NOT NULL"));
+        assert!(ddl.contains("TEXT NOT NULL"));
+        assert!(ddl.contains("thread_id TEXT NOT NULL"));
     }
 
     // ============================================================================

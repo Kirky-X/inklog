@@ -396,8 +396,8 @@ cargo audit                                   # 安全公告（lefthook pre-push
 |:----:|------|------|
 | 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.3 → 0.3.0 正式版 |
 | 📋 | 工作区依赖传导同步 | trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0 |
-| 📋 | CI 测试矩阵按数据库后端分组 | 后端 feature 互斥，需按后端拆分验证组合 |
-| 📋 | 补齐 MySQL 集成测试环境 | 当前缺少 MySQL 服务导致该后端集成测试阻塞 |
+| ✅ | CI 测试矩阵按数据库后端分组 | docker 流水线按 sqlite/postgres/mysql/duckdb 四后端分组验证（duckdb 为 embedded 后端，无需容器服务） |
+| ✅ | 补齐 MySQL 集成测试环境 | MySQL 8 服务已入 docker/docker-compose.test.yml，CI mysql 分支可跑集成测试 |
 | 📋 | 提升测试覆盖率 | llvm-cov 基线约 80%，向 95%+ 目标提升 |
 
 ---

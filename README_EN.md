@@ -398,8 +398,8 @@ Phased goals compiled from the existing release plan (timing may adjust with the
 |:----:|------|------|
 | 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.3 → 0.3.0 stable release |
 | 📋 | Workspace dependency lockstep | trait-kit 0.5.0, oxcache 0.5.0, dbnexus 0.6.0 |
-| 📋 | CI test matrix grouped by database backend | Backend features are mutually exclusive and must be validated per backend group |
-| 📋 | Provision the MySQL integration environment | Integration tests for that backend are currently blocked by the missing MySQL service |
+| ✅ | CI test matrix grouped by database backend | The Docker pipeline validates the four mutually exclusive backends (sqlite/postgres/mysql/duckdb); duckdb is embedded and needs no container service |
+| ✅ | Provision the MySQL integration environment | A MySQL 8 service is provided in docker/docker-compose.test.yml; the CI mysql branch runs the integration tests |
 | 📋 | Raise test coverage | llvm-cov baseline is about 80%, moving toward the 95%+ target |
 
 ---

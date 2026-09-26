@@ -24,7 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        db: [sqlite, postgres, mysql]
+        # 四个后端 feature 互斥（见 Cargo.toml [features] 说明），按后端分组验证；
+        # sqlite/duckdb 为 embedded 后端，不起 compose 服务。
+        db: [sqlite, postgres, mysql, duckdb]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -52,8 +54,8 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
-      - name: Start database service (only for pg/mysql jobs)
-        if: matrix.db != 'sqlite'
+      - name: Start database service (only for server-side pg/mysql jobs)
+        if: matrix.db == 'postgres' || matrix.db == 'mysql'
         run: |
           docker compose -f docker/docker-compose.test.yml up -d --wait ${{ matrix.db }}
 
@@ -68,6 +70,9 @@ jobs:
               ;;
             mysql)
               echo "INKLOG_TEST_DB_URL=mysql://inklog:inklog@localhost:3306/inklog_test" >> $GITHUB_ENV
+              ;;
+            duckdb)
+              echo "INKLOG_TEST_DB_URL=duckdb:///tmp/inklog_ci_test.duckdb" >> $GITHUB_ENV
               ;;
           esac
 

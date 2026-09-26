@@ -18,7 +18,12 @@
 //! 仅测试 inklog 自身的 `DbNexusAdapter` / `DatabaseSink` 适配器逻辑，
 //! 不测试 `dbnexus` / `sea-orm` 库内部实现。
 
-#![cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+#![cfg(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "duckdb"
+))]
 
 use inklog::InklogError;
 use std::env;
@@ -63,7 +68,7 @@ pub fn unique_sqlite_url(name: &str) -> String {
     )
 }
 
-/// 创建 logs 表的 SQL（兼容 SQLite/PostgreSQL/MySQL）。
+/// 创建 logs 表的 SQL（兼容 SQLite/PostgreSQL/MySQL/DuckDB）。
 pub const CREATE_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS logs ( \
     timestamp TEXT NOT NULL, \
     level TEXT NOT NULL, \
@@ -75,7 +80,7 @@ pub const CREATE_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS logs ( \
     thread_id TEXT NOT NULL \
 )";
 
-/// 构造指定表名的建表 DDL（兼容 SQLite/PostgreSQL/MySQL）。
+/// 构造指定表名的建表 DDL（兼容 SQLite/PostgreSQL/MySQL/DuckDB）。
 ///
 /// `CREATE_TABLE_SQL` 固定建 `logs` 表；当测试需要其他表名（如 `logs_single`）
 /// 时用本函数生成对应 DDL，再通过 `execute_raw_ddl` 执行。

@@ -13,26 +13,12 @@ use inklog::integrations::infra::database::{Database, DbNexusAdapter};
 use serial_test::serial;
 
 /// 辅助：创建测试用 DbNexusAdapter（带 logs 表）。
+///
+/// `with_table_name` 内部自动建表（ensure_table_exists），表名由调用方指定。
 async fn setup_adapter(url: &str, table_name: &str) -> DbNexusAdapter {
-    let adapter = DbNexusAdapter::with_table_name(url, 5, table_name)
+    DbNexusAdapter::with_table_name(url, 5, table_name)
         .await
-        .expect("Failed to create DbNexusAdapter");
-    // 确保表存在
-    // 使用 `execute_raw_ddl` 而非 `execute_raw`：dbnexus 启用 sql-parser feature 后，
-    // `execute_raw` 会拦截 DDL 语句（CREATE TABLE）返回 Permission 错误，
-    // `execute_raw_ddl` 是 DDL 专用通道，仅限 admin 角色执行。
-    // 用 `create_table_sql(table_name)` 动态生成 DDL，因为 `CREATE_TABLE_SQL`
-    // 固定建 `logs` 表，而本辅助函数允许调用方传入自定义表名（如 `logs_single`）。
-    let session = adapter
-        .pool()
-        .get_session("admin")
-        .await
-        .expect("Failed to get session");
-    session
-        .execute_raw_ddl(&super::create_table_sql(table_name))
-        .await
-        .expect("Failed to create table");
-    adapter
+        .expect("Failed to create DbNexusAdapter")
 }
 
 #[tokio::test]

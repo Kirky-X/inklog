@@ -16,20 +16,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 async fn setup_sink(url: &str, batch_size: usize) -> DatabaseSink {
+    // with_table_name 内部自动建表（ensure_table_exists）
     let adapter = DbNexusAdapter::with_table_name(url, 5, "logs")
         .await
         .expect("Failed to create DbNexusAdapter");
-    // 使用 `execute_raw_ddl` 执行 DDL：dbnexus 启用 sql-parser feature 后，
-    // `execute_raw` 会拦截 DDL 语句，必须用 `execute_raw_ddl` 通道（仅限 admin）。
-    let session = adapter
-        .pool()
-        .get_session("admin")
-        .await
-        .expect("Failed to get session");
-    session
-        .execute_raw_ddl(super::CREATE_TABLE_SQL)
-        .await
-        .expect("Failed to create table");
 
     let db: Arc<dyn DatabaseTrait> = Arc::new(adapter);
     let config = DatabaseSinkConfig {

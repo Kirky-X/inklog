@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **对象池闭环**：worker 消费端 `Arc::try_unwrap` 成功即归还 `LogRecord`（池此前只取不还，零分配目标落空）
 - **`set_level` 双门面同步**：运行时热调级别时同步 `log::set_max_level`（此前 log 门面被旧级别拦截）
 - **行为变更：console sink `enabled=false` 不再输出**：`ConsoleSink::write` 此前不检查 `enabled` 字段，显式禁用组合仍全量写 stdout/stderr；现禁用态在 write 处丢弃记录（默认组合 `enabled=true` 行为逐字节不变）。该语义落实使性能基准等声明禁用 console 的场景不再向 stdout 泄漏海量输出
+- **CI 数据库后端矩阵补齐 duckdb**：docker 数据库流水线分组矩阵扩为 sqlite/postgres/mysql/duckdb 四后端（互斥 feature 逐一验证）；duckdb 为 embedded 后端不起 compose 服务，经 `duckdb:///` 文件库直跑集成测试；`tests/docker` 测试目标 crate cfg 同步纳入 duckdb（此前该 feature 下整个目标被 cfg 掉，矩阵项只会空跑）。随真跑暴露并修复 duckdb 链路两处缺陷：`DbNexusAdapter` 建表此前走 SeaORM 通道（DuckDB 连接直接报错），现按驱动分派至 `execute_duckdb_raw`；DuckDB 建表 DDL 去除自增 id 列（duckdb-rs 绑定对 AUTOINCREMENT/IDENTITY 约束报 "Constraint not implemented"，行标识由隐式 rowid 提供）
 
 ## [0.3.0-rc.3] - 2026-09-10
 

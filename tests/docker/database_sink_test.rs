@@ -18,21 +18,10 @@ use std::time::Duration;
 
 /// 创建测试用 DbNexusAdapter 并确保 logs 表存在。
 async fn setup_adapter(url: &str) -> DbNexusAdapter {
-    let adapter = DbNexusAdapter::with_table_name(url, 3, "logs")
+    // with_table_name 内部自动建表（ensure_table_exists）
+    DbNexusAdapter::with_table_name(url, 3, "logs")
         .await
-        .expect("Failed to create DbNexusAdapter");
-    // 使用 `execute_raw_ddl` 执行 DDL：dbnexus 启用 sql-parser feature 后，
-    // `execute_raw` 会拦截 DDL 语句，必须用 `execute_raw_ddl` 通道（仅限 admin）。
-    let session = adapter
-        .pool()
-        .get_session("admin")
-        .await
-        .expect("Failed to get session");
-    session
-        .execute_raw_ddl(super::CREATE_TABLE_SQL)
-        .await
-        .expect("Failed to create table");
-    adapter
+        .expect("Failed to create DbNexusAdapter")
 }
 
 /// 创建测试用 DatabaseSink（带配置）。
