@@ -152,7 +152,24 @@ mod internal_publish_tests {
             serde_json::json!({ "op": "rotate", "error": "EACCES" }),
         );
 
-        let record = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        // hub 是进程级广播面：并发测试触发的其他 publish_internal（如
+        // worker 降级恢复的 INFO 事件）同样会进入本通道。按 ops_kind
+        // 过滤消费，只对本测试发布的事件做映射断言。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let record = loop {
+            let remain = deadline.saturating_duration_since(std::time::Instant::now());
+            let record = rx
+                .recv_timeout(remain)
+                .expect("own sink_degraded event must arrive within timeout");
+            if record
+                .fields
+                .get("ops_kind")
+                .map(|v| v == "sink_degraded")
+                .unwrap_or(false)
+            {
+                break record;
+            }
+        };
         assert_eq!(record.target, "inklog::ops");
         assert_eq!(record.level, "WARN");
         assert!(
