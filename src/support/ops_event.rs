@@ -114,6 +114,12 @@ pub fn register_ops_channel(sender: Sender<Arc<LogRecord>>) {
     OPS_EVENT_HUB.write().push(sender);
 }
 
+/// 是否存在已注册的事件通道。高频路径可用本查询在 hub 为空时
+/// 跳过事件构造（detail 组装）等发布前置开销。
+pub fn has_channels() -> bool {
+    !OPS_EVENT_HUB.read().is_empty()
+}
+
 /// 清空注册（测试隔离用）。
 #[cfg(test)]
 pub fn reset_ops_hub_for_tests() {

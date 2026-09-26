@@ -67,8 +67,8 @@
 // 数字类 PII 规则依赖环视实现 CJK 友好边界。键名检测等纯 \b 场景仍用 regex crate。
 use fancy_regex::Regex;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::error::InklogError;
 
@@ -377,12 +377,20 @@ impl DataMasker {
 
     /// 检测面布尔形式：是否存在任一命中。与 [`Self::detect`] 同源
     /// （不做标记短路），找到首个命中即提前返回——存在性判断只做
-    /// 首匹配查找，不物化全部命中区间。
+    /// 首匹配查找，不物化全部命中区间。引擎级匹配错误与 detect 共用
+    /// 同一可观测出口（见 [`MaskRule::report_engine_error`]）。
     pub fn has_match(&self, text: &str) -> bool {
         self.rules
             .iter()
             .filter(|r| r.is_enabled())
-            .any(|rule| matches!(rule.pattern.find(text), Ok(Some(_))))
+            .any(|rule| match rule.pattern.find(text) {
+                Ok(Some(_)) => true,
+                Ok(None) => false,
+                Err(e) => {
+                    rule.report_engine_error(&e);
+                    false
+                }
+            })
     }
 
     /// 行级 key=value 文本脱敏：命中行只替换 `=` 之后的值侧，
@@ -622,8 +630,6 @@ impl DataMaskerBuilder {
         DataMasker { rules }
     }
 }
-
-use std::sync::LazyLock;
 
 /// Pre-compiled regex patterns for better performance
 static EMAIL_REGEX: LazyLock<Regex> =
@@ -1098,29 +1104,51 @@ impl MaskRule {
     /// 与 [`Self::apply`] 的对齐依据：库内全部规则的 apply_fn 都在正则
     /// match 集上逐个改写（含 Luhn 失败 fall back 到 replacement 的
     /// credit_card），正则命中即 apply 的操作点。引擎级匹配错误
-    /// （fancy_regex 回溯上限等）记 warn 后跳过该次匹配，不中断其余命中。
+    /// （fancy_regex 回溯上限等）跳过该次匹配不中断其余命中，经
+    /// [`Self::report_engine_error`] 留痕并广播漏报。
     fn find_matches(&self, text: &str) -> Vec<(usize, usize)> {
         self.pattern
             .find_iter(text)
             .filter_map(|m| match m {
                 Ok(found) => Some((found.start(), found.end())),
                 Err(e) => {
-                    tracing::warn!(
-                        rule = self.name.as_str(),
-                        error = %e,
-                        "regex match error during detect; skipping this match"
-                    );
-                    // 跳过该次命中属 fail-open 漏报，接入 ops 事件广播
-                    // 使漏脱敏可观测（hub 无注册通道时为 no-op）
-                    crate::support::ops_event::publish_internal(
-                        "masking_engine_error",
-                        Some(self.name.as_str()),
-                        serde_json::json!({ "error": e.to_string() }),
-                    );
+                    self.report_engine_error(&e);
                     None
                 }
             })
             .collect()
+    }
+
+    /// 引擎级匹配错误的统一可观测出口（detect 与 has_match 共用）。
+    ///
+    /// warn 逐次留痕；ops 事件广播按规则名限频为进程生命周期内首报——
+    /// 回溯上限类错误对同一规则是持续性的，逐命中广播会在事件风暴下
+    /// 累积 `send_timeout` 阻塞，首报足以驱动运维排查。hub 无注册通道
+    /// 时零开销返回（detail 不构造），广播路径不反压主日志链路
+    /// （publish 侧对通道满/关闭静默丢弃）。
+    fn report_engine_error(&self, error: &fancy_regex::Error) {
+        static REPORTED: LazyLock<Mutex<HashSet<String>>> =
+            LazyLock::new(|| Mutex::new(HashSet::new()));
+        tracing::warn!(
+            rule = self.name.as_str(),
+            error = %error,
+            "regex match error during detect; skipping this match"
+        );
+        if !crate::support::ops_event::has_channels() {
+            return;
+        }
+        // 锁中毒时放弃本次广播：错误路径不传播 panic
+        let Ok(mut reported) = REPORTED.lock() else {
+            return;
+        };
+        if !reported.insert(self.name.clone()) {
+            return;
+        }
+        crate::support::ops_event::publish_internal(
+            "masking_engine_error",
+            Some(self.name.as_str()),
+            serde_json::json!({ "error": error.to_string() }),
+        );
     }
 
     /// Returns the name of this rule.
