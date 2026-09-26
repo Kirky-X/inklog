@@ -1121,11 +1121,11 @@ impl MaskRule {
 
     /// 引擎级匹配错误的统一可观测出口（detect 与 has_match 共用）。
     ///
-    /// warn 逐次留痕；ops 事件广播按规则名限频为进程生命周期内首报——
-    /// 回溯上限类错误对同一规则是持续性的，逐命中广播会在事件风暴下
-    /// 累积 `send_timeout` 阻塞，首报足以驱动运维排查。hub 无注册通道
-    /// 时零开销返回（detail 不构造），广播路径不反压主日志链路
-    /// （publish 侧对通道满/关闭静默丢弃）。
+    /// warn 逐次留痕；ops 事件广播按规则名限频：投递成功后本进程不再
+    /// 重报同规则——回溯上限类错误对同一规则是持续性的，逐命中广播
+    /// 会在事件风暴下累积 `send_timeout` 阻塞。首报投递失败（通道满
+    /// 被丢弃）不标记，下次错误自动重报。hub 无注册通道时零开销返回
+    /// （detail 不构造），广播路径不反压主日志链路。
     fn report_engine_error(&self, error: &fancy_regex::Error) {
         static REPORTED: LazyLock<Mutex<HashSet<String>>> =
             LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -1141,14 +1141,19 @@ impl MaskRule {
         let Ok(mut reported) = REPORTED.lock() else {
             return;
         };
-        if !reported.insert(self.name.clone()) {
+        // 常态（已首报）经 contains(&str) 免分配短路，仅首次插入才 clone
+        if reported.contains(self.name.as_str()) {
             return;
         }
-        crate::support::ops_event::publish_internal(
+        // 投递确认后才标记首报：通道满被丢弃的「首报」不算数，
+        // 下次引擎错误自动重报
+        if crate::support::ops_event::publish_internal(
             "masking_engine_error",
             Some(self.name.as_str()),
             serde_json::json!({ "error": error.to_string() }),
-        );
+        ) {
+            reported.insert(self.name.clone());
+        }
     }
 
     /// Returns the name of this rule.
@@ -1365,6 +1370,71 @@ pub fn mask_phone(phone: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    // ---- 引擎错误可观测出口：限频、归因与 hub 状态（进程级广播面，
+    // 与其他 serial 测试互斥执行） ----
+
+    #[test]
+    #[serial]
+    fn test_engine_error_broadcast_dedup_and_attribution() {
+        crate::support::ops_event::reset_ops_hub_for_tests();
+        assert!(
+            !crate::support::ops_event::has_channels(),
+            "hub must be empty after reset"
+        );
+        let (tx, rx) = crossbeam_channel::bounded(8);
+        crate::support::ops_event::register_ops_channel(tx);
+        assert!(crate::support::ops_event::has_channels());
+
+        let error =
+            fancy_regex::Error::RuntimeError(fancy_regex::RuntimeError::BacktrackLimitExceeded);
+        let rule_a = MaskRule::builder("zz-test-engine-err-a")
+            .pattern(r"\bZZA-\d+\b")
+            .build()
+            .unwrap();
+        let rule_b = MaskRule::builder("zz-test-engine-err-b")
+            .pattern(r"\bZZB-\d+\b")
+            .build()
+            .unwrap();
+
+        // 同规则两次引擎错误：限频为一次广播
+        rule_a.report_engine_error(&error);
+        rule_a.report_engine_error(&error);
+        // 不同规则各广播一次（按 ops_sink 归因）
+        rule_b.report_engine_error(&error);
+
+        let mut per_rule: HashMap<String, u32> = HashMap::new();
+        while let Ok(record) = rx.try_recv() {
+            if record
+                .fields
+                .get("ops_kind")
+                .map(|v| v == "masking_engine_error")
+                != Some(true)
+            {
+                // 并发测试触发的其他 ops 广播不参与本断言
+                continue;
+            }
+            let sink = record
+                .fields
+                .get("ops_sink")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            *per_rule.entry(sink.to_string()).or_insert(0) += 1;
+        }
+        assert_eq!(
+            per_rule.get("zz-test-engine-err-a"),
+            Some(&1),
+            "same-rule engine errors must be rate-limited to one broadcast"
+        );
+        assert_eq!(
+            per_rule.get("zz-test-engine-err-b"),
+            Some(&1),
+            "each distinct rule gets its own broadcast"
+        );
+        crate::support::ops_event::reset_ops_hub_for_tests();
+        assert!(!crate::support::ops_event::has_channels());
+    }
 
     #[test]
     fn test_mask_email() {
@@ -2381,5 +2451,80 @@ mod tests {
         for m in &matches {
             assert!(!&text[m.start..m.end].is_empty());
         }
+    }
+
+    #[test]
+    fn test_engine_error_report_broadcast_is_rate_limited_per_rule() {
+        use crate::support::ops_event::{
+            has_channels, register_ops_channel, reset_ops_hub_for_tests,
+        };
+        use crossbeam_channel::bounded;
+
+        // 零开销门：hub 无注册通道时 has_channels 为 false
+        reset_ops_hub_for_tests();
+        assert!(!has_channels());
+
+        let (tx, rx) = bounded(8);
+        register_ops_channel(tx);
+        assert!(has_channels());
+
+        let error =
+            fancy_regex::Error::RuntimeError(fancy_regex::RuntimeError::BacktrackLimitExceeded);
+        let rule_a = MaskRule::builder("engine_err_rule_a")
+            .pattern(r"\bAE-\d+\b")
+            .build()
+            .unwrap();
+        let rule_b = MaskRule::builder("engine_err_rule_b")
+            .pattern(r"\bBE-\d+\b")
+            .build()
+            .unwrap();
+
+        // 同规则两次引擎错误：限频仅首报一次广播；不同规则各报一次
+        rule_a.report_engine_error(&error);
+        rule_a.report_engine_error(&error);
+        rule_b.report_engine_error(&error);
+
+        // hub 是进程级广播面，并发测试触发的其他 ops 事件也会进入本
+        // 通道——按 ops_kind/ops_sink 过滤，只核对本测试的事件
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut got_a = false;
+        let mut got_b = false;
+        while !(got_a && got_b) {
+            let remain = deadline.saturating_duration_since(std::time::Instant::now());
+            let record = rx
+                .recv_timeout(remain)
+                .expect("engine error events must arrive within timeout");
+            if record
+                .fields
+                .get("ops_kind")
+                .map(|v| v == "masking_engine_error")
+                .unwrap_or(false)
+            {
+                match record.fields.get("ops_sink").and_then(|v| v.as_str()) {
+                    Some("engine_err_rule_a") if !got_a => {
+                        got_a = true;
+                        // masking_engine_error 不在 to_log_record 的 WARN
+                        // kinds 列表，映射为 INFO（现状锁定）
+                        assert_eq!(record.level, "INFO");
+                    }
+                    Some("engine_err_rule_b") if !got_b => got_b = true,
+                    _ => {}
+                }
+            }
+        }
+        // 限频是同步语义（投递成功才标记，标记后直接返回），通道内
+        // 不可能再出现同规则的第二条广播
+        for record in rx.try_iter() {
+            let is_rule_a_err = record
+                .fields
+                .get("ops_kind")
+                .map(|v| v == "masking_engine_error")
+                .unwrap_or(false)
+                && record.fields.get("ops_sink").and_then(|v| v.as_str())
+                    == Some("engine_err_rule_a");
+            assert!(!is_rule_a_err, "rate limiter must suppress repeats");
+        }
+
+        reset_ops_hub_for_tests();
     }
 }

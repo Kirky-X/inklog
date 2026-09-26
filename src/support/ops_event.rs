@@ -129,16 +129,26 @@ pub fn reset_ops_hub_for_tests() {
 /// 内部故障/恢复路径的轻量发布入口：轮转失败、压缩/加密失败、sink
 /// 降级与恢复等站点调用。无注册通道时为 no-op（事件通道满/关闭时
 /// 静默丢弃——不得反压主日志链路，与 manager 侧语义一致）。
-pub fn publish_internal(kind: &str, sink: Option<&str>, detail: serde_json::Value) {
+///
+/// 返回是否至少成功投递到一个通道：需要「确认送达」语义的发布方
+/// （如限频去重的错误上报）据此决定是否重报。
+pub fn publish_internal(kind: &str, sink: Option<&str>, detail: serde_json::Value) -> bool {
     let senders = OPS_EVENT_HUB.read();
     if senders.is_empty() {
-        return;
+        return false;
     }
     let event = InklogOpsEvent::now(kind, sink, detail);
     let record = Arc::new(event.to_log_record());
+    let mut delivered = false;
     for sender in senders.iter() {
-        let _ = sender.send_timeout(Arc::clone(&record), Duration::from_millis(100));
+        if sender
+            .send_timeout(Arc::clone(&record), Duration::from_millis(100))
+            .is_ok()
+        {
+            delivered = true;
+        }
     }
+    delivered
 }
 
 #[cfg(test)]
