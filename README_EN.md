@@ -118,7 +118,7 @@ inklog is logging infrastructure built for production: application code keeps us
 cargo add inklog
 ```
 
-Or declare it explicitly in `Cargo.toml` (`default = []`; only core capabilities are enabled by default):
+Or declare it explicitly in `Cargo.toml` (`default = ["i18n"]`; core capabilities plus internationalization are enabled by default):
 
 ```toml
 [dependencies]
@@ -159,10 +159,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🎨 Feature Flags
 
-`default = []`: the default build contains only core capabilities; every feature below must be enabled explicitly (per the `Cargo.toml` `[features]` definition).
+`default = ["i18n"]`: the default build contains core capabilities plus internationalization; every other feature below must be enabled explicitly (per the `Cargo.toml` `[features]` definition). Opting out via `default-features = false` prunes the whole icu/fluent dependency tree, with `tr`/`tr_args` falling back to the embedded English message table.
 
 | Flag | Default | Description |
 |------|:----:|------|
+| `i18n` | ✅ | Internationalization runtime: ICU4X locale formatting + fluent-bundle translation + `INKLOG_LOCALE` override; opting out removes icu/fluent from the dependency tree |
 | `sqlite` | ❌ | SQLite database backend (via dbnexus, rustls runtime) |
 | `postgres` | ❌ | PostgreSQL database backend (via dbnexus) |
 | `mysql` | ❌ | MySQL database backend (via dbnexus) |

@@ -232,7 +232,7 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
             if let Some(sink) = fallback
                 && let Err(e) = sink.write(&masked_record).await
             {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 tracing::warn!(
                     "{}",
@@ -278,7 +278,7 @@ impl crate::support::io::sink::LogSink for DatabaseSink {
                             for r in &records_to_flush {
                                 if let Err(fe) = sink.write(r).await {
                                     failed_records.push(r.clone());
-                                    let mut args = fluent_bundle::FluentArgs::new();
+                                    let mut args = crate::i18n::MsgArgs::new();
                                     args.set("err", fe.to_string());
                                     tracing::warn!(
                                         "{}",
@@ -431,7 +431,7 @@ pub fn convert_logs_to_parquet(
         .map(|l| {
             serde_json::to_string(&l.fields)
                 .inspect_err(|e| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("err", e.to_string());
                     tracing::warn!(
                         "{}",

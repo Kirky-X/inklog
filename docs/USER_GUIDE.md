@@ -57,13 +57,14 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 | **运行时热调** | `set_level` 即时调整全局与 per-target 日志级别 |
 | **健康监控** | Sink 状态、通道水位与指标追踪 |
 | **动态 Sink** | `LoggerBuilder::add_sink` 注册第三方 Sink，每 Sink 独立通道 |
-| **i18n** | 错误消息经 Fluent + ICU 按系统 locale 渲染 |
+| **i18n** | 错误消息经 Fluent + ICU 按系统 locale 渲染（`i18n` feature，默认开启；关闭后回退内嵌英文文案） |
 
 ### 可选功能（feature 门控）
 
 | 功能 | 描述 |
 |------|------|
 | **数据库 Sink** | PostgreSQL、MySQL、SQLite、DuckDB（经 dbnexus，批量落库、分区表） |
+| **i18n 关闭** | `default-features = false` 裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退内嵌英文文案表 |
 | **压缩** | Zstd（`compression`）/ Gzip（`gzip`）压缩轮转文件 |
 | **加密** | AES-256-GCM 轮转归档加密 |
 | **Parquet 导出** | 分析就绪的列式归档格式 |
@@ -76,7 +77,7 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ## 📦 安装
 
-将以下内容添加到 `Cargo.toml`（`default = []`，默认仅启用核心能力）：
+将以下内容添加到 `Cargo.toml`（`default = ["i18n"]`，默认启用核心能力 + 国际化）：
 
 ```toml
 [dependencies]
@@ -436,6 +437,26 @@ let custom_rule = MaskRule::builder("employee_id")
     .build()
     .expect("Invalid pattern");
 ```
+
+#### Sink 出口脱敏契约
+
+console / file sink 在 `masking_enabled` 门控下执行的 PII 脱敏，使用的是 `DataMasker::new()` 构造的 **inklog 内置规则集**（21 条正则规则 + 敏感字段名检测，按优先级排序）。这套内置规则与消费方业务代码自管的脱敏规则**不同源**：消费方在自己的出口（如 API 响应、落库字段）做的脱敏，与 inklog sink 出口的内置掩码，二者规则集、掩码形态彼此独立，不要假设两边输出一致。需要 sink 侧复用自管规则时，用注册表构建 `DataMasker` 后经 `with_masker` 注入（见下）。
+
+**标记幂等契约**：脱敏输出会带上 `***REDACTED***`、`***MASKED***`、`[REDACTED]` 等标记；`DataMasker::mask` 对已含这些标记的输入直接原样返回、不再套用规则。因此多层脱敏叠加（例如全局净化器已处理过、sink 出口 PII 掩码再次经过同一条记录）不会产生 `REDACTED` 套 `REDACTED` 的嵌套标记——运维侧可据此假设：日志中每个标记都来自且仅来自一次真实的脱敏动作。
+
+**自定义规则集注入（`with_registry` 对齐）**：`DataMasker::builder().with_registry(registry)` 用注册表中的规则**替换**全部内置规则（`add_rule` / `disable_builtin` 在替换结果上继续叠加）；注册表可用 `MaskRuleRegistry::with_builtins()`（装载内置规则）或 `load_from_toml`（解析 TOML 规则）获得。构建出的 `DataMasker` 经 sink 的 `with_masker` 注入即生效：
+
+```rust
+use inklog::{DataMasker, MaskRuleRegistry, sink::console::ConsoleSink};
+
+let registry = MaskRuleRegistry::with_builtins();
+let masker = DataMasker::builder().with_registry(registry).build();
+
+let sink = ConsoleSink::new(console_config, template).with_masker(masker);
+// FileSink / ChannelBufferedFileSink 同样提供 with_masker 注入
+```
+
+注意：`FileSink` 轮转重建的派生实例不继承注入的 masker（回退为内置规则集）；`ChannelBufferedFileSink` 注入后覆盖 `base_config.masking_enabled` 控制的默认构造。
 
 ### HTTP 服务器配置
 

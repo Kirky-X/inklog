@@ -20,12 +20,12 @@ macro_rules! vprintln {
 }
 
 pub fn validate_config(config_path: &PathBuf) -> Result<()> {
-    let mut args = fluent_bundle::FluentArgs::new();
+    let mut args = inklog::i18n::MsgArgs::new();
     args.set("path", config_path.display().to_string());
     vprintln!("{}", inklog::i18n::tr_args("cli-validate-validating", args));
 
     if !config_path.exists() {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", config_path.display().to_string());
         return Err(anyhow::anyhow!(
             "{}",
@@ -90,7 +90,7 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
     if let Some(level) = global.get("level") {
         let level_str = level.as_str().unwrap_or("");
         if !inklog::LogLevel::is_valid_level(level_str) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("level", level_str.to_string());
             args.set("valid", inklog::LogLevel::VALID_LEVEL_STRINGS.join(", "));
             return Err(anyhow::anyhow!(
@@ -98,7 +98,7 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
                 inklog::i18n::tr_args("cli-err-invalid-log-level", args)
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("level", level_str.to_string());
         vprintln!(
             "  {}",
@@ -115,7 +115,7 @@ fn validate_global_config(global: &toml::Table) -> Result<()> {
                 inklog::i18n::tr("cli-err-empty-format")
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("len", format_str.len().to_string());
         vprintln!(
             "  {}",
@@ -134,7 +134,7 @@ fn validate_console_sink(console: &toml::Table) -> Result<()> {
                 inklog::i18n::tr("cli-err-console-enabled")
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("enabled", enabled.to_string());
         vprintln!(
             "  {}",
@@ -162,7 +162,7 @@ fn validate_console_sink(console: &toml::Table) -> Result<()> {
                 ));
             }
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("count", levels.len().to_string());
         vprintln!(
             "  {}",
@@ -181,7 +181,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
                 inklog::i18n::tr("cli-err-file-enabled")
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("enabled", enabled.to_string());
         vprintln!(
             "  {}",
@@ -198,7 +198,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
                 inklog::i18n::tr("cli-err-file-path-empty")
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", path_str.to_string());
         vprintln!(
             "  {}",
@@ -210,14 +210,14 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
         && let Some(size_str) = max_size.as_str()
     {
         if parse_size(size_str).is_err() {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("size", size_str.to_string());
             return Err(anyhow::anyhow!(
                 "{}",
                 inklog::i18n::tr_args("cli-err-file-max-size", args)
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("size", size_str.to_string());
         vprintln!(
             "  {}",
@@ -295,7 +295,7 @@ fn validate_file_sink(file: &toml::Table) -> Result<()> {
             ));
         }
 
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("env", env_name.to_string());
         vprintln!(
             "  {}",
@@ -316,7 +316,7 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
                 inklog::i18n::tr("cli-err-perf-capacity")
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("n", n.to_string());
         vprintln!(
             "  {}",
@@ -333,7 +333,7 @@ fn validate_performance(perf: &toml::Table) -> Result<()> {
                 inklog::i18n::tr("cli-err-perf-threads")
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("n", n.to_string());
         vprintln!(
             "  {}",
@@ -358,7 +358,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
                 inklog::i18n::tr("cli-err-db-enabled")
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("enabled", enabled.to_string());
         vprintln!(
             "  {}",
@@ -373,13 +373,13 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
 
     if let Some(driver) = db.get("driver") {
         let driver_str = driver.as_str().ok_or_else(|| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("driver", driver.to_string());
             anyhow::anyhow!("{}", inklog::i18n::tr_args("cli-err-db-driver-type", args))
         })?;
         let valid_drivers = ["postgres", "postgresql", "mysql", "sqlite", "sqlite3"];
         if !valid_drivers.contains(&driver_str.to_lowercase().as_str()) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("driver", driver_str.to_string());
             args.set("valid", format!("{:?}", valid_drivers));
             return Err(anyhow::anyhow!(
@@ -387,7 +387,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
                 inklog::i18n::tr_args("cli-err-db-driver-invalid", args)
             ));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("driver", driver_str.to_string());
         vprintln!(
             "  {}",
@@ -405,7 +405,7 @@ fn validate_database_sink(db: &toml::Table) -> Result<()> {
             ));
         }
         validate_database_url(url_str)?;
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("len", url_str.len().to_string());
         vprintln!("  {}", inklog::i18n::tr_args("cli-validate-db-url", args));
     }
@@ -461,7 +461,7 @@ fn validate_database_url(url: &str) -> Result<()> {
     let is_valid = valid_prefixes.iter().any(|p| url.starts_with(p));
 
     if !is_valid {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("prefixes", format!("{:?}", valid_prefixes));
         return Err(anyhow::anyhow!(
             "{}",
@@ -488,7 +488,7 @@ fn validate_http_server(http: &toml::Table) -> Result<()> {
         if !(1..=65535).contains(&n) {
             return Err(anyhow::anyhow!("{}", inklog::i18n::tr("cli-err-http-port")));
         }
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("n", n.to_string());
         vprintln!(
             "  {}",
@@ -528,7 +528,7 @@ fn validate_sections(config: &toml::Table, _config_path: &PathBuf) -> Result<()>
 
     for key in config.keys() {
         if !valid_sections.contains(&key.as_str()) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("section", key.to_string());
             eprintln!(
                 "  {}",
@@ -645,21 +645,21 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     let config_example = std::path::PathBuf::from("./config.example.toml");
 
     if home_config.exists() {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", home_config.display().to_string());
         vprintln!("    {}", inklog::i18n::tr_args("cli-prereq-sys-ok", args));
     } else {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", home_config.display().to_string());
         eprintln!("    {}", inklog::i18n::tr_args("cli-prereq-sys-miss", args));
     }
 
     if local_config.exists() {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", local_config.display().to_string());
         vprintln!("    {}", inklog::i18n::tr_args("cli-prereq-local-ok", args));
     } else {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", local_config.display().to_string());
         eprintln!(
             "    {}",
@@ -668,7 +668,7 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     }
 
     if config_example.exists() {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", config_example.display().to_string());
         vprintln!(
             "    {}",
@@ -679,7 +679,7 @@ pub fn check_prerequisites() -> anyhow::Result<()> {
     vprintln!("\n{}", inklog::i18n::tr("cli-prereq-done"));
 
     if !missing_critical.is_empty() {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("deps", missing_critical.join(", "));
         return Err(anyhow::anyhow!(
             "{}",

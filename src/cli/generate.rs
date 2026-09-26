@@ -16,7 +16,7 @@ fn validate_output_path_safety(path: &Path) -> Result<()> {
     let suspicious = ['\0', '\u{2024}', '\u{2025}', '\u{FE52}'];
     for c in path_str.chars() {
         if suspicious.contains(&c) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             return Err(anyhow::anyhow!(
                 "{}",
@@ -28,7 +28,7 @@ fn validate_output_path_safety(path: &Path) -> Result<()> {
     // Reject path traversal patterns (.. components)
     for component in path.components() {
         if matches!(component, std::path::Component::ParentDir) {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             return Err(anyhow::anyhow!(
                 "{}",
@@ -74,7 +74,7 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
         "database" => generate_database_config(),
         "file" => generate_file_config(),
         _ => {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = inklog::i18n::MsgArgs::new();
             args.set("type", config_type.to_string());
             return Err(anyhow::anyhow!(
                 "{}",
@@ -84,7 +84,7 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
     };
 
     let mut file = File::create(&output_file).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_file.display().to_string());
         inklog::i18n::tr_args("config-create_config_failed", args)
     })?;
@@ -92,7 +92,7 @@ pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
     file.write_all(config_content.as_bytes())
         .with_context(|| inklog::i18n::tr("config-write_config_failed"))?;
 
-    let mut args = fluent_bundle::FluentArgs::new();
+    let mut args = inklog::i18n::MsgArgs::new();
     args.set("path", output_file.display().to_string());
     println!("{}", inklog::i18n::tr_args("cli-generate-config", args));
     Ok(())
@@ -289,7 +289,7 @@ INKLOG_DECRYPT_KEY=<MUST_SET_BEFORE_USE>
     };
 
     let mut file = File::create(&output_file).with_context(|| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = inklog::i18n::MsgArgs::new();
         args.set("path", output_file.display().to_string());
         inklog::i18n::tr_args("config-create_env_failed", args)
     })?;
@@ -297,7 +297,7 @@ INKLOG_DECRYPT_KEY=<MUST_SET_BEFORE_USE>
     file.write_all(env_content.as_bytes())
         .with_context(|| inklog::i18n::tr("config-write_env_failed"))?;
 
-    let mut args = fluent_bundle::FluentArgs::new();
+    let mut args = inklog::i18n::MsgArgs::new();
     args.set("path", output_file.display().to_string());
     println!("{}", inklog::i18n::tr_args("cli-generate-env", args));
     Ok(())

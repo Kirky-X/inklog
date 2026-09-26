@@ -915,7 +915,7 @@ impl LoggerManager {
                 }
                 for (name, sink_status) in status.sinks {
                     if !sink_status.status.is_operational() {
-                        let mut args = fluent_bundle::FluentArgs::new();
+                        let mut args = crate::i18n::MsgArgs::new();
                         args.set("name", name.clone());
                         args.set("error", format!("{:?}", sink_status.last_error));
                         tracing::warn!("{}", crate::i18n::tr_args("sink-health_unhealthy", args));
@@ -927,7 +927,7 @@ impl LoggerManager {
                         );
 
                         if should_recover && sink_status.consecutive_failures > 3 {
-                            let mut args = fluent_bundle::FluentArgs::new();
+                            let mut args = crate::i18n::MsgArgs::new();
                             args.set("name", name.clone());
                             tracing::warn!(
                                 "{}",
@@ -938,7 +938,7 @@ impl LoggerManager {
                             if let Err(e) =
                                 control_tx.send(SinkControlMessage::RecoverSink(name.clone()))
                             {
-                                let mut args = fluent_bundle::FluentArgs::new();
+                                let mut args = crate::i18n::MsgArgs::new();
                                 args.set("name", name.clone());
                                 args.set("err", e.to_string());
                                 tracing::error!(

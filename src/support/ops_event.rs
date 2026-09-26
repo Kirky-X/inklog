@@ -114,6 +114,12 @@ pub fn register_ops_channel(sender: Sender<Arc<LogRecord>>) {
     OPS_EVENT_HUB.write().push(sender);
 }
 
+/// 是否存在已注册的事件通道。高频路径可用本查询在 hub 为空时
+/// 跳过事件构造（detail 组装）等发布前置开销。
+pub fn has_channels() -> bool {
+    !OPS_EVENT_HUB.read().is_empty()
+}
+
 /// 清空注册（测试隔离用）。
 #[cfg(test)]
 pub fn reset_ops_hub_for_tests() {
@@ -123,24 +129,40 @@ pub fn reset_ops_hub_for_tests() {
 /// 内部故障/恢复路径的轻量发布入口：轮转失败、压缩/加密失败、sink
 /// 降级与恢复等站点调用。无注册通道时为 no-op（事件通道满/关闭时
 /// 静默丢弃——不得反压主日志链路，与 manager 侧语义一致）。
-pub fn publish_internal(kind: &str, sink: Option<&str>, detail: serde_json::Value) {
+///
+/// 返回是否至少成功投递到一个通道：需要「确认送达」语义的发布方
+/// （如限频去重的错误上报）据此决定是否重报。
+pub fn publish_internal(kind: &str, sink: Option<&str>, detail: serde_json::Value) -> bool {
     let senders = OPS_EVENT_HUB.read();
     if senders.is_empty() {
-        return;
+        return false;
     }
     let event = InklogOpsEvent::now(kind, sink, detail);
     let record = Arc::new(event.to_log_record());
+    let mut delivered = false;
     for sender in senders.iter() {
-        let _ = sender.send_timeout(Arc::clone(&record), Duration::from_millis(100));
+        if sender
+            .send_timeout(Arc::clone(&record), Duration::from_millis(100))
+            .is_ok()
+        {
+            delivered = true;
+        }
     }
+    delivered
 }
 
 #[cfg(test)]
 mod internal_publish_tests {
     use super::*;
     use crossbeam_channel::bounded;
+    use serial_test::serial;
+
+    // 以下测试直接 reset/register 进程级 OPS_EVENT_HUB，与其他动 hub
+    // 的测试（masking 的引擎错误广播测试）必须互斥执行，否则并发
+    // reset 会清掉对方刚注册的通道，recv 超时或广播丢失。
 
     #[test]
+    #[serial]
     fn test_publish_internal_delivers_to_registered_channels() {
         reset_ops_hub_for_tests();
         let (tx, rx) = bounded(8);
@@ -152,7 +174,24 @@ mod internal_publish_tests {
             serde_json::json!({ "op": "rotate", "error": "EACCES" }),
         );
 
-        let record = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        // hub 是进程级广播面：并发测试触发的其他 publish_internal（如
+        // worker 降级恢复的 INFO 事件）同样会进入本通道。按 ops_kind
+        // 过滤消费，只对本测试发布的事件做映射断言。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let record = loop {
+            let remain = deadline.saturating_duration_since(std::time::Instant::now());
+            let record = rx
+                .recv_timeout(remain)
+                .expect("own sink_degraded event must arrive within timeout");
+            if record
+                .fields
+                .get("ops_kind")
+                .map(|v| v == "sink_degraded")
+                .unwrap_or(false)
+            {
+                break record;
+            }
+        };
         assert_eq!(record.target, "inklog::ops");
         assert_eq!(record.level, "WARN");
         assert!(
@@ -165,6 +204,7 @@ mod internal_publish_tests {
     }
 
     #[test]
+    #[serial]
     fn test_publish_internal_is_noop_without_channels() {
         reset_ops_hub_for_tests();
         // 无注册通道：不得 panic、不得反压

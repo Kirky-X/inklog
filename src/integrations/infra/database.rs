@@ -219,7 +219,7 @@ impl DbNexusAdapter {
 
         // 使用 DbPool::with_config 创建连接池
         let pool = DbPool::with_config(config).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::DatabaseError {
                 message: crate::i18n::tr_args("db-pool_create_failed", args),
@@ -327,7 +327,7 @@ impl DbNexusAdapter {
         let driver = detect_driver_from_url(url);
         let ddl = generate_create_table_sql(&self.table_name, &driver);
         let session = self.pool.get_session(&self.admin_role).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::DatabaseError {
                 message: crate::i18n::tr_args("db-session_failed", args),
@@ -335,7 +335,7 @@ impl DbNexusAdapter {
             }
         })?;
         session.execute_raw_ddl(&ddl).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::DatabaseError {
                 message: crate::i18n::tr_args("db-ensure_table_failed", args),
@@ -358,7 +358,7 @@ fn validate_table_name(name: &str) -> Result<(), InklogError> {
     let mut chars = name.chars();
     let first = chars.next().unwrap();
     if !first.is_ascii_alphabetic() && first != '_' {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("name", name.to_string());
         return Err(InklogError::ConfigError(crate::i18n::tr_args(
             "db-table_invalid_start",
@@ -367,7 +367,7 @@ fn validate_table_name(name: &str) -> Result<(), InklogError> {
     }
     for c in chars {
         if !c.is_ascii_alphanumeric() && c != '_' {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("name", name.to_string());
             args.set("char", c.to_string());
             return Err(InklogError::ConfigError(crate::i18n::tr_args(
@@ -539,7 +539,7 @@ impl Database for DbNexusAdapter {
 
         // 获取写会话 (使用配置的管理员角色)
         let session = self.pool.get_session(&self.admin_role).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::DatabaseError {
                 message: crate::i18n::tr_args("db-session_failed", args),
@@ -555,7 +555,7 @@ impl Database for DbNexusAdapter {
                 .execute_duckdb_transaction(statements)
                 .await
                 .map_err(|e| {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("err", e.to_string());
                     InklogError::DatabaseError {
                         message: crate::i18n::tr_args("db-batch_insert_failed", args),
@@ -624,7 +624,7 @@ impl Database for DbNexusAdapter {
                     elapsed_ms = elapsed_ms,
                     "Database batch insert failed"
                 );
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 let msg = crate::i18n::tr_args("db-batch_insert_failed", args);
                 InklogError::DatabaseError {
@@ -662,7 +662,7 @@ impl Database for DbNexusAdapter {
         match self.pool.get_session(&self.admin_role).await {
             Ok(_) => true,
             Err(e) => {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 tracing::warn!(
                     "{}",

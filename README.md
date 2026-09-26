@@ -157,10 +157,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🎨 特性标志
 
-`default = []`：默认组合只包含核心能力，下列 feature 全部按需显式启用（依据 `Cargo.toml` `[features]` 定义）。
+`default = ["i18n"]`：默认组合为核心能力 + 国际化；下列其余 feature 按需显式启用（依据 `Cargo.toml` `[features]` 定义）。以 `default-features = false` 引入可裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退到内嵌英文文案表。
 
 | 标志 | 默认 | 说明 |
 |------|:----:|------|
+| `i18n` | ✅ | 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + `INKLOG_LOCALE` 覆盖；关闭后依赖树不含 icu/fluent |
 | `sqlite` | ❌ | SQLite 数据库后端（经 dbnexus，rustls 运行时） |
 | `postgres` | ❌ | PostgreSQL 数据库后端（经 dbnexus） |
 | `mysql` | ❌ | MySQL 数据库后端（经 dbnexus） |

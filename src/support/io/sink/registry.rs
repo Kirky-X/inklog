@@ -72,7 +72,7 @@ impl SinkRegistry {
     /// Create a sink by type name.
     pub async fn create(&self, sink_type: &str) -> Result<Arc<dyn LogSink>, InklogError> {
         let factory = self.factories.get(sink_type).ok_or_else(|| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("type", sink_type);
             InklogError::ConfigError(crate::i18n::tr_args("config-unknown_sink_type", args))
         })?;

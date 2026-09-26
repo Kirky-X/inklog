@@ -103,7 +103,7 @@ pub fn env_key_is_password(env_var: &str) -> bool {
 /// 使用 Zeroizing 安全读取环境变量，防止密钥驻留内存
 fn read_key_env_value(env_var: &str) -> Result<Zeroizing<String>, InklogError> {
     let value = std::env::var(env_var).map_err(|_| {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("env", env_var);
         InklogError::ConfigError(crate::i18n::tr_args("config-encryption_key_not_set", args))
     })?;
@@ -144,7 +144,7 @@ fn key_from_env_value(
             return Ok(Zeroizing::new(result));
         }
         // Base64 解码成功但长度不对，拒绝使用
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("got", decoded.len());
         return Err(InklogError::ConfigError(crate::i18n::tr_args(
             "config-encryption_base64_wrong_length",
@@ -160,7 +160,7 @@ fn key_from_env_value(
     }
 
     // 密钥长度无效
-    let mut args = fluent_bundle::FluentArgs::new();
+    let mut args = crate::i18n::MsgArgs::new();
     args.set("got", raw_bytes.len());
     Err(InklogError::ConfigError(crate::i18n::tr_args(
         "config-encryption_key_wrong_length",
@@ -184,7 +184,7 @@ pub fn derive_key_from_password(
 ) -> Result<([u8; 32], Vec<u8>), InklogError> {
     // Security: enforce minimum password length
     if password.len() < 12 {
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("got", password.len());
         return Err(InklogError::ConfigError(crate::i18n::tr_args(
             "config-encryption_password_too_short",
@@ -221,6 +221,7 @@ mod tests {
     use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_from_base64() {
         let key_b64 = "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
         unsafe {
@@ -236,6 +237,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_from_raw_bytes() {
         let key_raw = "abcdefghijklmnopqrstuvwxyz123456";
         unsafe {
@@ -251,6 +253,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_missing() {
         unsafe {
             std::env::remove_var("INKLOG_NONEXISTENT_KEY");
@@ -308,6 +311,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_from_password() {
         // Test PBKDF2 password derivation branch (1-127 chars)
         unsafe {
@@ -323,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_base64_wrong_length() {
         // Base64 decodes successfully but length is not 32 bytes
         // Use a valid Base64 string that decodes to 16 bytes (not 32)
@@ -342,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_too_long_input() {
         // Input longer than 127 bytes should return error
         let long_password = "a".repeat(128);
@@ -358,6 +364,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_empty_string() {
         // Empty string should return error (is_empty check)
         unsafe {
@@ -406,6 +413,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_long_non_base64_input() {
         // 覆盖行 75-78: 长度 >= 128 且不是有效 Base64 时返回错误
         // 使用 128 个 '!' 字符（非 Base64 字符），确保到达最后的 Err 分支
@@ -546,6 +554,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_with_salt_missing_env() {
         unsafe {
             std::env::remove_var("INKLOG_TEST_KEY_WITH_SALT_MISSING");

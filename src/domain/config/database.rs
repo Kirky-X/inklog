@@ -35,7 +35,7 @@ impl std::str::FromStr for DatabaseDriver {
         } else if s.eq_ignore_ascii_case("duckdb") {
             Ok(DatabaseDriver::DuckDB)
         } else {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("driver", s);
             args.set("valid", "postgres, mysql, sqlite, duckdb");
             Err(crate::i18n::tr_args("config-unknown_db_driver", args))
@@ -77,7 +77,7 @@ impl std::str::FromStr for PartitionStrategy {
         } else if s.eq_ignore_ascii_case("yearly") || s.eq_ignore_ascii_case("year") {
             Ok(PartitionStrategy::Yearly)
         } else {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("strategy", s);
             Err(crate::i18n::tr_args(
                 "config-unknown_partition_strategy",
@@ -166,7 +166,7 @@ impl std::str::FromStr for ArchiveFormat {
         } else if s.eq_ignore_ascii_case("csv") {
             Ok(ArchiveFormat::Csv)
         } else {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("format", s);
             args.set("valid", "json, parquet, csv");
             Err(crate::i18n::tr_args("config-unknown_archive_format", args))

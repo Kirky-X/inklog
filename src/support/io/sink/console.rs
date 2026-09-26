@@ -10,6 +10,7 @@ use crate::support::processing::OutputFormat;
 use async_trait::async_trait;
 use is_terminal::IsTerminal;
 use owo_colors::OwoColorize;
+use std::borrow::Cow;
 use std::fmt;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,11 @@ pub struct ConsoleSink {
     template: LogTemplate,
     /// None = masking_enabled=false（输出原样）
     masker: Option<DataMasker>,
+    /// 环境判定（NO_COLOR/CLICOLOR_FORCE/TERM + TTY）在进程生命周期内
+    /// 基本不变，构造期缓存——env::var 内部持进程级锁，逐条日志查询
+    /// 在多线程高吞吐下是串行点
+    colorize_stdout: bool,
+    colorize_stderr: bool,
 }
 
 impl fmt::Debug for ConsoleSink {
@@ -34,11 +40,15 @@ impl fmt::Debug for ConsoleSink {
 impl ConsoleSink {
     pub fn new(config: ConsoleSinkConfig, template: LogTemplate) -> Self {
         let masker = config.masking_enabled.then(DataMasker::new);
+        let colorize_stdout = Self::compute_colorize(&config, false);
+        let colorize_stderr = Self::compute_colorize(&config, true);
         Self {
             config,
             writer: Arc::new(Mutex::new(Box::new(io::stdout()))),
             template,
             masker,
+            colorize_stdout,
+            colorize_stderr,
         }
     }
 
@@ -86,11 +96,22 @@ impl ConsoleSink {
     }
 
     fn should_colorize(&self, is_stderr: bool) -> bool {
+        if is_stderr {
+            self.colorize_stderr
+        } else {
+            self.colorize_stdout
+        }
+    }
+
+    /// 构造期一次性判定着色：JSON/colored 配置、NO_COLOR / CLICOLOR_FORCE /
+    /// TERM 环境标准与 TTY 检测在进程生命周期内基本不变，缓存进实例
+    /// 而非逐条日志重复查询。
+    fn compute_colorize(config: &ConsoleSinkConfig, is_stderr: bool) -> bool {
         // JSON mode never uses color (would corrupt JSON structure)
-        if self.config.output_format == OutputFormat::Json {
+        if config.output_format == OutputFormat::Json {
             return false;
         }
-        if !self.config.colored {
+        if !config.colored {
             return false;
         }
 
@@ -124,16 +145,23 @@ impl ConsoleSink {
 #[async_trait]
 impl LogSink for ConsoleSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        // enabled=false 的语义落实：禁用态的 console sink 丢弃记录。
+        // 装配路径（build_detached 等）无论 enabled 都会构造并接线
+        // console sink，若 write 不检查该字段，禁用组合仍会全量输出。
+        if !self.config.enabled {
+            return Ok(());
+        }
         // 应用数据脱敏（如果启用）
-        let masked_record = if self.config.masking_enabled {
+        // masking 关闭时零克隆借用原记录;开启时才物化脱敏副本
+        let masked_record: Cow<'_, LogRecord> = if self.config.masking_enabled {
             let mut masked = record.clone();
             if let Some(masker) = self.masker.as_ref() {
                 masked.message = masker.mask(&record.message);
                 masker.mask_hashmap(&mut masked.fields);
             }
-            masked
+            Cow::Owned(masked)
         } else {
-            record.clone()
+            Cow::Borrowed(record)
         };
 
         // Stderr separation
@@ -191,6 +219,8 @@ impl Clone for ConsoleSink {
             template: self.template.clone(),
             // Clone carries the same masker（含 with_masker 注入的自定义规则）
             masker: self.masker.clone(),
+            colorize_stdout: self.colorize_stdout,
+            colorize_stderr: self.colorize_stderr,
         }
     }
 }
@@ -216,10 +246,11 @@ mod tests {
     #[test]
     #[serial]
     fn test_no_color_env() {
-        let sink = get_sink();
         unsafe {
             env::set_var("NO_COLOR", "1");
         }
+        // 着色判定在构造期缓存:先固定环境再构造实例
+        let sink = get_sink();
         assert!(!sink.should_colorize(false));
         unsafe {
             env::remove_var("NO_COLOR");
@@ -229,7 +260,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_force_color_env() {
-        let sink = get_sink();
         // Remove NO_COLOR to ensure deterministic test result
         unsafe {
             env::remove_var("NO_COLOR");
@@ -237,6 +267,8 @@ mod tests {
         unsafe {
             env::set_var("CLICOLOR_FORCE", "1");
         }
+        // 着色判定在构造期缓存:先固定环境再构造实例
+        let sink = get_sink();
         assert!(sink.should_colorize(false));
         unsafe {
             env::remove_var("CLICOLOR_FORCE");
@@ -246,7 +278,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_term_dumb() {
-        let sink = get_sink();
         // Remove NO_COLOR to ensure deterministic test result
         unsafe {
             env::remove_var("NO_COLOR");
@@ -258,6 +289,8 @@ mod tests {
         unsafe {
             env::remove_var("CLICOLOR_FORCE");
         }
+        // 着色判定在构造期缓存:先固定环境再构造实例
+        let sink = get_sink();
         assert!(!sink.should_colorize(false));
         unsafe {
             env::remove_var("TERM");
@@ -267,16 +300,23 @@ mod tests {
     #[test]
     #[serial]
     fn test_config_disabled() {
-        let mut sink = get_sink();
         // Remove NO_COLOR to ensure deterministic test result
         unsafe {
             env::remove_var("NO_COLOR");
         }
-        sink.config.colored = false;
         unsafe {
             env::set_var("CLICOLOR_FORCE", "1");
-        } // Config should override force?
-        // My logic: if !config.colored return false.
+        }
+        // Config should override force? My logic: if !config.colored return
+        // false. 着色判定在构造期缓存:先固定环境与配置再构造实例
+        let sink = ConsoleSink::new(
+            ConsoleSinkConfig {
+                enabled: true,
+                colored: false,
+                ..Default::default()
+            },
+            LogTemplate::default(),
+        );
         assert!(!sink.should_colorize(false));
         unsafe {
             env::remove_var("CLICOLOR_FORCE");
@@ -305,6 +345,25 @@ mod tests {
         let template = LogTemplate::default();
         let sink = ConsoleSink::new(config, template);
         assert!(!sink.config.enabled);
+    }
+
+    #[tokio::test]
+    async fn test_log_sink_write_disabled_drops_records() {
+        // enabled=false 的语义落实：装配路径无论 enabled 都接线 console
+        // sink，禁用态必须在 write 处丢弃记录，否则禁用组合仍全量输出
+        let config = ConsoleSinkConfig {
+            enabled: false,
+            colored: false,
+            ..Default::default()
+        };
+        let (sink, writer) = sink_with_test_writer(config);
+        let record = make_record("INFO", "should not appear");
+        sink.write(&record).await.unwrap();
+        assert!(
+            writer.is_empty(),
+            "disabled console sink must drop records, got: {}",
+            writer.output()
+        );
     }
 
     #[test]

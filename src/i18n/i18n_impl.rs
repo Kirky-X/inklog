@@ -51,7 +51,7 @@ impl LogI18nFormatter {
     /// cannot be parsed, or [`I18nError::FormatError`] if ICU4X
     /// lacks compiled data for it.
     pub fn new_default() -> Result<Self, I18nError> {
-        let locale = super::locale_manager::current_locale();
+        let locale = super::current_locale();
         Self::new(&locale)
     }
 

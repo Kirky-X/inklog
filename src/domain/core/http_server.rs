@@ -79,7 +79,7 @@ impl LoggerManager {
                 match std::env::var(token_env) {
                     Ok(t) if !t.is_empty() => (true, Some(t)),
                     Ok(_) => {
-                        let mut args = fluent_bundle::FluentArgs::new();
+                        let mut args = crate::i18n::MsgArgs::new();
                         args.set("env", token_env);
                         return Err(InklogError::ConfigError(crate::i18n::tr_args(
                             "config-http_auth_token_empty",
@@ -87,7 +87,7 @@ impl LoggerManager {
                         )));
                     }
                     Err(_) => {
-                        let mut args = fluent_bundle::FluentArgs::new();
+                        let mut args = crate::i18n::MsgArgs::new();
                         args.set("env", token_env);
                         return Err(InklogError::ConfigError(crate::i18n::tr_args(
                             "config-http_auth_token_not_set",
@@ -176,7 +176,7 @@ impl LoggerManager {
                     match serde_json::to_value(&status) {
                         Ok(v) => axum::Json(v),
                         Err(e) => {
-                            let mut args = fluent_bundle::FluentArgs::new();
+                            let mut args = crate::i18n::MsgArgs::new();
                             args.set("err", e.to_string());
                             tracing::error!(
                                 "{}",
@@ -200,7 +200,7 @@ impl LoggerManager {
         let addr: std::net::SocketAddr = format!("{}:{}", config.host, config.port)
             .parse()
             .map_err(|e: std::net::AddrParseError| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("addr", format!("{}:{}", config.host, config.port));
                 args.set("err", e.to_string());
                 InklogError::ConfigError(crate::i18n::tr_args("config-invalid_http_address", args))
@@ -253,7 +253,7 @@ impl LoggerManager {
             );
             tokio::spawn(async move {
                 if let Err(e) = server.serve(make_svc).await {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("err", e.to_string());
                     tracing::error!(
                         "{}",
@@ -274,7 +274,7 @@ impl LoggerManager {
                 match axum::serve(listener, make_svc).await {
                     Ok(_) => info!("HTTP server stopped"),
                     Err(e) => {
-                        let mut args = fluent_bundle::FluentArgs::new();
+                        let mut args = crate::i18n::MsgArgs::new();
                         args.set("err", e.to_string());
                         tracing::error!(
                             "{}",
@@ -311,7 +311,7 @@ fn bind_failure_outcome(
     err: &std::io::Error,
     https: bool,
 ) -> Result<(), InklogError> {
-    let mut args = fluent_bundle::FluentArgs::new();
+    let mut args = crate::i18n::MsgArgs::new();
     args.set("addr", addr.to_string());
     args.set("err", err.to_string());
     let message_key = if https {

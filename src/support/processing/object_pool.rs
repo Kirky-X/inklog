@@ -116,7 +116,7 @@ where
             builder = builder.ttl(Duration::from_secs(ttl_secs));
         }
         let cache = builder.build().await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-build_failed", args))
         })?;
@@ -132,7 +132,7 @@ where
         K: Clone,
     {
         let result = self.cache.get(key).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-get_failed", args))
         })?;
@@ -152,7 +152,7 @@ where
         V: Clone,
     {
         self.cache.set(key, &value).await.map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::CacheError(crate::i18n::tr_args("cache-set_failed", args))
         })?;

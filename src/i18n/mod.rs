@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: MIT
 //! Internationalization and locale-aware formatting for log operations.
 //!
-//! This is a **core feature** — always compiled, no cargo feature gate required.
+//! Gated behind the `i18n` cargo feature (enabled by default). With the
+//! feature on, this module provides locale-aware number formatting, date
+//! formatting, plural rules, and string collation via the `icu` crate
+//! (ICU4X 2.x), plus runtime message translation via `fluent-bundle`
+//! with `.ftl` files. Locale is detected via `sys-locale` and can be
+//! overridden with the `INKLOG_LOCALE` environment variable.
 //!
-//! Provides locale-aware number formatting, date formatting, plural rules,
-//! and string collation via the `icu` crate (ICU4X 2.x). Useful for
-//! generating locale-sensitive log messages (e.g. "1 event" vs "2 events"),
-//! formatting log counters, displaying log timestamps, normalizing log
-//! levels, and sorting log fields by locale-specific collation rules.
-//!
-//! Runtime message translation is provided by `fluent-bundle` with `.ftl`
-//! translation files. Locale is automatically detected via `sys-locale`
-//! and can be overridden with the `INKLOG_LOCALE` environment variable.
+//! With the feature off, the translation entry points
+//! ([`tr`]/[`tr_args`]) stay available and resolve against the embedded
+//! English fallback table; [`LogI18nFormatter`] and [`I18nError`] do not
+//! exist, and the dependency tree contains no icu/fluent crates.
 //!
 //! # Example
 //!
@@ -29,18 +29,31 @@
 //! let level = fmt.format_log_level("info")?; // "INFO"
 //! ```
 
+#[cfg(feature = "i18n")]
 use icu::collator::CollatorBorrowed;
+#[cfg(feature = "i18n")]
 use icu::decimal::DecimalFormatter;
+#[cfg(feature = "i18n")]
 use icu::locale::Locale;
+#[cfg(feature = "i18n")]
 use icu::plurals::PluralRules;
+#[cfg(feature = "i18n")]
 use thiserror::Error;
 
+#[cfg(feature = "i18n")]
 mod i18n_impl;
-mod locale_manager;
+#[cfg(feature = "i18n")]
+mod locale_real;
+#[cfg(not(feature = "i18n"))]
+mod locale_stub;
 
-pub use locale_manager::{current_locale, init_locale, tr, tr_args};
+#[cfg(feature = "i18n")]
+pub use locale_real::{MsgArgs, current_locale, init_locale, tr, tr_args};
+#[cfg(not(feature = "i18n"))]
+pub use locale_stub::{MsgArgs, current_locale, init_locale, tr, tr_args};
 
 /// Errors returned by [`LogI18nFormatter`] operations.
+#[cfg(feature = "i18n")]
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum I18nError {
     /// BCP-47 locale string could not be parsed.
@@ -62,6 +75,7 @@ pub enum I18nError {
 /// Construct with [`LogI18nFormatter::new`] using a BCP-47 locale tag
 /// (e.g. `"en-US"`, `"zh-CN"`). All formatters are created eagerly so
 /// that repeated formatting calls are allocation-light.
+#[cfg(feature = "i18n")]
 pub struct LogI18nFormatter {
     locale: Locale,
     decimal_formatter: DecimalFormatter,
@@ -69,6 +83,7 @@ pub struct LogI18nFormatter {
     collator: CollatorBorrowed<'static>,
 }
 
+#[cfg(feature = "i18n")]
 impl std::fmt::Debug for LogI18nFormatter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LogI18nFormatter")
@@ -77,7 +92,7 @@ impl std::fmt::Debug for LogI18nFormatter {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "i18n"))]
 mod tests {
     use super::*;
 

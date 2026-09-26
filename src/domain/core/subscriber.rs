@@ -418,7 +418,7 @@ impl Drop for LoggerSubscriber {
             let remaining = self.fallback_buffer.lock().len();
             if remaining > 0 {
                 // Drop 阶段不依赖 tracing 全局状态：格式化到 String 后直接输出
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("count", remaining.to_string());
                 eprintln!(
                     "{}",

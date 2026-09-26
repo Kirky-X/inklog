@@ -71,7 +71,7 @@ impl AsyncAutoBuilder for InklogModule {
         Box::pin(async move {
             // 1. Require DbNexusModule capability (Arc<dyn ConnectionPool + Send + Sync>).
             let pool = kit.require::<DbNexusModule>().map_err(|e| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 InklogError::database_error(crate::i18n::tr_args("config-require_dbnexus", args))
             })?;
@@ -96,7 +96,7 @@ impl AsyncLifecycle for InklogModule {
             // Verify DbNexusModule capability is accessible after all modules are built.
             // This catches missing or failed database dependencies early.
             kit.require::<DbNexusModule>().map_err(|e| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 InklogError::database_error(crate::i18n::tr_args("config-db_not_available", args))
             })?;

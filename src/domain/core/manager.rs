@@ -463,7 +463,7 @@ impl LoggerManager {
         {
             match http_cfg.error_mode {
                 crate::HttpErrorMode::Warn => {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("err", e.to_string());
                     tracing::warn!(
                         "{}",
@@ -921,12 +921,12 @@ impl LoggerManager {
     /// ```
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
         let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-failed_read_config", args))
         })?;
         let config: InklogConfig = toml::from_str(&content).map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-failed_parse_config", args))
         })?;
@@ -956,7 +956,7 @@ impl LoggerManager {
     /// ```
     pub async fn load() -> Result<Self, InklogError> {
         let config = InklogConfig::load_sync().map_err(|e| {
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             InklogError::ConfigError(crate::i18n::tr_args("config-failed_load_config", args))
         })?;
@@ -973,7 +973,7 @@ impl LoggerManager {
         self.control_tx
             .send(SinkControlMessage::RecoverSink(sink_name.to_string()))
             .map_err(|e| {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 InklogError::ChannelError(crate::i18n::tr_args("config-failed_send_recovery", args))
             })
@@ -1400,7 +1400,40 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_logger_manager_new_creates_instance() {
-        let manager = LoggerManager::new()
+        // 预占进程级全局（tracing subscriber + log logger）：并发测试下
+        // 全局由先完成 install 的实例持有，其余实例的日志事件会持续落入
+        // 全局实例通道。预占后本测试的 install 走良性降级分支，tracing /
+        // log 事件不再可能进入本实例通道。占位对其他测试无转移影响：
+        // 本文件内的事件断言均已用 with_default 线程局部 registry，
+        // 不依赖进程全局。
+        struct SilentLogger;
+        impl log::Log for SilentLogger {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                false
+            }
+            fn log(&self, _: &log::Record) {}
+            fn flush(&self) {}
+        }
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing_subscriber::filter::LevelFilter::OFF)
+            .with_writer(std::io::sink)
+            .try_init();
+        let _ = log::set_boxed_logger(Box::new(SilentLogger));
+
+        // file sink 关闭：默认配置会把实例通道注册进进程级 ops 事件 hub
+        // （register_ops_channel），并发测试触发的内部故障广播
+        // （publish_internal：轮转/压缩失败、worker 降级恢复）会写入本
+        // 实例通道，且 file worker 因默认相对路径不可写进入降级模式不
+        // 消费主通道，「新建无积压」的同步断言在并发下不成立。关闭后
+        // 实例不进广播面，断言确定。与 new() 走同一 build_with_deps 路径。
+        let config = InklogConfig {
+            file_sink: Some(FileSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let manager = LoggerManager::with_config(config)
             .await
             .expect("Failed to create manager");
         // 验证基本属性

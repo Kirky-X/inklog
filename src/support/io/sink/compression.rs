@@ -256,7 +256,7 @@ impl CompressionStrategy for GzipCompression {
 
         if let Err(e) = std::fs::remove_file(path) {
             // 删除失败时原始文件与压缩文件并存，需保留两者待人工/后续清理
-            let mut args = fluent_bundle::FluentArgs::new();
+            let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
             error!(
                 original = %path.display(),
@@ -311,7 +311,7 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
 
     if let Err(e) = std::fs::remove_file(path) {
         // 删除失败时原始文件与压缩文件并存，需保留两者待人工/后续清理
-        let mut args = fluent_bundle::FluentArgs::new();
+        let mut args = crate::i18n::MsgArgs::new();
         args.set("err", e.to_string());
         error!(
             original = %path.display(),

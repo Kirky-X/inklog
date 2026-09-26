@@ -974,7 +974,7 @@ impl SinkHealthMonitor {
                     fallback_target = target,
                     "{}",
                     tr_args("metrics-sink_recovering", {
-                        let mut args = fluent_bundle::FluentArgs::new();
+                        let mut args = crate::i18n::MsgArgs::new();
                         args.set("sink", sink_name);
                         args.set("target", target.as_str());
                         args
@@ -991,7 +991,7 @@ impl SinkHealthMonitor {
                         max_retries = self.config.max_retries,
                         "{}",
                         tr_args("metrics-sink_recovery_max_retries", {
-                            let mut args = fluent_bundle::FluentArgs::new();
+                            let mut args = crate::i18n::MsgArgs::new();
                             args.set("sink", sink_name);
                             args.set("max_retries", self.config.max_retries.to_string());
                             args
@@ -1022,7 +1022,7 @@ impl SinkHealthMonitor {
                         .cloned()
                         .unwrap_or(current_state.clone()),
                     tr_args("metrics-recovery_attempt_delay", {
-                        let mut args = fluent_bundle::FluentArgs::new();
+                        let mut args = crate::i18n::MsgArgs::new();
                         args.set("delay_ms", delay_ms.to_string());
                         args
                     }),
@@ -1064,7 +1064,7 @@ impl SinkHealthMonitor {
                 error = error,
                 "{}",
                 tr_args("metrics-sink_failed_fallback_disabled", {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("sink", sink_name);
                     args
                 })
@@ -1093,7 +1093,7 @@ impl SinkHealthMonitor {
                 failure_count = failure_count,
                 "{}",
                 tr_args("metrics-sink_fallback_triggered", {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("sink", sink_name);
                     args.set("target", fallback_target.as_str());
                     args.set("error", error);
@@ -1123,7 +1123,7 @@ impl SinkHealthMonitor {
                 threshold = self.config.failure_threshold,
                 "{}",
                 tr_args("metrics-sink_failure_warning", {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("sink", sink_name);
                     args.set("count", failure_count.to_string());
                     args
@@ -1149,7 +1149,7 @@ impl SinkHealthMonitor {
                         sink_name: sink_name.to_string(),
                         target: "file".to_string(),
                         reason: tr_args("metrics-fallback_reason_database", {
-                            let mut args = fluent_bundle::FluentArgs::new();
+                            let mut args = crate::i18n::MsgArgs::new();
                             args.set("error", error);
                             args
                         }),
@@ -1169,7 +1169,7 @@ impl SinkHealthMonitor {
                             sink_name: sink_name.to_string(),
                             target: "console".to_string(),
                             reason: tr_args("metrics-fallback_reason_disk_full", {
-                                let mut args = fluent_bundle::FluentArgs::new();
+                                let mut args = crate::i18n::MsgArgs::new();
                                 args.set("error", error);
                                 args
                             }),
@@ -1183,7 +1183,7 @@ impl SinkHealthMonitor {
                             sink_name: sink_name.to_string(),
                             target: "console".to_string(),
                             reason: tr_args("metrics-fallback_reason_file", {
-                                let mut args = fluent_bundle::FluentArgs::new();
+                                let mut args = crate::i18n::MsgArgs::new();
                                 args.set("error", error);
                                 args
                             }),
@@ -1199,7 +1199,7 @@ impl SinkHealthMonitor {
                         sink_name: sink_name.to_string(),
                         target: "console".to_string(),
                         reason: tr_args("metrics-fallback_reason_unknown", {
-                            let mut args = fluent_bundle::FluentArgs::new();
+                            let mut args = crate::i18n::MsgArgs::new();
                             args.set("error", error);
                             args
                         }),
@@ -1230,7 +1230,7 @@ impl SinkHealthMonitor {
         let new_state = FallbackState::Fallback {
             target: "plaintext".to_string(),
             reason: tr_args("metrics-fallback_reason_encryption", {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("error", error);
                 args
             }),
@@ -1243,7 +1243,7 @@ impl SinkHealthMonitor {
             sink_name: sink_name.to_string(),
             target: "plaintext".to_string(),
             reason: tr_args("metrics-fallback_reason_plaintext", {
-                let mut args = fluent_bundle::FluentArgs::new();
+                let mut args = crate::i18n::MsgArgs::new();
                 args.set("error", error);
                 args
             }),
@@ -1266,7 +1266,7 @@ impl SinkHealthMonitor {
                 sink = sink_name,
                 "{}",
                 tr_args("metrics-sink_recovery_confirmed", {
-                    let mut args = fluent_bundle::FluentArgs::new();
+                    let mut args = crate::i18n::MsgArgs::new();
                     args.set("sink", sink_name);
                     args
                 })
