@@ -155,8 +155,14 @@ pub fn publish_internal(kind: &str, sink: Option<&str>, detail: serde_json::Valu
 mod internal_publish_tests {
     use super::*;
     use crossbeam_channel::bounded;
+    use serial_test::serial;
+
+    // 以下测试直接 reset/register 进程级 OPS_EVENT_HUB，与其他动 hub
+    // 的测试（masking 的引擎错误广播测试）必须互斥执行，否则并发
+    // reset 会清掉对方刚注册的通道，recv 超时或广播丢失。
 
     #[test]
+    #[serial]
     fn test_publish_internal_delivers_to_registered_channels() {
         reset_ops_hub_for_tests();
         let (tx, rx) = bounded(8);
@@ -198,6 +204,7 @@ mod internal_publish_tests {
     }
 
     #[test]
+    #[serial]
     fn test_publish_internal_is_noop_without_channels() {
         reset_ops_hub_for_tests();
         // 无注册通道：不得 panic、不得反压

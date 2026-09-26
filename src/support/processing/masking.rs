@@ -2454,6 +2454,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_engine_error_report_broadcast_is_rate_limited_per_rule() {
         use crate::support::ops_event::{
             has_channels, register_ops_channel, reset_ops_hub_for_tests,
