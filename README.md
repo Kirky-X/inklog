@@ -120,7 +120,7 @@ cargo add inklog
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.3"
+inklog = "0.3.0-rc.6"
 ```
 
 ### 最小可运行示例
@@ -317,7 +317,7 @@ Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重�
 | Docker 数据库集成 | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite 生命周期验证 |
 | 性能测试 | `tests/performance/` + `benches/` | 大容量、长时间运行测试与 criterion 基准 |
 
-**测试规模**（截至 v0.3.0-rc.3，按 `#[test]` / `#[tokio::test]` 统计）：`src/` 内联 1,255 个 + `tests/` 目录 528 个，共 **1,783 个测试函数**；另有 criterion 基准函数 18 个（`benches/inklog_bench.rs` 15 个、`benches/rc4_pipeline_bench.rs` 3 个）。
+**测试规模**（截至 v0.3.0-rc.6，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,462 个 + `tests/` 目录 558 个，共 **2,020 个测试函数**；另有 criterion 顶层基准函数 21 个（`benches/inklog_bench.rs` 17 个、`benches/rc4_pipeline_bench.rs` 4 个）。
 
 ### 运行命令（与 CI 一致）
 
@@ -394,7 +394,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 
 | 状态 | 目标 | 说明 |
 |:----:|------|------|
-| 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.3 → 0.3.0 正式版 |
+| 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.6 → 0.3.0 正式版 |
 | 📋 | 工作区依赖传导同步 | trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0 |
 | ✅ | CI 测试矩阵按数据库后端分组 | docker 流水线按 sqlite/postgres/mysql/duckdb 四后端分组验证（duckdb 为 embedded 后端，无需容器服务） |
 | ✅ | 补齐 MySQL 集成测试环境 | MySQL 8 服务已入 docker/docker-compose.test.yml，CI mysql 分支可跑集成测试 |
@@ -445,7 +445,8 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 
 ### 最近版本
 
-- **0.3.0-rc.3**（2026-09-10）：新增 `init_inklog_logger` 单例初始化、运行时级别热调（`set_level`）、动态 Sink 注册（`LoggerBuilder::add_sink`）、`trace_id`/`span_id` 追踪关联、`inklog-cli query` 日志检索、网络转发 Sink（TCP/UDP）、OTLP 导出 MVP、归档防篡改链与 `docs/PERFORMANCE.md` 首份性能基线；
+- **0.3.0-rc.6**（2026-09-28）：全出口 PII 掩码覆盖与脱敏正则加固（fancy-regex 环视）；ERROR/FATAL 兜底补发、fsync 崩溃一致性与文件权限 0600；审计链接入轮转管线与 `inklog-cli verify-chain`；服务身份静态字段注入；deferred-capabilities 四项（中文姓名掩码/FallbackJournal/CBFS 转正/真 OTel 链路上下文）；masking 检测面与 KV 脱敏 API；i18n feature 化；CI 数据库矩阵补齐 duckdb；
+- **0.3.0-rc.4**（2026-09-14，含原 rc.3 批次）：新增 `init_inklog_logger` 单例初始化、运行时级别热调（`set_level`）、动态 Sink 注册（`LoggerBuilder::add_sink`）、`trace_id`/`span_id` 追踪关联、`inklog-cli query` 日志检索、网络转发 Sink（TCP/UDP）、OTLP 导出 MVP、归档防篡改链与 `docs/PERFORMANCE.md` 首份性能基线；
 - **0.3.0-rc.2**（2026-09-03）：集成 trait-kit 0.5.0-rc.2 与 i18n 重构并升级版本号；默认公共 API 移除三个 Mock（BREAKING，外部测试消费者需启用 `test-utils`）；
 - **0.2.0**（2026-08-05）：新增 `compression` / `parquet` / `fast-masking` feature 与 i18n 核心模块；新增 ChannelBufferedFileSink、断路器保护与环形缓冲文件 Sink；edition 2024、MSRV 1.94。
 

@@ -2579,7 +2579,7 @@ dependencies = [
 
 [[package]]
 name = "inklog"
-version = "0.3.0-rc.5"
+version = "0.3.0-rc.6"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -2644,7 +2644,7 @@ dependencies = [
 
 [[package]]
 name = "inklog-examples"
-version = "0.3.0-rc.5"
+version = "0.3.0-rc.6"
 dependencies = [
  "aes-gcm",
  "anyhow",

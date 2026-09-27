@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <summary>📑 目录</summary>
 
 - [Unreleased](#unreleased)
-- [0.3.0-rc.3](#030-rc3---2026-09-10)
+- [0.3.0-rc.6](#030-rc6---2026-09-28)
+- [0.3.0-rc.5](#030-rc5---2026-09-21)
+- [0.3.0-rc.4](#030-rc4---2026-09-14)
 - [0.3.0-rc.2](#030-rc2---2026-09-03)
 - [0.2.0](#020---2026-08-05)
 - [0.1.12](#0112---2026-07-22)
@@ -25,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 </details>
 
 ## [Unreleased]
+
+## [0.3.0-rc.6] - 2026-09-28
 
 ### Added
 
@@ -42,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **解压炸弹防护**：查询与内存解压路径施加 1 GiB 输出上限（流式读取，超限报 i18n 错误）
 - **内部故障 ops 事件**：轮转 rename 失败、轮转产物压缩/加密失败、sink 降级与恢复路径自动发布 `sink_degraded`/`sink_recovered` 事件（全局 hub 复用 manager ops 通道）
 - **服务身份静态字段注入**：`GlobalConfig` 新增 `service_name`/`service_instance`/`service_env`/`service_version` 与 `static_fields`（附加键值）；配置后由 subscriber 在记录入通道前注入每条日志的 `fields`（键名同名，全部出口一致，事件显式同名字段优先），未配置时热路径零开销；支持 TOML（`[global]`）、环境变量（`INKLOG_GLOBAL_SERVICE_*`、`INKLOG_GLOBAL_STATIC_FIELDS=k=v,...`，沿用既有前缀语义）与 confers/DI 键路径（`global.service_*`）；三条配置链统一身份校验：TOML 由 `InklogConfig::validate` 硬拒绝、env 覆盖点对空白值/控制字符告警忽略、DI 装配链拒绝构建；adapter 键路径对未设置的身份字段透传 None（不产生空串注入）
+- **deferred-capabilities 四项遗留能力**：中文姓名掩码（`NAME_FIELD_PATTERNS` 姓名族键词 + 2-4 汉字值形态，保留首字脱敏）；磁盘持久化 fallback 队列 `FallbackJournal`（JSONL 10MiB 上限丢最旧、启动重放防循环、`global.fallback_journal` 默认关）；ChannelBufferedFileSink 转正为主 file sink 路径（简单配置走 CBFS，高级配置回落 FileSink，USER_GUIDE 双路径能力矩阵）；真 OTel 链路上下文（新 `otel` feature，opentelemetry 0.30，span extensions → W3C traceparent → 根 span 派生三级提取，版本未对齐静默回退）
+- **masking API 扩展**：detect-only 检测面（`MaskMatch`/`detect`/`has_match` 与 pattern 访问器）；`MaskRuleRegistry` 全量快照 `rules()` 与构造器 `from_rules()`；行级 KV 脱敏 `DataMasker::mask_kv_lines`
 
 ### Changed
 
@@ -51,8 +57,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`set_level` 双门面同步**：运行时热调级别时同步 `log::set_max_level`（此前 log 门面被旧级别拦截）
 - **行为变更：console sink `enabled=false` 不再输出**：`ConsoleSink::write` 此前不检查 `enabled` 字段，显式禁用组合仍全量写 stdout/stderr；现禁用态在 write 处丢弃记录（默认组合 `enabled=true` 行为逐字节不变）。该语义落实使性能基准等声明禁用 console 的场景不再向 stdout 泄漏海量输出
 - **CI 数据库后端矩阵补齐 duckdb**：docker 数据库流水线分组矩阵扩为 sqlite/postgres/mysql/duckdb 四后端（互斥 feature 逐一验证）；duckdb 为 embedded 后端不起 compose 服务，经 `duckdb:///` 文件库直跑集成测试；`tests/docker` 测试目标 crate cfg 同步纳入 duckdb（此前该 feature 下整个目标被 cfg 掉，矩阵项只会空跑）。随真跑暴露并修复 duckdb 链路两处缺陷：`DbNexusAdapter` 建表此前走 SeaORM 通道（DuckDB 连接直接报错），现按驱动分派至 `execute_duckdb_raw`；DuckDB 建表 DDL 去除自增 id 列（duckdb-rs 绑定对 AUTOINCREMENT/IDENTITY 约束报 "Constraint not implemented"，行标识由隐式 rowid 提供）；评审收尾：DuckDB DDL 分派显式限定 CREATE TABLE 模板（`execute_duckdb_raw` 的 DdlGuard 仅对可识别 DDL 关键字设防，其余语句会以 admin 绕过 guard 策略），并清理 docker 测试遗留的死辅助 DDL 代码
+- **i18n feature 化**：icu/fluent 依赖树可裁剪（不启用 i18n feature 的消费方不再承担其编译成本），default 行为零变化
+- **console 着色构造期缓存**：着色判定构造期缓存与禁用分支零克隆
+- **error sink 延迟创建**：error sink 延迟到首次 error 写入时才创建文件
+- **ChannelBufferedFileSink 落盘格式**：缓冲落盘记录间补换行分隔
 
-## [0.3.0-rc.3] - 2026-09-10
+---
+
+## [0.3.0-rc.5] - 2026-09-21
+
+### 新增
+
+- **通用业务指标 registry**：Prometheus 文本导出（收编并行会话改动）
+
+### 变更
+
+- **i18n 整改**：统一错误与消息文案管理并清理零引用死键
+- **特性守卫**：补四数据库后端互斥守卫，引入 database/zstd 谓词收敛
+- **依赖与发布**：跨仓 path 依赖改走 crates.io；rustls 升 0.23.45；为 path-only 依赖补全 version 字段；release 工作流 publish 步骤幂等容错
+- **工程加固**：detect-secrets 基线、pre-commit 门禁、typos 白名单、CI examples serde 依赖修复
+
+### 修复
+
+- **logger-install**：依赖注入构建路径补装全局 tracing/log 前端
+- **dbnexus 依赖特性**：补 failover/replica-routing
+
+---
+
+## [0.3.0-rc.4] - 2026-09-14
+
+> 注：0.3.0-rc.3 未单独发布（无 tag、未上 crates.io），本节内容含原 rc.3 开发批次，随 0.3.0-rc.4 一并发布。
 
 ### Added
 
@@ -80,6 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **dbnexus 死使能清理**：移除 `failover`/`replica-routing` feature（`with_full_config` 硬编码 `None`，无行为）
 - 依赖升级：dbnexus → 0.6.0-rc.3、oxcache → 0.5.0-rc.4、trait-kit → 0.5.0-rc.3
 - 新增依赖：confers 0.6.0-rc.3（optional，`config-confers`/`kms` feature）+ `[patch.crates-io]` 本地路径
+
+---
 
 ## [0.3.0-rc.2] - 2026-09-03
 

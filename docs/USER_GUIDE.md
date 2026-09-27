@@ -81,29 +81,29 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.3"
+inklog = "0.3.0-rc.6"
 ```
 
 ### 启用可选 feature
 
 ```toml
 # HTTP 端点
-inklog = { version = "0.3.0-rc.3", features = ["http"] }
+inklog = { version = "0.3.0-rc.6", features = ["http"] }
 
 # CLI 工具
-inklog = { version = "0.3.0-rc.3", features = ["cli"] }
+inklog = { version = "0.3.0-rc.6", features = ["cli"] }
 
 # 数据库支持（四选一，互斥）
-inklog = { version = "0.3.0-rc.3", features = ["sqlite"] }
-inklog = { version = "0.3.0-rc.3", features = ["postgres"] }
-inklog = { version = "0.3.0-rc.3", features = ["mysql"] }
-inklog = { version = "0.3.0-rc.3", features = ["duckdb"] }
+inklog = { version = "0.3.0-rc.6", features = ["sqlite"] }
+inklog = { version = "0.3.0-rc.6", features = ["postgres"] }
+inklog = { version = "0.3.0-rc.6", features = ["mysql"] }
+inklog = { version = "0.3.0-rc.6", features = ["duckdb"] }
 
 # 压缩与性能
-inklog = { version = "0.3.0-rc.3", features = ["compression", "gzip", "parquet", "fast-masking"] }
+inklog = { version = "0.3.0-rc.6", features = ["compression", "gzip", "parquet", "fast-masking"] }
 
 # 集成与扩展
-inklog = { version = "0.3.0-rc.3", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
+inklog = { version = "0.3.0-rc.6", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
 ```
 
 完整 feature 清单与说明见 [README](../README.md#-特性标志)。
@@ -805,7 +805,7 @@ inklog 提供 `MockCache` / `MockConfig` / `MockDatabaseAdapter` 三个 Mock 实
 
 ```toml
 [dev-dependencies]
-inklog = { version = "0.3.0-rc.3", features = ["test-utils"] }
+inklog = { version = "0.3.0-rc.6", features = ["test-utils"] }
 ```
 
 #### 依赖注入测试模式

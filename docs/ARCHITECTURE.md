@@ -544,5 +544,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-**文档版本**: 3.1（对应 inklog 0.3.0-rc.3）
+**文档版本**: 3.1（对应 inklog 0.3.0-rc.6）
 **[⬆ 返回顶部](#️-inklog-架构设计)**
