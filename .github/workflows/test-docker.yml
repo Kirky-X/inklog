@@ -63,7 +63,7 @@ jobs:
         run: |
           case "${{ matrix.db }}" in
             sqlite)
-              echo "INKLOG_TEST_DB_URL=sqlite:///tmp/inklog_ci_test.db?mode=rwc" >> $GITHUB_ENV
+              echo "INKLOG_TEST_DB_URL=sqlite:///tmp/inklog_ci_test_${{ github.run_id }}.db?mode=rwc" >> $GITHUB_ENV
               ;;
             postgres)
               echo "INKLOG_TEST_DB_URL=postgres://inklog:inklog@localhost:5432/inklog_test" >> $GITHUB_ENV
@@ -72,7 +72,7 @@ jobs:
               echo "INKLOG_TEST_DB_URL=mysql://inklog:inklog@localhost:3306/inklog_test" >> $GITHUB_ENV
               ;;
             duckdb)
-              echo "INKLOG_TEST_DB_URL=duckdb:///tmp/inklog_ci_test.duckdb" >> $GITHUB_ENV
+              echo "INKLOG_TEST_DB_URL=duckdb:///tmp/inklog_ci_test_${{ github.run_id }}.duckdb" >> $GITHUB_ENV
               ;;
           esac
 
@@ -91,11 +91,15 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: Cleanup duckdb test file
-        if: always() && matrix.db == 'duckdb'
-        # 清除固定路径残留：self-hosted runner 跨 run 复用环境时，旧库的
-        # schema 会被 CREATE TABLE IF NOT EXISTS 幂等沿用，产生假阳性
-        run: rm -f /tmp/inklog_ci_test.duckdb
+      - name: Cleanup embedded db test file
+        if: always() && (matrix.db == 'sqlite' || matrix.db == 'duckdb')
+        # embedded 后端用 run_id 唯一路径（同 tests 的 unique_sqlite_url 先例）：
+        # self-hosted runner 复用环境时旧库不会被 CREATE TABLE IF NOT EXISTS
+        # 幂等沿用，并发 run 互不冲突；硬杀残留也因路径唯一不影响后续 run。
+        # 不做前置通配清理——会误删同机并发 run 正在使用的文件。
+        run: |
+          rm -f "/tmp/inklog_ci_test_${{ github.run_id }}.db"
+          rm -f "/tmp/inklog_ci_test_${{ github.run_id }}.duckdb"
 
       - name: Cleanup Docker services
         if: always()
