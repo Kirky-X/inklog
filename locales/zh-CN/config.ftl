@@ -24,7 +24,8 @@ config-invalid_stderr_level = 无效的 stderr_levels 条目 '{ $level }'。有�
 config-env_invalid_format = INKLOG_GLOBAL_FORMAT 为空，已忽略
 config-env_invalid_db_url = INKLOG_DATABASE_SINK_URL 包含不安全字符，已忽略
 config-env_blank_value_ignored = 环境变量 '{ $var }' 为空，已忽略
-config-env_invalid_static_field = INKLOG_GLOBAL_STATIC_FIELDS 段 '{ $segment }' 不是有效的 key=value，已忽略
+config-env_invalid_static_field = INKLOG_GLOBAL_STATIC_FIELDS 段 '{ $segment }' 不是有效的 key=value（完整原始值: '{ $raw }'），已忽略
+config-env_control_char_ignored = 环境变量 '{ $var }' 含控制字符，已忽略
 
 # 数据库配置解析错误
 config-unknown_db_driver = 未知的数据库驱动 '{ $driver }'。有效驱动: { $valid }

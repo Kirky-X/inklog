@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **net 重连指数退避**：connect 失败按 `min(2^n × 100ms, 30s)` 退避，窗口内 write 直接入缓冲不再发起连接，成功清零
 - **解压炸弹防护**：查询与内存解压路径施加 1 GiB 输出上限（流式读取，超限报 i18n 错误）
 - **内部故障 ops 事件**：轮转 rename 失败、轮转产物压缩/加密失败、sink 降级与恢复路径自动发布 `sink_degraded`/`sink_recovered` 事件（全局 hub 复用 manager ops 通道）
-- **服务身份静态字段注入**：`GlobalConfig` 新增 `service_name`/`service_instance`/`service_env`/`service_version` 与 `static_fields`（附加键值）；配置后由 subscriber 在记录入通道前注入每条日志的 `fields`（键名同名，全部出口一致，事件显式同名字段优先），未配置时热路径零开销；支持 TOML（`[global]`）、环境变量（`INKLOG_GLOBAL_SERVICE_*`、`INKLOG_GLOBAL_STATIC_FIELDS=k=v,...`，沿用既有前缀语义）与 confers/DI 键路径（`global.service_*`）；`validate` 拒绝空白值与含控制字符的键值
+- **服务身份静态字段注入**：`GlobalConfig` 新增 `service_name`/`service_instance`/`service_env`/`service_version` 与 `static_fields`（附加键值）；配置后由 subscriber 在记录入通道前注入每条日志的 `fields`（键名同名，全部出口一致，事件显式同名字段优先），未配置时热路径零开销；支持 TOML（`[global]`）、环境变量（`INKLOG_GLOBAL_SERVICE_*`、`INKLOG_GLOBAL_STATIC_FIELDS=k=v,...`，沿用既有前缀语义）与 confers/DI 键路径（`global.service_*`）；三条配置链统一身份校验：TOML 由 `InklogConfig::validate` 硬拒绝、env 覆盖点对空白值/控制字符告警忽略、DI 装配链拒绝构建；adapter 键路径对未设置的身份字段透传 None（不产生空串注入）
 
 ### Changed
 

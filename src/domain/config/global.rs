@@ -283,14 +283,16 @@ impl GlobalConfig {
                 crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
             ));
         }
-        self.validate_identity_fields()?;
+        self.validate_identity()?;
         Ok(())
     }
 
     /// 已配置身份字段的注入映射（键名 → 值；未配置任何身份时为空 map）。
     ///
     /// 固定身份键：`service_name` / `service_instance` / `service_env` /
-    /// `service_version`；`static_fields` 的键原样保留。
+    /// `service_version`——这四个键是**保留键**；`static_fields` 的键原样
+    /// 保留并后写优先（可覆盖固定键），应用应避免以 `service_` 前缀命名
+    /// 业务字段。空白值跳过（深度防御：绕过 validate 的链路不注入空白身份）。
     pub fn identity_fields(&self) -> std::collections::BTreeMap<String, serde_json::Value> {
         let mut map = std::collections::BTreeMap::new();
         let scalars = [
@@ -301,18 +303,27 @@ impl GlobalConfig {
         ];
         for (key, value) in scalars {
             if let Some(v) = value {
+                if v.trim().is_empty() {
+                    continue;
+                }
                 map.insert(key.to_string(), serde_json::Value::String(v.clone()));
             }
         }
         for (key, value) in &self.static_fields {
+            if value.trim().is_empty() {
+                continue;
+            }
             map.insert(key.clone(), serde_json::Value::String(value.clone()));
         }
         map
     }
 
-    /// 身份字段校验：已设置（Some）的标量不得为空白；键/值不得含控制字符
-    ///（换行等会破坏日志行结构，注入向量在配置期即拒绝）。
-    fn validate_identity_fields(&self) -> Result<(), String> {
+    /// 身份字段校验（只读入口）：已设置（Some）的标量不得为空白；键/值不得
+    /// 含控制字符（换行等会破坏日志行结构，TOML/env/DI 三条配置链统一拒绝）。
+    ///
+    /// [`InklogConfig::validate`](crate::domain::config::InklogConfig::validate)
+    /// 与 manager 的 DI 装配链都经由本入口执行硬校验。
+    pub fn validate_identity(&self) -> Result<(), String> {
         let scalars = [
             ("service_name", &self.service_name),
             ("service_instance", &self.service_instance),
@@ -339,7 +350,7 @@ impl GlobalConfig {
 }
 
 /// 拒绝含控制字符的配置值（CWE-117 邻域：换行/制表等会破坏日志行结构）。
-fn reject_control_chars(field: &str, value: &str) -> Result<(), String> {
+pub(crate) fn reject_control_chars(field: &str, value: &str) -> Result<(), String> {
     if let Some(c) = value.chars().find(|&c| char::is_control(c)) {
         return Err(format!(
             "{field} contains a control character (U+{:04X})",
@@ -559,6 +570,36 @@ mod tests {
             ..Default::default()
         };
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_identity_fields_skip_blank_values() {
+        // 深度防御：绕过 validate 的链路（如宿主手工改字段）塞入空白值时，
+        // 注入映射不得包含空白身份键
+        let cfg = GlobalConfig {
+            service_name: Some("orders".to_string()),
+            service_instance: Some("   ".to_string()),
+            service_env: Some(String::new()),
+            static_fields: [("blank".to_string(), " ".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let identity = cfg.identity_fields();
+        assert_eq!(identity.len(), 1, "blank values must be skipped");
+        assert!(identity.contains_key("service_name"));
+    }
+
+    #[test]
+    fn test_validate_identity_public_entry_rejects_and_accepts() {
+        // 公开校验入口（供 InklogConfig::validate 与 DI 链复用，&self 只读）
+        let mut cfg = GlobalConfig {
+            service_name: Some("bad\nvalue".to_string()),
+            ..Default::default()
+        };
+        assert!(cfg.validate_identity().is_err());
+        cfg.service_name = Some("good".to_string());
+        assert!(cfg.validate_identity().is_ok());
     }
 
     #[test]

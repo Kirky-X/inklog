@@ -181,8 +181,9 @@ impl InklogConfig {
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_AUTO_FALLBACK") {
             config.global.auto_fallback = val.parse().unwrap_or(config.global.auto_fallback);
         }
-        // 服务身份静态字段：沿用既有 INKLOG_GLOBAL_ 前缀语义；空值视为
-        // 未设置（告警忽略），控制字符由 global.validate() 在加载链上拒绝
+        // 服务身份静态字段：沿用既有 INKLOG_GLOBAL_ 前缀语义。env 覆盖在
+        // validate 之后执行，因此空值与控制字符在覆盖点就地告警忽略（不依赖
+        // 后置校验）；TOML 链则由 InklogConfig::validate() 硬拒绝
         for (env_suffix, slot) in [
             ("SERVICE_NAME", &mut config.global.service_name),
             ("SERVICE_INSTANCE", &mut config.global.service_instance),
@@ -198,6 +199,15 @@ impl InklogConfig {
                         "{}",
                         crate::i18n::tr_args("config-env_blank_value_ignored", args)
                     );
+                } else if crate::domain::config::global::reject_control_chars(&env_var, &val)
+                    .is_err()
+                {
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("var", &env_var);
+                    tracing::warn!(
+                        "{}",
+                        crate::i18n::tr_args("config-env_control_char_ignored", args)
+                    );
                 } else {
                     *slot = Some(val);
                 }
@@ -210,7 +220,20 @@ impl InklogConfig {
                     continue;
                 }
                 match segment.split_once('=') {
-                    Some((key, value)) if !key.trim().is_empty() && !value.is_empty() => {
+                    Some((key, value))
+                        if !key.trim().is_empty()
+                            && !value.is_empty()
+                            && crate::domain::config::global::reject_control_chars(
+                                "static field",
+                                value,
+                            )
+                            .is_ok()
+                            && crate::domain::config::global::reject_control_chars(
+                                "static field key",
+                                key,
+                            )
+                            .is_ok() =>
+                    {
                         config
                             .global
                             .static_fields
@@ -219,6 +242,7 @@ impl InklogConfig {
                     _ => {
                         let mut args = crate::i18n::MsgArgs::new();
                         args.set("segment", segment);
+                        args.set("raw", &val);
                         tracing::warn!(
                             "{}",
                             crate::i18n::tr_args("config-env_invalid_static_field", args)
@@ -520,6 +544,13 @@ impl InklogConfig {
                 args,
             )));
         }
+
+        // --- Global identity fields ---
+        // 身份字段是本加载链的硬校验出口（normalize 只 warn）：空白值/控制
+        // 字符在此以 Err 拒绝加载
+        self.global
+            .validate_identity()
+            .map_err(InklogError::ConfigError)?;
 
         // --- Global log level ---
         if !crate::LogLevel::is_valid_level(&self.global.level) {
@@ -863,6 +894,57 @@ mod tests {
         unsafe {
             std::env::remove_var("INKLOG_GLOBAL_STATIC_FIELDS");
         }
+    }
+
+    #[test]
+    fn test_env_override_control_char_identity_ignored() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        // env 值含控制字符：在覆盖点告警忽略（保持 None），不进入配置
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_SERVICE_NAME", "orders\nfake");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(
+            config.global.service_name.is_none(),
+            "control-character env value must be ignored"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_SERVICE_NAME");
+        }
+    }
+
+    #[test]
+    fn test_env_override_static_fields_control_char_segment_skipped() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_STATIC_FIELDS", "good=1,bad=line1\nline2");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(
+            !config.global.static_fields.contains_key("bad"),
+            "control-character static field must be skipped"
+        );
+        assert!(config.global.static_fields.contains_key("good"));
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_STATIC_FIELDS");
+        }
+    }
+
+    #[test]
+    fn test_validate_hard_rejects_invalid_identity_fields() {
+        // InklogConfig::validate 是加载链的硬校验出口：身份字段非法必须 Err
+        let mut config = InklogConfig::default();
+        config.global.service_name = Some("bad\nvalue".to_string());
+        assert!(config.validate().is_err());
+
+        let mut config = InklogConfig::default();
+        config.global.service_env = Some("   ".to_string());
+        assert!(config.validate().is_err());
+
+        // 默认配置（无身份）仍通过
+        assert!(InklogConfig::default().validate().is_ok());
     }
 
     #[test]

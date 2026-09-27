@@ -256,6 +256,12 @@ impl LoggerManager {
             if let Some(v) = config_provider.get_string("global.service_version") {
                 config.global.service_version = Some(v);
             }
+            // provider 覆盖完成后立即硬校验身份字段：DI 链与 TOML 链的校验
+            // 语义一致（空白值/控制字符拒绝构建）
+            config
+                .global
+                .validate_identity()
+                .map_err(InklogError::ConfigError)?;
 
             // File sink 配置（显式 `enabled = false` 同样要落进 config——
             // 依赖注入模式下宿主可能已通过 add_sink 挂载自己的文件 sink

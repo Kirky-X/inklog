@@ -224,26 +224,13 @@ impl Config for InklogConfigAdapter {
             "global.format" => Some(self.config.global.format.clone()),
             "global.masking_enabled" => Some(self.config.global.masking_enabled.to_string()),
             "global.auto_fallback" => Some(self.config.global.auto_fallback.to_string()),
-            "global.service_name" => {
-                Some(self.config.global.service_name.clone().unwrap_or_default())
-            }
-            "global.service_instance" => Some(
-                self.config
-                    .global
-                    .service_instance
-                    .clone()
-                    .unwrap_or_default(),
-            ),
-            "global.service_env" => {
-                Some(self.config.global.service_env.clone().unwrap_or_default())
-            }
-            "global.service_version" => Some(
-                self.config
-                    .global
-                    .service_version
-                    .clone()
-                    .unwrap_or_default(),
-            ),
+            // 身份字段直接透传 Option：键未设置时返回 None（与 MockConfig 的
+            // 「未配置返回 None」语义一致），manager 的覆盖块才不会把 None
+            // 折叠成 Some("") 而向每条日志注入空串身份
+            "global.service_name" => self.config.global.service_name.clone(),
+            "global.service_instance" => self.config.global.service_instance.clone(),
+            "global.service_env" => self.config.global.service_env.clone(),
+            "global.service_version" => self.config.global.service_version.clone(),
             "global.fallback_initial_delay_ms" => {
                 Some(self.config.global.fallback_initial_delay_ms.to_string())
             }
@@ -566,6 +553,45 @@ mod tests {
             Some("debug".to_string())
         );
         assert_eq!(adapter.get_string("nonexistent.key"), None);
+    }
+
+    #[test]
+    fn test_adapter_unconfigured_identity_keys_return_none() {
+        // 未配置身份字段时必须返回 None（键未设置 ≠ 空值）：manager 的
+        // if let Some 覆盖块不得把 None 折叠成 Some("")，否则每条日志会被
+        // 注入空串身份字段，违背「未设置（None）时不注入」契约
+        let adapter = InklogConfigAdapter::from_config(InklogConfig::default());
+        for key in [
+            "global.service_name",
+            "global.service_instance",
+            "global.service_env",
+            "global.service_version",
+        ] {
+            assert_eq!(
+                adapter.get_string(key),
+                None,
+                "unconfigured '{key}' must return None"
+            );
+        }
+    }
+
+    #[test]
+    fn test_adapter_configured_identity_keys_passthrough() {
+        let mut config = InklogConfig::default();
+        config.global.service_name = Some("orders".to_string());
+        config.global.service_env = Some("prod".to_string());
+
+        let adapter = InklogConfigAdapter::from_config(config);
+        assert_eq!(
+            adapter.get_string("global.service_name"),
+            Some("orders".to_string())
+        );
+        assert_eq!(
+            adapter.get_string("global.service_env"),
+            Some("prod".to_string())
+        );
+        // 其余未配置键仍为 None
+        assert_eq!(adapter.get_string("global.service_instance"), None);
     }
 
     #[test]
