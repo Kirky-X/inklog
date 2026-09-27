@@ -33,6 +33,7 @@ db-table_empty = Table name must not be empty
 db-table_invalid_start = Invalid table name '{ $name }': must start with a letter or underscore
 db-table_invalid_char = Invalid table name '{ $name }': contains forbidden character '{ $char }'
 db-ensure_table_failed = Failed to ensure table exists: { $err }
+db-duckdb_ddl_not_create_table = DuckDB DDL channel only allows CREATE TABLE templates, got: { $sql }
 
 # Cache adapter messages
 cache-get_failed = Failed to get cache key '{ $key }': { $err }

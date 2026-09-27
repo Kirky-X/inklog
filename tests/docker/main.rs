@@ -68,54 +68,6 @@ pub fn unique_sqlite_url(name: &str) -> String {
     )
 }
 
-/// 创建 logs 表的 SQL（兼容 SQLite/PostgreSQL/MySQL/DuckDB）。
-pub const CREATE_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS logs ( \
-    timestamp TEXT NOT NULL, \
-    level TEXT NOT NULL, \
-    target TEXT NOT NULL, \
-    message TEXT NOT NULL, \
-    fields TEXT NOT NULL, \
-    file TEXT, \
-    line INTEGER, \
-    thread_id TEXT NOT NULL \
-)";
-
-/// 构造指定表名的建表 DDL（兼容 SQLite/PostgreSQL/MySQL/DuckDB）。
-///
-/// `CREATE_TABLE_SQL` 固定建 `logs` 表；当测试需要其他表名（如 `logs_single`）
-/// 时用本函数生成对应 DDL，再通过 `execute_raw_ddl` 执行。
-///
-/// `table_name` 必须是合法 SQL 标识符（`[A-Za-z_][A-Za-z0-9_]*`），
-/// 非法输入直接 panic（测试工具代码，fail-fast 合理）。
-pub fn create_table_sql(table_name: &str) -> String {
-    let mut chars = table_name.chars();
-    let valid = match chars.next() {
-        Some(first) => first.is_ascii_alphabetic() || first == '_',
-        None => false,
-    } && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
-    assert!(
-        valid,
-        "invalid table name `{}`: expected identifier matching [A-Za-z_][A-Za-z0-9_]*",
-        table_name
-    );
-    format!(
-        "CREATE TABLE IF NOT EXISTS {} ( \
-            timestamp TEXT NOT NULL, \
-            level TEXT NOT NULL, \
-            target TEXT NOT NULL, \
-            message TEXT NOT NULL, \
-            fields TEXT NOT NULL, \
-            file TEXT, \
-            line INTEGER, \
-            thread_id TEXT NOT NULL \
-        )",
-        table_name
-    )
-}
-
-/// 统计 logs 表行数的 SQL（兼容 SQLite/PostgreSQL/MySQL）。
-pub const COUNT_TABLE_SQL: &str = "SELECT COUNT(*) FROM logs";
-
 /// 辅助函数：构造测试用 LogRecord。
 pub fn make_log_record(level: &str, target: &str, message: &str) -> inklog::LogRecord {
     use inklog::tracing::Level;
@@ -160,22 +112,4 @@ fn unique_sqlite_url_sanitizes_unsafe_characters() {
         unique_sqlite_url("bad name/../x"),
         format!("sqlite:///tmp/inklog_test_bad_name____x_{pid}.db?mode=rwc")
     );
-}
-
-#[test]
-fn create_table_sql_accepts_valid_identifier() {
-    let sql = create_table_sql("logs_single");
-    assert!(sql.starts_with("CREATE TABLE IF NOT EXISTS logs_single"));
-}
-
-#[test]
-#[should_panic(expected = "invalid table name")]
-fn create_table_sql_rejects_invalid_identifier() {
-    create_table_sql("logs; DROP TABLE logs--");
-}
-
-#[test]
-#[should_panic(expected = "invalid table name")]
-fn create_table_sql_rejects_empty_identifier() {
-    create_table_sql("");
 }

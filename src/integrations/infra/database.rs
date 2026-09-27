@@ -335,30 +335,51 @@ impl DbNexusAdapter {
             }
         })?;
         // DuckDB 连接不支持 SeaORM 的 execute_raw_ddl 路径（内部 as_sea_orm
-        // 对 DuckDb 连接返回错误），改走 dbnexus 的 DuckDB 专用通道——
-        // admin 角色 + DdlGuard 对 DDL 的放行语义与 execute_raw_ddl 一致。
+        // 对 DuckDb 连接返回错误），改走 dbnexus 的 DuckDB 专用通道。注意：
+        // execute_duckdb_raw 的 DdlGuard 仅对可识别的 DDL 关键字设防，其余
+        // 语句 admin 直接放行——故分派入参限定为本函数生成的 CREATE TABLE
+        // 模板，禁止复用该分支执行其他 DDL。
         #[cfg(feature = "duckdb")]
         if driver == DatabaseDriver::DuckDB {
-            session.execute_duckdb_raw(&ddl).await.map_err(|e| {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("err", e.to_string());
-                InklogError::DatabaseError {
-                    message: crate::i18n::tr_args("db-ensure_table_failed", args),
-                    source: Some(Box::new(e)),
-                }
-            })?;
+            ensure_create_table_ddl(&ddl)?;
+            session
+                .execute_duckdb_raw(&ddl)
+                .await
+                .map_err(map_ddl_err)?;
             return Ok(());
         }
-        session.execute_raw_ddl(&ddl).await.map_err(|e| {
-            let mut args = crate::i18n::MsgArgs::new();
-            args.set("err", e.to_string());
-            InklogError::DatabaseError {
-                message: crate::i18n::tr_args("db-ensure_table_failed", args),
-                source: Some(Box::new(e)),
-            }
-        })?;
+        session.execute_raw_ddl(&ddl).await.map_err(map_ddl_err)?;
         Ok(())
     }
+}
+
+/// 映射 DDL 执行失败到 `db-ensure_table_failed` 错误（两处 DDL 调用点共用）。
+#[cfg(feature = "database")]
+fn map_ddl_err(e: dbnexus::DbError) -> InklogError {
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("err", e.to_string());
+    InklogError::DatabaseError {
+        message: crate::i18n::tr_args("db-ensure_table_failed", args),
+        source: Some(Box::new(e)),
+    }
+}
+
+/// 校验入参确为 CREATE TABLE 建表模板，否则拒绝执行。
+///
+/// 仅 [`ensure_table_exists`] 的 DuckDB 分派使用：`execute_duckdb_raw` 的
+/// DdlGuard 只拦截可识别的 DDL 关键字，其余语句（如 CREATE SCHEMA）会以
+/// admin 身份绕过 guard 策略直接执行——该通道只允许建表模板进入。
+#[cfg(feature = "duckdb")]
+fn ensure_create_table_ddl(ddl: &str) -> Result<(), InklogError> {
+    if ddl.starts_with("CREATE TABLE") {
+        return Ok(());
+    }
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("sql", ddl.to_string());
+    Err(InklogError::DatabaseError {
+        message: crate::i18n::tr_args("db-duckdb_ddl_not_create_table", args),
+        source: None,
+    })
 }
 
 /// Validate that a table name contains only safe identifier characters.
@@ -1429,6 +1450,18 @@ mod tests {
         assert!(ddl.contains("TIMESTAMP NOT NULL"));
         assert!(ddl.contains("TEXT NOT NULL"));
         assert!(ddl.contains("thread_id TEXT NOT NULL"));
+    }
+
+    #[cfg(all(test, feature = "duckdb"))]
+    #[test]
+    fn test_ensure_create_table_ddl_rejects_non_create_table() {
+        // generate_create_table_sql 产物必须放行
+        let ddl = generate_create_table_sql("logs", &DatabaseDriver::DuckDB);
+        assert!(ensure_create_table_ddl(&ddl).is_ok());
+        // 其余 DDL（会绕过 execute_duckdb_raw 的 DdlGuard）必须拒绝
+        assert!(ensure_create_table_ddl("CREATE SCHEMA audit").is_err());
+        assert!(ensure_create_table_ddl("DROP TABLE logs").is_err());
+        assert!(ensure_create_table_ddl("").is_err());
     }
 
     // ============================================================================

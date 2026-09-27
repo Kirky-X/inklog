@@ -91,6 +91,12 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      - name: Cleanup duckdb test file
+        if: always() && matrix.db == 'duckdb'
+        # 清除固定路径残留：self-hosted runner 跨 run 复用环境时，旧库的
+        # schema 会被 CREATE TABLE IF NOT EXISTS 幂等沿用，产生假阳性
+        run: rm -f /tmp/inklog_ci_test.duckdb
+
       - name: Cleanup Docker services
         if: always()
         run: docker compose -f docker/docker-compose.test.yml down -v
