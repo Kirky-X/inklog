@@ -3669,6 +3669,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_write_with_masking_keeps_plain_english_words_intact() {
+        // 落盘脱敏路径：普通英文单词不得被护照规则误掩，真护照形态仍被掩
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+        let config = FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            masking_enabled: true,
+            batch_size: 1,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let record = LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "test".to_string(),
+            message: "task execution completed for E12345678".to_string(),
+            fields: HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "t1".to_string(),
+            trace_id: None,
+            span_id: None,
+        };
+        sink.write(&record).await.unwrap();
+        sink.flush().await.unwrap();
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            content.contains("task execution completed"),
+            "plain English words must survive masking on disk: {content}"
+        );
+        assert!(
+            !content.contains("e******on"),
+            "'execution' must not be masked as a passport: {content}"
+        );
+        assert!(
+            !content.contains("E12345678") && content.contains("E******78"),
+            "real passport numbers must still be masked on disk: {content}"
+        );
+        sink.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn test_write_appends_to_existing_file() {
         let temp_dir = tempdir().unwrap();
         let log_path = temp_dir.path().join("test.log");

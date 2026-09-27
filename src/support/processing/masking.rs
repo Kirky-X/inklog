@@ -710,12 +710,11 @@ static MAC_ADDRESS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Passport number (Chinese international passport format)
 ///
-/// 排除"混合 hex"形态（前缀后 8 位含 [a-fA-F] 的十六进制串，如 git 短 SHA
-/// `e1a2b3c4d`）：真实护照序列以前缀字母 + 纯数字为主（如 E12345678），
-/// 纯数字后缀不受前瞻影响。
+/// 前缀字母（E/G）+ 8 位纯数字。后缀必须是数字：曾允许字母数字混合，
+/// 结果 e/g 开头的 9 字母英文单词（如 execution）被整体误掩；纯数字
+/// 后缀下不存在"混合 hex"误伤形态，无需额外排除前瞻。
 static PASSPORT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?<![0-9A-Za-z])[EeGg](?![0-9a-fA-F]{0,7}[a-fA-F][0-9a-fA-F]{0,7}(?![0-9A-Za-z]))[A-Za-z0-9]{8}(?![0-9A-Za-z])")
-        .expect("Invalid passport regex")
+    Regex::new(r"(?<![0-9A-Za-z])[EeGg]\d{8}(?![0-9A-Za-z])").expect("Invalid passport regex")
 });
 
 /// US Social Security Number
@@ -2033,6 +2032,24 @@ mod tests {
             !result.contains("E12345678"),
             "passport E+8digits must be masked: {result}"
         );
+    }
+
+    #[test]
+    fn test_plain_english_words_not_masked_as_passport() {
+        // e/g 开头的普通英文单词不得被护照规则误掩：
+        // 护照是前缀字母 + 8 位纯数字，字母后缀不是合法护照形态
+        let masker = DataMasker::new();
+        for text in [
+            "task execution completed",
+            "everything generation gradually",
+            "the group finished",
+        ] {
+            let result = masker.mask(text);
+            assert_eq!(
+                result, text,
+                "plain English words must stay untouched: {result}"
+            );
+        }
     }
 
     #[test]
