@@ -965,10 +965,10 @@ inklog 支持通过 `INKLOG_*` 环境变量覆盖配置（优先级高于配置�
 | `INKLOG_GLOBAL_SERVICE_INSTANCE` | 服务身份：实例标识（字段 `service_instance`） | `INKLOG_GLOBAL_SERVICE_INSTANCE=orders-7f3a` |
 | `INKLOG_GLOBAL_SERVICE_ENV` | 服务身份：部署环境（字段 `service_env`） | `INKLOG_GLOBAL_SERVICE_ENV=prod` |
 | `INKLOG_GLOBAL_SERVICE_VERSION` | 服务身份：服务版本（字段 `service_version`） | `INKLOG_GLOBAL_SERVICE_VERSION=1.2.3` |
-
-> 注：`service_name`/`service_instance`/`service_env`/`service_version` 为保留字段键，建议应用避免以 `service_` 前缀命名业务字段（事件显式携带同名字段会覆盖静态身份，影响日志溯源归属）。
 | `INKLOG_GLOBAL_STATIC_FIELDS` | 附加静态键值（逗号分隔 `key=value`，注入每条记录；value 不得含 `,`，无法解析的段告警跳过） | `INKLOG_GLOBAL_STATIC_FIELDS=region=cn-north-1,az=a` |
 | `INKLOG_LOCALE` | 消息本地化语言（zh-CN / en） | `INKLOG_LOCALE=en` |
+
+> 注：`service_name`/`service_instance`/`service_env`/`service_version` 为保留字段键，建议应用避免以 `service_` 前缀命名业务字段（事件显式携带同名字段会覆盖静态身份，影响日志溯源归属）。
 
 ### 文件 Sink
 

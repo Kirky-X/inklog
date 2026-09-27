@@ -1547,6 +1547,82 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_di_config_invalid_identity_value_rejects_build() {
+        // DI 链身份硬校验：provider 返回含控制字符的身份值时构建必须失败
+        //（与 TOML 链的 InklogConfig::validate 硬拒绝语义一致）
+        use crate::integrations::MockConfig;
+        use crate::integrations::infra::config::Config;
+        let config = MockConfig::new();
+        config.set("global.service_name", "orders\nfake");
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(config) as Arc<dyn Config>),
+            custom_sinks: Vec::new(),
+            #[cfg(feature = "database")]
+            database: None,
+        };
+        let result = LoggerManager::build_with_deps(deps).await;
+        match result {
+            Ok(manager) => {
+                let _ = manager.shutdown();
+                panic!("build must fail on control-character identity value");
+            }
+            Err(e) => {
+                assert!(
+                    e.to_string().contains("control character"),
+                    "unexpected error: {e}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_di_config_blank_identity_value_rejects_build() {
+        use crate::integrations::MockConfig;
+        use crate::integrations::infra::config::Config;
+        let config = MockConfig::new();
+        config.set("global.service_env", "   ");
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(config) as Arc<dyn Config>),
+            custom_sinks: Vec::new(),
+            #[cfg(feature = "database")]
+            database: None,
+        };
+        let result = LoggerManager::build_with_deps(deps).await;
+        match result {
+            Ok(manager) => {
+                let _ = manager.shutdown();
+                panic!("build must fail on blank identity value");
+            }
+            Err(e) => {
+                assert!(e.to_string().contains("blank"), "unexpected error: {e}");
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_di_config_valid_identity_value_builds() {
+        // 正例：合法身份值正常构建（拒绝路径的对照）
+        use crate::integrations::MockConfig;
+        use crate::integrations::infra::config::Config;
+        let config = MockConfig::new();
+        config.set("global.service_name", "orders");
+        config.set("global.service_env", "prod");
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(config) as Arc<dyn Config>),
+            custom_sinks: Vec::new(),
+            #[cfg(feature = "database")]
+            database: None,
+        };
+        let manager = LoggerManager::build_with_deps(deps)
+            .await
+            .expect("valid identity values must build");
+        let _ = manager.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_manager_cache_getter_returns_injected_instance() {
         // cache()/database() getter 应返回与注入实例共享底层数据的 Arc
         use crate::integrations::MockCache;
