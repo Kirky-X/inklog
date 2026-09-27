@@ -92,6 +92,10 @@ use crate::InklogError;
 /// | `global.format` | `config.global.format` |
 /// | `global.masking_enabled` | `config.global.masking_enabled` |
 /// | `global.auto_fallback` | `config.global.auto_fallback` |
+/// | `global.service_name` | `config.global.service_name` |
+/// | `global.service_instance` | `config.global.service_instance` |
+/// | `global.service_env` | `config.global.service_env` |
+/// | `global.service_version` | `config.global.service_version` |
 /// | `file_sink.enabled` | `config.file_sink.enabled` |
 /// | `file_sink.path` | `config.file_sink.path` |
 /// | `file_sink.max_size` | `config.file_sink.max_size` |
@@ -220,6 +224,26 @@ impl Config for InklogConfigAdapter {
             "global.format" => Some(self.config.global.format.clone()),
             "global.masking_enabled" => Some(self.config.global.masking_enabled.to_string()),
             "global.auto_fallback" => Some(self.config.global.auto_fallback.to_string()),
+            "global.service_name" => {
+                Some(self.config.global.service_name.clone().unwrap_or_default())
+            }
+            "global.service_instance" => Some(
+                self.config
+                    .global
+                    .service_instance
+                    .clone()
+                    .unwrap_or_default(),
+            ),
+            "global.service_env" => {
+                Some(self.config.global.service_env.clone().unwrap_or_default())
+            }
+            "global.service_version" => Some(
+                self.config
+                    .global
+                    .service_version
+                    .clone()
+                    .unwrap_or_default(),
+            ),
             "global.fallback_initial_delay_ms" => {
                 Some(self.config.global.fallback_initial_delay_ms.to_string())
             }

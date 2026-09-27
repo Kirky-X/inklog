@@ -23,6 +23,8 @@ config-env_unsafe_http_path = HTTP path '{ $path }' (env: { $env_var }) is not a
 config-invalid_stderr_level = Invalid stderr_levels entry '{ $level }'. Valid levels: { $valid }
 config-env_invalid_format = INKLOG_GLOBAL_FORMAT is empty, ignoring
 config-env_invalid_db_url = INKLOG_DATABASE_SINK_URL contains unsafe characters, ignoring
+config-env_blank_value_ignored = Environment variable '{ $var }' is blank, ignoring
+config-env_invalid_static_field = INKLOG_GLOBAL_STATIC_FIELDS segment '{ $segment }' is not a valid key=value pair, ignoring
 
 # Database config parsing errors
 config-unknown_db_driver = Unknown database driver '{ $driver }'. Valid drivers: { $valid }

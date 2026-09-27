@@ -53,6 +53,7 @@ impl Clone for LoggerSubscriber {
             error_sample_counter: AtomicU64::new(self.error_sample_counter.load(Ordering::Relaxed)),
             fallback_pending: Arc::clone(&self.fallback_pending),
             journal: self.journal.clone(),
+            identity_fields: self.identity_fields.clone(),
         }
     }
 }
@@ -83,6 +84,10 @@ pub struct LoggerSubscriber {
     /// 磁盘持久化 fallback journal（deferred-capabilities C4）：
     /// LRU 淘汰的关键日志落盘，进程启动重放。None = 未启用（零开销）。
     journal: Option<Arc<crate::support::fallback_journal::FallbackJournal>>,
+    /// 服务身份静态字段（service_name/instance/env/version + 自定义标注），
+    /// 构建期固化；on_event 时以"事件显式字段优先"语义逐条注入 `fields`。
+    /// None = 未配置（热路径仅一次 Option 判断，零开销）。
+    identity_fields: Option<Arc<std::collections::BTreeMap<String, serde_json::Value>>>,
 }
 
 impl LoggerSubscriber {
@@ -103,6 +108,7 @@ impl LoggerSubscriber {
             error_sample_counter: AtomicU64::new(0),
             fallback_pending: Arc::new(AtomicBool::new(false)),
             journal: None,
+            identity_fields: None,
         }
     }
 
@@ -153,6 +159,18 @@ impl LoggerSubscriber {
     /// Set the rate limiter for log throughput control.
     pub fn with_rate_limiter(mut self, rate_limiter: Arc<RateLimiter>) -> Self {
         self.rate_limiter = Some(rate_limiter);
+        self
+    }
+
+    /// 启用服务身份静态字段注入（service_name/instance/env/version 等）。
+    ///
+    /// 每条记录进入通道前把这些键值并入 `fields`；事件显式携带的同名字段
+    /// 优先（or-insert 语义，与 trace_id 的显式覆盖先例一致）。
+    pub fn with_identity_fields(
+        mut self,
+        fields: Arc<std::collections::BTreeMap<String, serde_json::Value>>,
+    ) -> Self {
+        self.identity_fields = Some(fields);
         self
     }
 
@@ -456,6 +474,17 @@ where
             }
         }
 
+        // 服务身份静态字段注入：or-insert，事件显式同名字段优先；
+        // 放在限流判定之后——被丢弃的记录不做无谓注入
+        if let Some(identity) = self.identity_fields.as_ref() {
+            for (key, value) in identity.iter() {
+                record
+                    .fields
+                    .entry(key.clone())
+                    .or_insert_with(|| value.clone());
+            }
+        }
+
         // Sanitize message and fields before sending to channels
         self.sanitize_record(&mut record);
 
@@ -548,6 +577,95 @@ mod tests {
         assert_eq!(async_received.level, "INFO");
         assert_eq!(async_received.target, "test::subscriber");
         assert_eq!(async_received.message, "hello");
+    }
+
+    fn identity_map(
+        pairs: &[(&str, &str)],
+    ) -> std::sync::Arc<std::collections::BTreeMap<String, Value>> {
+        std::sync::Arc::new(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn test_identity_fields_injected_into_records() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, async_rx) = bounded(10);
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()))
+            .with_identity_fields(identity_map(&[
+                ("service_name", "orders"),
+                ("service_env", "prod"),
+            ]));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::identity", message = "with identity");
+        });
+
+        let received = console_rx.recv().unwrap();
+        assert_eq!(
+            received.fields.get("service_name").and_then(Value::as_str),
+            Some("orders"),
+            "static identity field must be injected"
+        );
+        assert_eq!(
+            received.fields.get("service_env").and_then(Value::as_str),
+            Some("prod")
+        );
+        // async 通道侧同样带身份字段（多出口一致）
+        let async_received = async_rx.recv().unwrap();
+        assert_eq!(
+            async_received
+                .fields
+                .get("service_name")
+                .and_then(Value::as_str),
+            Some("orders")
+        );
+    }
+
+    #[test]
+    fn test_identity_fields_do_not_override_event_fields() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()))
+            .with_identity_fields(identity_map(&[("service_name", "orders")]));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            // 事件显式携带同名字段：显式值优先（与 trace_id 显式覆盖语义一致）
+            tracing::info!(target: "test::identity", service_name = "explicit", message = "override");
+        });
+
+        let received = console_rx.recv().unwrap();
+        assert_eq!(
+            received.fields.get("service_name").and_then(Value::as_str),
+            Some("explicit"),
+            "event-provided field must win over static identity"
+        );
+    }
+
+    #[test]
+    fn test_without_identity_fields_no_injection() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::identity", message = "plain");
+        });
+
+        let received = console_rx.recv().unwrap();
+        assert!(
+            !received.fields.contains_key("service_name"),
+            "no identity wiring must leave fields untouched"
+        );
     }
 
     #[test]

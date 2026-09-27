@@ -181,6 +181,52 @@ impl InklogConfig {
         if let Ok(val) = std::env::var("INKLOG_GLOBAL_AUTO_FALLBACK") {
             config.global.auto_fallback = val.parse().unwrap_or(config.global.auto_fallback);
         }
+        // 服务身份静态字段：沿用既有 INKLOG_GLOBAL_ 前缀语义；空值视为
+        // 未设置（告警忽略），控制字符由 global.validate() 在加载链上拒绝
+        for (env_suffix, slot) in [
+            ("SERVICE_NAME", &mut config.global.service_name),
+            ("SERVICE_INSTANCE", &mut config.global.service_instance),
+            ("SERVICE_ENV", &mut config.global.service_env),
+            ("SERVICE_VERSION", &mut config.global.service_version),
+        ] {
+            let env_var = format!("INKLOG_GLOBAL_{env_suffix}");
+            if let Ok(val) = std::env::var(&env_var) {
+                if val.trim().is_empty() {
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("var", &env_var);
+                    tracing::warn!(
+                        "{}",
+                        crate::i18n::tr_args("config-env_blank_value_ignored", args)
+                    );
+                } else {
+                    *slot = Some(val);
+                }
+            }
+        }
+        if let Ok(val) = std::env::var("INKLOG_GLOBAL_STATIC_FIELDS") {
+            for segment in val.split(',') {
+                let segment = segment.trim();
+                if segment.is_empty() {
+                    continue;
+                }
+                match segment.split_once('=') {
+                    Some((key, value)) if !key.trim().is_empty() && !value.is_empty() => {
+                        config
+                            .global
+                            .static_fields
+                            .insert(key.trim().to_string(), value.to_string());
+                    }
+                    _ => {
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("segment", segment);
+                        tracing::warn!(
+                            "{}",
+                            crate::i18n::tr_args("config-env_invalid_static_field", args)
+                        );
+                    }
+                }
+            }
+        }
 
         // File sink overrides
         if let Ok(val) = std::env::var("INKLOG_FILE_SINK_ENABLED")
@@ -731,6 +777,91 @@ mod tests {
         );
         unsafe {
             std::env::remove_var("INKLOG_GLOBAL_LEVEL");
+        }
+    }
+
+    #[test]
+    fn test_env_override_identity_fields() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_SERVICE_NAME", "orders");
+            std::env::set_var("INKLOG_GLOBAL_SERVICE_INSTANCE", "orders-7f3a");
+            std::env::set_var("INKLOG_GLOBAL_SERVICE_ENV", "prod");
+            std::env::set_var("INKLOG_GLOBAL_SERVICE_VERSION", "1.2.3");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(config.global.service_name.as_deref(), Some("orders"));
+        assert_eq!(
+            config.global.service_instance.as_deref(),
+            Some("orders-7f3a")
+        );
+        assert_eq!(config.global.service_env.as_deref(), Some("prod"));
+        assert_eq!(config.global.service_version.as_deref(), Some("1.2.3"));
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_SERVICE_NAME");
+            std::env::remove_var("INKLOG_GLOBAL_SERVICE_INSTANCE");
+            std::env::remove_var("INKLOG_GLOBAL_SERVICE_ENV");
+            std::env::remove_var("INKLOG_GLOBAL_SERVICE_VERSION");
+        }
+    }
+
+    #[test]
+    fn test_env_override_blank_identity_value_ignored() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        // 空值不得覆盖为 Some("")：应保持 None 并告警忽略
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_SERVICE_NAME", "   ");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(
+            config.global.service_name.is_none(),
+            "blank identity env value must not become Some(...)"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_SERVICE_NAME");
+        }
+    }
+
+    #[test]
+    fn test_env_override_static_fields_parses_key_value_pairs() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_STATIC_FIELDS", "region=cn-north-1,az=a");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(
+            config
+                .global
+                .static_fields
+                .get("region")
+                .map(String::as_str),
+            Some("cn-north-1")
+        );
+        assert_eq!(
+            config.global.static_fields.get("az").map(String::as_str),
+            Some("a")
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_STATIC_FIELDS");
+        }
+    }
+
+    #[test]
+    fn test_env_override_static_fields_skips_invalid_segments() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        // 无 '=' 的段与空段跳过；合法段仍生效
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_STATIC_FIELDS", "good=1,,bad-segment");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(config.global.static_fields.len(), 1);
+        assert!(config.global.static_fields.contains_key("good"));
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_STATIC_FIELDS");
         }
     }
 

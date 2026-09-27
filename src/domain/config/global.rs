@@ -3,6 +3,7 @@
 //! Global logger configuration.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::support::processing::template::OutputFormat;
 
@@ -170,6 +171,48 @@ pub struct GlobalConfig {
     /// `logs/fallback.journal`
     #[serde(default = "default_fallback_journal_path")]
     pub fallback_journal_path: String,
+
+    /// 服务名（静态身份字段，注入每条日志记录的 `fields`，键名
+    /// `service_name`）。未设置（None）时不注入。
+    ///
+    /// # Default
+    ///
+    /// `None`
+    #[serde(default)]
+    pub service_name: Option<String>,
+
+    /// 服务实例标识（注入键名 `service_instance`，如 pod 名 / 进程 id 组合）。
+    ///
+    /// # Default
+    ///
+    /// `None`
+    #[serde(default)]
+    pub service_instance: Option<String>,
+
+    /// 部署环境（注入键名 `service_env`，如 `prod` / `staging`）。
+    ///
+    /// # Default
+    ///
+    /// `None`
+    #[serde(default)]
+    pub service_env: Option<String>,
+
+    /// 服务版本（注入键名 `service_version`）。
+    ///
+    /// # Default
+    ///
+    /// `None`
+    #[serde(default)]
+    pub service_version: Option<String>,
+
+    /// 附加静态键值（与身份字段一并注入 `fields`，键名原样保留）。
+    /// 用于 region/az/tenant 等部署维度标注。
+    ///
+    /// # Default
+    ///
+    /// 空 map
+    #[serde(default)]
+    pub static_fields: HashMap<String, String>,
 }
 
 fn default_global_level() -> String {
@@ -204,6 +247,11 @@ impl Default for GlobalConfig {
             output_format: OutputFormat::default(),
             fallback_journal: false,
             fallback_journal_path: default_fallback_journal_path(),
+            service_name: None,
+            service_instance: None,
+            service_env: None,
+            service_version: None,
+            static_fields: HashMap::new(),
         }
     }
 }
@@ -235,8 +283,70 @@ impl GlobalConfig {
                 crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
             ));
         }
+        self.validate_identity_fields()?;
         Ok(())
     }
+
+    /// 已配置身份字段的注入映射（键名 → 值；未配置任何身份时为空 map）。
+    ///
+    /// 固定身份键：`service_name` / `service_instance` / `service_env` /
+    /// `service_version`；`static_fields` 的键原样保留。
+    pub fn identity_fields(&self) -> std::collections::BTreeMap<String, serde_json::Value> {
+        let mut map = std::collections::BTreeMap::new();
+        let scalars = [
+            ("service_name", &self.service_name),
+            ("service_instance", &self.service_instance),
+            ("service_env", &self.service_env),
+            ("service_version", &self.service_version),
+        ];
+        for (key, value) in scalars {
+            if let Some(v) = value {
+                map.insert(key.to_string(), serde_json::Value::String(v.clone()));
+            }
+        }
+        for (key, value) in &self.static_fields {
+            map.insert(key.clone(), serde_json::Value::String(value.clone()));
+        }
+        map
+    }
+
+    /// 身份字段校验：已设置（Some）的标量不得为空白；键/值不得含控制字符
+    ///（换行等会破坏日志行结构，注入向量在配置期即拒绝）。
+    fn validate_identity_fields(&self) -> Result<(), String> {
+        let scalars = [
+            ("service_name", &self.service_name),
+            ("service_instance", &self.service_instance),
+            ("service_env", &self.service_env),
+            ("service_version", &self.service_version),
+        ];
+        for (name, value) in scalars {
+            if let Some(v) = value {
+                if v.trim().is_empty() {
+                    return Err(format!("global.{name} is set but blank"));
+                }
+                reject_control_chars(&format!("global.{name}"), v)?;
+            }
+        }
+        for (key, value) in &self.static_fields {
+            if key.is_empty() {
+                return Err("global.static_fields contains an empty key".to_string());
+            }
+            reject_control_chars("global.static_fields key", key)?;
+            reject_control_chars(&format!("global.static_fields[{key}]"), value)?;
+        }
+        Ok(())
+    }
+}
+
+/// 拒绝含控制字符的配置值（CWE-117 邻域：换行/制表等会破坏日志行结构）。
+fn reject_control_chars(field: &str, value: &str) -> Result<(), String> {
+    if let Some(c) = value.chars().find(|&c| char::is_control(c)) {
+        return Err(format!(
+            "{field} contains a control character (U+{:04X})",
+            c as u32
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -337,5 +447,165 @@ mod tests {
             !rendered.contains("sanitizer_enabled"),
             "alias must not be emitted on serialization, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn test_identity_fields_default_empty() {
+        let cfg = GlobalConfig::default();
+        assert!(cfg.service_name.is_none());
+        assert!(cfg.service_instance.is_none());
+        assert!(cfg.service_env.is_none());
+        assert!(cfg.service_version.is_none());
+        assert!(cfg.static_fields.is_empty());
+        assert!(cfg.identity_fields().is_empty());
+    }
+
+    #[test]
+    fn test_identity_fields_collects_configured_values() {
+        let cfg = GlobalConfig {
+            service_name: Some("orders".to_string()),
+            service_instance: Some("orders-7f3a".to_string()),
+            service_env: Some("prod".to_string()),
+            service_version: Some("1.2.3".to_string()),
+            static_fields: [("region".to_string(), "cn-north-1".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let identity = cfg.identity_fields();
+        assert_eq!(identity.len(), 5);
+        assert_eq!(identity["service_name"], "orders");
+        assert_eq!(identity["service_instance"], "orders-7f3a");
+        assert_eq!(identity["service_env"], "prod");
+        assert_eq!(identity["service_version"], "1.2.3");
+        assert_eq!(identity["region"], "cn-north-1");
+    }
+
+    #[test]
+    fn test_identity_fields_partial_configuration() {
+        // 只配 service_name：其余身份键不得出现
+        let cfg = GlobalConfig {
+            service_name: Some("orders".to_string()),
+            ..Default::default()
+        };
+        let identity = cfg.identity_fields();
+        assert_eq!(identity.len(), 1);
+        assert!(identity.contains_key("service_name"));
+        assert!(!identity.contains_key("service_instance"));
+    }
+
+    #[test]
+    fn test_validate_rejects_blank_identity_values() {
+        for value in ["", "   "] {
+            let mut cfg = GlobalConfig {
+                service_name: Some(value.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                cfg.validate().is_err(),
+                "blank service_name '{value}' must be rejected"
+            );
+        }
+        let mut cfg = GlobalConfig {
+            service_version: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_control_characters_in_identity() {
+        for value in ["orders\nprod", "orders\tpayment", "orders\u{0}x"] {
+            let mut cfg = GlobalConfig {
+                service_name: Some(value.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                cfg.validate().is_err(),
+                "control characters in service_name '{value}' must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid_static_fields() {
+        // 空 key
+        let mut cfg = GlobalConfig::default();
+        cfg.static_fields.insert(String::new(), "v".to_string());
+        assert!(
+            cfg.validate().is_err(),
+            "empty static field key must be rejected"
+        );
+
+        // key / value 含控制字符
+        let mut cfg = GlobalConfig::default();
+        cfg.static_fields.insert("k\n".to_string(), "v".to_string());
+        assert!(cfg.validate().is_err());
+        let mut cfg = GlobalConfig::default();
+        cfg.static_fields.insert("k".to_string(), "v\n".to_string());
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_identity() {
+        let mut cfg = GlobalConfig {
+            service_name: Some("orders".to_string()),
+            service_instance: Some("orders-7f3a".to_string()),
+            service_env: Some("prod".to_string()),
+            service_version: Some("1.2.3".to_string()),
+            static_fields: [("region".to_string(), "cn-north-1".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_deserialize_identity_fields_from_toml() {
+        let parsed: GlobalConfig = toml::from_str(
+            "service_name = \"orders\"\n\
+             service_instance = \"orders-7f3a\"\n\
+             service_env = \"prod\"\n\
+             service_version = \"1.2.3\"\n\
+             [static_fields]\nregion = \"cn-north-1\"\n",
+        )
+        .unwrap();
+        assert_eq!(parsed.service_name.as_deref(), Some("orders"));
+        assert_eq!(parsed.service_instance.as_deref(), Some("orders-7f3a"));
+        assert_eq!(parsed.service_env.as_deref(), Some("prod"));
+        assert_eq!(parsed.service_version.as_deref(), Some("1.2.3"));
+        assert_eq!(
+            parsed.static_fields.get("region").map(String::as_str),
+            Some("cn-north-1")
+        );
+    }
+
+    #[test]
+    fn test_deserialize_identity_fields_within_root_config() {
+        // 宿主视角：身份字段位于 [global] 表下（InklogConfig 全文解析）
+        let parsed: crate::InklogConfig = toml::from_str(
+            "[global]\nservice_name = \"orders\"\n\
+             [global.static_fields]\nregion = \"cn-north-1\"\n",
+        )
+        .unwrap();
+        assert_eq!(parsed.global.service_name.as_deref(), Some("orders"));
+        assert_eq!(
+            parsed
+                .global
+                .static_fields
+                .get("region")
+                .map(String::as_str),
+            Some("cn-north-1")
+        );
+    }
+
+    #[test]
+    fn test_deserialize_without_identity_fields_still_works() {
+        // 既有配置文件（无身份字段）必须继续解析
+        let parsed: GlobalConfig = toml::from_str("level = \"debug\"\n").unwrap();
+        assert_eq!(parsed.level, "debug");
+        assert!(parsed.service_name.is_none());
+        assert!(parsed.static_fields.is_empty());
     }
 }

@@ -244,6 +244,18 @@ impl LoggerManager {
             if let Some(fallback) = config_provider.get_bool("global.auto_fallback") {
                 config.global.auto_fallback = fallback;
             }
+            if let Some(v) = config_provider.get_string("global.service_name") {
+                config.global.service_name = Some(v);
+            }
+            if let Some(v) = config_provider.get_string("global.service_instance") {
+                config.global.service_instance = Some(v);
+            }
+            if let Some(v) = config_provider.get_string("global.service_env") {
+                config.global.service_env = Some(v);
+            }
+            if let Some(v) = config_provider.get_string("global.service_version") {
+                config.global.service_version = Some(v);
+            }
 
             // File sink 配置（显式 `enabled = false` 同样要落进 config——
             // 依赖注入模式下宿主可能已通过 add_sink 挂载自己的文件 sink
@@ -627,6 +639,13 @@ impl LoggerManager {
         // Wire sanitizer when security features are enabled (CWE-117 prevention)
         if config.global.masking_enabled {
             subscriber = subscriber.with_sanitizer(Arc::new(LogSanitizer::new()));
+        }
+
+        // Wire service identity static fields（service_name/instance/env/version
+        // + 自定义标注）：未配置任何身份时空 map，不接线（热路径零开销）
+        let identity_fields = config.global.identity_fields();
+        if !identity_fields.is_empty() {
+            subscriber = subscriber.with_identity_fields(Arc::new(identity_fields));
         }
 
         // Wire rate limiter when configured

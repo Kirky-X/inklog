@@ -961,6 +961,11 @@ inklog 支持通过 `INKLOG_*` 环境变量覆盖配置（优先级高于配置�
 | `INKLOG_GLOBAL_FORMAT` | 日志格式 | `INKLOG_GLOBAL_FORMAT="{timestamp} {message}"` |
 | `INKLOG_GLOBAL_MASKING_ENABLED` | 启用数据脱敏 | `INKLOG_GLOBAL_MASKING_ENABLED=true` |
 | `INKLOG_GLOBAL_AUTO_FALLBACK` | 启用自动降级 | `INKLOG_GLOBAL_AUTO_FALLBACK=true` |
+| `INKLOG_GLOBAL_SERVICE_NAME` | 服务身份：服务名（静态字段 `service_name` 注入每条记录） | `INKLOG_GLOBAL_SERVICE_NAME=orders` |
+| `INKLOG_GLOBAL_SERVICE_INSTANCE` | 服务身份：实例标识（字段 `service_instance`） | `INKLOG_GLOBAL_SERVICE_INSTANCE=orders-7f3a` |
+| `INKLOG_GLOBAL_SERVICE_ENV` | 服务身份：部署环境（字段 `service_env`） | `INKLOG_GLOBAL_SERVICE_ENV=prod` |
+| `INKLOG_GLOBAL_SERVICE_VERSION` | 服务身份：服务版本（字段 `service_version`） | `INKLOG_GLOBAL_SERVICE_VERSION=1.2.3` |
+| `INKLOG_GLOBAL_STATIC_FIELDS` | 附加静态键值（逗号分隔 `key=value`，注入每条记录） | `INKLOG_GLOBAL_STATIC_FIELDS=region=cn-north-1,az=a` |
 | `INKLOG_LOCALE` | 消息本地化语言（zh-CN / en） | `INKLOG_LOCALE=en` |
 
 ### 文件 Sink
