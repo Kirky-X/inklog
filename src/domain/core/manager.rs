@@ -743,20 +743,20 @@ impl LoggerManager {
             std::env::var("RUST_LOG").ok().filter(|v| !v.is_empty()),
         )));
 
-        // Create error sink for logging system errors
+        // Create error sink for logging system errors.
+        // 惰性创建：构建期不打开 logs/error.log，一次性命令构建后未发生
+        // error 级事件即退出时不再遗留该文件；首次真正写入时才落盘
+        //（构造永不失败，打开失败语义后移到写入路径并原样上抛）。
         let error_sink_config = FileSinkConfig {
             enabled: true,
             path: PathBuf::from("logs/error.log"),
             ..Default::default()
         };
-        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> =
-            Arc::new(Mutex::new(match FileSink::new(error_sink_config) {
-                Ok(sink) => Some(Arc::new(sink) as Arc<dyn LogSink>),
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to create error sink");
-                    None
-                }
-            }));
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(Some(
+            Arc::new(crate::support::io::sink::file::LazyFileSink::new(
+                error_sink_config,
+            )) as Arc<dyn LogSink>,
+        )));
 
         let file_sink_cfg = config.file_sink.clone().unwrap_or_default();
 
@@ -1199,6 +1199,7 @@ mod tests {
 
     use super::*;
     use chrono::Utc;
+    use serial_test::serial;
 
     // ============================================================================
     // LoggerBuilder 测试 - 验证配置传播
@@ -3377,6 +3378,47 @@ worker_threads = 1
         assert!(manager.effective_channel_capacity() > 0);
 
         let _ = manager.shutdown();
+    }
+
+    // ============================================================================
+    // error sink 延迟创建测试
+    //
+    // 默认 error sink 指向相对路径 logs/error.log；一次性命令构建 manager
+    // 后未发生任何 error 级事件即退出时，不得遗留该文件。
+    // ============================================================================
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
+    async fn test_build_detached_defers_error_log_file_creation() {
+        // CWD 隔离：默认 error sink 路径相对当前目录解析；
+        // serial 防止与其他测试的进程级 CWD 切换互踩
+        let base_dir = tempfile::TempDir::new().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(base_dir.path()).unwrap();
+
+        let config = InklogConfig {
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (manager, _subscriber, _filter) = LoggerManager::build_detached(
+            config,
+            #[cfg(feature = "database")]
+            None,
+        )
+        .await
+        .expect("build_detached should succeed");
+
+        assert!(
+            !base_dir.path().join("logs/error.log").exists(),
+            "构建 manager 不得立即创建 logs/error.log"
+        );
+
+        let _ = manager.shutdown();
+        std::env::set_current_dir(original_cwd).unwrap();
     }
 
     // ============================================================================

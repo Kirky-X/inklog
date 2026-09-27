@@ -1459,6 +1459,63 @@ impl FileSink {
     }
 }
 
+/// 构建期不触碰文件系统的 [`FileSink`] 惰性包装。
+///
+/// 内部 FileSink 推迟到首次 [`LogSink::write`] 时构造：一次性命令构建
+/// logger 后未发生任何 error 级事件即退出时，不再遗留空的目标文件（如
+/// `logs/error.log`）。对写入方透明——实现同一 [`LogSink`] 端口，内部
+/// FileSink 构造失败时错误原样上抛，不静默吞掉。
+pub(crate) struct LazyFileSink {
+    config: FileSinkConfig,
+    inner: parking_lot::Mutex<Option<Arc<FileSink>>>,
+}
+
+impl LazyFileSink {
+    pub(crate) fn new(config: FileSinkConfig) -> Self {
+        Self {
+            config,
+            inner: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// 取内部 FileSink，首次调用时构造；锁内仅做同步构造，不跨 await。
+    fn get_or_create(&self) -> Result<Arc<FileSink>, InklogError> {
+        let mut guard = self.inner.lock();
+        if let Some(sink) = guard.as_ref() {
+            return Ok(sink.clone());
+        }
+        let sink = Arc::new(FileSink::new(self.config.clone())?);
+        *guard = Some(sink.clone());
+        Ok(sink)
+    }
+}
+
+#[async_trait]
+impl LogSink for LazyFileSink {
+    async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        let sink = self.get_or_create()?;
+        sink.write(record).await
+    }
+
+    async fn flush(&self) -> Result<(), InklogError> {
+        // 从未写入时无文件也无缓冲，安全 no-op
+        let sink = self.inner.lock().as_ref().cloned();
+        match sink {
+            Some(sink) => sink.flush().await,
+            None => Ok(()),
+        }
+    }
+
+    async fn shutdown(&self) -> Result<(), InklogError> {
+        // 从未写入时无定时器线程与句柄需要清理，安全 no-op
+        let sink = self.inner.lock().as_ref().cloned();
+        match sink {
+            Some(sink) => sink.shutdown().await,
+            None => Ok(()),
+        }
+    }
+}
+
 #[async_trait]
 impl LogSink for FileSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
@@ -3666,6 +3723,55 @@ mod tests {
             "masked output should contain REDACTED marker"
         );
         sink.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_lazy_file_sink_defers_file_creation_until_first_write() {
+        let temp_dir = tempdir().unwrap();
+        let log_path = temp_dir.path().join("lazy/error.log");
+
+        let sink = LazyFileSink::new(FileSinkConfig {
+            enabled: true,
+            path: log_path.clone(),
+            ..Default::default()
+        });
+        assert!(
+            !log_path.exists(),
+            "构建 LazyFileSink 不得创建目标文件（含父目录）"
+        );
+
+        let record = LogRecord {
+            timestamp: Utc::now(),
+            level: "ERROR".to_string(),
+            target: "lazy_test".to_string(),
+            message: "first error event".to_string(),
+            fields: HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "t1".to_string(),
+            trace_id: None,
+            span_id: None,
+        };
+        sink.write(&record).await.unwrap();
+        sink.flush().await.unwrap();
+        assert!(log_path.exists(), "首次写入后目标文件必须出现");
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("first error event"));
+        sink.shutdown().await.unwrap();
+
+        // 从未写入时 flush/shutdown 必须为安全 no-op，同样不得创建文件
+        let untouched_path = temp_dir.path().join("lazy/never.log");
+        let fresh = LazyFileSink::new(FileSinkConfig {
+            enabled: true,
+            path: untouched_path.clone(),
+            ..Default::default()
+        });
+        fresh.flush().await.unwrap();
+        fresh.shutdown().await.unwrap();
+        assert!(
+            !untouched_path.exists(),
+            "flush/shutdown on an unwritten LazyFileSink must not create the file"
+        );
     }
 
     #[tokio::test]
