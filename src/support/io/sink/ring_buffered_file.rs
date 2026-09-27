@@ -81,8 +81,11 @@ impl ChannelBufferedFileSink {
     }
 
     /// 渲染前按 base_config.masking_enabled 对记录做 PII 掩码。
+    ///
+    /// 返回的行以 `\n` 结尾：LogTemplate 是纯渲染契约（不含换行），逐行可
+    /// grep 的行分隔在 sink 写入层补齐，取舍与 FileSink 的 `writeln!` 语义一致。
     fn render_masked(&self, record: &LogRecord) -> String {
-        match self.masker.as_ref() {
+        let mut rendered = match self.masker.as_ref() {
             Some(masker) => {
                 let mut fields = record.fields.clone();
                 masker.mask_hashmap(&mut fields);
@@ -94,7 +97,9 @@ impl ChannelBufferedFileSink {
                 self.template.render(&masked)
             }
             None => self.template.render(record),
-        }
+        };
+        rendered.push('\n');
+        rendered
     }
     pub fn new(config: ChannelBufferedConfig, template: LogTemplate) -> Result<Self, InklogError> {
         // vuln-0002 对齐：与 FileSink.open_file_inner 相同的路径校验语义，
@@ -534,6 +539,52 @@ mod tests {
         let data = std::fs::read_to_string(&path).unwrap();
         assert!(data.contains("hello-0"));
         assert!(data.contains("hello-19"));
+    }
+
+    #[tokio::test]
+    async fn test_records_are_newline_separated() {
+        // 落盘记录必须逐行分隔（可 grep）：模板不含换行，sink 写入层补换行
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("newline_sep.log");
+
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 16,
+            flush_interval_ms: 50,
+        };
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        sink.write(&make_record("first-record")).await.unwrap();
+        sink.write(&make_record("second-record")).await.unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            data.ends_with('\n'),
+            "every record must end with a newline, got: {data:?}"
+        );
+        let lines: Vec<&str> = data.lines().collect();
+        assert_eq!(
+            lines.len(),
+            2,
+            "two records must produce exactly two lines, got: {data:?}"
+        );
+        assert!(
+            lines[0].contains("first-record") && !lines[0].contains("second-record"),
+            "line 1 must be the first record intact, got: {:?}",
+            lines[0]
+        );
+        assert!(
+            lines[1].contains("second-record") && !lines[1].contains("first-record"),
+            "line 2 must be the second record intact, got: {:?}",
+            lines[1]
+        );
     }
 
     #[tokio::test]
