@@ -224,6 +224,7 @@ mod tests {
     use super::*;
     use crossbeam_channel::bounded;
     use log::Log;
+    use serial_test::serial;
 
     #[test]
     fn test_level_to_string() {
@@ -235,9 +236,13 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_log_facade_bridges_tracing_span_context() {
         use crossbeam_channel::unbounded;
 
+        // adapter.log() 经 enabled() 受进程级 max_level 门禁：本测试自持
+        // Info 阈值，不依赖其它测试先行设置（搭便车在串行化后必然翻车）
+        log::set_max_level(log::LevelFilter::Info);
         let (console_tx, console_rx) = unbounded();
         let (async_tx, async_rx) = unbounded();
         let adapter = LogAdapter::new(console_tx, async_tx, Arc::new(Metrics::new()));
@@ -392,6 +397,7 @@ mod tests {
         assert!(log_record.fields.is_empty());
     }
 
+    #[serial]
     #[test]
     fn test_log_adapter_log_sanitizes_injected_record_through_channels() {
         let (console_tx, console_rx) = bounded(10);
@@ -453,6 +459,7 @@ mod tests {
         assert_eq!(log_record.message, "leak [CUSTOM] now");
     }
 
+    #[serial]
     #[test]
     fn test_log_adapter_log_sends_to_channels() {
         let (console_tx, console_rx) = bounded(10);
@@ -511,6 +518,7 @@ mod tests {
         assert!(expected.starts_with("ThreadId("));
     }
 
+    #[serial]
     #[test]
     fn test_log_adapter_handles_full_channel() {
         // Create channels with capacity 1
@@ -545,6 +553,7 @@ mod tests {
         assert_eq!(metrics.channel_blocked(), 8);
     }
 
+    #[serial]
     #[test]
     fn test_log_adapter_disconnected_channel() {
         let (console_tx, _cr) = bounded(10);
@@ -581,6 +590,7 @@ mod tests {
         adapter.flush();
     }
 
+    #[serial]
     #[test]
     fn test_log_adapter_all_levels_mapped() {
         let (console_tx, _) = bounded(10);
@@ -612,6 +622,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[test]
     fn test_log_adapter_enabled_respects_max_level() {
         let (console_tx, _) = bounded(10);
@@ -640,6 +651,7 @@ mod tests {
         assert!(!adapter.enabled(&trace_meta));
     }
 
+    #[serial]
     #[test]
     fn test_log_adapter_console_disconnected_channel() {
         // Test the console Disconnected branch (lines 104-106)
@@ -681,6 +693,7 @@ mod tests {
         let _ = logger;
     }
 
+    #[serial]
     #[test]
     fn test_log_logger_enabled() {
         let (console_tx, _) = bounded(10);
@@ -703,6 +716,7 @@ mod tests {
         assert!(!logger.enabled(&debug_meta));
     }
 
+    #[serial]
     #[test]
     fn test_log_logger_log() {
         let (console_tx, console_rx) = bounded(10);
