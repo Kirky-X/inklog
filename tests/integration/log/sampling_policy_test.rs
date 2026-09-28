@@ -243,8 +243,9 @@ rate_limit = 1
         .count();
 
     assert_eq!(
-        warn_kept, 0,
-        "baseline must drop non-critical WARN records entirely under stress: {content}"
+        warn_kept, 1,
+        "baseline must pass only the record consuming the bucket's initial token (warn-0); \
+         every stress-path WARN must be dropped: {content}"
     );
     assert_eq!(
         error_kept, 1,
