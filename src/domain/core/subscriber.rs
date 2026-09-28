@@ -17,7 +17,7 @@ use tracing_subscriber::layer::Context;
 
 const DEFAULT_SEND_TIMEOUT_MS: u64 = 100;
 const FALLBACK_BUFFER_SIZE: usize = 100;
-/// Sampling rate for ERROR/FATAL logs when rate-limited: keep 1 in N.
+/// 限流压力下的内置兜底采样率：采样策略未命中时 ERROR/FATAL 保留 1/N。
 const ERROR_SAMPLING_RATE: u64 = 100;
 
 /// Fallback buffer 条目：记录 + 各 async 通道的投递状态。
@@ -50,6 +50,7 @@ impl Clone for LoggerSubscriber {
             fallback_buffer: self.fallback_buffer.clone(),
             sanitizer: self.sanitizer.clone(),
             rate_limiter: self.rate_limiter.clone(),
+            sampling_policy: self.sampling_policy.clone(),
             error_sample_counter: AtomicU64::new(self.error_sample_counter.load(Ordering::Relaxed)),
             fallback_pending: Arc::clone(&self.fallback_pending),
             journal: self.journal.clone(),
@@ -76,6 +77,8 @@ pub struct LoggerSubscriber {
     sanitizer: Option<Arc<LogSanitizer>>,
     /// Optional rate limiter for log throughput control
     rate_limiter: Option<Arc<RateLimiter>>,
+    /// 限流压力下的采样策略（None = 走内置 ERROR/FATAL 兜底采样）
+    sampling_policy: Option<Arc<crate::support::io::sink::sampling::SamplingPolicy>>,
     /// Counter for ERROR/FATAL sampling when rate-limited
     error_sample_counter: AtomicU64,
     /// 兜底缓冲存在待补发记录（ERROR/FATAL 入队置位；半满触发补发后按
@@ -105,6 +108,7 @@ impl LoggerSubscriber {
             fallback_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(FALLBACK_BUFFER_SIZE))),
             sanitizer: None,
             rate_limiter: None,
+            sampling_policy: None,
             error_sample_counter: AtomicU64::new(0),
             fallback_pending: Arc::new(AtomicBool::new(false)),
             journal: None,
@@ -159,6 +163,15 @@ impl LoggerSubscriber {
     /// Set the rate limiter for log throughput control.
     pub fn with_rate_limiter(mut self, rate_limiter: Arc<RateLimiter>) -> Self {
         self.rate_limiter = Some(rate_limiter);
+        self
+    }
+
+    /// 设置限流压力下的采样策略。
+    pub fn with_sampling_policy(
+        mut self,
+        policy: Arc<crate::support::io::sink::sampling::SamplingPolicy>,
+    ) -> Self {
+        self.sampling_policy = Some(policy);
         self
     }
 
@@ -460,15 +473,28 @@ where
         if let Some(ref limiter) = self.rate_limiter
             && !limiter.try_acquire()
         {
-            // Rate limited: only keep ERROR/FATAL with 1-in-N sampling
-            if Self::is_critical_level(&record.level) {
-                let count = self.error_sample_counter.fetch_add(1, Ordering::Relaxed);
-                if !count.is_multiple_of(ERROR_SAMPLING_RATE) {
-                    self.metrics.inc_logs_dropped();
-                    return;
+            // 压力路径：采样策略规则优先（Some = 策略决策）；
+            // 无策略或无规则命中（None）回退内置兜底——非关键级别丢弃，
+            // ERROR/FATAL 按 1-in-N 采样保留。
+            let (keep, sampled_eviction) = match self
+                .sampling_policy
+                .as_ref()
+                .and_then(|policy| policy.should_emit(&record))
+            {
+                Some(decision) => (decision, !decision),
+                None if Self::is_critical_level(&record.level) => {
+                    let count = self.error_sample_counter.fetch_add(1, Ordering::Relaxed);
+                    let keep = count.is_multiple_of(ERROR_SAMPLING_RATE);
+                    (keep, !keep)
                 }
-                // Sampled: fall through to send
-            } else {
+                None => (false, false),
+            };
+            if !keep {
+                // 采样淘汰（策略规则或兜底 1-in-N）计入专用细分指标；
+                // 非关键级别的压力丢弃是限流丢弃而非采样
+                if sampled_eviction {
+                    self.metrics.inc_sampled_out();
+                }
                 self.metrics.inc_logs_dropped();
                 return;
             }
@@ -547,6 +573,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::config::sampling::SamplingConfig;
+    use crate::support::io::sink::sampling::SamplingPolicy;
     use crossbeam_channel::bounded;
     use serde_json::Value;
     use serial_test::serial;
@@ -577,6 +605,180 @@ mod tests {
         assert_eq!(async_received.level, "INFO");
         assert_eq!(async_received.target, "test::subscriber");
         assert_eq!(async_received.message, "hello");
+    }
+
+    /// 构建"恒定限流"的 subscriber：RateLimiter::new(0) 无令牌且不补充，
+    /// 每条记录都进入压力路径（确定性，不依赖测试耗时）。
+    fn rate_limited_subscriber(
+        console_tx: Sender<Arc<LogRecord>>,
+        async_tx: Sender<Arc<LogRecord>>,
+        metrics: Arc<Metrics>,
+        policy: Option<SamplingPolicy>,
+    ) -> LoggerSubscriber {
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics)
+            .with_rate_limiter(Arc::new(RateLimiter::new(0)));
+        if let Some(policy) = policy {
+            layer.with_sampling_policy(Arc::new(policy))
+        } else {
+            layer
+        }
+    }
+
+    #[test]
+    fn test_rate_limit_without_policy_keeps_baseline_behavior() {
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let registry = tracing_subscriber::registry().with(rate_limited_subscriber(
+            console_tx,
+            async_tx,
+            metrics.clone(),
+            None,
+        ));
+
+        with_default(registry, || {
+            for i in 0..10 {
+                tracing::error!(target: "t::baseline", message = format!("error {i}"));
+            }
+            for i in 0..5 {
+                tracing::info!(target: "t::baseline", message = format!("info {i}"));
+            }
+        });
+
+        let kept: Vec<String> = console_rx.try_iter().map(|r| r.message.clone()).collect();
+        // 未配置策略 = 现状语义：ERROR 计数器 0 放行（1-in-100），其余采样淘汰；
+        // INFO 非关键级别全量丢弃
+        assert_eq!(
+            kept.iter().filter(|m| m.starts_with("error")).count(),
+            1,
+            "baseline must keep the first rate-limited ERROR (counter 0)"
+        );
+        assert!(
+            kept.iter().all(|m| !m.starts_with("info")),
+            "baseline must drop non-critical records entirely"
+        );
+        // 指标细分：9 条 ERROR 为采样淘汰（sampled_out），5 条 INFO 为压力丢弃
+        assert_eq!(metrics.sampled_out(), 9);
+        assert_eq!(metrics.logs_dropped(), 14);
+    }
+
+    #[test]
+    fn test_rate_limit_policy_per_level_sampling() {
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let mut per_level = std::collections::HashMap::new();
+        per_level.insert("warn".to_string(), 2u64);
+        let policy = SamplingPolicy::from_config(&SamplingConfig {
+            per_level,
+            per_target_prefix: std::collections::HashMap::new(),
+        })
+        .unwrap();
+        let registry = tracing_subscriber::registry().with(rate_limited_subscriber(
+            console_tx,
+            async_tx,
+            metrics.clone(),
+            Some(policy),
+        ));
+
+        with_default(registry, || {
+            for i in 0..5 {
+                tracing::warn!(target: "t::policy", message = format!("warn {i}"));
+            }
+            for i in 0..5 {
+                tracing::info!(target: "t::policy", message = format!("info {i}"));
+            }
+            tracing::error!(target: "t::policy", message = "fallback error");
+        });
+
+        let kept: Vec<String> = console_rx.try_iter().map(|r| r.message.clone()).collect();
+        // WARN 每级别 1-in-2：计数器 0/2/4 放行，共 3 条
+        assert_eq!(
+            kept.iter().filter(|m| m.starts_with("warn")).count(),
+            3,
+            "per-level 1-in-2 rate must keep 3 of 5 WARN records"
+        );
+        // INFO 无规则命中 → 兜底：非关键级别全量丢弃
+        assert!(kept.iter().all(|m| !m.starts_with("info")));
+        // ERROR 无规则命中 → 兜底：计数器 0 放行
+        assert_eq!(
+            kept.iter().filter(|m| m.starts_with("fallback")).count(),
+            1,
+            "records without a matching rule must fall back to baseline sampling"
+        );
+        // 指标：2 条 WARN 采样淘汰计入 sampled_out（唯一 ERROR 计数器 0 放行，
+        // 不产生采样淘汰）；5 条 INFO 压力丢弃 + 2 条采样淘汰 = logs_dropped 7
+        assert_eq!(metrics.sampled_out(), 2);
+        assert_eq!(metrics.logs_dropped(), 7);
+    }
+
+    #[test]
+    fn test_rate_limit_policy_target_prefix_rules() {
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let mut per_target_prefix = std::collections::HashMap::new();
+        per_target_prefix.insert(
+            "app::audit".to_string(),
+            crate::domain::config::sampling::TargetSamplingRule {
+                keep_level: Some("debug".to_string()),
+                sample_every_n: 10,
+            },
+        );
+        per_target_prefix.insert(
+            "app::noise".to_string(),
+            crate::domain::config::sampling::TargetSamplingRule {
+                keep_level: None,
+                sample_every_n: 2,
+            },
+        );
+        let policy = SamplingPolicy::from_config(&SamplingConfig {
+            per_level: std::collections::HashMap::new(),
+            per_target_prefix,
+        })
+        .unwrap();
+        let registry = tracing_subscriber::registry().with(rate_limited_subscriber(
+            console_tx,
+            async_tx,
+            metrics.clone(),
+            Some(policy),
+        ));
+
+        with_default(registry, || {
+            for i in 0..3 {
+                tracing::info!(target: "app::audit::core", message = format!("audit {i}"));
+            }
+            for i in 0..4 {
+                tracing::info!(target: "app::noise", message = format!("noise {i}"));
+            }
+            for i in 0..2 {
+                tracing::error!(target: "app::other", message = format!("other {i}"));
+            }
+        });
+
+        let kept: Vec<String> = console_rx.try_iter().map(|r| r.message.clone()).collect();
+        // audit：keep_level=debug 豁免 INFO → 3 条全放行
+        assert_eq!(
+            kept.iter().filter(|m| m.starts_with("audit")).count(),
+            3,
+            "records above keep_level under a matched prefix must all pass"
+        );
+        // noise：1-in-2 → 计数器 0/2 放行，共 2 条
+        assert_eq!(
+            kept.iter().filter(|m| m.starts_with("noise")).count(),
+            2,
+            "prefix rule N-of-1 must keep every 2nd record"
+        );
+        // other：无前缀命中 → 兜底，ERROR 计数器 0 放行（第 1 条）
+        assert_eq!(
+            kept.iter().filter(|m| m.starts_with("other")).count(),
+            1,
+            "unmatched targets must fall back to baseline sampling"
+        );
+        // 指标：2 条 noise 采样淘汰 + 1 条 other 兜底采样淘汰 = sampled_out 3；
+        // logs_dropped = 2（noise）+ 1（other）
+        assert_eq!(metrics.sampled_out(), 3);
+        assert_eq!(metrics.logs_dropped(), 3);
     }
 
     fn identity_map(

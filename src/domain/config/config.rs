@@ -14,6 +14,7 @@ use super::global::GlobalConfig;
 use super::http::HttpServerConfig;
 use super::performance::MAX_CHANNEL_CAPACITY;
 use super::performance::PerformanceConfig;
+use super::sampling::SamplingConfig;
 
 // Re-export HttpErrorMode for env override match in this file
 use super::http::HttpErrorMode;
@@ -51,6 +52,9 @@ pub struct InklogConfig {
     /// `RUST_LOG` but higher than the global default.
     #[serde(default)]
     pub target_levels: HashMap<String, String>,
+    /// 采样策略：限流压力下决定保留哪些记录（未配置 = 内置兜底采样）。
+    #[serde(default)]
+    pub sampling: SamplingConfig,
 }
 
 fn default_console_sink() -> Option<ConsoleSinkConfig> {
@@ -133,6 +137,7 @@ impl Default for InklogConfig {
             performance: PerformanceConfig::default(),
             http_server: None,
             target_levels: HashMap::new(),
+            sampling: SamplingConfig::default(),
         }
     }
 }
@@ -634,6 +639,9 @@ impl InklogConfig {
                 args,
             )));
         }
+
+        // --- Sampling policy ---
+        self.sampling.validate()?;
 
         Ok(())
     }
@@ -1701,5 +1709,63 @@ level = "verbose"
         // 非法日志级别必须报错
         let result: Result<InklogConfig, _> = "[global]\nlevel = \"verbose\"\n".parse();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sampling_toml_section_parses() {
+        let toml_str = r#"
+[sampling.per_level]
+info = 10
+
+[sampling.per_target_prefix."app::audit"]
+keep_level = "debug"
+
+[sampling.per_target_prefix."app::noise"]
+sample_every_n = 2
+"#;
+        let config: InklogConfig = toml_str.parse().expect("should parse sampling TOML");
+        assert_eq!(config.sampling.per_level.get("info"), Some(&10));
+        let audit = config
+            .sampling
+            .per_target_prefix
+            .get("app::audit")
+            .expect("audit rule should exist");
+        assert_eq!(audit.keep_level.as_deref(), Some("debug"));
+        assert_eq!(audit.sample_every_n, 1, "rule rate must default to 1");
+        let noise = config
+            .sampling
+            .per_target_prefix
+            .get("app::noise")
+            .expect("noise rule should exist");
+        assert_eq!(noise.keep_level, None);
+        assert_eq!(noise.sample_every_n, 2);
+    }
+
+    #[test]
+    fn test_sampling_section_absent_defaults_to_empty() {
+        let config: InklogConfig = "".parse().expect("empty TOML should parse");
+        assert!(
+            config.sampling.is_empty(),
+            "absent [sampling] section must yield an empty policy"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid_sampling() {
+        // 零采样率拒绝
+        let result: Result<InklogConfig, _> = "[sampling.per_level]\ninfo = 0\n".parse();
+        assert!(result.is_err(), "zero per-level rate must be rejected");
+
+        // 非法级别键拒绝
+        let result: Result<InklogConfig, _> = "[sampling.per_level]\nverbose = 5\n".parse();
+        assert!(result.is_err(), "invalid level key must be rejected");
+
+        // 非法 keep_level 拒绝
+        let result: Result<InklogConfig, _> = r#"
+[sampling.per_target_prefix."app"]
+keep_level = "verbose"
+"#
+        .parse();
+        assert!(result.is_err(), "invalid keep_level must be rejected");
     }
 }

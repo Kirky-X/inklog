@@ -17,6 +17,7 @@ mod multi_sink_fallback {
         FallbackAction, FallbackConfig, FallbackState, InklogConfig, LoggerManager,
         SinkHealthMonitor,
     };
+    use serial_test::serial;
     use std::path::PathBuf;
     use tempfile::TempDir;
     use tracing_subscriber::layer::SubscriberExt;
@@ -151,7 +152,11 @@ mod multi_sink_fallback {
 
     // === 文件到数据库降级测试 ===
 
+    // 建真实 logger 的用例必须串行：logger 构建会向进程级 OPS_EVENT_HUB 注册
+    // 通道且不注销，降级风暴的 ops 广播会写入并行测试的 sink（曾有加密文件
+    // 用例被 1MB 噪声撑爆轮转阈值导致活跃文件被轮转走的偶发失败）
     #[tokio::test]
+    #[serial]
     async fn test_file_sink_failure_triggers_fallback() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
@@ -230,6 +235,7 @@ mod multi_sink_fallback {
     // === 数据库到文件降级测试 ===
 
     #[tokio::test]
+    #[serial]
     async fn test_database_sink_failure_triggers_fallback() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("fallback_test.log");
@@ -292,6 +298,7 @@ mod multi_sink_fallback {
     // === 所有 Sink 不可用时的处理 ===
 
     #[tokio::test]
+    #[serial]
     async fn test_all_sinks_unavailable() {
         // 无效的文件路径
         let invalid_file = PathBuf::from("/invalid/path/fallback.log");
@@ -345,6 +352,7 @@ mod multi_sink_fallback {
     // === 并发降级场景测试 ===
 
     #[tokio::test]
+    #[serial]
     async fn test_concurrent_fallback_scenarios() {
         use inklog::tokio::sync::Barrier;
         use std::sync::Arc;

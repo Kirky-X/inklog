@@ -51,8 +51,14 @@ async fn test_comprehensive_real_data_writing() {
             enabled: true,
             path: log_path.clone(),
             max_size: "50MB".into(),
-            rotation_time: "minutely".into(),
-            keep_files: 5, // 保留5个文件，测试轮转
+            // 核正：原 "minutely" 使 ~20s 写入窗口跨分钟边界即触发时间轮转，
+            // secret_data_1 随活跃文件归档为密文，下方"活跃文件应为明文"断言
+            // 随时钟相位偶发失败。时间轮转归档（压缩+加密）语义已由
+            // encryption_file_test::test_encrypted_file_sink_rotation 专例覆盖，
+            // 本用例以确定性为优先改为 "daily"（max_size 50MB 同样不会触发
+            // 尺寸轮转），活跃文件断言不再依赖时钟相位
+            rotation_time: "daily".into(),
+            keep_files: 5,
             batch_size: 1000,
             flush_interval_ms: 1000,
             fsync: false,
@@ -239,7 +245,7 @@ async fn test_comprehensive_real_data_writing() {
         encrypted_content.contains("secret_data_1"),
         "活跃文件应为明文（encrypt 仅作用于轮转归档）"
     );
-    // 若测试窗口内发生了时间轮转（rotation_time: "minutely"），归档必须为密文
+    // 防御性不变量：任何加密归档产物都不得含明文敏感数据
     for entry in std::fs::read_dir(temp_dir.path())
         .unwrap()
         .filter_map(|e| e.ok())

@@ -8,7 +8,8 @@
 //! 3. **N 取 1**：其余记录按原子计数器每 N 条放行 1 条。
 //!
 //! [`SamplingSink`] 是 [`LogSink`] 装饰器：采样淘汰的记录不写入内层 sink
-//! （计入 `logs_dropped`），其余语义（flush/shutdown/is_healthy）透传。
+//! （计入 `logs_dropped` 与 `sampled_out_total`），其余语义
+//! （flush/shutdown/is_healthy）透传。
 //! 经 `LoggerBuilder::add_sink` 注册即可给任意第三方 sink 加采样。
 //!
 //! # Example
@@ -27,11 +28,13 @@
 //! let sink: Arc<dyn inklog::LogSink> = Arc::new(SamplingSink::new(inner, Arc::new(sampler)));
 //! ```
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
+use crate::domain::config::sampling::SamplingConfig;
 use crate::support::io::LogSink;
 use crate::support::query::level_rank;
 use crate::{InklogError, LogRecord, Metrics};
@@ -89,6 +92,29 @@ impl Sampler {
         })
     }
 
+    /// 纯 N 取 1 采样器：无级别豁免阈值，所有记录进入计数器。
+    ///
+    /// [`SamplingPolicy`] 的 per_level 采样率与无 `keep_level` 的前缀规则
+    /// 以此为基座（级别路由由策略层完成，采样器只承担计数）。
+    ///
+    /// # Errors
+    ///
+    /// `sample_every_n == 0` 返回 [`InklogError::ConfigError`]。
+    pub(crate) fn n_of_one(sample_every_n: u64) -> Result<Self, InklogError> {
+        if sample_every_n == 0 {
+            return Err(InklogError::ConfigError(
+                "sample_every_n must be >= 1".to_string(),
+            ));
+        }
+        // 阈值取不可能达到的秩（u8::MAX），使任何合法记录都落入计数器路径
+        Ok(Self {
+            min_level_rank: u8::MAX,
+            sample_every_n,
+            keyword_whitelist: Vec::new(),
+            counter: AtomicU64::new(0),
+        })
+    }
+
     /// 采样决策：true = 写入 sink。
     pub fn should_emit(&self, record: &LogRecord) -> bool {
         // 1. 关键词白名单豁免
@@ -131,6 +157,108 @@ impl Sampler {
     }
 }
 
+/// 限流压力下的采样策略（Subscriber 级）：per_level 采样率 + per_target_prefix 规则。
+///
+/// 每条规则编译为一个 [`Sampler`]（决策基座复用：keep_level 阈值豁免 +
+/// N 取 1，计数器 0 放行，N=1 全放行）。[`SamplingPolicy::should_emit`]
+/// 返回 `None` 表示无规则命中（含空策略），调用方回退内置兜底采样——
+/// 只配置部分规则时，未提及的记录仍按既有压力语义（非关键丢弃、
+/// ERROR/FATAL 1-in-N）处理，不因引入策略而意外丢失。
+pub struct SamplingPolicy {
+    /// 级别秩 → 纯 N 取 1 采样器（级别路由由本表完成，无豁免阈值）
+    per_level: HashMap<u8, Sampler>,
+    /// (小写 target 前缀, 规则采样器)；按前缀长度降序排列，首个命中生效
+    per_target_prefix: Vec<(String, Sampler)>,
+}
+
+impl SamplingPolicy {
+    /// 从采样配置构建策略。
+    ///
+    /// # Errors
+    ///
+    /// 级别名非法、采样率为 0、前缀为空或别名键（`warn`/`warning` 等）
+    /// 映射到同一级别时返回 [`InklogError::ConfigError`]。
+    pub fn from_config(config: &SamplingConfig) -> Result<Self, InklogError> {
+        let mut per_level = HashMap::with_capacity(config.per_level.len());
+        for (level, rate) in &config.per_level {
+            let rank = level_rank(level);
+            if rank == u8::MAX {
+                return Err(InklogError::ConfigError(format!(
+                    "Invalid sampling level '{level}'. Valid: trace/debug/info/warn/error/fatal"
+                )));
+            }
+            if *rate == 0 {
+                return Err(InklogError::ConfigError(format!(
+                    "sampling rate for level '{level}' must be >= 1"
+                )));
+            }
+            if per_level.keys().any(|r| *r == rank) {
+                return Err(InklogError::ConfigError(format!(
+                    "sampling levels '{level}' and a rank-equivalent alias both configured; \
+                     keep one per level rank"
+                )));
+            }
+            // 级别路由由 per_level 键完成，采样器只承担 N 取 1
+            per_level.insert(rank, Sampler::n_of_one(*rate)?);
+        }
+        let mut per_target_prefix: Vec<(String, Sampler)> =
+            Vec::with_capacity(config.per_target_prefix.len());
+        for (prefix, rule) in &config.per_target_prefix {
+            if prefix.is_empty() {
+                return Err(InklogError::ConfigError(
+                    "sampling target prefix must not be empty".to_string(),
+                ));
+            }
+            if rule.sample_every_n == 0 {
+                return Err(InklogError::ConfigError(format!(
+                    "sample_every_n for prefix '{prefix}' must be >= 1"
+                )));
+            }
+            let sampler = match rule.keep_level.as_deref() {
+                Some(keep_level) => {
+                    if level_rank(keep_level) == u8::MAX {
+                        return Err(InklogError::ConfigError(format!(
+                            "Invalid keep_level '{keep_level}'. \
+                             Valid: trace/debug/info/warn/error/fatal"
+                        )));
+                    }
+                    Sampler::new(keep_level, rule.sample_every_n, Vec::new())?
+                }
+                // 未配置豁免阈值：纯 N 取 1
+                None => Sampler::n_of_one(rule.sample_every_n)?,
+            };
+            per_target_prefix.push((prefix.to_lowercase(), sampler));
+        }
+        // 最长前缀优先：更具体的规则胜出
+        per_target_prefix.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
+        Ok(Self {
+            per_level,
+            per_target_prefix,
+        })
+    }
+
+    /// 是否未配置任何规则（未配置 = 调用方走内置兜底采样）。
+    pub fn is_empty(&self) -> bool {
+        self.per_level.is_empty() && self.per_target_prefix.is_empty()
+    }
+
+    /// 采样决策：`Some(true)` 放行、`Some(false)` 采样淘汰、`None` 无规则
+    /// 命中（调用方回退内置兜底采样）。
+    ///
+    /// 命中顺序：target 前缀规则（最长前缀优先，大小写不敏感）→
+    /// 每级别采样率。级别别名（warning/critical）与主名等价。
+    pub fn should_emit(&self, record: &LogRecord) -> Option<bool> {
+        let target = record.target.to_lowercase();
+        for (prefix, sampler) in &self.per_target_prefix {
+            if target.starts_with(prefix.as_str()) {
+                return Some(sampler.should_emit(record));
+            }
+        }
+        let rank = level_rank(&record.level);
+        self.per_level.get(&rank).map(|s| s.should_emit(record))
+    }
+}
+
 /// Sink 级采样装饰器：采样淘汰的记录不写入内层 sink。
 pub struct SamplingSink {
     inner: Arc<dyn LogSink>,
@@ -159,6 +287,7 @@ impl LogSink for SamplingSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         if !self.sampler.should_emit(record) {
             if let Some(ref metrics) = self.metrics {
+                metrics.inc_sampled_out();
                 metrics.inc_logs_dropped();
             }
             return Ok(());
@@ -320,6 +449,11 @@ mod tests {
             1,
             "sampled-out record must count as dropped"
         );
+        assert_eq!(
+            metrics.sampled_out(),
+            1,
+            "sampled-out record must count in the dedicated sampling metric"
+        );
     }
 
     #[tokio::test]
@@ -363,5 +497,185 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Relaxed),
             "shutdown must be delegated"
         );
+    }
+
+    fn policy_record(level: Level, target: &str, message: &str) -> LogRecord {
+        LogRecord::new(level, target.to_string(), message.to_string())
+    }
+
+    fn policy_from(
+        per_level: &[(&str, u64)],
+        per_target_prefix: &[(&str, Option<&str>, u64)],
+    ) -> SamplingPolicy {
+        let mut config = SamplingConfig::default();
+        for (level, rate) in per_level {
+            config.per_level.insert(level.to_string(), *rate);
+        }
+        for (prefix, keep_level, rate) in per_target_prefix {
+            config.per_target_prefix.insert(
+                prefix.to_string(),
+                crate::domain::config::sampling::TargetSamplingRule {
+                    keep_level: keep_level.map(str::to_string),
+                    sample_every_n: *rate,
+                },
+            );
+        }
+        SamplingPolicy::from_config(&config).unwrap()
+    }
+
+    #[test]
+    fn test_policy_from_config_rejects_invalid_rules() {
+        let mut config = SamplingConfig::default();
+        config.per_level.insert("info".to_string(), 0);
+        assert!(
+            SamplingPolicy::from_config(&config).is_err(),
+            "zero rate must be rejected"
+        );
+
+        let mut config = SamplingConfig::default();
+        config.per_level.insert("verbose".to_string(), 5);
+        assert!(
+            SamplingPolicy::from_config(&config).is_err(),
+            "invalid level key must be rejected"
+        );
+
+        let mut config = SamplingConfig::default();
+        config.per_level.insert("warn".to_string(), 5);
+        config.per_level.insert("warning".to_string(), 10);
+        assert!(
+            SamplingPolicy::from_config(&config).is_err(),
+            "alias keys mapping to the same rank must be rejected"
+        );
+
+        let mut config = SamplingConfig::default();
+        config.per_target_prefix.insert(
+            String::new(),
+            crate::domain::config::sampling::TargetSamplingRule::default(),
+        );
+        assert!(
+            SamplingPolicy::from_config(&config).is_err(),
+            "empty prefix must be rejected"
+        );
+
+        let mut config = SamplingConfig::default();
+        config.per_target_prefix.insert(
+            "app::x".to_string(),
+            crate::domain::config::sampling::TargetSamplingRule {
+                keep_level: Some("verbose".to_string()),
+                sample_every_n: 1,
+            },
+        );
+        assert!(
+            SamplingPolicy::from_config(&config).is_err(),
+            "invalid keep_level must be rejected"
+        );
+
+        let mut config = SamplingConfig::default();
+        config.per_target_prefix.insert(
+            "app::x".to_string(),
+            crate::domain::config::sampling::TargetSamplingRule {
+                keep_level: None,
+                sample_every_n: 0,
+            },
+        );
+        assert!(
+            SamplingPolicy::from_config(&config).is_err(),
+            "zero rule rate must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_policy_default_config_is_empty_and_opinionless() {
+        let policy = SamplingPolicy::from_config(&SamplingConfig::default()).unwrap();
+        assert!(policy.is_empty());
+        assert_eq!(
+            policy.should_emit(&policy_record(Level::ERROR, "any", "x")),
+            None,
+            "empty policy must express no opinion so callers fall back to baseline"
+        );
+    }
+
+    #[test]
+    fn test_policy_per_level_n_of_one_sampling() {
+        let policy = policy_from(&[("info", 5)], &[]);
+        let kept = (0..100)
+            .filter(|i| {
+                policy.should_emit(&policy_record(Level::INFO, "t", &format!("m{i}"))) == Some(true)
+            })
+            .count();
+        assert_eq!(
+            kept, 20,
+            "1-in-5 per-level rate must keep exactly 20 of 100 records"
+        );
+        // 未配置级别的记录无规则命中 → 无意见
+        assert_eq!(
+            policy.should_emit(&policy_record(Level::DEBUG, "t", "x")),
+            None,
+            "levels without a rule must yield None"
+        );
+    }
+
+    #[test]
+    fn test_policy_prefix_rules_longest_prefix_wins() {
+        let policy = policy_from(
+            &[],
+            &[
+                ("app", Some("error"), 10),
+                ("app::audit", Some("debug"), 10),
+            ],
+        );
+        // 长前缀命中：keep_level=debug 豁免 INFO
+        assert!(
+            policy.should_emit(&policy_record(Level::INFO, "app::audit::core", "x")) == Some(true),
+            "longest matching prefix rule must win"
+        );
+        // 短前缀命中：keep_level=error，INFO 未豁免且 n=10 → 计数器 0 放行
+        assert!(
+            policy.should_emit(&policy_record(Level::INFO, "app::net", "first")) == Some(true),
+            "counter 0 must pass through the rule sampler"
+        );
+    }
+
+    #[test]
+    fn test_policy_prefix_match_is_case_insensitive() {
+        let policy = policy_from(&[], &[("app::audit", Some("debug"), 10)]);
+        assert!(
+            policy.should_emit(&policy_record(Level::INFO, "App::Audit::Core", "x")) == Some(true),
+            "target prefix matching must be case-insensitive"
+        );
+    }
+
+    #[test]
+    fn test_policy_prefix_keep_level_exempts_severe_records_only() {
+        // keep_level=warn：WARN 及以上豁免全放行；TRACE 未豁免 → n=1 全放行；
+        // 换 n=2 时 TRACE 走 N 取 1
+        let policy = policy_from(&[], &[("app::audit", Some("warn"), 1)]);
+        assert!(policy.should_emit(&policy_record(Level::ERROR, "app::audit", "x")) == Some(true));
+        assert!(policy.should_emit(&policy_record(Level::WARN, "app::audit", "x")) == Some(true));
+
+        let policy = policy_from(&[], &[("app::audit", Some("warn"), 2)]);
+        let kept = (0..10)
+            .filter(|i| {
+                policy.should_emit(&policy_record(Level::TRACE, "app::audit", &format!("t{i}")))
+                    == Some(true)
+            })
+            .count();
+        assert_eq!(
+            kept, 5,
+            "records below keep_level must follow the N-of-1 rate"
+        );
+    }
+
+    #[test]
+    fn test_policy_prefix_rule_takes_precedence_over_per_level() {
+        let policy = policy_from(&[("info", 100)], &[("app::audit", Some("trace"), 1)]);
+        // 前缀规则命中 → 规则采样器（n=1 全放行），而非 info 的 1-in-100
+        for i in 0..10 {
+            assert!(
+                policy.should_emit(&policy_record(Level::INFO, "app::audit", &format!("m{i}")))
+                    == Some(true),
+                "prefix rule must take precedence over per-level rate"
+            );
+        }
     }
 }

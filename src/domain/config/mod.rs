@@ -10,6 +10,7 @@ pub mod file_sink;
 pub mod global;
 pub mod http;
 pub mod performance;
+pub mod sampling;
 
 pub use config::InklogConfig;
 pub use console::ConsoleSinkConfig;
@@ -20,3 +21,4 @@ pub use file_sink::FileSinkConfig;
 pub use global::GlobalConfig;
 pub use http::{HttpAuthConfig, HttpErrorMode, HttpServerConfig, TlsConfig};
 pub use performance::{ChannelStrategy, PerformanceConfig};
+pub use sampling::{SamplingConfig, TargetSamplingRule};

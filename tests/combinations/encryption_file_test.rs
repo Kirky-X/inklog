@@ -150,7 +150,11 @@ mod encryption_file {
         // → *.zst.enc/*.gz.enc），活跃写入文件为明文（设计如此）——原“活跃文件
         // 不含明文”的断言与实现语义不符，改为验证明文写入成功
         let content = fs::read_to_string(&log_path).unwrap();
-        assert!(content.contains("test message"), "记录应写入活跃文件");
+        assert!(
+            content.contains("test message"),
+            "记录应写入活跃文件，实际内容（{} 字节）：{content:?}",
+            content.len()
+        );
 
         unsafe {
             std::env::remove_var("INKLOG_ENCRYPTION_KEY");

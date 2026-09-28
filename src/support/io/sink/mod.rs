@@ -46,7 +46,7 @@ pub use rotation::{
     CompositeRotation, RotationContext, RotationResult, RotationStrategy, SizeBasedRotation,
     TimeBasedRotation,
 };
-pub use sampling::{Sampler, SamplingSink};
+pub use sampling::{Sampler, SamplingPolicy, SamplingSink};
 
 use crate::InklogError;
 use crate::LogRecord;

@@ -44,6 +44,7 @@
 //! |------|------|------|
 //! | `inklog_logs_written_total` | Counter | 总日志记录数 |
 //! | `inklog_logs_dropped_total` | Counter | 总丢弃日志数 |
+//! | `inklog_sampled_out_total` | Counter | 采样淘汰日志数 |
 //! | `inklog_sink_errors_total` | Counter | 总错误数 |
 //! | `inklog_latency_p50_us` | Gauge | P50 延迟（微秒）|
 //! | `inklog_latency_p95_us` | Gauge | P95 延迟（微秒）|
@@ -259,6 +260,7 @@ impl Histogram {
 pub struct MetricsSnapshot {
     pub logs_written: u64,
     pub logs_dropped: u64,
+    pub sampled_out: u64,
     pub channel_blocked: u64,
     pub sink_errors: u64,
     pub db_batch_size: i64,
@@ -312,6 +314,7 @@ pub struct HealthStatus {
 pub struct Metrics {
     pub(crate) logs_written_total: AtomicU64,
     pub(crate) logs_dropped_total: AtomicU64,
+    pub(crate) sampled_out_total: AtomicU64,
     pub(crate) channel_send_blocked_total: AtomicU64,
     pub(crate) sink_errors_total: AtomicU64,
     pub(crate) lock_contention_total: AtomicU64,
@@ -344,6 +347,7 @@ impl Default for Metrics {
         Self {
             logs_written_total: AtomicU64::new(0),
             logs_dropped_total: AtomicU64::new(0),
+            sampled_out_total: AtomicU64::new(0),
             channel_send_blocked_total: AtomicU64::new(0),
             sink_errors_total: AtomicU64::new(0),
             lock_contention_total: AtomicU64::new(0),
@@ -383,6 +387,15 @@ impl Metrics {
     /// Returns the total number of logs dropped.
     pub fn logs_dropped(&self) -> u64 {
         self.logs_dropped_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the total number of logs evicted by sampling decisions.
+    ///
+    /// 这是 `logs_dropped` 的采样细分：仅统计采样决策淘汰的记录
+    /// （Subscriber 压力路径采样与 [`SamplingSink`](crate::support::io::sink::SamplingSink)
+    /// 淘汰），限流压力下的非采样丢弃与通道满丢弃不计入。
+    pub fn sampled_out(&self) -> u64 {
+        self.sampled_out_total.load(Ordering::Relaxed)
     }
 
     /// Returns the total number of times the channel was blocked.
@@ -437,6 +450,10 @@ impl Metrics {
 
     pub fn inc_logs_dropped(&self) {
         self.logs_dropped_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_sampled_out(&self) {
+        self.sampled_out_total.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn inc_channel_blocked(&self) {
@@ -607,6 +624,7 @@ impl Metrics {
             metrics: MetricsSnapshot {
                 logs_written: self.logs_written_total.load(Ordering::Relaxed),
                 logs_dropped: self.logs_dropped_total.load(Ordering::Relaxed),
+                sampled_out: self.sampled_out_total.load(Ordering::Relaxed),
                 channel_blocked: self.channel_send_blocked_total.load(Ordering::Relaxed),
                 sink_errors: self.sink_errors_total.load(Ordering::Relaxed),
                 db_batch_size: self.db_batch_size.get(),
@@ -638,6 +656,13 @@ impl Metrics {
         s.push_str(&format!(
             "inklog_logs_dropped_total {}\n",
             self.logs_dropped_total.load(Ordering::Relaxed)
+        ));
+
+        s.push_str("# HELP inklog_sampled_out_total Logs evicted by sampling decisions\n");
+        s.push_str("# TYPE inklog_sampled_out_total counter\n");
+        s.push_str(&format!(
+            "inklog_sampled_out_total {}\n",
+            self.sampled_out_total.load(Ordering::Relaxed)
         ));
 
         s.push_str("# HELP inklog_channel_blocked_total Total times channel was blocked\n");
@@ -2235,6 +2260,36 @@ mod metrics_tests {
         assert!(
             prom.contains("inklog_db_pool_idle 7"),
             "prometheus export should contain pool idle, got: {prom}"
+        );
+    }
+
+    #[test]
+    fn test_sampled_out_counter_and_snapshot() {
+        let metrics = Metrics::new();
+        assert_eq!(metrics.sampled_out(), 0);
+        metrics.inc_sampled_out();
+        metrics.inc_sampled_out();
+        metrics.inc_sampled_out();
+        assert_eq!(metrics.sampled_out(), 3);
+        let status = metrics.get_status(0, 100);
+        assert_eq!(
+            status.metrics.sampled_out, 3,
+            "snapshot must carry the sampled-out counter"
+        );
+    }
+
+    #[test]
+    fn test_sampled_out_exported_to_prometheus() {
+        let metrics = Metrics::new();
+        metrics.inc_sampled_out();
+        let output = metrics.export_prometheus();
+        assert!(
+            output.contains("# TYPE inklog_sampled_out_total counter"),
+            "prometheus export must declare the sampled-out counter: {output}"
+        );
+        assert!(
+            output.contains("inklog_sampled_out_total 1"),
+            "prometheus export must carry the sampled-out value: {output}"
         );
     }
 }

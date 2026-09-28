@@ -19,6 +19,7 @@ use crate::integrations::Database;
 use crate::support::io::ConsoleSink;
 use crate::support::io::FileSink;
 use crate::support::io::LogSink;
+use crate::support::io::sink::SamplingPolicy;
 use crate::support::processing::RateLimiter;
 use crate::validation::sanitize::LogSanitizer;
 use crate::{FileSinkConfig, InklogConfig};
@@ -659,6 +660,12 @@ impl LoggerManager {
         // None 同义处理为不限流。
         if let Some(rate) = config.performance.rate_limit.filter(|&r| r > 0) {
             subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(rate)));
+        }
+
+        // 采样策略：限流压力下的保留规则；未配置（空）时不接线，走内置兜底
+        if !config.sampling.is_empty() {
+            let policy = SamplingPolicy::from_config(&config.sampling)?;
+            subscriber = subscriber.with_sampling_policy(Arc::new(policy));
         }
 
         // C4 磁盘持久化 fallback journal：构建期重放一次（记录带 replayed=true

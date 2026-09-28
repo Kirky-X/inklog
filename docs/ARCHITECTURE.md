@@ -121,7 +121,8 @@ sequenceDiagram
 - 提取 `trace_id` / `span_id`（从当前 tracing span；无 OTel 时沿 parent 链以根 span id 派生 32/16 位 hex）；
 - 按脱敏规则处理消息与字段；
 - 经 `EnvFilter`（reload 包装）支持运行时级别热调；
-- 非阻塞发送到通道，队列满时背压。
+- 非阻塞发送到通道，队列满时背压；
+- 限流触发时进入压力路径：`SamplingPolicy`（`InklogConfig.sampling`，per_level 采样率 + per_target_prefix 规则，最长前缀优先）先决策，未命中回退内置兜底（非关键级别丢弃，ERROR/FATAL 保留 1/100）；采样淘汰计入 `inklog_sampled_out_total`。
 
 ### 配置系统（InklogConfig）
 

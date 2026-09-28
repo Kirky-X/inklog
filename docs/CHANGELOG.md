@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **可配采样策略**：`InklogConfig.sampling`（`SamplingConfig`：`per_level` 每级别采样率 + `per_target_prefix` 按 target 前缀规则，最长前缀优先、大小写不敏感）配置限流压力下的保留规则，加载期校验（级别合法、采样率 ≥ 1、前缀非空）；规则未命中或未配置时回退内置兜底（非关键级别丢弃、ERROR/FATAL 保留 1/100），行为与既有语义一致
+- **采样细分指标**：新增 `inklog_sampled_out_total`（`Metrics::sampled_out()`），仅统计采样决策淘汰的记录（Subscriber 压力路径采样与 `SamplingSink` 淘汰），限流非采样丢弃与通道满丢弃不计入；`MetricsSnapshot` 同步携带 `sampled_out`
+
 ## [0.3.0-rc.6] - 2026-09-28
 
 ### Added

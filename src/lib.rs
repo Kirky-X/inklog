@@ -203,8 +203,8 @@ pub use support::io::sink::{
     AsyncSink, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
     CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, NoOpRateLimit,
     RateLimitedSink, Rotatable, RotationContext, RotationResult, RotationStrategy, Sampler,
-    SamplingSink, SinkFactory, SinkMetadata, SinkRateLimit, SinkRegistry, SizeBasedRotation,
-    TimeBasedRotation, TokenBucketRateLimit,
+    SamplingPolicy, SamplingSink, SinkFactory, SinkMetadata, SinkRateLimit, SinkRegistry,
+    SizeBasedRotation, TimeBasedRotation, TokenBucketRateLimit,
 };
 
 // Re-export masking for benchmarks
@@ -217,7 +217,8 @@ pub mod integrations;
 pub use domain::config::{
     ArchiveFormat, ChannelStrategy, ConsoleSinkConfig, DatabaseDriver, DatabaseSinkConfig,
     FileSinkConfig, GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig,
-    ParquetConfig, PartitionStrategy, PerformanceConfig, TlsConfig,
+    ParquetConfig, PartitionStrategy, PerformanceConfig, SamplingConfig, TargetSamplingRule,
+    TlsConfig,
 };
 pub use domain::types::log_record::LogRecord;
 pub use error::InklogError;

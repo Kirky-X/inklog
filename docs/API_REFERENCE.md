@@ -387,10 +387,16 @@ pub struct InklogConfig {
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
     pub target_levels: HashMap<String, String>,    // per-target 级别预设
+    pub sampling: SamplingConfig,                  // 采样策略（默认空 = 内置兜底）
 }
 ```
 
 > `target_levels` 的条目合并进 EnvFilter：优先级低于 `RUST_LOG`、高于全局默认级别。
+>
+> `sampling` 配置限流压力下的保留规则：`per_level`（级别 → N 取 1 采样率）与
+> `per_target_prefix`（target 前缀 → `{ keep_level, sample_every_n }`，最长前缀
+> 优先）。未配置时走内置兜底（非关键级别丢弃，ERROR/FATAL 保留 1/100）；规则
+> 未命中的记录同样回退内置兜底。
 
 #### 方法
 
@@ -718,6 +724,7 @@ pub struct MetricsSnapshot {
 |--------|------|------|
 | `inklog_logs_written_total` | counter | 成功写入总数 |
 | `inklog_logs_dropped_total` | counter | 丢弃总数 |
+| `inklog_sampled_out_total` | counter | 采样淘汰总数（`logs_dropped` 的采样细分） |
 | `inklog_sink_errors_total` | counter | Sink 错误总数 |
 | `inklog_channel_blocked_total` | counter | 通道阻塞次数 |
 | `inklog_write_latency_us` | histogram | 写入延迟（微秒，含 bucket/sum/count） |
@@ -818,6 +825,8 @@ impl<T: LogSink + ?Sized> AsyncSink for T {}
 | `CompressionStrategy` / `NoCompression` / `ZstdCompression` / `GzipCompression` | 压缩后端抽象 |
 | `SinkFactory` / `FileSinkFactory` / `SinkMetadata` / `SinkWriteOutcome` | Sink 工厂与元数据 |
 | `Sampler` | 采样器（`should_emit(&LogRecord) -> bool`） |
+| `SamplingPolicy` | 限流压力下的采样策略（per_level 采样率 + per_target_prefix 规则；`should_emit` 返回 `Option<bool>`，`None` = 无规则命中，回退内置兜底） |
+| `SamplingConfig` / `TargetSamplingRule` | 采样策略配置（`InklogConfig.sampling`，加载期校验） |
 | `SinkRateLimit` / `NoOpRateLimit` / `TokenBucketRateLimit` | 限流端口与实现（对象安全，供上层实现注入） |
 | `MiddlewareChain` / `MiddlewareVerdict` / `RecordMiddleware` / `EnrichMiddleware` / `LevelFilterMiddleware` | 中间件组合子 |
 
