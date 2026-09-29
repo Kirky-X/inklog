@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Channel sizing strategy for log buffer management.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelStrategy {
     #[serde(rename = "fixed")]
@@ -54,6 +55,7 @@ impl std::fmt::Display for ChannelStrategy {
 
 /// Performance tuning configuration for log channel and worker management.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PerformanceConfig {
     #[serde(default = "default_channel_capacity")]
     pub channel_capacity: usize,

@@ -60,6 +60,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Check all features
         run: cargo check --workspace --features "sqlite http cli kit compression gzip parquet fast-masking"
+      # 裸 schema 组合是 README 文档化的独立公共面（不经 cli 隐式启用），
+      # 防止 schema 门控代码误引用 cli 门控符号时门禁全绿
+      - name: Check bare schema feature
+        run: cargo check --workspace --features schema
 
   test:
     name: Test
@@ -75,6 +79,15 @@ jobs:
         # test-utils 必须加入：integration 测试目标 required-features 含它，
         # 缺失时 cargo 静默跳过该目标（不报错、不执行），测试门禁形同虚设
         run: cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
+
+      - name: Verify config schema artifact has no drift
+        run: |
+          # 先断言产物已入库：git diff 不含 untracked，漏 add 时该步骤会静默空转
+          git ls-files --error-unmatch config_schema.json
+          # feature 集与上方测试步骤一致以复用编译产物（cli 隐含 schema）；
+          # 单测为 trim_end 比较，此处 git diff 兜底字节级差异（含尾随换行）
+          cargo run --quiet --features "sqlite http cli kit compression gzip parquet fast-masking test-utils" --bin inklog-cli -- generate --schema --output config_schema.json
+          git diff --exit-code -- config_schema.json
 
   build:
     name: Build (${{ matrix.os }})

@@ -74,6 +74,10 @@ enum Commands {
         #[arg(long)]
         #[arg(help = inklog::i18n::tr("cli-generate-help-env-example"))]
         env_example: bool,
+
+        #[arg(long)]
+        #[arg(help = inklog::i18n::tr("cli-generate-help-schema"))]
+        schema: bool,
     },
 
     #[command(name = "validate")]

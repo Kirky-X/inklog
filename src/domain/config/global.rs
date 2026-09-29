@@ -49,6 +49,7 @@ pub(crate) fn default_true() -> bool {
 /// export INKLOG_GLOBAL_MASKING_ENABLED=false
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GlobalConfig {
     /// Minimum log level to capture.
     ///

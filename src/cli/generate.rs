@@ -234,6 +234,31 @@ worker_threads = 2
     )
 }
 
+/// Generate the inklog configuration JSON Schema file (`schema` feature).
+///
+/// 输出为 pretty JSON（换行结尾），与入库产物 `config_schema.json` 同源；
+/// 路径安全校验与 TOML 模板生成共用同一套规则。
+pub fn generate_config_schema(output_path: &Path) -> Result<()> {
+    validate_output_path_safety(output_path)?;
+
+    let schema = serde_json::to_string_pretty(&inklog::InklogConfig::json_schema())
+        .context("serialize config JSON schema")?;
+
+    let mut file = File::create(output_path).with_context(|| {
+        let mut args = inklog::i18n::MsgArgs::new();
+        args.set("path", output_path.display().to_string());
+        inklog::i18n::tr_args("config-create_config_failed", args)
+    })?;
+    file.write_all(schema.as_bytes())
+        .and_then(|_| file.write_all(b"\n"))
+        .with_context(|| inklog::i18n::tr("config-write_config_failed"))?;
+
+    let mut args = inklog::i18n::MsgArgs::new();
+    args.set("path", output_path.display().to_string());
+    println!("{}", inklog::i18n::tr_args("cli-generate-schema", args));
+    Ok(())
+}
+
 pub fn generate_env_example(output_path: &Path) -> Result<()> {
     // Validate output path safety
     validate_output_path_safety(output_path)?;

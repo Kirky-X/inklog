@@ -597,6 +597,10 @@ mod sink_registry_e2e {
         assert_eq!(metadata.name, "File Sink");
         assert_eq!(factory.sink_type(), "file");
         assert!(metadata.description.contains("rotation"));
+        // schema feature 下 factory 填充真实 FileSinkConfig schema，否则维持 None
+        #[cfg(feature = "schema")]
+        assert!(metadata.config_schema.is_some());
+        #[cfg(not(feature = "schema"))]
         assert!(metadata.config_schema.is_none());
     }
 

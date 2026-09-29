@@ -33,6 +33,7 @@ use super::http::HttpErrorMode;
 /// - Environment variables (prefix `INKLOG_`)
 /// - Defaults (lowest priority)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InklogConfig {
     #[serde(default)]
     pub global: GlobalConfig,
@@ -652,6 +653,25 @@ impl InklogConfig {
         self.rate_limit.validate()?;
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "schema")]
+impl InklogConfig {
+    /// 导出配置的 JSON Schema（`schema` feature；与 `inklog-cli generate
+    /// --schema` 及入库产物 `config_schema.json` 同源）。
+    ///
+    /// 字段序为 serde_json 的确定性排序，输出适合入库做漂移校验。
+    ///
+    /// # Panics
+    ///
+    /// 仅当 `serde_json` 序列化 `schemars::Schema` 失败时 panic。载荷是
+    /// 纯数据（无非法 map 键、无非字符串数值边界），该路径不可达——
+    /// expect 表达的是序列化不变量，不是可恢复的错误分支。
+    #[must_use]
+    pub fn json_schema() -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(InklogConfig))
+            .expect("JsonSchema serialization cannot fail")
     }
 }
 
@@ -1796,6 +1816,19 @@ keep_level = "verbose"
         assert!(
             config.rate_limit.is_empty(),
             "absent [rate_limit] section must yield an empty quota config"
+        );
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    fn test_config_schema_artifact_matches_committed_file() {
+        let generated = serde_json::to_string_pretty(&InklogConfig::json_schema()).unwrap();
+        let committed = include_str!("../../../config_schema.json");
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "config_schema.json has drifted from the current config types — re-run: \
+             cargo run --features cli --bin inklog-cli -- generate --schema --output config_schema.json"
         );
     }
 

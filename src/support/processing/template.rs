@@ -29,6 +29,7 @@ fn format_field(key: &str, value: &Value) -> String {
 /// Controls whether logs are rendered as human-readable text (via `LogTemplate`)
 /// or as machine-parseable JSON (one object per line).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
     /// Human-readable text using `LogTemplate`.

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Supported database drivers for the database sink.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseDriver {
     #[serde(rename = "postgres")]
@@ -60,6 +61,7 @@ impl std::fmt::Display for DatabaseDriver {
 
 /// Database table partitioning strategy for log storage optimization.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum PartitionStrategy {
     #[serde(rename = "monthly")]
@@ -102,6 +104,7 @@ impl std::fmt::Display for PartitionStrategy {
 
 /// Parquet export configuration for database sink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ParquetConfig {
     #[serde(default = "default_parquet_compression_level")]
@@ -147,6 +150,7 @@ impl Default for ParquetConfig {
 
 /// Supported archive formats for database log export.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ArchiveFormat {
     #[default]
@@ -190,6 +194,7 @@ impl std::fmt::Display for ArchiveFormat {
 
 /// Database sink configuration for persistent log storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseSinkConfig {
     #[serde(default = "default_db_sink_name")]

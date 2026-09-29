@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 /// export INKLOG_CONSOLE_SINK_COLORED=false
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConsoleSinkConfig {
     /// Enable console logging.
     #[serde(default = "default_true")]

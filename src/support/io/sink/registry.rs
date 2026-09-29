@@ -139,9 +139,35 @@ impl SinkFactory for FileSinkFactory {
                 "encryption".to_string(),
                 "batching".to_string(),
             ],
-            config_schema: None,
+            config_schema: file_config_schema(),
         }
     }
+}
+
+/// FileSinkConfig 的 JSON Schema：`schema` feature 下填充真实导出，
+/// 未启用时维持 None（与 SinkMetadata 的 Option 语义一致）。
+///
+/// 进程级缓存一次生成：输出是类型的纯函数，而 metadata() 是公开
+/// discovery 端口，可能被管理/健康端点轮询，缓存把每次调用从
+/// 「新建 SchemaGenerator 走全类型树」降为一次 Value 克隆。
+#[cfg(feature = "schema")]
+static FILE_SINK_CONFIG_SCHEMA: std::sync::LazyLock<Option<serde_json::Value>> =
+    std::sync::LazyLock::new(|| {
+        let schema = serde_json::to_value(schemars::schema_for!(crate::FileSinkConfig));
+        // Schema→Value 为纯数据序列化，不可失败；debug 构建下显性化，
+        // release 的 .ok() 仅为适配 metadata() 的无错误通道签名
+        debug_assert!(schema.is_ok(), "FileSinkConfig schema serialization failed");
+        schema.ok()
+    });
+
+#[cfg(feature = "schema")]
+fn file_config_schema() -> Option<serde_json::Value> {
+    std::sync::LazyLock::force(&FILE_SINK_CONFIG_SCHEMA).clone()
+}
+
+#[cfg(not(feature = "schema"))]
+fn file_config_schema() -> Option<serde_json::Value> {
+    None
 }
 
 #[cfg(test)]
@@ -227,6 +253,33 @@ mod tests {
         let metadata = metadata.unwrap();
         assert_eq!(metadata.name, "File Sink");
         assert!(metadata.features.contains(&"rotation".to_string()));
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    fn test_registry_metadata_config_schema_filled_with_feature() {
+        let temp_dir = tempdir().unwrap();
+        let config = FileSinkConfig {
+            enabled: true,
+            path: temp_dir.path().join("schema_probe.log"),
+            ..Default::default()
+        };
+        let factory = FileSinkFactory::new(config);
+
+        let metadata = factory.metadata();
+        let schema = metadata
+            .config_schema
+            .as_ref()
+            .expect("schema feature must fill FileSinkFactory config_schema");
+
+        // FileSinkConfig 顶层属性可发现（JSON Schema properties 暴露）
+        let props = schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .expect("schema must be an object with properties");
+        for field in ["enabled", "path", "max_size"] {
+            assert!(props.contains_key(field), "schema must expose `{field}`");
+        }
     }
 
     #[test]
@@ -324,6 +377,10 @@ mod tests {
         assert!(metadata.features.contains(&"compression".to_string()));
         assert!(metadata.features.contains(&"encryption".to_string()));
         assert!(metadata.features.contains(&"batching".to_string()));
+        // schema feature 下 factory 填充真实 FileSinkConfig schema，否则维持 None
+        #[cfg(feature = "schema")]
+        assert!(metadata.config_schema.is_some());
+        #[cfg(not(feature = "schema"))]
         assert!(metadata.config_schema.is_none());
     }
 }

@@ -408,6 +408,19 @@ pub struct InklogConfig {
 >
 > 运维提示：组配额应显著低于全局 `performance.rate_limit` 预算——过大的组配
 > 额等效于该前缀豁免全局限流；规则数建议 ≤ 64（查找为按记录执行的线性扫描）。
+> 配置 JSON Schema（`schema` feature）：`InklogConfig::json_schema()` 程序化导出
+> （每次调用重新生成，O(schema) 分配，嵌入方可自行缓存），`inklog-cli generate
+> --schema [--output <file>]` 输出文件（默认 `config_schema.json`，入库并由漂移
+> 测试与 CI `git diff --exit-code` 防漂移）；`SinkMetadata.config_schema` 由内置
+> `FileSinkFactory` 在 `schema` feature 启用时填充 `FileSinkConfig` 的真实 schema
+> （进程级缓存），其余情况（feature 未启用、第三方 factory 未提供）均为 `null`。
+>
+> Schema 不含 serde alias 键名：`file/console` sink 的 `masking_enabled`
+> （alias `pii_masking_enabled`）与 `global.sanitizer_enabled`（alias
+> `sanitizer_enabled`）只以主名出现在 `properties` 中，alias 仅在字段描述
+> 文本中提及——按 schema 做机器校验时仅主名是合法键；alias 反序列化兼容
+> 仍由 loader 保证（schema 校验与反序列化接受域以主名为准）。
+
 
 #### 方法
 

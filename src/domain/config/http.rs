@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// HTTP server configuration for health checks and metrics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HttpServerConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -67,6 +68,7 @@ impl Default for HttpServerConfig {
 
 /// HTTP authentication configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HttpAuthConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -96,6 +98,7 @@ impl Default for HttpAuthConfig {
 /// Specifies the paths to the PEM-encoded certificate and private key files
 /// used for HTTPS connections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TlsConfig {
     /// Path to the PEM-encoded certificate file.
     pub cert_path: String,
@@ -139,6 +142,7 @@ impl TlsConfig {
 /// - `Warn`: Log errors as warnings and continue operation.
 /// - `Strict`: Return error responses to callers (default).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum HttpErrorMode {
     #[serde(rename = "warn")]

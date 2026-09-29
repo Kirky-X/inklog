@@ -45,6 +45,7 @@ use std::path::PathBuf;
 /// masking_enabled = true
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileSinkConfig {
     /// Enable file logging.
     #[serde(default = "default_true")]

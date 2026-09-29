@@ -105,7 +105,28 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             output,
             config_type,
             env_example,
+            schema,
         } => {
+            // --schema：输出 InklogConfig 的 JSON Schema 文件（默认
+            // config_schema.json，与入库产物同源）；--output 此时为文件路径
+            if schema {
+                // 本分支以 return 发散，output 可直接 move，不占用后续路径
+                let schema_path = output.unwrap_or_else(|| PathBuf::from("config_schema.json"));
+                generate::generate_config_schema(&schema_path)?;
+                if args.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "command": "generate",
+                            "status": "ok",
+                            "schema": true,
+                            "output": schema_path.display().to_string(),
+                        })
+                    );
+                }
+                return Ok(0);
+            }
+
             let output_path = output.unwrap_or_else(|| PathBuf::from("."));
             let output_path = if output_path.is_dir() {
                 output_path
@@ -347,12 +368,38 @@ mod exit_code_tests {
                 output: Some(dir.path().to_path_buf()),
                 config_type: super::super::ConfigType::Minimal,
                 env_example: false,
+                schema: false,
             },
         ))
         .unwrap();
         assert_eq!(code, 0);
         // 模板确实落盘
         assert!(fs::read_dir(dir.path()).unwrap().count() > 0);
+    }
+
+    #[test]
+    fn test_generate_schema_exit_0_writes_valid_json() {
+        let dir = tempdir();
+        let out = dir.path().join("schema.json");
+        let code = run_with_args(cli(
+            true,
+            Commands::Generate {
+                output: Some(out.clone()),
+                config_type: super::super::ConfigType::Minimal,
+                env_example: false,
+                schema: true,
+            },
+        ))
+        .unwrap();
+        assert_eq!(code, 0);
+        // --schema 模式下 --output 即文件路径，且内容为合法 JSON Schema
+        let parsed: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&out).expect("schema file must exist"))
+                .expect("schema output must be valid JSON");
+        assert!(
+            parsed.get("properties").is_some(),
+            "schema must expose config properties"
+        );
     }
 
     #[test]

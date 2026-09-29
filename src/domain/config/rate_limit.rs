@@ -14,6 +14,7 @@ use std::collections::HashMap;
 ///
 /// 查找为按记录执行的线性扫描（最长前缀优先），规则数建议 ≤ 64。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RateLimitConfig {
     /// target 前缀 → 每秒令牌数；最长前缀优先，未命中规则的 target 不受限
     #[serde(default)]

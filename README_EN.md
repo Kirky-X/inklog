@@ -169,7 +169,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `mysql` | ❌ | MySQL database backend (via dbnexus) |
 | `duckdb` | ❌ | DuckDB database backend (via dbnexus) |
 | `http` | ❌ | Axum health and metrics endpoints (axum + axum-server, TLS via rustls) |
-| `cli` | ❌ | `inklog-cli` command-line tool (clap + glob) |
+| `cli` | ❌ | `inklog-cli` command-line tool (clap + glob, implies `schema`) |
+| `schema` | ❌ | Config JSON Schema export (schemars derive + `InklogConfig::json_schema()`); implicitly enabled by `cli` |
 | `kit` | ❌ | trait-kit lifecycle and observability integration (`InklogModule`); requires at least one database backend feature |
 | `compression` | ❌ | Zstd compression for rotated log files (zstd) |
 | `gzip` | ❌ | Gzip compression backend (pure-Rust flate2; FileSink falls back to gzip for rotation when `compression` is off) |

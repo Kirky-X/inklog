@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **配置 JSON Schema 导出**：新增 `schema` optional feature（schemars 1.2）——全部配置类型（`InklogConfig` 及 global/console/file/database/http/performance/sampling/rate_limit 子配置与枚举）derive `JsonSchema`；`InklogConfig::json_schema()` 程序化导出；`inklog-cli generate --schema` 输出 schema 文件（默认 `config_schema.json`）；`SinkMetadata.config_schema` 由 factory 填充真实 schema（`FileSinkFactory` 先行，未启用 feature 时维持 `None`）；产物 `config_schema.json` 入库并由漂移单测（`include_str` 对比）与 CI 步骤（重新生成 + `git diff --exit-code`）双重防漂移
+
 - **per-target 分级限流**：`rate_limit.rules`（target 前缀 → 该组每秒令牌数，最长前缀优先、ASCII 大小写不敏感）配置按前缀分组的配额限流；命中组由组桶独立裁决（放行后不再进入 `performance.rate_limit` 全局限流），未命中 target 维持既有全局路径；组预算耗尽与全局限流拒绝共用同一关键级别救援（ERROR/FATAL 按 1-in-N 采样保留），非关键级别计为 `logs_dropped`；加载期校验（前缀非空、速率 ≥ 1），未配置时整体不接线、默认全局行为不变；查找路径为无分配线性扫描（基准 `target_rate_limiter_lookup`：最长前缀命中 ≈6ns、全表未命中 ≈4ns、含组桶裁决 ≈41ns）
 - **可配采样策略**：`InklogConfig.sampling`（`SamplingConfig`：`per_level` 每级别采样率 + `per_target_prefix` 按 target 前缀规则，最长前缀优先、大小写不敏感）配置限流压力下的保留规则，加载期校验（级别合法、采样率 ≥ 1、前缀非空）；规则未命中或未配置时回退内置兜底（非关键级别丢弃、ERROR/FATAL 保留 1/100），行为与既有语义一致
 - **采样细分指标**：新增 `inklog_sampled_out_total`（`Metrics::sampled_out()`），仅统计采样决策淘汰的记录（Subscriber 压力路径采样与 `SamplingSink` 淘汰），限流非采样丢弃与通道满丢弃不计入；`MetricsSnapshot` 同步携带 `sampled_out`

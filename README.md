@@ -167,7 +167,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `mysql` | ❌ | MySQL 数据库后端（经 dbnexus） |
 | `duckdb` | ❌ | DuckDB 数据库后端（经 dbnexus） |
 | `http` | ❌ | Axum HTTP 健康与指标端点（axum + axum-server，TLS 走 rustls） |
-| `cli` | ❌ | `inklog-cli` 命令行工具（clap + glob） |
+| `cli` | ❌ | `inklog-cli` 命令行工具（clap + glob，隐含 `schema`） |
+| `schema` | ❌ | 配置 JSON Schema 导出（schemars derive + `InklogConfig::json_schema()`）；`cli` 隐式启用 |
 | `kit` | ❌ | trait-kit 生命周期与可观测集成（`InklogModule`），需至少一个数据库后端 feature |
 | `zstd` | ❌ | Zstd 压缩轮转日志文件（zstd）；`compression` 为其 deprecated 兼容别名 |
 | `gzip` | ❌ | Gzip 压缩后端（flate2 纯 Rust；未启用 `zstd` 时 FileSink 轮转回退 gzip） |

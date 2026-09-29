@@ -81,6 +81,7 @@ cli-prereq-missing = Missing critical prerequisites: { $deps }. Please install t
 
 cli-generate-config = Generated config file: { $path }
 cli-generate-env = Generated env example file: { $path }
+cli-generate-schema = Generated config JSON Schema: { $path }
 cli-generate-unknown-type = Unknown config type: { $type }. Use: minimal, full, database, file
 
 # CLI decrypt messages
@@ -157,6 +158,7 @@ cli-generate-about = Generate inklog configuration files
 cli-generate-help-output = Output directory or file path
 cli-generate-help-config-type = Config type: minimal, full, database, file
 cli-generate-help-env-example = Generate environment variable example file
+cli-generate-help-schema = Generate the inklog configuration JSON Schema file (with --output as the file path, default config_schema.json); mutually exclusive with other generate options and takes precedence
 
 cli-validate-about = Validate inklog configuration files (default: inklog_config.toml)
 cli-validate-help-config = Path to configuration file

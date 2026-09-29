@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 /// 单条 target 前缀规则：级别豁免阈值 + N 取 1 采样率。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetSamplingRule {
     /// target 命中前缀且级别 ≥ 该级别的记录始终放行（None = 不按级别豁免）
     #[serde(default)]
@@ -35,6 +36,7 @@ impl Default for TargetSamplingRule {
 
 /// 采样策略配置。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SamplingConfig {
     /// 每级别采样率：级别名（大小写不敏感，含 warning/critical 别名）→ N
     #[serde(default)]

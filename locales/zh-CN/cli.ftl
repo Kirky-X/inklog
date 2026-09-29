@@ -81,6 +81,7 @@ cli-prereq-missing = 缺少关键前置条件: { $deps }。请在继续之前安
 
 cli-generate-config = 已生成配置文件: { $path }
 cli-generate-env = 已生成环境变量示例文件: { $path }
+cli-generate-schema = 已生成配置 JSON Schema: { $path }
 cli-generate-unknown-type = 未知的配置类型: { $type }。可用: minimal, full, database, file
 
 # CLI decrypt 消息
@@ -157,6 +158,7 @@ cli-generate-about = 生成 inklog 配置文件
 cli-generate-help-output = 输出目录或文件路径
 cli-generate-help-config-type = 配置类型: minimal、full、database、file
 cli-generate-help-env-example = 生成环境变量示例文件
+cli-generate-help-schema = 生成 inklog 配置 JSON Schema 文件（--output 为文件路径，默认 config_schema.json）；与其他生成选项互斥，启用时优先执行
 
 cli-validate-about = 校验 inklog 配置文件（默认: inklog_config.toml）
 cli-validate-help-config = 配置文件路径
