@@ -18,6 +18,7 @@ use rayon::prelude::*;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tracing_subscriber::prelude::*;
@@ -570,7 +571,8 @@ criterion_group!(
     bench_backpressure,
     bench_concurrency,
     bench_object_pool,
-    bench_zero_allocation
+    bench_zero_allocation,
+    bench_sampling_stress_overhead
 );
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 criterion_group!(dbnexus_benches, bench_parquet_conversion);
@@ -681,5 +683,70 @@ fn bench_zero_allocation(c: &mut Criterion) {
         })
     });
 
+    group.finish();
+}
+
+/// 限流压力路径下采样决策的每记录开销。
+///
+/// `RateLimiter::new(0)` 无令牌使每条记录都进入压力分支：无策略时走内置
+/// 兜底（非关键级别丢弃），有策略时额外经 `SamplingPolicy::should_emit`
+/// （target 前缀匹配 + 级别路由 + N 取 1 计数器）。每次测量重建
+/// subscriber，保证计数器从零开始、迭代间互不污染。
+fn bench_sampling_stress_overhead(c: &mut Criterion) {
+    use inklog::domain::core::subscriber::LoggerSubscriber;
+    use inklog::support::observability::Metrics;
+    use inklog::support::processing::rate_limiter::RateLimiter;
+    use inklog::{SamplingConfig, SamplingPolicy, TargetSamplingRule};
+
+    let mut per_level = std::collections::HashMap::new();
+    per_level.insert("info".to_string(), 4_u64);
+    let mut per_target_prefix = std::collections::HashMap::new();
+    per_target_prefix.insert(
+        "bench".to_string(),
+        TargetSamplingRule {
+            keep_level: None,
+            sample_every_n: 8,
+        },
+    );
+    let policy_config = SamplingConfig {
+        per_level,
+        per_target_prefix,
+    };
+
+    let cases: [(&str, Option<SamplingConfig>); 2] = [
+        ("no_policy_builtin_fallback", None),
+        ("policy_per_level_and_prefix", Some(policy_config)),
+    ];
+
+    let mut group = c.benchmark_group("sampling_stress_overhead");
+    group.measurement_time(Duration::from_secs(5));
+    for (name, config) in cases {
+        group.bench_function(name, |b| {
+            b.iter_custom(|iters| {
+                // 策略编译在计时区外：每次迭代重建（Sampler 计数器归零），
+                // 保证测量只含压力路径的每记录决策开销
+                let policy = config.as_ref().map(|cfg| {
+                    SamplingPolicy::from_config(cfg).expect("bench policy must compile")
+                });
+                let (_console_tx, _console_rx) = crossbeam_channel::bounded::<Arc<LogRecord>>(64);
+                let (_async_tx, _async_rx) = crossbeam_channel::bounded::<Arc<LogRecord>>(64);
+                let mut subscriber =
+                    LoggerSubscriber::new(_console_tx, _async_tx, Arc::new(Metrics::new()))
+                        .with_rate_limiter(Arc::new(RateLimiter::new(0)));
+                if let Some(policy) = policy {
+                    subscriber = subscriber.with_sampling_policy(Arc::new(policy));
+                }
+                let registry = tracing_subscriber::registry().with(subscriber);
+
+                let start = Instant::now();
+                tracing::subscriber::with_default(registry, || {
+                    for i in 0..iters {
+                        tracing::info!(target: "bench::sampling", iteration = i, "stress");
+                    }
+                });
+                start.elapsed()
+            })
+        });
+    }
     group.finish();
 }

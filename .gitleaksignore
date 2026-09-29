@@ -1,0 +1,18 @@
+# 测试夹具假凭证 allowlist：以下均为源码内的固定测试密钥/无效连接串，
+# 非真实泄露（审查定级 LOW；指纹格式 file:rule:line，按后缀匹配同时覆盖
+# 工作树扫描与 gitleaks detect 历史扫描；行号随历史 commit 漂移，需按
+# 检测时行号分别列出行号，漂移时同步更新）。
+# complex_features_test / comprehensive_validation_test：共享的 32 字节夹具加密 key
+# （解码后互异字符，仅用于内存 tempdir 下的 AES-256-GCM 轮转归档）。
+# 历史行号（commit e907ec36 时代的弱 key 位置）：
+tests/combinations/complex_features_test.rs:generic-api-key:28
+tests/combinations/complex_features_test.rs:generic-api-key:32
+tests/integration/comprehensive_validation_test.rs:generic-api-key:32
+# 现行行号（强 key 位置）：
+tests/combinations/complex_features_test.rs:generic-api-key:34
+tests/integration/comprehensive_validation_test.rs:generic-api-key:36
+# multi_sink_fallback_test：降级用例的故意无效数据库连接串（凭证与主机均
+# 为占位符，不指向任何真实服务；此处不写出连接串原文，避免 detect-secrets
+# 的 BasicAuthDetector 误报）。gitleaks 8.21.2 不复现该行（2026-09-29
+# dir/detect 双模式实测均无此条，按 trufflehog 报告通道的规则名预置，规则变更时需复核）。
+tests/combinations/multi_sink_fallback_test.rs:generic-api-key:246

@@ -193,7 +193,9 @@ mod multi_sink_fallback {
             file_sink: Some(file_config),
             database_sink: Some(db_config),
             console_sink: Some(ConsoleSinkConfig {
-                enabled: true,
+                // worker 线程的 stdout 直写不在测试 harness 捕获范围内，禁用
+                // 以免泄漏日志行污染进程 stdout（health 注册不受 enabled 影响）
+                enabled: false,
                 ..Default::default()
             }),
             ..Default::default()
@@ -271,7 +273,9 @@ mod multi_sink_fallback {
             file_sink: Some(file_config),
             database_sink: Some(db_config),
             console_sink: Some(ConsoleSinkConfig {
-                enabled: true,
+                // worker 线程的 stdout 直写不在测试 harness 捕获范围内，禁用
+                // 以免泄漏日志行污染进程 stdout（health 注册不受 enabled 影响）
+                enabled: false,
                 ..Default::default()
             }),
             ..Default::default()
@@ -327,7 +331,9 @@ mod multi_sink_fallback {
                 ..Default::default()
             }),
             console_sink: Some(ConsoleSinkConfig {
-                enabled: true,
+                // worker 线程的 stdout 直写不在测试 harness 捕获范围内，禁用
+                // 以免泄漏日志行污染进程 stdout（health 注册不受 enabled 影响）
+                enabled: false,
                 ..Default::default()
             }),
             ..Default::default()
@@ -386,7 +392,12 @@ mod multi_sink_fallback {
             },
             file_sink: Some(file_config),
             database_sink: Some(db_config),
-            console_sink: Some(ConsoleSinkConfig::default()),
+            // worker 线程的 stdout 直写不在测试 harness 捕获范围内，禁用以免
+            // 泄漏日志行污染进程 stdout（与本文件其余三处禁用同因）
+            console_sink: Some(ConsoleSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
             ..Default::default()
         };
 

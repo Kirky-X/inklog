@@ -1205,7 +1205,13 @@ mod tests {
             .build()
             .expect("Failed to build test runtime");
 
-        let config = InklogConfig::default();
+        // console 禁用：400 条并发记录经 worker 直写真实 stdout 会淹没测试
+        // 输出；并发投递与 shutdown 终止语义不受 sink 启用态影响
+        let mut config = InklogConfig::default();
+        config.console_sink = Some(crate::ConsoleSinkConfig {
+            enabled: false,
+            ..Default::default()
+        });
         let (file_tx, file_rx) = bounded::<Arc<LogRecord>>(100);
         let (console_tx, console_rx) = bounded::<Arc<LogRecord>>(2048);
         let (control_tx, control_rx) = bounded(10);

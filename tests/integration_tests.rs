@@ -103,6 +103,11 @@ async fn test_file_sink_auto_recovery() {
             path: log_file.clone().into(),
             ..Default::default()
         }),
+        // console 禁用：日志经 worker 直写真实 stdout 会淹没测试输出
+        console_sink: Some(inklog::ConsoleSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
         ..Default::default()
     };
     let (manager, subscriber, filter) = RecoveryLoggerManager::build_detached(
@@ -1478,6 +1483,11 @@ async fn test_concurrent_file_writes() {
             flush_interval_ms: 100,
             fsync: false,
             audit_chain_enabled: false,
+            ..Default::default()
+        }),
+        // console 禁用：401 条并发日志经 worker 直写真实 stdout 会淹没测试输出
+        console_sink: Some(inklog::ConsoleSinkConfig {
+            enabled: false,
             ..Default::default()
         }),
         performance: inklog::config::PerformanceConfig {

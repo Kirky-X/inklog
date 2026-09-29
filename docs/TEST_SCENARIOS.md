@@ -22,7 +22,7 @@ CI 主口径（`--features "sqlite http cli kit compression parquet fast-masking
 `[[test]]` 显式注册（深目录聚合的测试必须显式注册，否则 cargo 没有编译入口、不会执行）：
 
 - **integration**（required-features = sqlite,http,cli,compression,parquet,test-utils）：additional/comprehensive（全 sink 组合与动态配置）/ batch（批量写）/ verification（file_sink：压缩+加密归档验证）/ log（log crate 原生 + tracing 双路径）/ config（env 覆盖）/ http（服务器生命周期）/ cli（inklog-cli 二进制）/ parquet（导出）/ compression_ratio / recovery（自动恢复）/ stability（long_running，manual）
-- **combinations**（required-features = sqlite）：encryption_file（加密文件集成+密钥管理）/ multi_sink_fallback（SinkHealthMonitor 状态机+降级）/ complex_features（加密+压缩+数据库三特性叠加）
+- **combinations**（required-features = sqlite）：encryption_file（加密文件集成+密钥管理）/ multi_sink_fallback（SinkHealthMonitor 状态机+降级）/ complex_features（加密+数据库叠加，16KB 阈值强制尺寸轮转并断言归档为 v2 密文）
 - **performance**：benchmark（单线程/多线程/延迟/批量/池化 ×7）/ large_volume（1GB 压缩轮转）/ long_running + resource_monitor（内存/CPU 采样，manual）
 - **e2e_advanced**：见下节
 

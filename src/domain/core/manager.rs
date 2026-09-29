@@ -3751,6 +3751,7 @@ worker_threads = 1
 #[cfg(test)]
 mod set_level_tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_level_directives_upsert_and_render() {
@@ -3855,7 +3856,10 @@ mod set_level_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_manager_set_level_updates_directives_and_validates() {
+        // set_level(None, ..) 经生产路径同步改写进程级 log::max_level，
+        // 须与 log_adapter 的 max_level 测试组及 4051 的全局同步用例互斥
         let mut config = InklogConfig::default();
         config.global.level = "info".to_string();
         config
@@ -4047,8 +4051,12 @@ mod set_level_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_global_set_level_syncs_log_max_level() {
-        // 双门面同步：全局热调必须把 log::max_level 一起抬到新级别
+        // 双门面同步：全局热调必须把 log::max_level 一起抬到新级别。
+        // 断言直读进程级 max_level，须与 log_adapter 的 max_level 测试组及
+        // test_manager_set_level_updates_directives_and_validates（同样经
+        // set_level(None, ..) 写全局 max_level）互斥
         log::set_max_level(log::LevelFilter::Off);
         let mut config = InklogConfig::default();
         config.global.level = "info".to_string();

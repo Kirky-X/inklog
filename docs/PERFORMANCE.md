@@ -55,11 +55,13 @@
 
 ## 📈 既有基准（inklog_bench）
 
-`benches/inklog_bench.rs` 覆盖 LogRecord 创建、console sink 延迟、通道入队、持续/突发吞吐、FileSink 吞吐、no-op 对照等 9 组，运行方式：
+`benches/inklog_bench.rs` 覆盖 LogRecord 创建、console sink 延迟、通道入队、持续/突发吞吐、FileSink 吞吐、no-op 对照、模板渲染、掩码、背压、并发、对象池、零分配等组（parquet 转换按 database feature 门控），运行方式：
 
 ```bash
 cargo bench --bench inklog_bench
 ```
+
+其中 `sampling_stress_overhead` 组锁定限流压力路径的采样决策每记录开销：`RateLimiter::new(0)` 使每条记录都进入压力分支，对比 `no_policy_builtin_fallback`（内置兜底：非关键级别丢弃）与 `policy_per_level_and_prefix`（per_level 采样率 + target 前缀规则的 `SamplingPolicy` 决策）两态，即采样策略的每记录增量代价。
 
 历史数字未入库；后续版本更新时补齐 `inklog_bench` 的正式基线，与 `rc4_pipeline_bench` 统一以本文档为基线载体。
 

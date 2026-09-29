@@ -81,8 +81,10 @@ async fn test_comprehensive_real_data_writing() {
             ..Default::default()
         }),
         console_sink: Some(ConsoleSinkConfig {
-            enabled: true,
-            colored: true,
+            // worker 线程的 stdout 直写不在测试 harness 捕获范围内，启用会向
+            // 进程 stdout 泄漏约 4000 行日志（health 注册不受 enabled 影响，
+            // ConsoleSink::write 对禁用态直接丢弃）
+            enabled: false,
             ..Default::default()
         }),
         #[cfg(feature = "http")]
@@ -217,19 +219,28 @@ async fn test_comprehensive_real_data_writing() {
     let concurrent_elapsed = concurrent_start.elapsed();
     println!("并发测试完成，耗时: {:?}", concurrent_elapsed);
 
-    // 验证并发写入后的状态
-    let concurrent_metadata = std::fs::metadata(&log_path).unwrap();
-    assert!(
-        concurrent_metadata.len() > metadata.len(),
-        "并发写入应该增加了数据"
-    );
+    // 验证并发写入后的状态：spawn 完成只保证记录进入异步通道，落盘由
+    // file sink worker 按批次/间隔异步完成——轮询等待增长而非立即断言
+    // （break 即证明 len > metadata.len()，无需循环后重复断言）
+    let concurrent_deadline = Instant::now() + Duration::from_secs(10);
+    let concurrent_len = loop {
+        let len = std::fs::metadata(&log_path).unwrap().len();
+        if len > metadata.len() {
+            break len;
+        }
+        assert!(
+            Instant::now() < concurrent_deadline,
+            "并发写入应该增加了数据（等待落盘超时）"
+        );
+        sleep(Duration::from_millis(50)).await;
+    };
 
     let total_elapsed = test_start.elapsed();
 
     println!("\n=== 测试结果汇总 ===");
     println!("总测试时间: {:?}", total_elapsed);
     println!("写入的消息数量: {}", 2000 + 500 + 1000 + 500); // 约4500条
-    println!("最终文件大小: {} bytes", concurrent_metadata.len());
+    println!("最终文件大小: {} bytes", concurrent_len);
     println!("轮转文件数量: {}", log_files);
 
     // 验证数据掩码功能
@@ -239,12 +250,28 @@ async fn test_comprehensive_real_data_writing() {
 
     // 核正：encrypt 仅作用于轮转归档（file.rs rotate_inner 的后台压缩/加密路径），
     // 活跃写入文件是明文——secret_data 以明文出现属设计语义；归档密文行为由
-    // encryption_file_test::test_encrypted_file_sink_rotation 强制覆盖
-    let encrypted_content = std::fs::read_to_string(&log_path).unwrap();
-    assert!(
-        encrypted_content.contains("secret_data_1"),
-        "活跃文件应为明文（encrypt 仅作用于轮转归档）"
-    );
+    // encryption_file_test::test_encrypted_file_sink_rotation 强制覆盖。
+    // secret_data_1 的落盘由 file sink worker 异步完成，与读取存在竞态——
+    // 轮询等待其出现，超时才判失败（并行负载下 flush 可显著滞后）；
+    // 文件长度未增长时跳过全量重读（该时点文件已 >100KB，避免最多 200 次
+    // 数百 KB 级重复 IO）
+    let plaintext_deadline = Instant::now() + Duration::from_secs(10);
+    let mut last_len = 0_u64;
+    loop {
+        let len = std::fs::metadata(&log_path).unwrap().len();
+        if len > last_len {
+            last_len = len;
+            let content = std::fs::read_to_string(&log_path).unwrap();
+            if content.contains("secret_data_1") {
+                break;
+            }
+        }
+        assert!(
+            Instant::now() < plaintext_deadline,
+            "活跃文件应为明文且包含 secret_data_1（等待落盘超时，encrypt 仅作用于轮转归档）"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
     // 防御性不变量：任何加密归档产物都不得含明文敏感数据
     for entry in std::fs::read_dir(temp_dir.path())
         .unwrap()
@@ -304,6 +331,12 @@ async fn test_dynamic_configuration_changes() {
             max_size: "10MB".into(),
             ..Default::default()
         }),
+        // console 禁用：200 条 dynamic_test 日志经 worker 直写真实 stdout 会
+        // 淹没测试输出（--quiet 也无法捕获 worker 线程的直写）
+        console_sink: Some(ConsoleSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
         ..Default::default()
     };
 
@@ -339,6 +372,10 @@ async fn test_dynamic_configuration_changes() {
             enabled: true,
             path: log_path.clone(),
             max_size: "20MB".into(), // 修改文件大小
+            ..Default::default()
+        }),
+        console_sink: Some(ConsoleSinkConfig {
+            enabled: false,
             ..Default::default()
         }),
         ..Default::default()
