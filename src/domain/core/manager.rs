@@ -3859,7 +3859,8 @@ mod set_level_tests {
     #[serial]
     async fn test_manager_set_level_updates_directives_and_validates() {
         // set_level(None, ..) 经生产路径同步改写进程级 log::max_level，
-        // 须与 log_adapter 的 max_level 测试组及 4051 的全局同步用例互斥
+        // 须与 log_adapter 的 max_level 测试组及 test_global_set_level_syncs_log_max_level
+        // （同样断言进程级 max_level）互斥
         let mut config = InklogConfig::default();
         config.global.level = "info".to_string();
         config
