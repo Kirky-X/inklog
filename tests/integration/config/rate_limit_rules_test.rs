@@ -138,3 +138,88 @@ enabled = true
 
     let _ = manager.shutdown();
 }
+
+#[tokio::test]
+#[serial]
+async fn test_rate_limit_rules_rescue_critical_after_quota_exhaustion() {
+    // 钉住 MEDIUM 修复的行为接缝（TOML 链 → manager 接线 → 压力路径救援 →
+    // 落盘）：组配额耗尽后非关键记录被丢（logs_dropped），同组 ERROR 获
+    // 1-in-100 兜底救援（计数器 0 放行）——与全局限流路径语义一致
+    let temp_dir = tempdir().unwrap();
+    let log_path = temp_dir.path().join("rate_limit_rescue.log");
+
+    let toml_str = r#"
+[global]
+level = "info"
+
+[console_sink]
+enabled = false
+
+[file_sink]
+enabled = true
+
+[rate_limit.rules]
+"app::audit" = 1
+"#;
+    let mut config: InklogConfig = toml_str
+        .parse()
+        .expect("valid rate_limit TOML must pass the config chain");
+    config.file_sink = Some(inklog::FileSinkConfig {
+        enabled: true,
+        path: log_path.clone(),
+        batch_size: 1,
+        flush_interval_ms: 10,
+        fsync: false,
+        audit_chain_enabled: false,
+        ..Default::default()
+    });
+
+    let (manager, subscriber, filter) = LoggerManager::build_detached(
+        config,
+        #[cfg(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ))]
+        None,
+    )
+    .await
+    .unwrap();
+
+    let registry = tracing_subscriber::registry().with(subscriber).with(filter);
+    tracing::subscriber::with_default(registry, || {
+        // 组桶 1 令牌：warn 消耗预算；第 2 条 warn 组配额拒绝（非关键无救援）；
+        // ERROR 走压力路径兜底救援（计数器 0 放行）
+        tracing::warn!(target: "app::audit::core", message = "audit-warn-kept");
+        tracing::warn!(target: "app::audit::core", message = "audit-warn-dropped");
+        tracing::error!(target: "app::audit::core", message = "audit-error-rescued");
+    });
+
+    // 等待落盘至见到救援的 ERROR（batch_size=1 + flush 10ms）
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let content = loop {
+        let current = std::fs::read_to_string(&log_path).unwrap_or_default();
+        if current.contains("audit-error-rescued") || std::time::Instant::now() >= deadline {
+            break current;
+        }
+        inklog::tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+
+    assert!(
+        content.contains("audit-warn-kept") && content.contains("audit-error-rescued"),
+        "first record consumes the token and the exhausted-group ERROR must be rescued: {content}"
+    );
+    assert!(
+        !content.contains("audit-warn-dropped"),
+        "non-critical record after quota exhaustion must stay dropped: {content}"
+    );
+
+    let status = manager.get_health_status();
+    assert_eq!(
+        status.metrics.logs_dropped, 1,
+        "only the non-critical quota drop must count as logs_dropped"
+    );
+
+    let _ = manager.shutdown();
+}
