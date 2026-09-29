@@ -8,6 +8,7 @@ pub mod masking_ac;
 pub mod masking_registry;
 pub mod object_pool;
 pub mod rate_limiter;
+pub mod target_rate_limiter;
 pub mod template;
 
 pub use masking::{DataMasker, DataMaskerBuilder, MaskMatch, MaskRule, MaskRuleBuilder};
@@ -19,5 +20,6 @@ pub use object_pool::{
     put_string_buffer,
 };
 pub use rate_limiter::RateLimiter;
+pub use target_rate_limiter::{TargetQuotaVerdict, TargetRateLimiter};
 pub use template::LogTemplate;
 pub use template::OutputFormat;

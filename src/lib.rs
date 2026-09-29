@@ -217,8 +217,8 @@ pub mod integrations;
 pub use domain::config::{
     ArchiveFormat, ChannelStrategy, ConsoleSinkConfig, DatabaseDriver, DatabaseSinkConfig,
     FileSinkConfig, GlobalConfig, HttpAuthConfig, HttpErrorMode, HttpServerConfig, InklogConfig,
-    ParquetConfig, PartitionStrategy, PerformanceConfig, SamplingConfig, TargetSamplingRule,
-    TlsConfig,
+    ParquetConfig, PartitionStrategy, PerformanceConfig, RateLimitConfig, SamplingConfig,
+    TargetSamplingRule, TlsConfig,
 };
 pub use domain::types::log_record::LogRecord;
 pub use error::InklogError;
@@ -250,8 +250,8 @@ pub use support::observability::{
 };
 pub use support::processing::{
     DataMasker, DataMaskerBuilder, LogTemplate, MaskMatch, MaskRule, MaskRuleBuilder,
-    MaskRuleRegistry, ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, get_log_record,
-    get_string_buffer, put_log_record, put_string_buffer,
+    MaskRuleRegistry, ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, TargetQuotaVerdict,
+    TargetRateLimiter, get_log_record, get_string_buffer, put_log_record, put_string_buffer,
 };
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig,

@@ -14,6 +14,7 @@ use super::global::GlobalConfig;
 use super::http::HttpServerConfig;
 use super::performance::MAX_CHANNEL_CAPACITY;
 use super::performance::PerformanceConfig;
+use super::rate_limit::RateLimitConfig;
 use super::sampling::SamplingConfig;
 
 // Re-export HttpErrorMode for env override match in this file
@@ -55,6 +56,9 @@ pub struct InklogConfig {
     /// 采样策略：限流压力下决定保留哪些记录（未配置 = 内置兜底采样）。
     #[serde(default)]
     pub sampling: SamplingConfig,
+    /// 按 target 前缀分组的限流配额（未配置 = 订阅器不接线，全局行为不变）。
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 fn default_console_sink() -> Option<ConsoleSinkConfig> {
@@ -138,6 +142,7 @@ impl Default for InklogConfig {
             http_server: None,
             target_levels: HashMap::new(),
             sampling: SamplingConfig::default(),
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }
@@ -642,6 +647,9 @@ impl InklogConfig {
 
         // --- Sampling policy ---
         self.sampling.validate()?;
+
+        // --- Per-target rate limit quota groups ---
+        self.rate_limit.validate()?;
 
         Ok(())
     }
@@ -1767,5 +1775,38 @@ keep_level = "verbose"
 "#
         .parse();
         assert!(result.is_err(), "invalid keep_level must be rejected");
+    }
+
+    #[test]
+    fn test_rate_limit_rules_toml_section_parses() {
+        let toml_str = r#"
+[rate_limit.rules]
+"app::audit" = 500
+"app::noise" = 10
+"#;
+        let config: InklogConfig = toml_str.parse().expect("should parse rate_limit TOML");
+        assert_eq!(config.rate_limit.rules.get("app::audit"), Some(&500));
+        assert_eq!(config.rate_limit.rules.get("app::noise"), Some(&10));
+        assert!(!config.rate_limit.is_empty());
+    }
+
+    #[test]
+    fn test_rate_limit_section_absent_defaults_to_empty() {
+        let config: InklogConfig = "".parse().expect("empty TOML should parse");
+        assert!(
+            config.rate_limit.is_empty(),
+            "absent [rate_limit] section must yield an empty quota config"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid_rate_limit_rules() {
+        // 零速率拒绝
+        let result: Result<InklogConfig, _> = "[rate_limit.rules]\n\"app::noise\" = 0\n".parse();
+        assert!(result.is_err(), "zero per-group rate must be rejected");
+
+        // 空前缀拒绝（TOML 裸键可表空串）
+        let result: Result<InklogConfig, _> = "[rate_limit.rules]\n\"\" = 10\n".parse();
+        assert!(result.is_err(), "empty prefix must be rejected");
     }
 }

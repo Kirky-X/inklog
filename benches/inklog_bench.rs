@@ -572,7 +572,8 @@ criterion_group!(
     bench_concurrency,
     bench_object_pool,
     bench_zero_allocation,
-    bench_sampling_stress_overhead
+    bench_sampling_stress_overhead,
+    bench_target_rate_limiter_lookup
 );
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 criterion_group!(dbnexus_benches, bench_parquet_conversion);
@@ -748,5 +749,47 @@ fn bench_sampling_stress_overhead(c: &mut Criterion) {
             })
         });
     }
+    group.finish();
+}
+
+/// per-target 分级限流的查找路径开销（R7）。
+///
+/// `governs` 是纯前缀查找（规则按前缀长度降序 + 无分配 ASCII 大小写不敏感
+/// 比较）；`evaluate` 额外含组桶决策（一次 parking_lot 锁 + 时间补充）。
+/// 两条路径分开测：前者即 <100ns 基线的锁定对象，后者给出含配额扣减的
+/// 端到端每记录代价。注意 evaluate 为单线程无竞争地板值——组桶是组内
+/// 所有生产者共享的单锁，高速率组的真实代价含锁竞争。
+fn bench_target_rate_limiter_lookup(c: &mut Criterion) {
+    use inklog::support::processing::TargetRateLimiter;
+
+    // "app::audit"（10 字符）为唯一最长前缀，命中规则在扫描序列中排首位
+    let mut rules = std::collections::HashMap::new();
+    for (prefix, rate) in [
+        ("app::audit", 1_000_000_000_u64),
+        ("scheduler", 1_000_000_000),
+        ("app::net", 1_000_000_000),
+        ("worker", 1_000_000_000),
+        ("db", 1_000_000_000),
+    ] {
+        rules.insert(prefix.to_string(), rate);
+    }
+    let limiter = TargetRateLimiter::from_rules(rules).expect("bench rules must compile");
+
+    let mut group = c.benchmark_group("target_rate_limiter_lookup");
+    group.measurement_time(Duration::from_secs(5));
+
+    // 最长前缀命中（5 条规则中 "app::audit" 最长、扫描序列首位）
+    group.bench_function("lookup_longest_prefix_hit", |b| {
+        b.iter(|| std::hint::black_box(limiter.governs(std::hint::black_box("app::audit::core"))))
+    });
+    // 未命中全表扫完（最坏情况）
+    group.bench_function("lookup_no_rule_fallthrough", |b| {
+        b.iter(|| std::hint::black_box(limiter.governs(std::hint::black_box("unmatched::path"))))
+    });
+    // 命中组桶放行的端到端裁决（查找 + 锁 + 补充 + 扣减）
+    group.bench_function("evaluate_governed_pass", |b| {
+        b.iter(|| std::hint::black_box(limiter.evaluate(std::hint::black_box("app::audit::core"))))
+    });
+
     group.finish();
 }

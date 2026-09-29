@@ -296,7 +296,11 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_per_target_filter_via_shared_level_state() {
+        // enabled() 先过进程级 max_level 门禁：本测试自持 Info 阈值，
+        // 不依赖其它测试先行设置（初始 Off 时 Level::Info 一律被拒）
+        log::set_max_level(log::LevelFilter::Info);
         // per-target 指令对 log 门面生效：myapp=warn 时 myapp 的 info 被丢弃
         let (console_tx, _cr) = bounded(10);
         let (async_tx, _ar) = bounded(10);

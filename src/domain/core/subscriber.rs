@@ -3,6 +3,8 @@
 use crate::LogRecord;
 use crate::Metrics;
 use crate::support::processing::RateLimiter;
+use crate::support::processing::target_rate_limiter::TargetQuotaVerdict;
+use crate::support::processing::target_rate_limiter::TargetRateLimiter;
 use crate::validation::sanitize::LogSanitizer;
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
@@ -50,6 +52,7 @@ impl Clone for LoggerSubscriber {
             fallback_buffer: self.fallback_buffer.clone(),
             sanitizer: self.sanitizer.clone(),
             rate_limiter: self.rate_limiter.clone(),
+            target_rate_limiter: self.target_rate_limiter.clone(),
             sampling_policy: self.sampling_policy.clone(),
             error_sample_counter: AtomicU64::new(self.error_sample_counter.load(Ordering::Relaxed)),
             fallback_pending: Arc::clone(&self.fallback_pending),
@@ -77,6 +80,8 @@ pub struct LoggerSubscriber {
     sanitizer: Option<Arc<LogSanitizer>>,
     /// Optional rate limiter for log throughput control
     rate_limiter: Option<Arc<RateLimiter>>,
+    /// 按 target 前缀分组的配额限流（None = 不接线，全局行为不变）
+    target_rate_limiter: Option<Arc<TargetRateLimiter>>,
     /// 限流压力下的采样策略（None = 走内置 ERROR/FATAL 兜底采样）
     sampling_policy: Option<Arc<crate::support::io::sink::sampling::SamplingPolicy>>,
     /// Counter for ERROR/FATAL sampling when rate-limited
@@ -108,6 +113,7 @@ impl LoggerSubscriber {
             fallback_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(FALLBACK_BUFFER_SIZE))),
             sanitizer: None,
             rate_limiter: None,
+            target_rate_limiter: None,
             sampling_policy: None,
             error_sample_counter: AtomicU64::new(0),
             fallback_pending: Arc::new(AtomicBool::new(false)),
@@ -163,6 +169,13 @@ impl LoggerSubscriber {
     /// Set the rate limiter for log throughput control.
     pub fn with_rate_limiter(mut self, rate_limiter: Arc<RateLimiter>) -> Self {
         self.rate_limiter = Some(rate_limiter);
+        self
+    }
+
+    /// 设置按 target 前缀分组的配额限流（最长前缀优先；命中组独立裁决，
+    /// 未命中 target 维持既有全局限流路径）。
+    pub fn with_target_rate_limiter(mut self, limiter: Arc<TargetRateLimiter>) -> Self {
+        self.target_rate_limiter = Some(limiter);
         self
     }
 
@@ -469,10 +482,37 @@ where
         // 从当前 span 上下文提取 trace_id/span_id（未启用 span 时零成本直通）
         Self::extract_trace_context(&ctx, &mut record);
 
-        // Rate limiting check (before sanitization to save work on dropped logs)
-        if let Some(ref limiter) = self.rate_limiter
-            && !limiter.try_acquire()
-        {
+        // per-target 分级限流：命中前缀规则的 target 由其配额组独立裁决
+        // （组桶放行后不再进入全局限流），未命中 target 维持既有全局路径；
+        // 组预算耗尽属限流拒绝，与全局限流拒绝共用同一关键级别救援语义
+        let mut ungoverned = true;
+        let mut quota_rejected = false;
+        if let Some(ref target_limiter) = self.target_rate_limiter {
+            match target_limiter.evaluate(&record.target) {
+                TargetQuotaVerdict::Drop => {
+                    quota_rejected = true;
+                    ungoverned = false;
+                }
+                TargetQuotaVerdict::Pass => ungoverned = false,
+                TargetQuotaVerdict::Ungoverned => {}
+            }
+        }
+
+        // Rate limiting check (before sanitization to save work on dropped logs)；
+        // 组配额拒绝与全局限流拒绝同入压力路径——ERROR/FATAL 按 1-in-N 采样
+        // 保留的兜底语义对两条限流来源一致，避免配额前缀下的审计错误日志
+        // 被无痕抑制（全局路径的既有设计决策，见 ERROR_SAMPLING_RATE）
+        let stress_rejected = if quota_rejected {
+            true
+        } else if ungoverned {
+            // 全局限流拒绝判定（未接线 = None = 不限流）
+            self.rate_limiter
+                .as_ref()
+                .is_some_and(|limiter| !limiter.try_acquire())
+        } else {
+            false
+        };
+        if stress_rejected {
             // 压力路径：采样策略规则优先（Some = 策略决策）；
             // 无策略或无规则命中（None）回退内置兜底——非关键级别丢弃，
             // ERROR/FATAL 按 1-in-N 采样保留。
@@ -575,6 +615,7 @@ mod tests {
     use super::*;
     use crate::domain::config::sampling::SamplingConfig;
     use crate::support::io::sink::sampling::SamplingPolicy;
+    use crate::support::processing::target_rate_limiter::TargetRateLimiter;
     use crossbeam_channel::bounded;
     use serde_json::Value;
     use serial_test::serial;
@@ -622,6 +663,127 @@ mod tests {
         } else {
             layer
         }
+    }
+
+    // =====================================================================
+    // per-target 分级限流（R7）：前缀配额组独立裁决，未命中 target 维持
+    // 既有全局路径；未接线时整体零介入。
+    // =====================================================================
+
+    fn target_rules(pairs: &[(&str, u64)]) -> TargetRateLimiter {
+        TargetRateLimiter::from_rules(pairs.iter().map(|(p, r)| (p.to_string(), *r)).collect())
+            .unwrap()
+    }
+
+    #[test]
+    fn test_target_quota_governed_target_uses_group_not_global() {
+        // 全局限流 0 令牌（恒拒）+ app::audit 组 16 令牌：命中组走组桶放行，
+        // 证明受管辖 target 不再进入全局路径
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics)
+            .with_rate_limiter(Arc::new(RateLimiter::new(0)))
+            .with_target_rate_limiter(Arc::new(target_rules(&[("app::audit", 16)])));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            for i in 0..16 {
+                tracing::info!(target: "app::audit::core", message = format!("audit {i}"));
+            }
+        });
+
+        let kept = console_rx
+            .try_iter()
+            .filter(|r| r.target.starts_with("app::audit"))
+            .count();
+        assert_eq!(
+            kept, 16,
+            "governed targets must be adjudicated by their group bucket, bypassing the global limiter"
+        );
+    }
+
+    #[test]
+    fn test_target_quota_exhausted_drops_governed_only() {
+        // app::noise 组 1 令牌：第 1 条放行、第 2 条组配额拒绝且非关键级别
+        // 无救援（logs_dropped）；未命中规则的 target 不消耗组预算，在无
+        // 全局限流时照常放行
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone())
+            .with_target_rate_limiter(Arc::new(target_rules(&[("app::noise", 1)])));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::warn!(target: "app::noise::spam", message = "noise 1");
+            tracing::warn!(target: "app::noise::spam", message = "noise 2");
+            tracing::warn!(target: "other::clean", message = "clean 1");
+        });
+
+        let messages: Vec<String> = console_rx.try_iter().map(|r| r.message.clone()).collect();
+        assert!(
+            messages.contains(&"noise 1".to_string()) && !messages.contains(&"noise 2".to_string()),
+            "second same-group record must be dropped by quota, kept: {messages:?}"
+        );
+        assert!(
+            messages.contains(&"clean 1".to_string()),
+            "ungoverned target must pass untouched: {messages:?}"
+        );
+        assert_eq!(
+            metrics.logs_dropped(),
+            1,
+            "quota drop must count as logs_dropped (限流丢弃而非采样)"
+        );
+    }
+
+    #[test]
+    fn test_target_quota_exhaustion_rescues_critical_level() {
+        // 组预算耗尽后同组的 ERROR 获 1-in-N 兜底救援（计数器 0 放行），
+        // 与全局限流压力路径的关键级别语义一致；随后的 WARN 仍被丢弃
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let layer = LoggerSubscriber::new(console_tx, async_tx, Arc::new(Metrics::new()))
+            .with_target_rate_limiter(Arc::new(target_rules(&[("app::audit", 1)])));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::warn!(target: "app::audit::core", message = "audit warn 1");
+            // 组预算已耗尽：ERROR 计数器 0 → 兜底采样放行
+            tracing::error!(target: "app::audit::core", message = "audit error rescued");
+            tracing::warn!(target: "app::audit::core", message = "audit warn 2");
+        });
+
+        let messages: Vec<String> = console_rx.try_iter().map(|r| r.message.clone()).collect();
+        assert!(
+            messages.contains(&"audit error rescued".to_string()),
+            "exhausted group must still rescue the first ERROR (1-in-N fallback): {messages:?}"
+        );
+        assert!(
+            messages.contains(&"audit warn 1".to_string())
+                && !messages.contains(&"audit warn 2".to_string()),
+            "non-critical records after exhaustion must stay dropped: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn test_without_target_quota_wiring_global_behavior_unchanged() {
+        // 未接线时全局限流行为与既有语义完全一致（默认全局行为不变）
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics)
+            .with_rate_limiter(Arc::new(RateLimiter::new(0)));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::warn!(target: "app::anything", message = "global only");
+        });
+
+        assert!(
+            console_rx.try_iter().next().is_none(),
+            "no target-quota wiring must leave the global limiter in full effect"
+        );
     }
 
     #[test]

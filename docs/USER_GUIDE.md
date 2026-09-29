@@ -72,7 +72,7 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 | **网络转发** | TCP（可 TLS）+ UDP Sink，断线缓冲与自动重连 |
 | **OTLP 导出** | OTLP/HTTP JSON 日志导出 |
 | **CLI 工具** | `inklog-cli`：decrypt / generate / validate / query |
-| **采样与限流** | 采样器（N 取 1）、令牌桶限流、中间件链装饰器、可配采样策略（per_level 采样率 + per_target_prefix 规则） |
+| **采样与限流** | 采样器（N 取 1）、令牌桶限流、中间件链装饰器、可配采样策略（per_level 采样率 + per_target_prefix 规则）、per-target 分级限流（rate_limit.rules 前缀配额组，最长前缀优先） |
 | **归档防篡改** | HMAC-SHA256 归档链，防删除、重排与伪造 |
 
 ## 📦 安装

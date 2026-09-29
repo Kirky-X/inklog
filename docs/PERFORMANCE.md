@@ -63,6 +63,8 @@ cargo bench --bench inklog_bench
 
 其中 `sampling_stress_overhead` 组锁定限流压力路径的采样决策每记录开销：`RateLimiter::new(0)` 使每条记录都进入压力分支，对比 `no_policy_builtin_fallback`（内置兜底：非关键级别丢弃）与 `policy_per_level_and_prefix`（per_level 采样率 + target 前缀规则的 `SamplingPolicy` 决策）两态，即采样策略的每记录增量代价。
 
+`target_rate_limiter_lookup` 组锁定 per-target 分级限流的查找路径开销：`lookup_longest_prefix_hit`（最长前缀命中）与 `lookup_no_rule_fallthrough`（未命中全表扫完）为纯前缀查找基线（实测 ≈6ns / ≈4ns，远低于 100ns 量级），`evaluate_governed_pass` 为含组桶锁与令牌扣减的端到端裁决（实测 ≈41ns，单线程无竞争地板值；组桶为组内共享单锁，多生产者场景含锁竞争）。
+
 历史数字未入库；后续版本更新时补齐 `inklog_bench` 的正式基线，与 `rc4_pipeline_bench` 统一以本文档为基线载体。
 
 ## 🔍 与 0.3.0-rc.3 新增能力的对照

@@ -5,3 +5,4 @@
 //! 测试配置管理和环境变量覆盖功能
 
 mod config_env_test;
+mod rate_limit_rules_test;

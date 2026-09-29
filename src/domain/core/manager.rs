@@ -21,6 +21,7 @@ use crate::support::io::FileSink;
 use crate::support::io::LogSink;
 use crate::support::io::sink::SamplingPolicy;
 use crate::support::processing::RateLimiter;
+use crate::support::processing::target_rate_limiter::TargetRateLimiter;
 use crate::validation::sanitize::LogSanitizer;
 use crate::{FileSinkConfig, InklogConfig};
 use crate::{HealthStatus, Metrics};
@@ -660,6 +661,13 @@ impl LoggerManager {
         // None 同义处理为不限流。
         if let Some(rate) = config.performance.rate_limit.filter(|&r| r > 0) {
             subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(rate)));
+        }
+
+        // per-target 分级限流（R7）：前缀配额组；未配置（空）时不接线，
+        // 全局行为不变。from_config 的硬拒绝与构建期其它配置校验同级
+        if !config.rate_limit.is_empty() {
+            let limiter = TargetRateLimiter::from_rules(config.rate_limit.rules.clone())?;
+            subscriber = subscriber.with_target_rate_limiter(Arc::new(limiter));
         }
 
         // 采样策略：限流压力下的保留规则；未配置（空）时不接线，走内置兜底

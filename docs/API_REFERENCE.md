@@ -388,6 +388,7 @@ pub struct InklogConfig {
     pub http_server: Option<HttpServerConfig>,
     pub target_levels: HashMap<String, String>,    // per-target 级别预设
     pub sampling: SamplingConfig,                  // 采样策略（默认空 = 内置兜底）
+    pub rate_limit: RateLimitConfig,               // per-target 前缀配额组（默认空 = 不接线）
 }
 ```
 
@@ -397,6 +398,16 @@ pub struct InklogConfig {
 > `per_target_prefix`（target 前缀 → `{ keep_level, sample_every_n }`，最长前缀
 > 优先）。未配置时走内置兜底（非关键级别丢弃，ERROR/FATAL 保留 1/100）；规则
 > 未命中的记录同样回退内置兜底。
+>
+> `rate_limit.rules` 配置按 target 前缀分组的配额限流：前缀 → 该组每秒令牌数
+> （组内共享预算，最长前缀优先、ASCII 大小写不敏感）。命中组的记录由组桶独立
+> 裁决（放行后不再进入 `performance.rate_limit` 全局限流），未命中的 target 维
+> 持既有全局路径。组预算耗尽与全局限流拒绝共用同一压力语义：ERROR/FATAL 按
+> 1-in-100 采样保留（`sampling` 策略优先），非关键级别计为 `logs_dropped`。
+> 未配置时整体不接线，全局行为不变。
+>
+> 运维提示：组配额应显著低于全局 `performance.rate_limit` 预算——过大的组配
+> 额等效于该前缀豁免全局限流；规则数建议 ≤ 64（查找为按记录执行的线性扫描）。
 
 #### 方法
 
