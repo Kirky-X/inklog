@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 use crate::LogRecord;
 use crate::Metrics;
-use crate::support::io::sink::middleware::RecordMiddleware;
+use crate::support::io::sink::middleware::{MiddlewareVerdict, RecordMiddleware};
 use crate::support::processing::pipeline::is_critical_level;
 use crate::support::processing::target_rate_limiter::TargetRateLimiter;
 use crate::support::processing::{
@@ -43,6 +43,10 @@ struct FallbackEntry {
 /// Clone 语义：全字段为 channel sender / Arc 句柄（克隆共享同一 logger 实例），
 /// AtomicU64 计数器克隆当前值。供测试 harness 在子线程以
 /// tracing::subscriber::with_default 安装线程级 subscriber（需 owned 值）。
+///
+/// 克隆与原实例共享同一采样计数相位（`stress_relief: Arc<StressRelief>`，
+/// 含兜底 ERROR 采样计数器与已绑定策略）：在克隆上调用 `with_sampling_policy`
+/// 替换的是共享策略，同样影响原实例及全部克隆的压力采样裁决。
 impl Clone for LoggerSubscriber {
     fn clone(&self) -> Self {
         Self {
@@ -201,11 +205,20 @@ impl LoggerSubscriber {
         self
     }
 
-    /// 用户治理中间件装配入口：尾插治理环，恒在内置限流件之后、改写轮
-    /// 之前执行。中间件可裁决丢弃（`Drop`/`Reround`），也可原位改写记录
-    /// （改写结果仍会经改写轮——如脱敏——继续处理）。
+    /// 用户治理中间件装配入口：尾插治理环，链上位次在内置限流件之后、改写轮
+    /// 之前。位次不等于恒执行：治理链任一环节 `Drop`/`Reround` 即短路剩余
+    /// 治理件——配额管辖 target 放行（`Reround`）时用户件被跳过，其过滤/
+    /// 改写对该记录不生效（配额组语义优先）；仅当在前的内置件全部 `Continue`
+    /// （未命中配额规则且全局限流放行）时用户件才执行。用户件可裁决丢弃
+    /// （`Drop`，计入 `user_middleware_dropped` 归因细分与 `logs_dropped`
+    /// 数据损失总账）或原位改写记录（改写结果仍会经改写轮——如脱敏——继续
+    /// 处理）。
     pub fn with_middleware(mut self, middleware: Arc<dyn RecordMiddleware>) -> Self {
-        self.pipeline.register_governance(middleware);
+        self.pipeline
+            .register_governance(Arc::new(UserMiddlewareDropCounter {
+                inner: middleware,
+                metrics: Arc::clone(&self.metrics),
+            }));
         self
     }
 
@@ -383,6 +396,30 @@ impl LoggerSubscriber {
                 buffer.push_front(entry);
             }
         }
+    }
+}
+
+/// 用户治理中间件的丢弃计数装饰器：`with_middleware` 装配时包裹用户件，
+/// 裁决 `Drop` 时补独立显性计数（归因细分 `user_middleware_dropped` +
+/// 数据损失总账 `logs_dropped`）。内置限流件的丢弃计数在其内部
+/// （`StressRelief`）完成，不经此路径，归因不重叠。
+struct UserMiddlewareDropCounter {
+    inner: Arc<dyn RecordMiddleware>,
+    metrics: Arc<Metrics>,
+}
+
+impl RecordMiddleware for UserMiddlewareDropCounter {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn process(&self, record: &mut LogRecord) -> MiddlewareVerdict {
+        let verdict = self.inner.process(record);
+        if verdict == MiddlewareVerdict::Drop {
+            self.metrics.inc_logs_dropped();
+            self.metrics.inc_user_middleware_dropped();
+        }
+        verdict
     }
 }
 
@@ -1792,7 +1829,7 @@ mod tests {
 
     // =========================================================================
     // with_middleware 用户治理装配入口：治理环尾插——用户件的原位改写
-    // 仍进改写轮被脱敏；Drop 裁决短路发送
+    // 仍进改写轮被脱敏；Drop 裁决短路发送并计入独立显性丢弃计数
     // =========================================================================
 
     /// 用户治理中间件测试件：为记录打标（值含换行，用于验证改写轮脱敏），
@@ -1841,6 +1878,87 @@ mod tests {
         assert!(
             console_rx.try_recv().is_err(),
             "dropped record must not reach any channel"
+        );
+    }
+
+    #[test]
+    fn test_with_middleware_drop_counts_user_middleware_dropped() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone())
+            .with_middleware(Arc::new(UserGovernanceMiddleware));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::middleware", message = "drop-me");
+        });
+
+        assert!(
+            console_rx.try_recv().is_err(),
+            "user-middleware drop must short-circuit sending"
+        );
+        assert_eq!(
+            metrics.user_middleware_dropped(),
+            1,
+            "user middleware Drop verdict must be counted explicitly"
+        );
+        assert_eq!(
+            metrics.logs_dropped(),
+            1,
+            "user middleware drop is data loss and must count toward logs_dropped"
+        );
+    }
+
+    #[test]
+    fn test_with_middleware_continue_does_not_count_drop_metric() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics.clone())
+            .with_middleware(Arc::new(UserGovernanceMiddleware));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::middleware", message = "kept");
+        });
+
+        assert!(console_rx.try_recv().is_ok(), "kept record must be sent");
+        assert_eq!(
+            metrics.user_middleware_dropped(),
+            0,
+            "Continue verdict must not touch the drop counter"
+        );
+        assert_eq!(metrics.logs_dropped(), 0);
+    }
+
+    #[test]
+    fn test_builtin_limiter_drop_not_attributed_to_user_middleware() {
+        let (console_tx, _console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+        let registry = tracing_subscriber::registry().with(rate_limited_subscriber(
+            console_tx,
+            async_tx,
+            metrics.clone(),
+            None,
+        ));
+
+        with_default(registry, || {
+            tracing::warn!(target: "t::builtin", message = "stress drop");
+        });
+
+        assert_eq!(
+            metrics.logs_dropped(),
+            1,
+            "builtin limiter stress drop still counts toward logs_dropped"
+        );
+        assert_eq!(
+            metrics.user_middleware_dropped(),
+            0,
+            "builtin limiter drops must not be attributed to user middleware"
         );
     }
 }

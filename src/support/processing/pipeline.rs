@@ -255,8 +255,10 @@ const MAX_SANITIZE_DEPTH: usize = 16;
 ///
 /// 装配约定：内置限流件经 [`ProcessingPipeline::register_governance_front`]
 /// 头插保持 `target 配额 → 全局限流` 的固定裁决顺序；用户中间件经
-/// [`ProcessingPipeline::register_governance`] 尾插，恒在内置治理之后、
-/// 改写轮之前（可裁决丢弃，也可原位改写，改写结果仍会被脱敏）。
+/// [`ProcessingPipeline::register_governance`] 尾插，链上位次在内置治理
+/// 之后、改写轮之前（可裁决丢弃，也可原位改写，改写结果仍会被脱敏）。
+/// 位次不等于恒执行：治理链任一环节 `Drop`/`Reround` 即短路剩余治理件，
+/// 配额管辖 target 放行（`Reround`）时用户件被跳过。
 #[derive(Clone, Default)]
 pub struct ProcessingPipeline {
     governance: MiddlewareChain,
@@ -273,12 +275,19 @@ impl ProcessingPipeline {
         self.governance.push_front(middleware);
     }
 
-    /// 治理环尾部追加（`with_middleware` 装配入口）。
+    /// 治理环尾部追加（`with_middleware` 装配入口）。尾插只定位次：链上
+    /// 任一环节 `Drop`/`Reround` 即短路剩余治理件，本件不保证对每条记录
+    /// 执行（配额管辖 target 放行时被 `Reround` 跳过）。
     pub fn register_governance(&mut self, middleware: Arc<dyn RecordMiddleware>) {
         self.governance.append(middleware);
     }
 
     /// 改写环尾部追加。
+    ///
+    /// 陷阱：改写环契约恒不丢弃，返回 `Drop` 的改写件不生效——`process`
+    /// 忽略改写环裁决（debug 构建下断言失败），记录仍进入发送阶段；需要
+    /// 丢弃语义请注册为治理件（[`ProcessingPipeline::register_governance`]）。
+    /// `Reround` 同理会短路改写环剩余改写件。
     pub fn register_rewrite(&mut self, middleware: Arc<dyn RecordMiddleware>) {
         self.rewrite.append(middleware);
     }
@@ -301,11 +310,19 @@ impl ProcessingPipeline {
 
     /// 处理一条记录：治理轮（`Drop`/`Reround` 短路）→ 改写轮。返回
     /// `false` 表示记录被治理轮丢弃，不应进入发送阶段。
+    ///
+    /// 改写环按契约恒不丢弃：其裁决被忽略（debug 构建下断言失败），
+    /// 记录恒进入发送阶段。
     pub fn process(&self, record: &mut LogRecord) -> bool {
         if !self.governance.apply(record) {
             return false;
         }
-        self.rewrite.apply(record);
+        let rewritten = self.rewrite.apply(record);
+        debug_assert!(
+            rewritten,
+            "rewrite middleware returned Drop: the rewrite round is \
+             non-dropping by contract, register a governance middleware instead"
+        );
         true
     }
 }
@@ -654,5 +671,32 @@ mod tests {
         assert!(pipeline.process(&mut r));
         assert_eq!(*log.lock(), vec!["quota", "global", "user"]);
         assert_eq!(pipeline.governance_len(), 3);
+    }
+
+    #[test]
+    fn test_pipeline_quota_reround_bypasses_user_governance_middleware() {
+        // 配额件（头插）放行即 Reround 终审：短路其后的用户件——「用户件
+        // 恒在内置限流件之后执行」不成立，钉住该旁路行为（配额管辖 target
+        // 的放行记录不经过用户治理件），防止未来无意变更
+        let log = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let mut pipeline = ProcessingPipeline::new();
+        pipeline.register_governance_front(Arc::new(ProbeMiddleware {
+            name: "quota",
+            log: Arc::clone(&log),
+            verdict: MiddlewareVerdict::Reround,
+        }));
+        pipeline.register_governance(Arc::new(ProbeMiddleware {
+            name: "user",
+            log: Arc::clone(&log),
+            verdict: MiddlewareVerdict::Continue,
+        }));
+
+        let mut r = record(Level::INFO, "t", "m");
+        assert!(pipeline.process(&mut r), "reround must emit");
+        assert_eq!(
+            *log.lock(),
+            vec!["quota"],
+            "quota Reround must bypass the user governance middleware after it"
+        );
     }
 }

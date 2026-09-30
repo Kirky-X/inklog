@@ -45,6 +45,7 @@
 //! | `inklog_logs_written_total` | Counter | 总日志记录数 |
 //! | `inklog_logs_dropped_total` | Counter | 总丢弃日志数 |
 //! | `inklog_sampled_out_total` | Counter | 采样淘汰日志数 |
+//! | `inklog_user_middleware_dropped_total` | Counter | 用户治理中间件丢弃日志数 |
 //! | `inklog_sink_errors_total` | Counter | 总错误数 |
 //! | `inklog_latency_p50_us` | Gauge | P50 延迟（微秒）|
 //! | `inklog_latency_p95_us` | Gauge | P95 延迟（微秒）|
@@ -261,6 +262,7 @@ pub struct MetricsSnapshot {
     pub logs_written: u64,
     pub logs_dropped: u64,
     pub sampled_out: u64,
+    pub user_middleware_dropped: u64,
     pub channel_blocked: u64,
     pub sink_errors: u64,
     pub db_batch_size: i64,
@@ -315,6 +317,7 @@ pub struct Metrics {
     pub(crate) logs_written_total: AtomicU64,
     pub(crate) logs_dropped_total: AtomicU64,
     pub(crate) sampled_out_total: AtomicU64,
+    pub(crate) user_middleware_dropped_total: AtomicU64,
     pub(crate) channel_send_blocked_total: AtomicU64,
     pub(crate) sink_errors_total: AtomicU64,
     pub(crate) lock_contention_total: AtomicU64,
@@ -348,6 +351,7 @@ impl Default for Metrics {
             logs_written_total: AtomicU64::new(0),
             logs_dropped_total: AtomicU64::new(0),
             sampled_out_total: AtomicU64::new(0),
+            user_middleware_dropped_total: AtomicU64::new(0),
             channel_send_blocked_total: AtomicU64::new(0),
             sink_errors_total: AtomicU64::new(0),
             lock_contention_total: AtomicU64::new(0),
@@ -396,6 +400,16 @@ impl Metrics {
     /// 淘汰），限流压力下的非采样丢弃与通道满丢弃不计入。
     pub fn sampled_out(&self) -> u64 {
         self.sampled_out_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the total number of logs dropped by user-registered middleware.
+    ///
+    /// 这是 `logs_dropped` 的归因细分：仅统计经 `with_middleware` 注册的
+    /// 用户治理中间件裁决 `Drop` 的记录；内置限流件（target 配额/全局限流）
+    /// 的丢弃计数在其内部压力救援完成（采样淘汰另计 `sampled_out`），
+    /// 不进入本计数。
+    pub fn user_middleware_dropped(&self) -> u64 {
+        self.user_middleware_dropped_total.load(Ordering::Relaxed)
     }
 
     /// Returns the total number of times the channel was blocked.
@@ -454,6 +468,11 @@ impl Metrics {
 
     pub fn inc_sampled_out(&self) {
         self.sampled_out_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_user_middleware_dropped(&self) {
+        self.user_middleware_dropped_total
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn inc_channel_blocked(&self) {
@@ -625,6 +644,7 @@ impl Metrics {
                 logs_written: self.logs_written_total.load(Ordering::Relaxed),
                 logs_dropped: self.logs_dropped_total.load(Ordering::Relaxed),
                 sampled_out: self.sampled_out_total.load(Ordering::Relaxed),
+                user_middleware_dropped: self.user_middleware_dropped_total.load(Ordering::Relaxed),
                 channel_blocked: self.channel_send_blocked_total.load(Ordering::Relaxed),
                 sink_errors: self.sink_errors_total.load(Ordering::Relaxed),
                 db_batch_size: self.db_batch_size.get(),
@@ -663,6 +683,13 @@ impl Metrics {
         s.push_str(&format!(
             "inklog_sampled_out_total {}\n",
             self.sampled_out_total.load(Ordering::Relaxed)
+        ));
+
+        s.push_str("# HELP inklog_user_middleware_dropped_total Logs dropped by user middleware\n");
+        s.push_str("# TYPE inklog_user_middleware_dropped_total counter\n");
+        s.push_str(&format!(
+            "inklog_user_middleware_dropped_total {}\n",
+            self.user_middleware_dropped_total.load(Ordering::Relaxed)
         ));
 
         s.push_str("# HELP inklog_channel_blocked_total Total times channel was blocked\n");
@@ -2290,6 +2317,35 @@ mod metrics_tests {
         assert!(
             output.contains("inklog_sampled_out_total 1"),
             "prometheus export must carry the sampled-out value: {output}"
+        );
+    }
+
+    #[test]
+    fn test_user_middleware_dropped_counter_and_snapshot() {
+        let metrics = Metrics::new();
+        assert_eq!(metrics.user_middleware_dropped(), 0);
+        metrics.inc_user_middleware_dropped();
+        metrics.inc_user_middleware_dropped();
+        assert_eq!(metrics.user_middleware_dropped(), 2);
+        let status = metrics.get_status(0, 100);
+        assert_eq!(
+            status.metrics.user_middleware_dropped, 2,
+            "snapshot must carry the user-middleware-dropped counter"
+        );
+    }
+
+    #[test]
+    fn test_user_middleware_dropped_exported_to_prometheus() {
+        let metrics = Metrics::new();
+        metrics.inc_user_middleware_dropped();
+        let output = metrics.export_prometheus();
+        assert!(
+            output.contains("# TYPE inklog_user_middleware_dropped_total counter"),
+            "prometheus export must declare the user-middleware-dropped counter: {output}"
+        );
+        assert!(
+            output.contains("inklog_user_middleware_dropped_total 1"),
+            "prometheus export must carry the user-middleware-dropped value: {output}"
         );
     }
 }
