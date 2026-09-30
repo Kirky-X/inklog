@@ -7,6 +7,7 @@ pub mod masking;
 pub mod masking_ac;
 pub mod masking_registry;
 pub mod object_pool;
+pub mod pipeline;
 pub mod rate_limiter;
 pub mod target_rate_limiter;
 pub mod template;
@@ -18,6 +19,10 @@ pub use masking_registry::MaskRuleRegistry;
 pub use object_pool::{
     ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record,
     put_string_buffer,
+};
+pub use pipeline::{
+    GlobalRateLimitMiddleware, IdentityFieldsMiddleware, ProcessingPipeline, SanitizeMiddleware,
+    StressRelief, TargetQuotaMiddleware,
 };
 pub use rate_limiter::RateLimiter;
 pub use target_rate_limiter::{TargetQuotaVerdict, TargetRateLimiter};

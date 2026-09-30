@@ -2,16 +2,20 @@
 // SPDX-License-Identifier: MIT
 use crate::LogRecord;
 use crate::Metrics;
-use crate::support::processing::RateLimiter;
-use crate::support::processing::target_rate_limiter::TargetQuotaVerdict;
+use crate::support::io::sink::middleware::RecordMiddleware;
+use crate::support::processing::pipeline::is_critical_level;
 use crate::support::processing::target_rate_limiter::TargetRateLimiter;
+use crate::support::processing::{
+    GlobalRateLimitMiddleware, IdentityFieldsMiddleware, ProcessingPipeline, RateLimiter,
+    SanitizeMiddleware, StressRelief, TargetQuotaMiddleware,
+};
 use crate::validation::sanitize::LogSanitizer;
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
 use serde_json::value;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::Layer;
@@ -19,8 +23,6 @@ use tracing_subscriber::layer::Context;
 
 const DEFAULT_SEND_TIMEOUT_MS: u64 = 100;
 const FALLBACK_BUFFER_SIZE: usize = 100;
-/// 限流压力下的内置兜底采样率：采样策略未命中时 ERROR/FATAL 保留 1/N。
-const ERROR_SAMPLING_RATE: u64 = 100;
 
 /// Fallback buffer 条目：记录 + 各 async 通道的投递状态。
 ///
@@ -50,14 +52,10 @@ impl Clone for LoggerSubscriber {
             metrics: self.metrics.clone(),
             send_timeout_ms: self.send_timeout_ms,
             fallback_buffer: self.fallback_buffer.clone(),
-            sanitizer: self.sanitizer.clone(),
-            rate_limiter: self.rate_limiter.clone(),
-            target_rate_limiter: self.target_rate_limiter.clone(),
-            sampling_policy: self.sampling_policy.clone(),
-            error_sample_counter: AtomicU64::new(self.error_sample_counter.load(Ordering::Relaxed)),
+            pipeline: self.pipeline.clone(),
+            stress_relief: Arc::clone(&self.stress_relief),
             fallback_pending: Arc::clone(&self.fallback_pending),
             journal: self.journal.clone(),
-            identity_fields: self.identity_fields.clone(),
         }
     }
 }
@@ -76,26 +74,19 @@ pub struct LoggerSubscriber {
     send_timeout_ms: u64,
     /// Fallback buffer for critical logs
     fallback_buffer: Arc<Mutex<VecDeque<FallbackEntry>>>,
-    /// Optional log sanitizer for preventing log injection (CWE-117)
-    sanitizer: Option<Arc<LogSanitizer>>,
-    /// Optional rate limiter for log throughput control
-    rate_limiter: Option<Arc<RateLimiter>>,
-    /// 按 target 前缀分组的配额限流（None = 不接线，全局行为不变）
-    target_rate_limiter: Option<Arc<TargetRateLimiter>>,
-    /// 限流压力下的采样策略（None = 走内置 ERROR/FATAL 兜底采样）
-    sampling_policy: Option<Arc<crate::support::io::sink::sampling::SamplingPolicy>>,
-    /// Counter for ERROR/FATAL sampling when rate-limited
-    error_sample_counter: AtomicU64,
+    /// 处理管道（治理轮：配额/限流/压力采样；改写轮：身份注入/脱敏）。
+    /// 内置件按配置装配，与迁移前 on_event 的硬编码顺序逐点等价；
+    /// with_middleware 追加用户治理件。
+    pipeline: ProcessingPipeline,
+    /// 压力救援裁决（两个限流中间件共享的采样策略与兜底计数载体）。
+    /// Arc 跨 Clone 共享：克隆共享同一采样计数相位。
+    stress_relief: Arc<StressRelief>,
     /// 兜底缓冲存在待补发记录（ERROR/FATAL 入队置位；半满触发补发后按
     /// 缓冲是否清空复位）。Arc 跨 Clone 共享，manager 的周期补发任务可见。
     fallback_pending: Arc<AtomicBool>,
     /// 磁盘持久化 fallback journal（deferred-capabilities C4）：
     /// LRU 淘汰的关键日志落盘，进程启动重放。None = 未启用（零开销）。
     journal: Option<Arc<crate::support::fallback_journal::FallbackJournal>>,
-    /// 服务身份静态字段（service_name/instance/env/version + 自定义标注），
-    /// 构建期固化；on_event 时以"事件显式字段优先"语义逐条注入 `fields`。
-    /// None = 未配置（热路径仅一次 Option 判断，零开销）。
-    identity_fields: Option<Arc<std::collections::BTreeMap<String, serde_json::Value>>>,
 }
 
 impl LoggerSubscriber {
@@ -104,6 +95,8 @@ impl LoggerSubscriber {
         async_sender: Sender<Arc<LogRecord>>,
         metrics: Arc<Metrics>,
     ) -> Self {
+        // 压力救援裁决与 metrics 共享同一实例：丢弃计数同源
+        let stress_relief = Arc::new(StressRelief::new(Arc::clone(&metrics)));
         Self {
             console_sender,
             async_sender,
@@ -111,14 +104,10 @@ impl LoggerSubscriber {
             metrics,
             send_timeout_ms: DEFAULT_SEND_TIMEOUT_MS,
             fallback_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(FALLBACK_BUFFER_SIZE))),
-            sanitizer: None,
-            rate_limiter: None,
-            target_rate_limiter: None,
-            sampling_policy: None,
-            error_sample_counter: AtomicU64::new(0),
+            pipeline: ProcessingPipeline::new(),
+            stress_relief,
             fallback_pending: Arc::new(AtomicBool::new(false)),
             journal: None,
-            identity_fields: None,
         }
     }
 
@@ -162,46 +151,62 @@ impl LoggerSubscriber {
 
     /// Set the log sanitizer for preventing log injection attacks.
     pub fn with_sanitizer(mut self, sanitizer: Arc<LogSanitizer>) -> Self {
-        self.sanitizer = Some(sanitizer);
+        self.pipeline
+            .register_rewrite(Arc::new(SanitizeMiddleware::new(sanitizer)));
         self
     }
 
     /// Set the rate limiter for log throughput control.
     pub fn with_rate_limiter(mut self, rate_limiter: Arc<RateLimiter>) -> Self {
-        self.rate_limiter = Some(rate_limiter);
+        self.pipeline
+            .register_governance(Arc::new(GlobalRateLimitMiddleware::new(
+                rate_limiter,
+                Arc::clone(&self.stress_relief),
+            )));
         self
     }
 
     /// 设置按 target 前缀分组的配额限流（最长前缀优先；命中组独立裁决，
-    /// 未命中 target 维持既有全局限流路径）。
+    /// 未命中 target 维持既有全局限流路径）。头插治理环：配额裁决恒先于
+    /// 全局限流，与接线顺序无关。
     pub fn with_target_rate_limiter(mut self, limiter: Arc<TargetRateLimiter>) -> Self {
-        self.target_rate_limiter = Some(limiter);
+        self.pipeline
+            .register_governance_front(Arc::new(TargetQuotaMiddleware::new(
+                limiter,
+                Arc::clone(&self.stress_relief),
+            )));
         self
     }
 
     /// 设置限流压力下的采样策略。
     pub fn with_sampling_policy(
-        mut self,
+        self,
         policy: Arc<crate::support::io::sink::sampling::SamplingPolicy>,
     ) -> Self {
-        self.sampling_policy = Some(policy);
+        self.stress_relief.set_policy(policy);
         self
     }
 
     /// 启用服务身份静态字段注入（service_name/instance/env/version 等）。
     ///
     /// 每条记录进入通道前把这些键值并入 `fields`；事件显式携带的同名字段
-    /// 优先（or-insert 语义，与 trace_id 的显式覆盖先例一致）。
+    /// 优先（or-insert 语义，与 trace_id 的显式覆盖先例一致）。头插改写环：
+    /// 身份注入恒先于脱敏（注入值同样被脱敏），与接线顺序无关。
     pub fn with_identity_fields(
         mut self,
         fields: Arc<std::collections::BTreeMap<String, serde_json::Value>>,
     ) -> Self {
-        self.identity_fields = Some(fields);
+        self.pipeline
+            .register_rewrite_front(Arc::new(IdentityFieldsMiddleware::new(fields)));
         self
     }
 
-    fn is_critical_level(level: &str) -> bool {
-        level == "ERROR" || level == "FATAL"
+    /// 用户治理中间件装配入口：尾插治理环，恒在内置限流件之后、改写轮
+    /// 之前执行。中间件可裁决丢弃（`Drop`/`Reround`），也可原位改写记录
+    /// （改写结果仍会经改写轮——如脱敏——继续处理）。
+    pub fn with_middleware(mut self, middleware: Arc<dyn RecordMiddleware>) -> Self {
+        self.pipeline.register_governance(middleware);
+        self
     }
 
     /// 从当前线程激活的 dispatch 派生 (trace_id, span_id)。
@@ -322,75 +327,6 @@ impl LoggerSubscriber {
         ))
     }
 
-    // 敏感键判定不再有本地副本：统一引用 `LogRecord::is_sensitive_key`
-    // （src/domain/types/log_record.rs，pub(crate) 单一事实源），
-    // 避免手工同步两份模式表导致的安全行为分叉。
-
-    /// Sanitize a log record's message and fields values, recursing into
-    /// nested objects and arrays so strings under sensitive keys are not
-    /// left untouched.
-    fn sanitize_record(&self, record: &mut LogRecord) {
-        if let Some(ref sanitizer) = self.sanitizer {
-            record.message = sanitizer.sanitize(&record.message);
-            for value in record.fields.values_mut() {
-                Self::sanitize_field_value(sanitizer, value);
-            }
-        }
-    }
-
-    /// 递归脱敏字段值：字符串值一律 sanitize；Object 按键递归（敏感键的
-    /// 字符串值同样被脱敏，不再被跳过）；Array 逐元素递归。递归深度上限
-    /// 16 层，超限子树整体替换为截断标记（防深嵌套栈溢出）。
-    fn sanitize_field_value(sanitizer: &LogSanitizer, value: &mut value::Value) {
-        const MAX_SANITIZE_DEPTH: usize = 16;
-        Self::sanitize_field_value_depth(sanitizer, value, 0, MAX_SANITIZE_DEPTH);
-    }
-
-    fn sanitize_field_value_depth(
-        sanitizer: &LogSanitizer,
-        value: &mut value::Value,
-        depth: usize,
-        max_depth: usize,
-    ) {
-        if depth >= max_depth {
-            *value = value::Value::String("***TRUNCATED***".to_string());
-            return;
-        }
-        match value {
-            value::Value::String(s) => *s = sanitizer.sanitize(s),
-            value::Value::Array(items) => {
-                for item in items.iter_mut() {
-                    Self::sanitize_field_value_depth(sanitizer, item, depth + 1, max_depth);
-                }
-            }
-            value::Value::Object(map) => {
-                for (nested_key, nested_value) in map.iter_mut() {
-                    if LogRecord::is_sensitive_key(nested_key) {
-                        // 敏感键：直接脱敏其字符串值
-                        if let value::Value::String(s) = nested_value {
-                            *s = sanitizer.sanitize(s);
-                        } else {
-                            Self::sanitize_field_value_depth(
-                                sanitizer,
-                                nested_value,
-                                depth + 1,
-                                max_depth,
-                            );
-                        }
-                    } else {
-                        Self::sanitize_field_value_depth(
-                            sanitizer,
-                            nested_value,
-                            depth + 1,
-                            max_depth,
-                        );
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
     pub fn try_flush_fallback(&self) {
         // 锁内仅取出待 flush 批量，循环发送在锁外执行，
         // 避免锁被持有 N × send_timeout
@@ -482,77 +418,13 @@ where
         // 从当前 span 上下文提取 trace_id/span_id（未启用 span 时零成本直通）
         Self::extract_trace_context(&ctx, &mut record);
 
-        // per-target 分级限流：命中前缀规则的 target 由其配额组独立裁决
-        // （组桶放行后不再进入全局限流），未命中 target 维持既有全局路径；
-        // 组预算耗尽属限流拒绝，与全局限流拒绝共用同一关键级别救援语义
-        let mut ungoverned = true;
-        let mut quota_rejected = false;
-        if let Some(ref target_limiter) = self.target_rate_limiter {
-            match target_limiter.evaluate(&record.target) {
-                TargetQuotaVerdict::Drop => {
-                    quota_rejected = true;
-                    ungoverned = false;
-                }
-                TargetQuotaVerdict::Pass => ungoverned = false,
-                TargetQuotaVerdict::Ungoverned => {}
-            }
+        // 处理管道：治理轮（target 配额 → 全局限流 → 压力采样救援）裁决
+        // 丢弃即短路发送，丢弃计数在治理件内完成；改写轮（身份注入 →
+        // 脱敏）在发送前完成。发送阶段不属于管道（依赖通道与兜底缓冲，
+        // 仍是 subscriber 职责）。
+        if !self.pipeline.process(&mut record) {
+            return;
         }
-
-        // Rate limiting check (before sanitization to save work on dropped logs)；
-        // 组配额拒绝与全局限流拒绝同入压力路径——ERROR/FATAL 按 1-in-N 采样
-        // 保留的兜底语义对两条限流来源一致，避免配额前缀下的审计错误日志
-        // 被无痕抑制（全局路径的既有设计决策，见 ERROR_SAMPLING_RATE）
-        let stress_rejected = if quota_rejected {
-            true
-        } else if ungoverned {
-            // 全局限流拒绝判定（未接线 = None = 不限流）
-            self.rate_limiter
-                .as_ref()
-                .is_some_and(|limiter| !limiter.try_acquire())
-        } else {
-            false
-        };
-        if stress_rejected {
-            // 压力路径：采样策略规则优先（Some = 策略决策）；
-            // 无策略或无规则命中（None）回退内置兜底——非关键级别丢弃，
-            // ERROR/FATAL 按 1-in-N 采样保留。
-            let (keep, sampled_eviction) = match self
-                .sampling_policy
-                .as_ref()
-                .and_then(|policy| policy.should_emit(&record))
-            {
-                Some(decision) => (decision, !decision),
-                None if Self::is_critical_level(&record.level) => {
-                    let count = self.error_sample_counter.fetch_add(1, Ordering::Relaxed);
-                    let keep = count.is_multiple_of(ERROR_SAMPLING_RATE);
-                    (keep, !keep)
-                }
-                None => (false, false),
-            };
-            if !keep {
-                // 采样淘汰（策略规则或兜底 1-in-N）计入专用细分指标；
-                // 非关键级别的压力丢弃是限流丢弃而非采样
-                if sampled_eviction {
-                    self.metrics.inc_sampled_out();
-                }
-                self.metrics.inc_logs_dropped();
-                return;
-            }
-        }
-
-        // 服务身份静态字段注入：or-insert，事件显式同名字段优先；
-        // 放在限流判定之后——被丢弃的记录不做无谓注入
-        if let Some(identity) = self.identity_fields.as_ref() {
-            for (key, value) in identity.iter() {
-                record
-                    .fields
-                    .entry(key.clone())
-                    .or_insert_with(|| value.clone());
-            }
-        }
-
-        // Sanitize message and fields before sending to channels
-        self.sanitize_record(&mut record);
 
         let record = Arc::new(record);
 
@@ -576,7 +448,7 @@ where
         if delivered.iter().any(|ok| !ok) {
             // For critical logs, add to fallback buffer（保留各通道投递状态，
             // flush 时只补发未成功的通道）
-            if Self::is_critical_level(&record.level) {
+            if is_critical_level(&record.level) {
                 let mut buffer = self.fallback_buffer.lock();
                 if buffer.len() >= FALLBACK_BUFFER_SIZE {
                     // LRU 淘汰的最旧关键日志落 journal（deferred-capabilities C4：
@@ -614,6 +486,7 @@ where
 mod tests {
     use super::*;
     use crate::domain::config::sampling::SamplingConfig;
+    use crate::support::io::sink::middleware::MiddlewareVerdict;
     use crate::support::io::sink::sampling::SamplingPolicy;
     use crate::support::processing::target_rate_limiter::TargetRateLimiter;
     use crossbeam_channel::bounded;
@@ -1567,117 +1440,6 @@ mod tests {
     }
 
     // =========================================================================
-    // sanitize_record 嵌套结构递归测试：嵌套对象/数组中敏感键被脱敏
-    // =========================================================================
-
-    #[test]
-    fn test_sanitize_record_recurses_into_nested_object_and_array() {
-        let (console_tx, _console_rx) = bounded(10);
-        let (async_tx, _async_rx) = bounded(10);
-        let metrics = Arc::new(Metrics::new());
-        let sanitizer = Arc::new(LogSanitizer::new());
-
-        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics).with_sanitizer(sanitizer);
-
-        let mut record = LogRecord::new(
-            tracing::Level::INFO,
-            "test::sanitize".to_string(),
-            "nested sanitize".to_string(),
-        );
-
-        // 嵌套对象：敏感键 + 普通键
-        let mut nested = serde_json::Map::new();
-        nested.insert(
-            "password".to_string(),
-            Value::String("line1\nline2".to_string()),
-        );
-        nested.insert("note".to_string(), Value::String("a\nb".to_string()));
-        record
-            .fields
-            .insert("config".to_string(), Value::Object(nested));
-
-        // 数组内对象：敏感键
-        let mut item = serde_json::Map::new();
-        item.insert(
-            "api_token".to_string(),
-            Value::String("tok1\ntok2".to_string()),
-        );
-        record
-            .fields
-            .insert("items".to_string(), Value::Array(vec![Value::Object(item)]));
-
-        layer.sanitize_record(&mut record);
-
-        // 嵌套对象中的敏感键字符串值被脱敏（换行被转义）
-        let config = record.fields.get("config").unwrap();
-        if let Value::Object(map) = config {
-            if let Value::String(s) = map.get("password").unwrap() {
-                assert!(
-                    !s.contains('\n') && s.contains("\\n"),
-                    "nested sensitive key 'password' must be sanitized, got: {s:?}"
-                );
-            } else {
-                panic!("password value should remain a string");
-            }
-            // 普通键同样被递归脱敏
-            if let Value::String(s) = map.get("note").unwrap() {
-                assert!(
-                    !s.contains('\n'),
-                    "nested plain string must also be sanitized, got: {s:?}"
-                );
-            }
-        } else {
-            panic!("config field should remain an object");
-        }
-
-        // 数组内对象中的敏感键字符串值被脱敏
-        let items = record.fields.get("items").unwrap();
-        if let Value::Array(arr) = items {
-            if let Value::Object(map) = &arr[0] {
-                if let Value::String(s) = map.get("api_token").unwrap() {
-                    assert!(
-                        !s.contains('\n') && s.contains("\\n"),
-                        "sensitive key inside array must be sanitized, got: {s:?}"
-                    );
-                } else {
-                    panic!("api_token value should remain a string");
-                }
-            } else {
-                panic!("array element should remain an object");
-            }
-        } else {
-            panic!("items field should remain an array");
-        }
-    }
-
-    #[test]
-    fn test_sanitize_record_leaves_non_string_values_untouched() {
-        let (console_tx, _console_rx) = bounded(10);
-        let (async_tx, _async_rx) = bounded(10);
-        let metrics = Arc::new(Metrics::new());
-        let sanitizer = Arc::new(LogSanitizer::new());
-
-        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics).with_sanitizer(sanitizer);
-
-        let mut record = LogRecord::new(
-            tracing::Level::INFO,
-            "test::sanitize".to_string(),
-            "non-string values".to_string(),
-        );
-        record
-            .fields
-            .insert("count".to_string(), serde_json::json!(42));
-
-        layer.sanitize_record(&mut record);
-
-        assert_eq!(
-            record.fields.get("count").unwrap(),
-            &serde_json::json!(42),
-            "non-string values must not be modified"
-        );
-    }
-
-    // =========================================================================
     // 敏感键判定单一事实源：subscriber 的 sanitizer 路径直接引用
     // `LogRecord::is_sensitive_key`（token 边界语义），本测试钉住该语义，
     // 防止有人再引入按子串匹配的本地副本（子串匹配会把 "author" 误判为敏感）。
@@ -2025,6 +1787,60 @@ mod tests {
             (1..=5).contains(&error_count),
             "expected ~1 sampled ERROR through rate limiter, got {}",
             error_count
+        );
+    }
+
+    // =========================================================================
+    // with_middleware 用户治理装配入口：治理环尾插——用户件的原位改写
+    // 仍进改写轮被脱敏；Drop 裁决短路发送
+    // =========================================================================
+
+    /// 用户治理中间件测试件：为记录打标（值含换行，用于验证改写轮脱敏），
+    /// message 含 "drop-me" 时裁决丢弃。
+    struct UserGovernanceMiddleware;
+
+    impl RecordMiddleware for UserGovernanceMiddleware {
+        fn name(&self) -> &str {
+            "user-governance"
+        }
+        fn process(&self, record: &mut LogRecord) -> MiddlewareVerdict {
+            record
+                .fields
+                .insert("user_tag".to_string(), serde_json::json!("line1\nline2"));
+            if record.message.contains("drop-me") {
+                MiddlewareVerdict::Drop
+            } else {
+                MiddlewareVerdict::Continue
+            }
+        }
+    }
+
+    #[test]
+    fn test_with_middleware_user_governance_runs_before_rewrite_round() {
+        let (console_tx, console_rx) = bounded(10);
+        let (async_tx, _async_rx) = bounded(10);
+        let metrics = Arc::new(Metrics::new());
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics)
+            .with_sanitizer(Arc::new(LogSanitizer::new()))
+            .with_middleware(Arc::new(UserGovernanceMiddleware));
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(target: "test::middleware", message = "kept");
+            tracing::info!(target: "test::middleware", message = "drop-me");
+        });
+
+        let kept = console_rx.recv().unwrap();
+        assert_eq!(kept.message, "kept");
+        let tag = kept.fields.get("user_tag").and_then(Value::as_str).unwrap();
+        assert!(
+            !tag.contains('\n') && tag.contains("\\n"),
+            "user middleware rewrite must still pass the rewrite round (sanitized), got: {tag:?}"
+        );
+        assert!(
+            console_rx.try_recv().is_err(),
+            "dropped record must not reach any channel"
         );
     }
 }

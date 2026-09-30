@@ -42,6 +42,10 @@ pub enum MiddlewareVerdict {
     Continue,
     /// 丢弃该记录（链条短路，不写 sink）
     Drop,
+    /// 本轮治理终审放行：短路链条上剩余中间件，记录继续进入下一阶段
+    /// （sink 场景直写内层 sink；管道场景进入改写与发送）。语义来源：
+    /// target 前缀配额组放行后不再进入全局限流（既有限流三态的链上表达）。
+    Reround,
 }
 
 /// 记录中间件端口：对象安全，`process` 同步执行（热路径无锁由实现方保证）。
@@ -53,8 +57,10 @@ pub trait RecordMiddleware: Send + Sync {
     fn process(&self, record: &mut LogRecord) -> MiddlewareVerdict;
 }
 
-/// 有序中间件链：任一环节 `Drop` 即短路。
-#[derive(Default)]
+/// 有序中间件链：任一环节 `Drop`/`Reround` 即短路。
+///
+/// Clone 共享中间件实例（Arc 句柄语义），与持有链的 subscriber 克隆语义一致。
+#[derive(Clone, Default)]
 pub struct MiddlewareChain {
     middlewares: Vec<Arc<dyn RecordMiddleware>>,
 }
@@ -81,8 +87,18 @@ impl MiddlewareChain {
 
     /// 追加中间件（builder 风格）。
     pub fn push(mut self, middleware: Arc<dyn RecordMiddleware>) -> Self {
-        self.middlewares.push(middleware);
+        self.append(middleware);
         self
+    }
+
+    /// 尾部追加中间件（就地注册）。
+    pub fn append(&mut self, middleware: Arc<dyn RecordMiddleware>) {
+        self.middlewares.push(middleware);
+    }
+
+    /// 头部插入中间件（就地注册）：固定内置治理件的裁决顺序用。
+    pub fn push_front(&mut self, middleware: Arc<dyn RecordMiddleware>) {
+        self.middlewares.insert(0, middleware);
     }
 
     /// 已注册的中间件数量。
@@ -95,10 +111,14 @@ impl MiddlewareChain {
     }
 
     /// 依序应用全部中间件；返回 `false` 表示记录被丢弃。
+    ///
+    /// `Drop` 与 `Reround` 均短路：前者丢弃，后者终审放行（跳过剩余中间件）。
     pub fn apply(&self, record: &mut LogRecord) -> bool {
         for middleware in &self.middlewares {
-            if middleware.process(record) == MiddlewareVerdict::Drop {
-                return false;
+            match middleware.process(record) {
+                MiddlewareVerdict::Drop => return false,
+                MiddlewareVerdict::Reround => return true,
+                MiddlewareVerdict::Continue => {}
             }
         }
         true
@@ -322,6 +342,60 @@ mod tests {
         assert!(chain.apply(&mut kept));
         assert_eq!(kept.fields.get("cluster").unwrap(), "prod-1");
         assert_eq!(chain.len(), 2);
+    }
+
+    /// 恒定终审放行的中间件：验证 Reround 短路语义。
+    struct ReroundMiddleware;
+
+    impl RecordMiddleware for ReroundMiddleware {
+        fn name(&self) -> &str {
+            "reround"
+        }
+        fn process(&self, _record: &mut LogRecord) -> MiddlewareVerdict {
+            MiddlewareVerdict::Reround
+        }
+    }
+
+    #[test]
+    fn test_reround_finalizes_round_and_skips_remaining() {
+        // Reround = 本轮治理终审放行：跳过链上剩余中间件，记录不被丢弃
+        let chain = MiddlewareChain::new()
+            .push(Arc::new(ReroundMiddleware))
+            .push(Arc::new(KeywordDropMiddleware {
+                keyword: "secret".to_string(),
+            }))
+            .push(Arc::new(EnrichMiddleware::new("cluster", "prod-1")));
+
+        // 即使后续中间件会丢弃/改写，Reround 已短路本轮：不再执行
+        let mut record = record(Level::INFO, "has secret inside");
+        assert!(chain.apply(&mut record), "reround must let the record pass");
+        assert!(
+            !record.fields.contains_key("cluster"),
+            "reround must skip remaining middlewares in the round"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_middleware_sink_reround_writes_inner_directly() {
+        let inner = Arc::new(CollectingSink {
+            messages: Mutex::new(Vec::new()),
+        });
+        let sink = Arc::new(MiddlewareSink::new(
+            inner.clone() as Arc<dyn LogSink>,
+            MiddlewareChain::new()
+                .push(Arc::new(ReroundMiddleware))
+                .push(Arc::new(
+                    LevelFilterMiddleware::new("fatal").expect("valid level"),
+                )),
+        ));
+
+        // Reround 短路后直接写内层 sink：后续 fatal 过滤不再执行
+        sink.write(&record(Level::INFO, "finalized")).await.unwrap();
+        assert_eq!(
+            inner.messages.lock().len(),
+            1,
+            "rerounded record must reach inner sink bypassing remaining middlewares"
+        );
     }
 
     #[tokio::test]

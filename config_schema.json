@@ -1,0 +1,761 @@
+{
+  "$defs": {
+    "ArchiveFormat": {
+      "description": "Supported archive formats for database log export.",
+      "enum": [
+        "json",
+        "parquet",
+        "csv"
+      ],
+      "type": "string"
+    },
+    "ChannelStrategy": {
+      "description": "Channel sizing strategy for log buffer management.",
+      "enum": [
+        "fixed",
+        "adaptive"
+      ],
+      "type": "string"
+    },
+    "ConsoleSinkConfig": {
+      "description": "Console sink configuration.\n\nControls logging output to stdout/stderr with optional colored output\nand level-based stream routing.\n\n# Example TOML Configuration\n\n```toml\n[console_sink]\nenabled = true\ncolored = true\nstderr_levels = [\"error\", \"warn\"]\nmasking_enabled = true\n```\n\n# Stream Routing\n\nLog levels specified in `stderr_levels` are written to stderr,\nall other levels go to stdout. This enables:\n- Separating errors from normal output\n- Piping stdout to files while keeping errors visible\n- Integration with monitoring tools that parse stderr\n\n# Environment Variable Overrides\n\n```bash\nexport INKLOG_CONSOLE_SINK_ENABLED=true\nexport INKLOG_CONSOLE_SINK_COLORED=false\n```",
+      "properties": {
+        "colored": {
+          "default": true,
+          "description": "Enable colored output using ANSI escape codes.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Enable console logging.",
+          "type": "boolean"
+        },
+        "masking_enabled": {
+          "default": true,
+          "description": "Enable PII masking for console output: structured PII (emails, phone\nnumbers, ID/bank card numbers) and values under sensitive field names\nare masked before the record is written to stdout/stderr.\n\n推荐新名 `pii_masking_enabled`；旧名 `masking_enabled` 为兼容别名，\n继续接受（serde alias），序列化时始终输出旧名。\n\n# 三个易混淆开关的分工\n\n- **sanitizer**（`global.masking_enabled`，推荐名 `sanitizer_enabled`）：\n  注入转义与消息脱敏，作用于 subscriber 入口（全局）。\n- **pii_masking**（本字段，推荐名 `pii_masking_enabled`）：结构化 PII\n  掩码，作用于本 sink 输出前。\n- **safe_message**（`InklogError::safe_message`，error.rs 的\n  SENSITIVE_PATTERNS）：错误消息出口脱敏，独立于以上两个开关。\n\n# Default\n\n`true` - Masking enabled by default for security consistency with\n[`GlobalConfig`](super::GlobalConfig).",
+          "type": "boolean"
+        },
+        "output_format": {
+          "$ref": "#/$defs/OutputFormat",
+          "default": "text",
+          "description": "Output format: text (template-based) or JSON (NDJSON).\n\nWhen `Json`, colored output is automatically disabled."
+        },
+        "stderr_levels": {
+          "default": [
+            "error",
+            "warn"
+          ],
+          "description": "Log levels to write to stderr instead of stdout.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "DatabaseDriver": {
+      "description": "Supported database drivers for the database sink.",
+      "enum": [
+        "postgres",
+        "mysql",
+        "sqlite",
+        "duckdb"
+      ],
+      "type": "string"
+    },
+    "DatabaseSinkConfig": {
+      "additionalProperties": false,
+      "description": "Database sink configuration for persistent log storage.",
+      "properties": {
+        "admin_role": {
+          "default": "admin",
+          "description": "Admin role name used for DDL and write operations.",
+          "type": "string"
+        },
+        "archive_format": {
+          "$ref": "#/$defs/ArchiveFormat",
+          "default": "json"
+        },
+        "batch_size": {
+          "default": 100,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "driver": {
+          "$ref": "#/$defs/DatabaseDriver",
+          "default": "sqlite"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "flush_interval_ms": {
+          "default": 500,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "default": "default",
+          "type": "string"
+        },
+        "parquet_config": {
+          "$ref": "#/$defs/ParquetConfig",
+          "default": {
+            "compression_level": 3,
+            "encoding": "PLAIN",
+            "include_fields": [],
+            "max_page_size": 1048576,
+            "max_row_group_size": 10000
+          }
+        },
+        "partition": {
+          "$ref": "#/$defs/PartitionStrategy",
+          "default": "monthly"
+        },
+        "permissions_path": {
+          "default": null,
+          "description": "Path to the RBAC permissions configuration file.\nWhen `None`, permission checking is disabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool_size": {
+          "default": 10,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "table_name": {
+          "default": "logs",
+          "type": "string"
+        },
+        "url": {
+          "default": "sqlite::memory:",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "FileSinkConfig": {
+      "description": "File sink configuration.\n\nControls logging output to files with support for rotation, compression,\nencryption, and retention policies.\n\n# Features\n\n- **Log Rotation**: Automatic file rotation by size or time interval\n- **Compression**: Zstd compression for rotated log files\n- **Encryption**: AES-256-GCM encryption for sensitive logs\n- **Retention**: Automatic cleanup of old log files based on age or total size\n- **Batching**: Configurable batch size for improved throughput\n\n# Example TOML Configuration\n\n```toml\n[file_sink]\nenabled = true\npath = \"logs/app.log\"\nmax_size = \"100MB\"\nrotation_time = \"daily\"\nkeep_files = 30\ncompress = true\ncompression_level = 3\nencrypt = false\nencryption_key_env = \"LOG_ENCRYPTION_KEY\"\nretention_days = 30\nmax_total_size = \"1GB\"\ncleanup_interval_minutes = 60\nbatch_size = 100\nflush_interval_ms = 100\nmasking_enabled = true\n```",
+      "properties": {
+        "audit_chain_enabled": {
+          "default": false,
+          "description": "归档审计链（HMAC-SHA256 前向链）：每次轮转成功后向\n`<stem>.chain.jsonl` manifest 追加 `{path, sha256, timestamp}` 条目，\n检测归档篡改/删除/重排。密钥读 `INKLOG_AUDIT_KEY` 环境变量；\n缺失时链禁用并告警。默认关闭。",
+          "type": "boolean"
+        },
+        "batch_size": {
+          "default": 100,
+          "description": "Number of log records to buffer before writing to disk.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cleanup_interval_minutes": {
+          "default": 60,
+          "description": "Interval between cleanup runs (minutes).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "compress": {
+          "default": true,
+          "description": "Enable compression for rotated log files.",
+          "type": "boolean"
+        },
+        "compression_level": {
+          "default": 3,
+          "description": "Zstd compression level (1-22).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Enable file logging.",
+          "type": "boolean"
+        },
+        "encrypt": {
+          "default": false,
+          "description": "Enable AES-256-GCM encryption for log files.",
+          "type": "boolean"
+        },
+        "encryption_key_env": {
+          "default": null,
+          "description": "Environment variable name for the encryption key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flush_interval_ms": {
+          "default": 100,
+          "description": "Maximum time to wait before flushing buffer (milliseconds).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fsync": {
+          "default": false,
+          "description": "每批写盘后执行 `sync_all`（fsync）：崩溃一致性增强。\n默认关闭（吞吐优先）；等保/审计场景建议开启。",
+          "type": "boolean"
+        },
+        "keep_files": {
+          "default": 30,
+          "description": "Maximum number of rotated files to keep.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "masking_enabled": {
+          "default": true,
+          "description": "Enable PII masking for file output: structured PII (emails, phone\nnumbers, ID/bank card numbers) and values under sensitive field names\nare masked before the record is persisted.\n\n推荐新名 `pii_masking_enabled`；旧名 `masking_enabled` 为兼容别名，\n继续接受（serde alias），序列化时始终输出旧名。\n\n# 三个易混淆开关的分工\n\n- **sanitizer**（`global.masking_enabled`，推荐名 `sanitizer_enabled`）：\n  注入转义与消息脱敏，作用于 subscriber 入口（全局）。\n- **pii_masking**（本字段，推荐名 `pii_masking_enabled`）：结构化 PII\n  掩码，作用于本 sink 持久化前。\n- **safe_message**（`InklogError::safe_message`，error.rs 的\n  SENSITIVE_PATTERNS）：错误消息出口脱敏，独立于以上两个开关。",
+          "type": "boolean"
+        },
+        "max_size": {
+          "default": "100MB",
+          "description": "Maximum size of a single log file before rotation.",
+          "type": "string"
+        },
+        "max_total_size": {
+          "default": "1GB",
+          "description": "Maximum total size of all log files combined.",
+          "type": "string"
+        },
+        "output_format": {
+          "$ref": "#/$defs/OutputFormat",
+          "default": "text",
+          "description": "Output format: text or JSON (NDJSON)."
+        },
+        "path": {
+          "default": "logs/app.log",
+          "description": "Path to the log file.",
+          "type": "string"
+        },
+        "retention_days": {
+          "default": 30,
+          "description": "Delete log files older than N days.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rotation_time": {
+          "default": "daily",
+          "description": "Time-based rotation interval.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "GlobalConfig": {
+      "description": "Global logger configuration.\n\nControls the overall behavior of the logging system including log level,\nformat string, and fallback settings.\n\n# Configuration Priority\n\nConfiguration values are loaded with the following priority (highest to lowest):\n1. Environment variables (prefix `INKLOG_GLOBAL_`)\n2. Configuration file values\n3. Default values\n\n# Example TOML Configuration\n\n```toml\n[global]\nlevel = \"debug\"\nformat = \"{timestamp} [{level}] {target} - {message}\"\nmasking_enabled = true\nauto_fallback = true\nfallback_initial_delay_ms = 1000\nfallback_max_delay_ms = 60000\nfallback_max_retries = 10\n```\n\n# Environment Variable Overrides\n\nAny field can be overridden via environment variables:\n```bash\nexport INKLOG_GLOBAL_LEVEL=debug\nexport INKLOG_GLOBAL_MASKING_ENABLED=false\n```",
+      "properties": {
+        "auto_fallback": {
+          "default": true,
+          "description": "Enable automatic fallback on sink failures.\n\nWhen a sink fails repeatedly, the system automatically falls back to\nalternative sinks (e.g., database → file → console).\n\n# Default\n\n`true` - Fallback enabled for reliability.",
+          "type": "boolean"
+        },
+        "fallback_initial_delay_ms": {
+          "default": 1000,
+          "description": "Initial delay before first retry (milliseconds).\n\nWhen a sink fails, the system waits this duration before attempting\nthe first retry. Subsequent retries use exponential backoff.\n\n# Default\n\n`1000` ms (1 second)",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fallback_journal": {
+          "default": false,
+          "description": "磁盘持久化 fallback 队列（deferred-capabilities C4）：兜底缓冲溢出/\n淘汰的 ERROR/FATAL 记录落盘 JSONL，进程启动时重放一次后清空。\n\n# Default\n\n`false`（关闭时全链路零文件 IO，行为与既往一致）",
+          "type": "boolean"
+        },
+        "fallback_journal_path": {
+          "default": "logs/fallback.journal",
+          "description": "fallback journal 文件路径（`fallback_journal` 开启时生效）。\n\n# Default\n\n`logs/fallback.journal`",
+          "type": "string"
+        },
+        "fallback_max_delay_ms": {
+          "default": 60000,
+          "description": "Maximum delay between retries (milliseconds).\n\nCaps the exponential backoff delay to prevent excessive waiting.\n\n# Default\n\n`60000` ms (60 seconds)",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fallback_max_retries": {
+          "default": 10,
+          "description": "Maximum number of retry attempts.\n\nAfter this many failures, the sink is marked as unhealthy and\nfallback mechanisms are activated.\n\n# Default\n\n`10` retries",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "format": {
+          "default": "{timestamp} [{level}] {target} - {message}",
+          "description": "Log message format template.\n\nSupports placeholders that are replaced with values from each log record:\n- `{timestamp}` - ISO 8601 timestamp\n- `{level}` - Log level (INFO, DEBUG, etc.)\n- `{target}` - Module path that emitted the log\n- `{message}` - Log message content\n- `{file}` - Source file path (optional)\n- `{line}` - Line number in source file (optional)\n- `{thread_id}` - Thread identifier\n- `{fields}` - Additional structured fields (JSON)\n\n# Default\n\n`\"{timestamp} [{level}] {target} - {message}\"`",
+          "type": "string"
+        },
+        "level": {
+          "default": "info",
+          "description": "Minimum log level to capture.\n\nValid values (case-insensitive): `trace`, `debug`, `info`, `warn`, `error`, `fatal`.\nLogs below this level are ignored.\n\n# Default\n\n`\"info\"` - Captures INFO, WARN, ERROR, and FATAL logs.",
+          "type": "string"
+        },
+        "masking_enabled": {
+          "default": true,
+          "description": "Enable the log sanitizer: CWE-117 injection escaping (newlines/control\ncharacters) plus message-level sensitive-data redaction, applied by the\ntracing subscriber before records enter any sink.\n\n推荐新名 `sanitizer_enabled`；旧名 `masking_enabled` 为兼容别名，\n继续接受（serde alias），序列化时始终输出旧名。\n\n# 三个易混淆开关的分工\n\n- **sanitizer**（本字段，推荐名 `sanitizer_enabled`）：注入转义与消息\n  脱敏，作用于 subscriber 入口（全局）。\n- **pii_masking**（`console_sink` / `file_sink` 的 `masking_enabled`，\n  推荐名 `pii_masking_enabled`）：结构化 PII 掩码（邮箱、手机号、证件/\n  银行卡号、敏感字段名），作用于 sink 输出前。\n- **safe_message**（`InklogError::safe_message`，error.rs 的\n  SENSITIVE_PATTERNS）：错误消息出口脱敏，独立于以上两个开关。\n\n# Default\n\n`true` - Masking enabled by default for security.",
+          "type": "boolean"
+        },
+        "output_format": {
+          "$ref": "#/$defs/OutputFormat",
+          "default": "text",
+          "description": "Output format for log sinks.\n\nControls whether logs are rendered as human-readable text or JSON.\n\n# Default\n\n`OutputFormat::Text`"
+        },
+        "service_env": {
+          "default": null,
+          "description": "部署环境（注入键名 `service_env`，如 `prod` / `staging`）。\n\n# Default\n\n`None`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_instance": {
+          "default": null,
+          "description": "服务实例标识（注入键名 `service_instance`，如 pod 名 / 进程 id 组合）。\n\n# Default\n\n`None`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_name": {
+          "default": null,
+          "description": "服务名（静态身份字段，注入每条日志记录的 `fields`，键名\n`service_name`）。未设置（None）时不注入。\n\n# Default\n\n`None`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_version": {
+          "default": null,
+          "description": "服务版本（注入键名 `service_version`）。\n\n# Default\n\n`None`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "static_fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "附加静态键值（与身份字段一并注入 `fields`，键名原样保留）。\n用于 region/az/tenant 等部署维度标注。\n\n# Default\n\n空 map",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "HttpAuthConfig": {
+      "description": "HTTP authentication configuration.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "token_env": {
+          "default": "INKLOG_HTTP_AUTH_TOKEN",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "HttpErrorMode": {
+      "description": "HTTP server error handling mode.\n\nControls how the HTTP server handles and reports errors.\n- `Warn`: Log errors as warnings and continue operation.\n- `Strict`: Return error responses to callers (default).",
+      "enum": [
+        "warn",
+        "strict"
+      ],
+      "type": "string"
+    },
+    "HttpServerConfig": {
+      "description": "HTTP server configuration for health checks and metrics.",
+      "properties": {
+        "auth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpAuthConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "error_mode": {
+          "$ref": "#/$defs/HttpErrorMode",
+          "default": "strict"
+        },
+        "health_path": {
+          "default": "/health",
+          "type": "string"
+        },
+        "host": {
+          "default": "127.0.0.1",
+          "type": "string"
+        },
+        "ip_whitelist": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "metrics_path": {
+          "default": "/metrics",
+          "type": "string"
+        },
+        "port": {
+          "default": 9090,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional TLS configuration. When set, the HTTP server starts with TLS."
+        }
+      },
+      "type": "object"
+    },
+    "OutputFormat": {
+      "description": "Output format for log sinks.\n\nControls whether logs are rendered as human-readable text (via `LogTemplate`)\nor as machine-parseable JSON (one object per line).",
+      "oneOf": [
+        {
+          "const": "text",
+          "description": "Human-readable text using `LogTemplate`.",
+          "type": "string"
+        },
+        {
+          "const": "json",
+          "description": "Newline-Delimited JSON (NDJSON).",
+          "type": "string"
+        }
+      ]
+    },
+    "ParquetConfig": {
+      "additionalProperties": false,
+      "description": "Parquet export configuration for database sink.",
+      "properties": {
+        "compression_level": {
+          "default": 3,
+          "format": "int32",
+          "type": "integer"
+        },
+        "encoding": {
+          "default": "PLAIN",
+          "type": "string"
+        },
+        "include_fields": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_page_size": {
+          "default": 1048576,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_row_group_size": {
+          "default": 10000,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "PartitionStrategy": {
+      "description": "Database table partitioning strategy for log storage optimization.",
+      "enum": [
+        "monthly",
+        "yearly"
+      ],
+      "type": "string"
+    },
+    "PerformanceConfig": {
+      "description": "Performance tuning configuration for log channel and worker management.",
+      "properties": {
+        "channel_capacity": {
+          "default": 10000,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "channel_strategy": {
+          "$ref": "#/$defs/ChannelStrategy",
+          "default": "fixed"
+        },
+        "expand_threshold_percent": {
+          "default": 80,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_capacity": {
+          "default": 50000,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_capacity": {
+          "default": 1000,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rate_limit": {
+          "default": null,
+          "description": "Maximum log rate in logs/sec. `None` = unlimited.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "shrink_threshold_percent": {
+          "default": 20,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shrink_wait_seconds": {
+          "default": 30,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "worker_threads": {
+          "default": 3,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RateLimitConfig": {
+      "description": "按 target 前缀分组的限流配额：前缀 → 该组每秒令牌数（组内共享预算）。\n\n查找为按记录执行的线性扫描（最长前缀优先），规则数建议 ≤ 64。",
+      "properties": {
+        "rules": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default": {},
+          "description": "target 前缀 → 每秒令牌数；最长前缀优先，未命中规则的 target 不受限",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SamplingConfig": {
+      "description": "采样策略配置。",
+      "properties": {
+        "per_level": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default": {},
+          "description": "每级别采样率：级别名（大小写不敏感，含 warning/critical 别名）→ N",
+          "type": "object"
+        },
+        "per_target_prefix": {
+          "additionalProperties": {
+            "$ref": "#/$defs/TargetSamplingRule"
+          },
+          "default": {},
+          "description": "target 前缀 → 规则（命中时最长前缀优先）",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "TargetSamplingRule": {
+      "description": "单条 target 前缀规则：级别豁免阈值 + N 取 1 采样率。",
+      "properties": {
+        "keep_level": {
+          "default": null,
+          "description": "target 命中前缀且级别 ≥ 该级别的记录始终放行（None = 不按级别豁免）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sample_every_n": {
+          "default": 1,
+          "description": "未豁免记录的 N 取 1 采样率（≥1；1 = 全放行）",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "TlsConfig": {
+      "description": "TLS configuration for the HTTP server.\n\nSpecifies the paths to the PEM-encoded certificate and private key files\nused for HTTPS connections.",
+      "properties": {
+        "cert_path": {
+          "description": "Path to the PEM-encoded certificate file.",
+          "type": "string"
+        },
+        "key_path": {
+          "description": "Path to the PEM-encoded private key file.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cert_path",
+        "key_path"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Root configuration for inklog logger.\n\n# Loading\n\nConfiguration can be loaded from:\n- TOML files (via `from_search_paths()`)\n- Environment variables (prefix `INKLOG_`)\n- Defaults (lowest priority)",
+  "properties": {
+    "console_sink": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConsoleSinkConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": {
+        "colored": true,
+        "enabled": true,
+        "masking_enabled": true,
+        "output_format": "text",
+        "stderr_levels": [
+          "error",
+          "warn"
+        ]
+      }
+    },
+    "database_sink": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DatabaseSinkConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "file_sink": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FileSinkConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "global": {
+      "$ref": "#/$defs/GlobalConfig",
+      "default": {
+        "auto_fallback": true,
+        "fallback_initial_delay_ms": 1000,
+        "fallback_journal": false,
+        "fallback_journal_path": "logs/fallback.journal",
+        "fallback_max_delay_ms": 60000,
+        "fallback_max_retries": 10,
+        "format": "{timestamp} [{level}] {target} - {message}",
+        "level": "info",
+        "masking_enabled": true,
+        "output_format": "text",
+        "service_env": null,
+        "service_instance": null,
+        "service_name": null,
+        "service_version": null,
+        "static_fields": {}
+      }
+    },
+    "http_server": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HttpServerConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "performance": {
+      "$ref": "#/$defs/PerformanceConfig",
+      "default": {
+        "channel_capacity": 10000,
+        "channel_strategy": "fixed",
+        "expand_threshold_percent": 80,
+        "max_capacity": 50000,
+        "min_capacity": 1000,
+        "rate_limit": null,
+        "shrink_threshold_percent": 20,
+        "shrink_wait_seconds": 30,
+        "worker_threads": 3
+      }
+    },
+    "rate_limit": {
+      "$ref": "#/$defs/RateLimitConfig",
+      "default": {
+        "rules": {}
+      },
+      "description": "按 target 前缀分组的限流配额（未配置 = 订阅器不接线，全局行为不变）。"
+    },
+    "sampling": {
+      "$ref": "#/$defs/SamplingConfig",
+      "default": {
+        "per_level": {},
+        "per_target_prefix": {}
+      },
+      "description": "采样策略：限流压力下决定保留哪些记录（未配置 = 内置兜底采样）。"
+    },
+    "target_levels": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "description": "Per-crate target level presets (e.g. `{\"hyper\" = \"warn\", \"my_crate\" = \"debug\"}`).\n\nThese are merged into the `EnvFilter` alongside the global level and\n`RUST_LOG` overrides. Target-level entries have lower priority than\n`RUST_LOG` but higher than the global default.",
+      "type": "object"
+    }
+  },
+  "title": "InklogConfig",
+  "type": "object"
+}
