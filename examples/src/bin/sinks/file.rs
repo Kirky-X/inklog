@@ -59,6 +59,7 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
         compression_level: 3,
         encrypt: false,
         encryption_key_env: None,
+        encryption_key_file: None,
         retention_days: 7,
         max_total_size: "1GB".to_string(),
         cleanup_interval_minutes: 60,
@@ -130,6 +131,7 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
         compression_level: 3,
         encrypt: false,
         encryption_key_env: None,
+        encryption_key_file: None,
         retention_days: 7,
         max_total_size: "1GB".to_string(),
         cleanup_interval_minutes: 60,
@@ -238,6 +240,7 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
         compression_level: 3, // Zstd 压缩级别（1-21，默认 3）
         encrypt: false,
         encryption_key_env: None,
+        encryption_key_file: None,
         retention_days: 7,
         max_total_size: "1GB".to_string(),
         cleanup_interval_minutes: 60,

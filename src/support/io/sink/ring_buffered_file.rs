@@ -3,10 +3,15 @@
 //! High-performance file sink using crossbeam channels.
 
 use super::LogSink;
+use super::file::{process_rotated, resolve_rotation_target};
 use crate::FileSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
+use crate::support::audit_chain::ArchiveChain;
+use crate::support::io::sink::encryption::{
+    KeyMaterial, resolve_key_material, validate_key_entropy,
+};
 use crate::validation::PathValidatorConfig;
 use async_trait::async_trait;
 use crossbeam_channel;
@@ -15,9 +20,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::thread;
-use std::time::Duration as StdDuration;
+use std::time::{Duration as StdDuration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackpressureStrategy {
@@ -25,6 +30,33 @@ pub enum BackpressureStrategy {
     Block,
     DropOldest,
     DropNewest,
+}
+
+/// 轮转参数（size/time 任一触发即轮转）。
+///
+/// **时间语义为滚动间隔近似**：自上次轮转起算（`last_rotation.elapsed()`），
+/// 与 FileSink 的日历对齐不同（FileSink daily = 次日零点、monthly = 次月
+/// 同日零点，见 `calculate_next_rotation_time`）。能力矩阵与文档按
+/// 「滚动近似」如实标注，不宣称一致。
+#[derive(Debug, Clone, Copy)]
+struct RotationParams {
+    /// size 触发阈值（字节）；None = 不按大小轮转
+    max_bytes: Option<u64>,
+    /// time 触发间隔；None = 不按时间轮转
+    interval: Option<StdDuration>,
+}
+
+/// 轮转触发判定（纯函数）：size 达阈值或 time 距上次轮转超间隔。
+fn rotation_due(
+    max_bytes: Option<u64>,
+    current: u64,
+    interval: Option<StdDuration>,
+    last_rotation: Instant,
+) -> bool {
+    if max_bytes.is_some_and(|max| current >= max) {
+        return true;
+    }
+    interval.is_some_and(|interval| last_rotation.elapsed() >= interval)
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +84,7 @@ impl Default for ChannelBufferedConfig {
 struct Inner {
     io_thread: Option<thread::JoinHandle<()>>,
     flush_thread: Option<thread::JoinHandle<()>>,
+    cleanup_thread: Option<thread::JoinHandle<()>>,
 }
 
 pub struct ChannelBufferedFileSink {
@@ -71,6 +104,22 @@ pub struct ChannelBufferedFileSink {
     write_error_count: Arc<AtomicUsize>,
     /// None = base_config.masking_enabled=false（落盘原样）
     masker: Option<crate::DataMasker>,
+    /// 当前活动文件字节量（轮转 size 判定；轮转后归零）。
+    ///
+    /// 已知失真（有意保留，与 FileSink 的 `current_size` 读文件元数据语义
+    /// 不同）：进程重启后从 0 起算，未含重启前活动文件已有体积——实际文件
+    /// 可增长到 `max_bytes + 既有体积` 才触发 size 轮转。如需严格阈值，
+    /// 改为构造期用文件元数据初始化（行为变更需评审）。
+    current_file_bytes: Arc<AtomicU64>,
+    /// 轮转参数（size/time，R-inklog-003）
+    rotation: RotationParams,
+    /// 上次轮转时刻（io 线程判定 time 触发；测试可注入合成时刻）
+    last_rotation: Arc<Mutex<Instant>>,
+    /// 归档审计链（audit_chain_enabled 时启用；轮转成功后 append 并写穿
+    /// manifest，与 FileSink 同一范式）
+    audit_chain: Option<Arc<Mutex<ArchiveChain>>>,
+    /// 轮转产物加密密钥材料（encrypt 时构造期已显性解析；None = 不加密）
+    key_material: Option<KeyMaterial>,
 }
 
 impl ChannelBufferedFileSink {
@@ -143,6 +192,53 @@ impl ChannelBufferedFileSink {
             )));
         }
 
+        // R-inklog-003：加密密钥在构造期显性解析——显式启用加密而 key
+        // 缺失/无效在此返回 Err（禁止静默明文落盘）。key 来源 env 优先、
+        // 其次配置文件（encryption_key_file，unix 权限 0600），与 fallback
+        // journal / FileSink 共享同一解析范式；默认 env 名与 FileSink 一致。
+        let key_material = if config.base_config.encrypt {
+            let default_env = "LOG_ENCRYPTION_KEY".to_string();
+            let env_name = config
+                .base_config
+                .encryption_key_env
+                .as_ref()
+                .unwrap_or(&default_env);
+            let material = resolve_key_material(
+                env_name,
+                config
+                    .base_config
+                    .encryption_key_file
+                    .as_deref()
+                    .map(std::path::Path::new),
+            )?;
+            // 纵深防御：直接用作密钥的原始字节须过熵校验（拒绝全零等弱密钥）
+            if let KeyMaterial::Raw(key) = &material {
+                validate_key_entropy(key.as_slice())?;
+            }
+            Some(material)
+        } else {
+            None
+        };
+
+        // 归档审计链：与 FileSink 同范式——INKLOG_AUDIT_KEY 为链密钥；
+        // 缺失则禁用（随机密钥会让 manifest 事后不可验，宁缺毋滥）
+        let audit_chain = if config.base_config.audit_chain_enabled {
+            match std::env::var("INKLOG_AUDIT_KEY") {
+                Ok(key) if !key.is_empty() => {
+                    Some(Arc::new(Mutex::new(ArchiveChain::new(key.as_bytes()))))
+                }
+                _ => {
+                    tracing::warn!(
+                        "audit_chain_enabled but INKLOG_AUDIT_KEY is not set; audit chain disabled"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let rotation = Self::rotation_params(&config.base_config);
         let masker = config
             .base_config
             .masking_enabled
@@ -167,6 +263,7 @@ impl ChannelBufferedFileSink {
             inner: Mutex::new(Inner {
                 io_thread: None,
                 flush_thread: None,
+                cleanup_thread: None,
             }),
             shutdown_flag,
             bytes_written,
@@ -174,25 +271,80 @@ impl ChannelBufferedFileSink {
             dropped_count,
             write_error_count,
             masker,
+            current_file_bytes: Arc::new(AtomicU64::new(0)),
+            rotation,
+            last_rotation: Arc::new(Mutex::new(Instant::now())),
+            audit_chain,
+            key_material,
         };
 
         sink.start_io_thread();
         sink.start_flush_thread();
+        sink.start_cleanup_timer();
 
         Ok(sink)
     }
 
+    /// 轮转参数解析：`max_size` 走共享 size 解析（不可解析/0 视为不按大小
+    /// 轮转）；`rotation_time` 为滚动间隔近似（hourly/daily/weekly/monthly →
+    /// 固定秒数，自上次轮转起算）——FileSink 是日历对齐（daily=次日零点等），
+    /// 二者语义差异见 [`RotationParams`] 文档。
+    fn rotation_params(cfg: &FileSinkConfig) -> RotationParams {
+        let max_bytes = super::rotation::parse_size(&cfg.max_size)
+            .ok()
+            .filter(|&bytes| bytes > 0);
+        let interval = match cfg.rotation_time.as_str() {
+            "hourly" => Some(StdDuration::from_secs(3600)),
+            "daily" => Some(StdDuration::from_secs(86400)),
+            "weekly" => Some(StdDuration::from_secs(604800)),
+            "monthly" => Some(StdDuration::from_secs(2592000)),
+            _ => Some(StdDuration::from_secs(86400)),
+        };
+        RotationParams {
+            max_bytes,
+            interval,
+        }
+    }
+
+    /// 活动文件打开：与 FileSink.open_file_inner 相同的三处审计级加固——
+    /// 新建父目录 0700、活动文件 0600、O_NOFOLLOW（vuln-0004 TOCTOU 修复）。
+    /// 回落判定收窄后默认配置（含 encrypt/compress）全部走本路径，
+    /// 权限不得比 FileSink 退化。
     fn open_file(path: &PathBuf) -> Result<File, InklogError> {
+        let parent_newly_created = path
+            .parent()
+            .is_some_and(|p| !p.as_os_str().is_empty() && !p.exists());
         if let Some(parent) = path.parent()
             && !parent.exists()
         {
             std::fs::create_dir_all(parent).map_err(InklogError::IoError)?;
         }
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(InklogError::IoError)
+        // 新建的日志目录收敛为 0700（已存在目录不回改用户权限）
+        #[cfg(unix)]
+        if parent_newly_created && let Some(parent) = path.parent() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+        }
+        // O_NOFOLLOW + 0600：内核层拒绝末段符号链接，日志可能含 PII/敏感上下文
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .mode(0o600)
+                .custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits())
+                .open(path)
+                .map_err(InklogError::IoError)
+        }
+        #[cfg(not(unix))]
+        {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(InklogError::IoError)
+        }
     }
 
     fn start_io_thread(&self) {
@@ -201,6 +353,13 @@ impl ChannelBufferedFileSink {
         let shutdown_flag = self.shutdown_flag.clone();
         let bytes_written = self.bytes_written.clone();
         let write_error_count = self.write_error_count.clone();
+        let current_file_bytes = self.current_file_bytes.clone();
+        let last_rotation = self.last_rotation.clone();
+        let audit_chain = self.audit_chain.clone();
+        let key_material = self.key_material.clone();
+        let base_path = self.config.base_config.path.clone();
+        let base_config = self.config.base_config.clone();
+        let rotation = self.rotation;
         let batch_size = self.config.flush_batch_size;
 
         let handle = thread::spawn(move || {
@@ -240,6 +399,7 @@ impl ChannelBufferedFileSink {
                             write_error_count.fetch_add(1, Ordering::Relaxed);
                         } else {
                             bytes_written.fetch_add(entry.len(), Ordering::Relaxed);
+                            current_file_bytes.fetch_add(entry.len() as u64, Ordering::Relaxed);
                         }
                     }
                     if let Err(e) = writer.flush() {
@@ -251,26 +411,85 @@ impl ChannelBufferedFileSink {
                         write_error_count.fetch_add(1, Ordering::Relaxed);
                     }
                 }
+
+                // R-inklog-003：批次落盘后判定轮转（size/time 任一触发）
+                let due = {
+                    let last = last_rotation.lock();
+                    rotation_due(
+                        rotation.max_bytes,
+                        current_file_bytes.load(Ordering::Relaxed),
+                        rotation.interval,
+                        *last,
+                    )
+                };
+                if due {
+                    Self::rotate_locked(
+                        &mut file_guard,
+                        &base_path,
+                        &current_file_bytes,
+                        &last_rotation,
+                        &audit_chain,
+                        &base_config,
+                        key_material.as_ref(),
+                    );
+                }
             }
 
             // Drain remaining messages from the channel before exiting.
             // Use try_recv() to avoid blocking after shutdown flag is set.
-            while let Ok(entry) = receiver.try_recv() {
+            // R-inklog-003：drain 与主循环同一轮转判定与 current_file_bytes
+            // 记账——此前 drain 绕过 rotation_due，shutdown 时通道积压可无限
+            // 越过 max_size（size 轮转断言偶发失败、活动文件超限的根因）。
+            loop {
+                let mut batch: Vec<String> = Vec::with_capacity(batch_size);
+                while batch.len() < batch_size {
+                    match receiver.try_recv() {
+                        Ok(entry) => batch.push(entry),
+                        Err(_) => break,
+                    }
+                }
+                if batch.is_empty() {
+                    break;
+                }
                 let mut file_guard = file.lock();
                 if let Some(writer) = file_guard.as_mut() {
-                    match writer.write_all(entry.as_bytes()) {
-                        Ok(()) => {
-                            bytes_written.fetch_add(entry.len(), Ordering::Relaxed);
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                kind = %e.kind(),
-                                "ChannelBufferedFileSink: Write error during drain: {}",
-                                e
-                            );
-                            write_error_count.fetch_add(1, Ordering::Relaxed);
+                    for entry in &batch {
+                        match writer.write_all(entry.as_bytes()) {
+                            Ok(()) => {
+                                bytes_written.fetch_add(entry.len(), Ordering::Relaxed);
+                                current_file_bytes.fetch_add(entry.len() as u64, Ordering::Relaxed);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    kind = %e.kind(),
+                                    "ChannelBufferedFileSink: Write error during drain: {}",
+                                    e
+                                );
+                                write_error_count.fetch_add(1, Ordering::Relaxed);
+                            }
                         }
                     }
+                }
+                // drain 期间同样执行轮转判定（size/time 任一触发）
+                let due = {
+                    let last = last_rotation.lock();
+                    rotation_due(
+                        rotation.max_bytes,
+                        current_file_bytes.load(Ordering::Relaxed),
+                        rotation.interval,
+                        *last,
+                    )
+                };
+                if due {
+                    Self::rotate_locked(
+                        &mut file_guard,
+                        &base_path,
+                        &current_file_bytes,
+                        &last_rotation,
+                        &audit_chain,
+                        &base_config,
+                        key_material.as_ref(),
+                    );
                 }
             }
 
@@ -323,6 +542,172 @@ impl ChannelBufferedFileSink {
         });
 
         self.inner.lock().flush_thread = Some(handle);
+    }
+
+    /// 保留清理定时器（与 FileSink 同节奏：cleanup_interval_minutes 间隔，
+    /// 复用其 perform_cleanup 单一事实源；shutdown_flag 响应式分段睡眠）。
+    fn start_cleanup_timer(&self) {
+        let interval = StdDuration::from_secs(
+            self.config
+                .base_config
+                .cleanup_interval_minutes
+                .saturating_mul(60)
+                .max(1),
+        );
+        let handle = self.spawn_cleanup_thread(interval);
+        self.inner.lock().cleanup_thread = Some(handle);
+    }
+
+    /// 测试注入短周期清理线程（替换常规线程槽位；被替换线程与实例共享
+    /// shutdown_flag，shutdown 时自行退出）。
+    #[cfg(test)]
+    fn start_cleanup_timer_for_test(&self, interval: StdDuration) {
+        let handle = self.spawn_cleanup_thread(interval);
+        self.inner.lock().cleanup_thread = Some(handle);
+    }
+
+    fn spawn_cleanup_thread(&self, check_interval: StdDuration) -> thread::JoinHandle<()> {
+        let shutdown_flag = self.shutdown_flag.clone();
+        let config = self.config.base_config.clone();
+        let path = self.config.base_config.path.clone();
+
+        thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                loop {
+                    if shutdown_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    // 拆分长 sleep 为 100ms 段，每段检查 shutdown_flag
+                    let mut elapsed = StdDuration::ZERO;
+                    const POLL_INTERVAL: StdDuration = StdDuration::from_millis(100);
+                    while elapsed < check_interval {
+                        if shutdown_flag.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let step = std::cmp::min(POLL_INTERVAL, check_interval - elapsed);
+                        thread::sleep(step);
+                        elapsed += step;
+                    }
+                    if shutdown_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if let Err(e) =
+                        crate::support::io::sink::file::FileSink::perform_cleanup(&config, &path)
+                    {
+                        tracing::error!("ChannelBufferedFileSink cleanup failed: {}", e);
+                    }
+                }
+            }));
+            if let Err(panic_info) = result {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                tracing::error!("Cleanup thread panicked: {}", msg);
+            }
+        })
+    }
+
+    /// 执行轮转（须持文件锁）：flush → 改名（冲突安全）→ 重开 → 重置计数
+    /// → 审计链接记 → 后台压缩/加密。命名与归档产物范式与 FileSink 一致
+    ///（复用其 resolve_rotation_target / sha256_file / process_rotated）。
+    /// 加密用构造期解析的 `key_material`（`None` = 未启用加密）。
+    fn rotate_locked(
+        file: &mut Option<BufWriter<File>>,
+        base_path: &PathBuf,
+        current_file_bytes: &AtomicU64,
+        last_rotation: &Mutex<Instant>,
+        audit_chain: &Option<Arc<Mutex<ArchiveChain>>>,
+        base_config: &FileSinkConfig,
+        key_material: Option<&KeyMaterial>,
+    ) {
+        if let Some(writer) = file.as_mut() {
+            let _ = writer.flush();
+        }
+        let _ = file.take();
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let rotated_path = resolve_rotation_target(base_path, &timestamp);
+        if base_path.exists() && std::fs::rename(base_path, &rotated_path).is_err() {
+            // 改名失败（跨设备等）：复制后删除兜底，与 FileSink 一致
+            if std::fs::copy(base_path, &rotated_path).is_ok() {
+                let _ = std::fs::remove_file(base_path);
+            } else {
+                // rename+copy 双失败：轮转产物缺位且源文件被续写——持续失败
+                // 环境轮转永久失效，必须显性上报（对齐 process_rotated 失败路径）
+                let error = format!(
+                    "rotation rename and copy both failed for {}",
+                    base_path.display()
+                );
+                tracing::error!("{error}");
+                crate::support::ops_event::publish_internal(
+                    "sink_degraded",
+                    Some("file"),
+                    serde_json::json!({ "op": "rotation", "error": error }),
+                );
+            }
+        }
+
+        // 重开活动文件；失败则句柄置空（后续写走 file_guard None 分支，
+        // 记录经 channel 计数不丢——与写错误路径语义一致）
+        match Self::open_file(base_path) {
+            Ok(new_file) => {
+                *file = Some(BufWriter::new(new_file));
+            }
+            Err(e) => tracing::error!(
+                path = %base_path.display(),
+                "ChannelBufferedFileSink: reopen after rotation failed: {}",
+                e
+            ),
+        }
+        current_file_bytes.store(0, Ordering::Relaxed);
+        *last_rotation.lock() = Instant::now();
+
+        // 归档审计链登记与压缩/加密后处理都在后台线程执行（sha256 全文件读 +
+        // manifest 全量重写是 O(条目数) 工作，不得占用 io 线程），
+        // 失败可观测不反压写路径
+        if audit_chain.is_some() || base_config.compress || base_config.encrypt {
+            let config = base_config.clone();
+            let archive_path = rotated_path.clone();
+            let audit_chain = audit_chain.clone();
+            let base_path = base_path.clone();
+            let key_material = key_material.cloned();
+            let _ = thread::spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    if let Some(chain) = audit_chain.as_ref() {
+                        crate::support::io::sink::file::register_rotated_archive(
+                            chain,
+                            &base_path,
+                            &archive_path,
+                        );
+                    }
+                    if (config.compress || config.encrypt)
+                        && let Err(e) =
+                            process_rotated(&config, &archive_path, key_material.as_ref())
+                    {
+                        tracing::error!("Failed to post-process rotated log: {}", e);
+                        crate::support::ops_event::publish_internal(
+                            "sink_degraded",
+                            Some("file"),
+                            serde_json::json!({ "op": "archive", "error": e.to_string() }),
+                        );
+                    }
+                }));
+                if let Err(panic_info) = result {
+                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    tracing::error!("Rotation post-processing thread panicked: {}", msg);
+                }
+            });
+        }
     }
 
     fn try_write(&self, record: &LogRecord) -> bool {
@@ -443,6 +828,9 @@ impl ChannelBufferedFileSink {
                 let _ = handle.join();
             }
             if let Some(handle) = inner.flush_thread.take() {
+                let _ = handle.join();
+            }
+            if let Some(handle) = inner.cleanup_thread.take() {
                 let _ = handle.join();
             }
         }
@@ -814,6 +1202,63 @@ mod tests {
 
         // Verify the file exists
         assert!(nested_path.exists());
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_open_file_hardening_matches_filesink() {
+        // 审计级加固对齐 FileSink：活动文件 0600、新建父目录 0700、
+        // O_NOFOLLOW（符号链接目标打开须失败）
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let nested = dir.path().join("created-parent").join("ring_perm.log");
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: nested.clone(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+        sink.write(&make_record("perm-probe")).await.unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+
+        let file_mode = std::fs::metadata(&nested).unwrap().permissions().mode();
+        assert_eq!(
+            file_mode & 0o777,
+            0o600,
+            "CBFS active file must be 0600 (FileSink parity), got {:o}",
+            file_mode & 0o777
+        );
+        let dir_mode = std::fs::metadata(dir.path().join("created-parent"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            dir_mode & 0o777,
+            0o700,
+            "newly created log parent dir must be 0700, got {:o}",
+            dir_mode & 0o777
+        );
+
+        // O_NOFOLLOW：日志路径被符号链接替换时打开必须失败（TOCTOU 关闭）
+        let link_dir = TempDir::new().unwrap();
+        let target = link_dir.path().join("real.log");
+        std::fs::write(&target, "victim").unwrap();
+        let link = link_dir.path().join("link.log");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let open_result = ChannelBufferedFileSink::open_file(&link);
+        assert!(
+            open_result.is_err(),
+            "O_NOFOLLOW must reject symlinked log path"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "victim",
+            "symlink target must not be touched"
+        );
     }
 
     #[test]
@@ -1229,5 +1674,507 @@ mod tests {
 
         // shutdown 可能因 flush 失败而返回错误，忽略
         let _ = sink.shutdown().await;
+    }
+
+    // ========================================================================
+    // R-inklog-003：CBFS 高级能力（轮转 size/time、压缩、加密、审计链、
+    // 保留清理）。manager 回落判定相应收窄后，此处为唯一文件写路径行为
+    // 基准（FileSink 仅保留 fsync/JSON 出站/磁盘空间守卫）。
+    // ========================================================================
+
+    /// 隔离保留清理干扰的测试配置：retention 拉满（3650 天 / 100 个 /
+    /// 30 天周期），轮转产物不会被清理线程误删。
+    fn rotation_cfg(
+        path: std::path::PathBuf,
+        max_size: &str,
+        rotation_time: &str,
+    ) -> ChannelBufferedConfig {
+        ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path,
+                max_size: max_size.to_string(),
+                rotation_time: rotation_time.to_string(),
+                compress: false,
+                keep_files: 100,
+                retention_days: 3650,
+                cleanup_interval_minutes: 60 * 24 * 30,
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 16,
+            flush_interval_ms: 50,
+        }
+    }
+
+    fn rotated_files(dir: &std::path::Path, stem: &str) -> Vec<std::path::PathBuf> {
+        let mut found: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(&format!("{stem}_")))
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// 轮转触发判定（纯函数，size/time 任一满足即轮转）。
+    #[test]
+    fn test_rotation_due_decision() {
+        let now = std::time::Instant::now();
+        // size 未达/已达
+        assert!(!rotation_due(Some(1000), 999, None, now));
+        assert!(rotation_due(Some(1000), 1000, None, now));
+        // time 未到/已过（hourly = 3600s；合成 7200s 前的 last_rotation）
+        let stale = now - std::time::Duration::from_secs(7200);
+        assert!(!rotation_due(
+            None,
+            0,
+            Some(std::time::Duration::from_secs(3600)),
+            now
+        ));
+        assert!(rotation_due(
+            None,
+            0,
+            Some(std::time::Duration::from_secs(3600)),
+            stale
+        ));
+        // 双条件：任一触发
+        assert!(rotation_due(
+            Some(1000),
+            500,
+            Some(std::time::Duration::from_secs(3600)),
+            stale
+        ));
+        // 未配置任何条件：永不轮转
+        assert!(!rotation_due(None, u64::MAX, None, stale));
+    }
+
+    #[tokio::test]
+    async fn test_rotation_by_size_creates_rotated_files() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_size.log");
+        let sink = ChannelBufferedFileSink::new(
+            rotation_cfg(path.clone(), "1KB", "daily"),
+            LogTemplate::default(),
+        )
+        .unwrap();
+
+        for i in 0..60 {
+            sink.write(&make_record(&format!("size-rot-{i}-{}", "x".repeat(30))))
+                .await
+                .unwrap();
+        }
+        sink.shutdown().await.unwrap();
+
+        let rotated = rotated_files(dir.path(), "ring_size");
+        assert!(
+            !rotated.is_empty(),
+            "size rotation must produce rotated files, dir: {:?}",
+            dir.path().read_dir().unwrap().collect::<Vec<_>>()
+        );
+        // 全部记录跨轮转产物保留（顺序文件级不乱、总量守恒）
+        let mut all = String::new();
+        for f in rotated_files(dir.path(), "ring_size")
+            .iter()
+            .chain(std::iter::once(&path))
+        {
+            all.push_str(&std::fs::read_to_string(f).unwrap_or_default());
+        }
+        for i in 0..60 {
+            assert!(
+                all.contains(&format!("size-rot-{i}")),
+                "record {i} must survive rotation, got {all:?}"
+            );
+        }
+        // 轮转后活动文件重置（不再超限）
+        let active_len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        assert!(
+            active_len <= 2048,
+            "active file must be reset after rotation, got {active_len}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rotation_by_time_after_interval() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_time.log");
+        let sink = ChannelBufferedFileSink::new(
+            rotation_cfg(path.clone(), "1GB", "hourly"),
+            LogTemplate::default(),
+        )
+        .unwrap();
+
+        // 合成时间触发：把 last_rotation 拨回 7200s 前（hourly 间隔已过）
+        *sink.last_rotation.lock() =
+            std::time::Instant::now() - std::time::Duration::from_secs(7200);
+
+        sink.write(&make_record("time-rot-marker")).await.unwrap();
+        sink.shutdown().await.unwrap();
+
+        let rotated = rotated_files(dir.path(), "ring_time");
+        assert!(
+            !rotated.is_empty(),
+            "time-triggered rotation must produce a rotated file"
+        );
+        let rotated_content = std::fs::read_to_string(&rotated[0]).unwrap();
+        assert!(
+            rotated_content.contains("time-rot-marker"),
+            "written record must land in the rotated file, got: {rotated_content:?}"
+        );
+        // 轮转后新活动文件存在且为空（本轮转批次之后无写入）
+        let active = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            !active.contains("time-rot-marker"),
+            "marker must not appear in the new active file"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_encrypt_without_key_fails_explicitly() {
+        // 复用 journal 加密（R-inklog-002）的 key 管理范式：显式启用加密而
+        // key 缺失 → 构造期显性失败
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_enc_nokey.log");
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_CBFS_ENC_MISSING");
+        }
+        let mut cfg = rotation_cfg(path.clone(), "1KB", "daily");
+        cfg.base_config.encrypt = true;
+        cfg.base_config.encryption_key_env = Some("INKLOG_TEST_CBFS_ENC_MISSING".to_string());
+
+        let result = ChannelBufferedFileSink::new(cfg, LogTemplate::default());
+        let Err(err) = result else {
+            panic!("encrypt without key must fail construction explicitly");
+        };
+        assert!(
+            err.to_string().contains("INKLOG_TEST_CBFS_ENC_MISSING"),
+            "error must name the key source, got: {err}"
+        );
+        assert!(
+            !path.exists(),
+            "no plaintext file may be created when key is missing"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_encrypted_rotation_roundtrip() {
+        use aes_gcm::KeyInit as _;
+        use aes_gcm::aead::Aead as _;
+        use base64::{Engine as _, engine::general_purpose};
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_enc.log");
+        let key: [u8; 32] = core::array::from_fn(|i| (i as u8).wrapping_mul(41).wrapping_add(7));
+        unsafe {
+            std::env::set_var(
+                "INKLOG_TEST_CBFS_ENC",
+                general_purpose::STANDARD.encode(key).as_str(),
+            );
+        }
+        let mut cfg = rotation_cfg(path.clone(), "1KB", "daily");
+        cfg.base_config.encrypt = true;
+        cfg.base_config.encryption_key_env = Some("INKLOG_TEST_CBFS_ENC".to_string());
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        for i in 0..40 {
+            sink.write(&make_record(&format!("enc-rot-{i}-{}", "y".repeat(30))))
+                .await
+                .unwrap();
+        }
+        sink.shutdown().await.unwrap();
+
+        // 轮转产物被加密为 .enc（v2 头：ENCLOG1\0 + version + algo + salt + nonce + ct）
+        // 轮询等待后台归档线程完成加密（shutdown 不 join 后台归档线程）
+        let mut all_plain;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let mut enc_files: Vec<std::path::PathBuf> = std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "enc"))
+                .collect();
+            enc_files.sort();
+            assert!(
+                !enc_files.is_empty(),
+                "rotated files must be encrypted to .enc"
+            );
+            all_plain = String::new();
+            for enc in &enc_files {
+                let data = std::fs::read(enc).unwrap();
+                assert!(data.starts_with(b"ENCLOG1\0"), "v2 magic required");
+                let salt = &data[12..28];
+                let nonce = &data[28..40];
+                let ciphertext = &data[40..];
+                // 原始密钥分支与盐无关（与 FileSink v2 语义一致）
+                let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key).unwrap();
+                let plain = cipher
+                    .decrypt(&aes_gcm::Nonce::try_from(nonce).unwrap(), ciphertext)
+                    .expect("decryption with the same env key must succeed");
+                let _ = salt;
+                all_plain.push_str(&String::from_utf8_lossy(&plain));
+            }
+            // 尾部记录在最后一次轮转阈值前落入活动文件（活动文件不加密，
+            // 与 FileSink 只加密轮转归档的语义一致）
+            all_plain.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+            let complete = (0..40).all(|i| all_plain.contains(&format!("enc-rot-{i}")));
+
+            if complete || std::time::Instant::now() >= deadline {
+                for i in 0..40 {
+                    assert!(
+                        all_plain.contains(&format!("enc-rot-{i}")),
+                        "record {i} must survive encrypted rotation"
+                    );
+                }
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_CBFS_ENC");
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_audit_chain_records_rotations() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_chain.log");
+        unsafe {
+            std::env::set_var("INKLOG_AUDIT_KEY", "cbfs-audit-chain-key-01");
+        }
+        let mut cfg = rotation_cfg(path.clone(), "1KB", "daily");
+        cfg.base_config.audit_chain_enabled = true;
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        for i in 0..40 {
+            sink.write(&make_record(&format!("chain-rot-{i}-{}", "z".repeat(30))))
+                .await
+                .unwrap();
+        }
+        sink.shutdown().await.unwrap();
+
+        // manifest 与 FileSink 同范式：`<stem>.chain.jsonl`，条目含 path+sha256+ts。
+        // 登记在轮转后台线程执行（sha256 全文件读 + manifest 全量重写不占
+        // io 线程）；shutdown 不 join 后台线程 → 轮询等待
+        let manifest = dir.path().join("ring_chain.chain.jsonl");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let body = loop {
+            let body = std::fs::read_to_string(&manifest).unwrap_or_default();
+            if !body.is_empty() || std::time::Instant::now() >= deadline {
+                break body;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        assert!(!body.is_empty(), "audit chain manifest must have entries");
+
+        let entries: Vec<crate::support::audit_chain::ArchiveChainEntry> = body
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()
+            .expect("manifest must be valid JSONL");
+        assert!(!entries.is_empty());
+        assert!(
+            crate::support::audit_chain::ArchiveChain::verify_entries(
+                &entries,
+                b"cbfs-audit-chain-key-01"
+            ),
+            "chain must verify with the audit key"
+        );
+        // 条目 sha256 与轮转产物内容一致
+        let first = &entries[0];
+        let rotated_path = std::path::PathBuf::from(
+            first
+                .event
+                .split_once("\"path\":\"")
+                .and_then(|(_, rest)| rest.split('"').next())
+                .expect("entry must carry path"),
+        );
+        let expected = crate::support::io::sink::file::FileSink::sha256_file(&rotated_path);
+        assert!(
+            first.event.contains(&expected.unwrap_or_default()),
+            "chain entry sha256 must match the rotated file"
+        );
+
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+        }
+    }
+
+    #[cfg(any(feature = "zstd", feature = "gzip"))]
+    #[tokio::test]
+    async fn test_compressed_rotation_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_comp.log");
+        let mut cfg = rotation_cfg(path.clone(), "1KB", "daily");
+        cfg.base_config.compress = true;
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        for i in 0..40 {
+            sink.write(&make_record(&format!("comp-rot-{i}-{}", "c".repeat(30))))
+                .await
+                .unwrap();
+        }
+        sink.shutdown().await.unwrap();
+
+        // 轮询等待后台归档线程完成压缩（shutdown 不 join 后台归档线程）。
+        // 活动文件不参与归档压缩（与 FileSink 只压缩轮转产物的语义一致），
+        // 尾部记录留在活动文件中，一并纳入断言。
+        let mut all;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let mut artifacts: Vec<std::path::PathBuf> = std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "zst" || e == "gz"))
+                .collect();
+            artifacts.sort();
+            assert!(
+                !artifacts.is_empty(),
+                "compressed rotation must produce .zst/.gz artifacts"
+            );
+            all = String::new();
+            for artifact in &artifacts {
+                let data = std::fs::read(artifact).unwrap();
+                // 分支级 feature 门控：单后端组合（仅 zstd / 仅 gzip）下
+                // 另一后端的解码代码不得参与编译（E0433）
+                if artifact.extension().is_some_and(|e| e == "zst") {
+                    #[cfg(feature = "zstd")]
+                    {
+                        let plain = zstd::stream::decode_all(&data[..]).unwrap();
+                        all.push_str(&String::from_utf8_lossy(&plain));
+                    }
+                } else {
+                    #[cfg(feature = "gzip")]
+                    {
+                        use std::io::Read as _;
+                        let mut decoder = flate2::read::GzDecoder::new(&data[..]);
+                        let mut plain = String::new();
+                        decoder.read_to_string(&mut plain).unwrap();
+                        all.push_str(&plain);
+                    }
+                }
+            }
+            all.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+            let complete = (0..40).all(|i| all.contains(&format!("comp-rot-{i}")));
+            if complete || std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        for i in 0..40 {
+            assert!(
+                all.contains(&format!("comp-rot-{i}")),
+                "record {i} must survive compressed rotation"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_timer_enforces_retention() {
+        use filetime::{FileTime, set_file_mtime};
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_keep.log");
+        let mut cfg = rotation_cfg(path.clone(), "1GB", "daily");
+        cfg.base_config.keep_files = 1;
+        cfg.base_config.retention_days = 0;
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        // 伪造 3 个"轮转产物"（旧 mtime，触发 keep_files=1 + retention=0 清理）
+        let old = FileTime::from_unix_time(0, 0);
+        for i in 0..3 {
+            let f = dir.path().join(format!("ring_keep_old{i}.log"));
+            std::fs::write(&f, "stale\n").unwrap();
+            set_file_mtime(&f, old).unwrap();
+        }
+
+        sink.start_cleanup_timer_for_test(std::time::Duration::from_millis(50));
+
+        // 轮询等待清理：只保留最新 1 个，其余删除
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut remaining = 3usize;
+        while std::time::Instant::now() < deadline {
+            remaining = (0..3)
+                .filter(|i| dir.path().join(format!("ring_keep_old{i}")).exists())
+                .count();
+            if remaining <= 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            remaining <= 1,
+            "retention cleanup must enforce keep_files, {remaining} stale files left"
+        );
+        sink.shutdown().await.unwrap();
+    }
+
+    // ========================================================================
+    // 新旧路径行为对拍（R-inklog-003）：同一批记录经 FileSink 与 CBFS
+    // 落盘后（level, target, message) 三元组集合一致。
+    // 注：两侧时间戳渲染格式不同（FileSink rfc3339 / 模板毫秒 UTC），
+    // 对拍剥离时间戳；格式语义差异由模板文档承载。
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_parity_file_sink_vs_cbfs() {
+        let dir = TempDir::new().unwrap();
+        let file_sink_path = dir.path().join("parity_file.log");
+        let cbfs_path = dir.path().join("parity_cbfs.log");
+
+        let file_cfg = FileSinkConfig {
+            path: file_sink_path.clone(),
+            compress: false,
+            ..Default::default()
+        };
+        let file_sink = crate::support::io::FileSink::new(file_cfg).unwrap();
+        let cbfs = ChannelBufferedFileSink::new(
+            rotation_cfg(cbfs_path.clone(), "1GB", "daily"),
+            LogTemplate::default(),
+        )
+        .unwrap();
+
+        for i in 0..20 {
+            let rec = make_record(&format!("parity-{i}"));
+            file_sink.write(&rec).await.unwrap();
+            cbfs.write(&rec).await.unwrap();
+        }
+        file_sink.flush().await.unwrap();
+        file_sink.shutdown().await.unwrap();
+        cbfs.flush().await.unwrap();
+        cbfs.shutdown().await.unwrap();
+
+        let parse = |data: &str| -> Vec<String> {
+            // 行形如 "ts [LEVEL] target - message"：剥离时间戳取语义三元组
+            let mut keys = Vec::new();
+            for line in data.lines() {
+                let Some((_, rest)) = line.split_once("] ") else {
+                    continue;
+                };
+                let Some((head, msg)) = rest.rsplit_once(" - ") else {
+                    continue;
+                };
+                keys.push(format!("{head}|{msg}"));
+            }
+            keys.sort();
+            keys
+        };
+        let file_keys = parse(&std::fs::read_to_string(&file_sink_path).unwrap());
+        let cbfs_keys = parse(&std::fs::read_to_string(&cbfs_path).unwrap());
+        assert_eq!(file_keys.len(), 20, "FileSink must persist all records");
+        assert_eq!(cbfs_keys.len(), 20, "CBFS must persist all records");
+        assert_eq!(
+            file_keys, cbfs_keys,
+            "both paths must persist identical (level, target, message) sets"
+        );
     }
 }

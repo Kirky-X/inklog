@@ -226,28 +226,12 @@ impl CompressionStrategy for GzipCompression {
 
         let compressed_path = path.with_extension("gz");
 
-        let input_file = File::open(path).map_err(|e| {
-            error!("Failed to open file for compression: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let mut reader = BufReader::new(input_file);
         let output_file = create_compressed_output(&compressed_path).map_err(|e| {
             error!("Failed to create compressed file: {}", e);
             InklogError::IoError(e)
         })?;
-
-        let level = level.clamp(0, 9) as u32;
-        let mut encoder = GzEncoder::new(output_file, Compression::new(level));
-
-        let mut buffer = [0u8; 8192];
-        loop {
-            let bytes_read = Read::read(&mut reader, &mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            std::io::Write::write_all(&mut encoder, &buffer[..bytes_read])?;
-        }
+        let mut encoder = GzEncoder::new(output_file, Compression::new(level.clamp(0, 9) as u32));
+        gzip_copy_into(&mut encoder, path)?;
 
         encoder.finish().map_err(|e| {
             error!("Failed to finish compression: {}", e);
@@ -270,18 +254,90 @@ impl CompressionStrategy for GzipCompression {
     }
 }
 
+/// gzip 编码核心：把 `input` 内容编码进已打开的 writer（不命名、不删源）。
+#[cfg(feature = "gzip")]
+fn gzip_copy_into<W: std::io::Write>(
+    encoder: &mut flate2::write::GzEncoder<W>,
+    input: &Path,
+) -> Result<(), InklogError> {
+    let input_file = File::open(input).map_err(|e| {
+        error!("Failed to open file for compression: {}", e);
+        InklogError::IoError(e)
+    })?;
+    let mut reader = BufReader::new(input_file);
+    let mut buffer = [0u8; 8192];
+    loop {
+        let bytes_read = Read::read(&mut reader, &mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        std::io::Write::write_all(encoder, &buffer[..bytes_read])?;
+    }
+    Ok(())
+}
+
+/// 追加命名压缩（轮转归档专用）：产物为 `{input}.{ext}`（gz），**不替换**
+/// 既有扩展名、不删除源文件。
+///
+/// `with_extension` 会把序号候选（`X.log.1`）的序号当扩展名剥掉——不同
+/// 轮转 attempt 的产物互相覆盖且冲突检查不单射（曾致同秒高频轮转挂死）。
+/// 仅 gzip 单后端组合启用（zstd 在场时轮转走 `zstd_encode_to` 路径）。
+#[cfg(all(feature = "gzip", not(feature = "zstd")))]
+pub(crate) fn gzip_compress_file_keeping_name(
+    path: &Path,
+    level: i32,
+) -> Result<PathBuf, InklogError> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    let compressed_path = append_ext(path, "gz");
+    let output_file = create_compressed_output(&compressed_path).map_err(|e| {
+        error!("Failed to create compressed file: {}", e);
+        InklogError::IoError(e)
+    })?;
+    let mut encoder = GzEncoder::new(output_file, Compression::new(level.clamp(0, 9) as u32));
+    gzip_copy_into(&mut encoder, path)?;
+    encoder.finish().map_err(|e| {
+        error!("Failed to finish compression: {}", e);
+        InklogError::CompressionError(e.to_string())
+    })?;
+    Ok(compressed_path)
+}
+
 /// Internal function to compress a file using Zstd.
 #[cfg(feature = "zstd")]
 fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf, InklogError> {
     let compressed_path = path.with_extension("zst");
+    zstd_encode_to(path, &compressed_path, compression_level)?;
 
-    let input_file = File::open(path).map_err(|e| {
+    if let Err(e) = std::fs::remove_file(path) {
+        // 删除失败时原始文件与压缩文件并存，需保留两者待人工/后续清理
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", e.to_string());
+        error!(
+            original = %path.display(),
+            compressed = %compressed_path.display(),
+            "{}",
+            crate::i18n::tr_args("config-compression_remove_failed", args)
+        );
+    }
+
+    Ok(compressed_path)
+}
+
+/// zstd 编码核心：`input` → `output`（调用方决定命名，不删源文件）。
+#[cfg(feature = "zstd")]
+pub(crate) fn zstd_encode_to(
+    input: &Path,
+    output: &Path,
+    compression_level: i32,
+) -> Result<(), InklogError> {
+    let input_file = File::open(input).map_err(|e| {
         error!("Failed to open file for compression: {}", e);
         InklogError::IoError(e)
     })?;
 
-    let mut reader = BufReader::new(input_file);
-    let output_file = create_compressed_output(&compressed_path).map_err(|e| {
+    let output_file = create_compressed_output(output).map_err(|e| {
         error!("Failed to create compressed file: {}", e);
         InklogError::IoError(e)
     })?;
@@ -294,6 +350,7 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
     {
         let mut writer = BufWriter::new(encoder.by_ref());
 
+        let mut reader = BufReader::new(input_file);
         let mut buffer = [0u8; 8192];
         loop {
             let bytes_read = Read::read(&mut reader, &mut buffer)?;
@@ -309,19 +366,17 @@ fn compress_file_internal(path: &Path, compression_level: i32) -> Result<PathBuf
         InklogError::CompressionError(e.to_string())
     })?;
 
-    if let Err(e) = std::fs::remove_file(path) {
-        // 删除失败时原始文件与压缩文件并存，需保留两者待人工/后续清理
-        let mut args = crate::i18n::MsgArgs::new();
-        args.set("err", e.to_string());
-        error!(
-            original = %path.display(),
-            compressed = %compressed_path.display(),
-            "{}",
-            crate::i18n::tr_args("config-compression_remove_failed", args)
-        );
-    }
+    Ok(())
+}
 
-    Ok(compressed_path)
+/// 在完整文件名后追加扩展名（不替换）。
+///
+/// 轮转序号候选（`X.log.1`）经 `with_extension` 会剥掉序号——产物互相
+/// 覆盖且冲突检查不单射；追加命名保证 attempt 与产物一一对应。
+pub(crate) fn append_ext(path: &Path, ext: &str) -> PathBuf {
+    let mut os = path.as_os_str().to_os_string();
+    os.push(format!(".{ext}"));
+    PathBuf::from(os)
 }
 
 /// Compress a single file (legacy function for backward compatibility).

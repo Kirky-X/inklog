@@ -214,6 +214,8 @@ pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogEr
 export INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 ```
 
+**密钥文件（次要来源）**：环境变量未设置时可从密钥文件读取（`encryption_key_file` / journal 的 `fallback_journal_key_file`），解析优先级 **env > 文件**。密钥文件 unix 权限必须 `0600`——组/其他可读的密钥文件在解析期显性拒绝；两个来源均不可用时加密路径**显性失败**（构建期报错），不存在静默明文降级。
+
 ### 加密文件格式
 
 #### v2 格式（当前版本）
@@ -238,6 +240,27 @@ export INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 |------|----------|------|
 | v1 | `[MAGIC 8][version 2][algo 2][nonce 12][密文]` | 无盐，仍可解密；v1 时代的密码模式因未存盐无法恢复（解密时显式报错），请迁移到 v2 |
 | Legacy | `[MAGIC 8][version 2][nonce 12][密文]` | 早期格式，解密工具自动识别 |
+
+### fallback journal 加密（可选）
+
+`global.fallback_journal_encrypt = true` 时，磁盘持久化兜底 journal 以 AES-256-GCM 加密落盘：
+
+```text
+偏移      大小     描述
+--------  -------  ------------------
+0-7       8 字节   MAGIC: "INKJRN1\0"
+8-9       2 字节   格式版本: 1 (u16 little-endian)
+10-11     2 字节   算法标识: 1 (AES-256-GCM)
+12-27     16 字节  PBKDF2 盐
+其后      逐段     nonce(12) + 段长(4, u32le) + 密文（明文为单行 JSON）
+```
+
+- **nonce 唯一性策略**：随机 96-bit/段（CSPRNG），同 key 跨段/跨文件不重复由单测断言；
+- **显性失败**：加密启用而 key 缺失/无效（env 与 key 文件均不可用、格式不符、原始密钥熵不足）时构建期报错，禁止静默明文落盘；
+- **格式自适应**：`replay` 按 magic 识别新旧格式——旧明文 JSONL 可被加密实例重放；不可识别/不可解密（版本或算法不支持、明文实例遇加密文件的配置回滚、错误密钥全军覆没）时文件原样保留并按段计数上报，不做静默清空销毁；
+- **文件权限**：加密 journal 的头创建、段追加与截断重建全部以 unix `0600` 创建（对齐 FileSink 加密产物与 key 文件约束）；
+- **明文模式的威胁模型**：`fallback_journal_encrypt = false`（默认）时兜底 journal 以**明文 JSONL** 落盘——其中集中存放 ERROR/FATAL 级记录，敏感上下文（异常消息、字段透传）可能比主日志更密集；共享主机/备份链路场景下该文件与主日志同等暴露，敏感部署应启用加密或将 `fallback_journal_path` 指向受限目录（目录权限不改变文件本身 0644 语义）；
+- **推送端口**：`fallback_journal_push_addr` 可选把 spill 记录同步推送远端（断线缓冲、失败计数不反压落盘）；`TransportSecurity` 预留 TLS 扩展点，当前为明文出站，部署在可信网段或由隧道层提供传输安全。
 
 ### 密钥轮换
 

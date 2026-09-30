@@ -18,9 +18,12 @@ mod encryption_file {
     use tracing_subscriber::layer::SubscriberExt;
 
     /// 生成测试用的有效 256 位密钥（Base64 编码）
+    ///
+    /// 32 字节（256 位）且逐字节互异（0x00..0x1F，Shannon 熵 = 5.0）——加密
+    /// sink 在构造期做密钥熵校验（≥ 4.0，拒绝数字序列等弱密钥），低位数字
+    /// 序列（如 Base64("1234…")）会显性拒绝构建。
     fn generate_test_key() -> String {
-        // 32 字节 = 256 位，Base64 编码后为 44 字符
-        "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=".to_string()
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".to_string()
     }
 
     /// 创建临时目录用于测试

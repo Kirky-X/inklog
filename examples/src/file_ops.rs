@@ -31,6 +31,7 @@ pub fn create_file_config(path: &str, max_size: &str, compress: bool) -> FileSin
         compression_level: 3,
         encrypt: false,
         encryption_key_env: None,
+        encryption_key_file: None,
         retention_days: 7,
         max_total_size: "1GB".to_string(),
         cleanup_interval_minutes: 60,
@@ -124,6 +125,7 @@ mod tests {
         assert_eq!(config.compression_level, 3);
         assert!(!config.encrypt);
         assert!(config.encryption_key_env.is_none());
+        assert!(config.encryption_key_file.is_none());
         assert_eq!(config.retention_days, 7);
         assert_eq!(config.max_total_size, "1GB");
         assert_eq!(config.batch_size, 100);

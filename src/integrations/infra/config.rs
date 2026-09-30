@@ -923,6 +923,7 @@ mod tests {
                 compression_level: 5,
                 encrypt: true,
                 encryption_key_env: Some("MY_KEY".to_string()),
+                encryption_key_file: None,
                 retention_days: 14,
                 max_total_size: "2GB".to_string(),
                 cleanup_interval_minutes: 30,

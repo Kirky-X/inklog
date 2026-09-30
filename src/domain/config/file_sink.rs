@@ -83,6 +83,11 @@ pub struct FileSinkConfig {
     #[serde(default)]
     pub encryption_key_env: Option<String>,
 
+    /// 加密密钥文件路径（`encrypt` 开启时生效；env 设置时被优先覆盖）。
+    /// unix 权限必须 0600（组/其他可读在密钥解析期显性拒绝）。
+    #[serde(default)]
+    pub encryption_key_file: Option<String>,
+
     /// Delete log files older than N days.
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
@@ -181,6 +186,7 @@ impl Default for FileSinkConfig {
             compression_level: default_compression_level(),
             encrypt: false,
             encryption_key_env: None,
+            encryption_key_file: None,
             retention_days: default_retention_days(),
             max_total_size: default_max_total_size(),
             cleanup_interval_minutes: default_cleanup_interval_minutes(),
@@ -214,16 +220,24 @@ impl FileSinkConfig {
         parse_config_size(&self.max_total_size)
             .map_err(|e| format!("max_total_size \"{}\": {e}", self.max_total_size))?;
         if self.encrypt {
-            match self.encryption_key_env.as_ref() {
-                None => {
-                    return Err("encrypt is enabled but encryption_key_env is not set".to_string());
+            // key 来源：env 优先，其次 key 文件——二者必具其一（显性校验，
+            // 禁止加密配置在无 key 的情况下静默运行）
+            match (
+                self.encryption_key_env.as_deref(),
+                self.encryption_key_file.as_deref(),
+            ) {
+                (None, None) => {
+                    return Err(
+                        "encrypt is enabled but neither encryption_key_env nor encryption_key_file is set"
+                            .to_string(),
+                    );
                 }
-                Some(env_name) if std::env::var(env_name).is_err() => {
+                (Some(env_name), None) if std::env::var(env_name).is_err() => {
                     return Err(format!(
                         "encrypt is enabled but environment variable \"{env_name}\" is not set"
                     ));
                 }
-                Some(_) => {}
+                _ => {}
             }
             // 等保 2.0/《网络安全法》第 21 条：日志留存不少于 6 个月。
             // 加密归档（审计级）场景下 retention_days 过短给出提示（不阻断配置）。

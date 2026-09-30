@@ -273,6 +273,12 @@ let config = InklogConfig {
 | `fallback_max_delay_ms` | `u64` | `60000` | 重试延迟上限（毫秒） |
 | `fallback_max_retries` | `u32` | `10` | 最大重试次数 |
 | `output_format` | `OutputFormat` | `Text` | 输出格式：`Text`（模板）或 `Json`（NDJSON） |
+| `fallback_journal` | `bool` | `false` | ERROR/FATAL 兜底溢出落盘 journal（启动重放防丢） |
+| `fallback_journal_path` | `String` | `"logs/fallback.journal"` | journal 文件路径 |
+| `fallback_journal_encrypt` | `bool` | `false` | journal AES-256-GCM 加密（key 缺失/无效时构建期显性失败） |
+| `fallback_journal_key_env` | `Option<String>` | `None` | journal 密钥环境变量名（默认 `INKLOG_JOURNAL_KEY`；优先于 key 文件） |
+| `fallback_journal_key_file` | `Option<String>` | `None` | journal 密钥文件路径（unix 权限必须 0600） |
+| `fallback_journal_push_addr` | `Option<String>` | `None` | journal push 地址（`host:port`，断线缓冲、失败不反压落盘） |
 
 #### 模板变量
 
@@ -293,20 +299,21 @@ let config = InklogConfig {
 
 #### 文件写入双路径（ChannelBufferedFileSink 转正）
 
-满足"简单配置"（`compress = false` 且 `encrypt = false` 且 `audit_chain_enabled = false` 且 `rotation_time = "daily"` 默认值）时，manager 自动使用 `ChannelBufferedFileSink`：独立 flush 线程（默认 100ms 强刷）+ 可配背压策略（`Block` 默认）+ PII 掩码。任一高级能力启用即回落 `FileSink`。
+默认 file 配置即走 `ChannelBufferedFileSink`（CBFS）：独立 flush 线程（默认 100ms 强刷）+ 可配背压策略（`Block` 默认）+ PII 掩码 + 按大小/时间轮转 + 压缩/加密归档 + 审计链 + 留存清理（轮转命名与归档后处理与 FileSink 共用同一实现）。仅剩两项能力由 `FileSink` 独占：
 
-| 能力 | ChannelBufferedFileSink（简单配置） | FileSink（高级配置回落） |
-|------|-------------------------------------|--------------------------|
+| 能力 | ChannelBufferedFileSink | FileSink |
+|------|-------------------------|----------|
 | PII 掩码 | ✓ | ✓ |
 | 独立 flush 线程 / 批量刷盘 | ✓ | 批量刷盘（无独立线程） |
 | 背压策略（Block/DropOldest/DropNewest） | ✓ | 固定丢弃+计数 |
-| 按大小/时间轮转 | ✗ | ✓ |
-| 压缩 / 加密归档 | ✗ | ✓ |
-| 审计链（`audit_chain_enabled`） | ✗ | ✓ |
-| 留存清理（`retention_days`/`keep_files`） | ✗ | ✓ |
-| `fsync` | ✗ | ✓ |
+| 按大小/时间轮转 | ✓（时间为滚动间隔近似，自上次轮转起算） | ✓（时间为日历对齐：daily=次日零点、monthly=次月同日） |
+| 压缩 / 加密归档 | ✓（复用 FileSink 后处理） | ✓ |
+| 审计链（`audit_chain_enabled`） | ✓ | ✓ |
+| 留存清理（`retention_days`/`keep_files`） | ✓（复用 `FileSink::perform_cleanup`） | ✓ |
+| 逐批 `fsync` | ✗ | ✓ |
+| `output_format = "Json"`（NDJSON 出站） | ✗ | ✓ |
 
-需要高级能力时显式配置任一项（如 `rotation_time = "hourly"` 或 `compress = true`）即自动回落。
+启用 `fsync = true` 或 `output_format = "Json"` 时自动回落 `FileSink`。加密归档的 key 来源为 **env 优先、其次 `encryption_key_file`**（unix 权限 0600），key 缺失/无效时构建期显性失败。
 
 #### FileSinkConfig 字段
 
@@ -315,12 +322,13 @@ let config = InklogConfig {
 | `enabled` | `bool` | `true` | 是否启用文件 Sink |
 | `path` | `PathBuf` | `"logs/app.log"` | 日志文件路径 |
 | `max_size` | `String` | `"100MB"` | 触发轮转的最大文件大小（如 `"10MB"`、`"500KB"`） |
-| `rotation_time` | `String` | `"daily"` | 时间轮转策略：`"hourly"`、`"daily"`、`"weekly"` |
+| `rotation_time` | `String` | `"daily"` | 时间轮转策略：`"hourly"`、`"daily"`、`"weekly"`。FileSink 为日历对齐（daily=次日零点等）；默认路径 CBFS 为滚动间隔近似（自上次轮转起算） |
 | `keep_files` | `u32` | `30` | 保留的轮转文件数量 |
 | `compress` | `bool` | `true` | 是否压缩轮转文件 |
 | `compression_level` | `i32` | `3` | 压缩级别（0-22，数值越高压缩率越高） |
 | `encrypt` | `bool` | `false` | 是否加密轮转归档 |
-| `encryption_key_env` | `Option<String>` | `None` | 加密密钥的环境变量名 |
+| `encryption_key_env` | `Option<String>` | `None` | 加密密钥的环境变量名（优先于 `encryption_key_file`） |
+| `encryption_key_file` | `Option<String>` | `None` | 加密密钥文件路径（unix 权限必须 0600；env 设置时被覆盖） |
 | `retention_days` | `u32` | `30` | 日志保留天数 |
 | `max_total_size` | `String` | `"1GB"` | 日志目录最大总大小 |
 | `cleanup_interval_minutes` | `u64` | `60` | 清理旧日志的间隔（分钟） |

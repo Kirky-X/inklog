@@ -173,6 +173,42 @@ pub struct GlobalConfig {
     #[serde(default = "default_fallback_journal_path")]
     pub fallback_journal_path: String,
 
+    /// fallback journal AES-256-GCM 加密。key 来源**env 优先，其次 key
+    /// 文件**（unix 权限必须 0600）；key 缺失/无效时构建期显性失败——
+    /// 禁止静默明文落盘。
+    ///
+    /// # Default
+    ///
+    /// `false`
+    #[serde(default)]
+    pub fallback_journal_encrypt: bool,
+
+    /// journal 加密密钥环境变量名（`fallback_journal_encrypt` 开启时生效；
+    /// 未设置时使用内置默认 `INKLOG_JOURNAL_KEY`）。
+    ///
+    /// # Default
+    ///
+    /// `None`
+    #[serde(default)]
+    pub fallback_journal_key_env: Option<String>,
+
+    /// journal 加密密钥文件路径（env 设置时被优先覆盖）。
+    ///
+    /// # Default
+    ///
+    /// `None`
+    #[serde(default)]
+    pub fallback_journal_key_file: Option<String>,
+
+    /// journal push 地址（`host:port`）：spill 记录同步推送（断线缓冲、
+    /// 失败不反压落盘）。接收端服务不在本 crate 范围。
+    ///
+    /// # Default
+    ///
+    /// `None`
+    #[serde(default)]
+    pub fallback_journal_push_addr: Option<String>,
+
     /// 服务名（静态身份字段，注入每条日志记录的 `fields`，键名
     /// `service_name`）。未设置（None）时不注入。
     ///
@@ -248,6 +284,10 @@ impl Default for GlobalConfig {
             output_format: OutputFormat::default(),
             fallback_journal: false,
             fallback_journal_path: default_fallback_journal_path(),
+            fallback_journal_encrypt: false,
+            fallback_journal_key_env: None,
+            fallback_journal_key_file: None,
+            fallback_journal_push_addr: None,
             service_name: None,
             service_instance: None,
             service_env: None,

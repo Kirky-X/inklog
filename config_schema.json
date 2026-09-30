@@ -191,6 +191,14 @@
             "null"
           ]
         },
+        "encryption_key_file": {
+          "default": null,
+          "description": "加密密钥文件路径（`encrypt` 开启时生效；env 设置时被优先覆盖）。\nunix 权限必须 0600（组/其他可读在密钥解析期显性拒绝）。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "flush_interval_ms": {
           "default": 100,
           "description": "Maximum time to wait before flushing buffer (milliseconds).",
@@ -270,10 +278,39 @@
           "description": "磁盘持久化 fallback 队列（deferred-capabilities C4）：兜底缓冲溢出/\n淘汰的 ERROR/FATAL 记录落盘 JSONL，进程启动时重放一次后清空。\n\n# Default\n\n`false`（关闭时全链路零文件 IO，行为与既往一致）",
           "type": "boolean"
         },
+        "fallback_journal_encrypt": {
+          "default": false,
+          "description": "fallback journal AES-256-GCM 加密。key 来源**env 优先，其次 key\n文件**（unix 权限必须 0600）；key 缺失/无效时构建期显性失败——\n禁止静默明文落盘。\n\n# Default\n\n`false`",
+          "type": "boolean"
+        },
+        "fallback_journal_key_env": {
+          "default": null,
+          "description": "journal 加密密钥环境变量名（`fallback_journal_encrypt` 开启时生效；\n未设置时使用内置默认 `INKLOG_JOURNAL_KEY`）。\n\n# Default\n\n`None`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fallback_journal_key_file": {
+          "default": null,
+          "description": "journal 加密密钥文件路径（env 设置时被优先覆盖）。\n\n# Default\n\n`None`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "fallback_journal_path": {
           "default": "logs/fallback.journal",
           "description": "fallback journal 文件路径（`fallback_journal` 开启时生效）。\n\n# Default\n\n`logs/fallback.journal`",
           "type": "string"
+        },
+        "fallback_journal_push_addr": {
+          "default": null,
+          "description": "journal push 地址（`host:port`）：spill 记录同步推送（断线缓冲、\n失败不反压落盘）。接收端服务不在本 crate 范围。\n\n# Default\n\n`None`",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "fallback_max_delay_ms": {
           "default": 60000,
@@ -693,7 +730,11 @@
         "auto_fallback": true,
         "fallback_initial_delay_ms": 1000,
         "fallback_journal": false,
+        "fallback_journal_encrypt": false,
+        "fallback_journal_key_env": null,
+        "fallback_journal_key_file": null,
         "fallback_journal_path": "logs/fallback.journal",
+        "fallback_journal_push_addr": null,
         "fallback_max_delay_ms": 60000,
         "fallback_max_retries": 10,
         "format": "{timestamp} [{level}] {target} - {message}",

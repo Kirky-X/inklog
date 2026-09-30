@@ -127,7 +127,7 @@ impl FileSink {
     }
 
     /// 归档产物 SHA-256（轮转审计链条目用）。
-    fn sha256_file(path: &std::path::Path) -> Option<String> {
+    pub(crate) fn sha256_file(path: &std::path::Path) -> Option<String> {
         use sha2::Digest;
         let data = fs::read(path).ok()?;
         let mut hasher = sha2::Sha256::new();
@@ -142,7 +142,7 @@ impl FileSink {
     }
 
     /// manifest 路径：`<stem>.chain.jsonl`（与活动日志同目录）。
-    fn audit_manifest_path(log_path: &std::path::Path) -> std::path::PathBuf {
+    pub(crate) fn audit_manifest_path(log_path: &std::path::Path) -> std::path::PathBuf {
         let stem = log_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -242,68 +242,21 @@ impl FileSink {
         super::rotation::parse_size(size_str).ok()
     }
 
-    /// 获取加密密钥（密码模式用文件头中的盐确定性派生）
-    ///
-    /// v2 加密格式：加密时生成 16 字节随机盐写入文件头，密码模式密钥经
-    /// PBKDF2(密码, 盐) 确定性派生，解密方（CLI）读出盐后可重导出同一密钥。
-    /// Base64 / 原始 32 字节密钥分支与盐无关。
+    /// 获取加密密钥（密码模式用文件头中的盐确定性派生）。
+    /// 单一事实源在 [`encryption_key_for`]，此处仅委托。
     ///
     /// 密钥（`Zeroizing` 包裹，离开作用域自动清零）
+    #[cfg_attr(not(test), allow(dead_code))] // 生产路径走 encryption_key_for；测试面便捷委托
     fn get_encryption_key(&self, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, InklogError> {
-        let default_key = "LOG_ENCRYPTION_KEY".to_string();
-        let key_env = self
-            .config
-            .encryption_key_env
-            .as_ref()
-            .unwrap_or(&default_key);
-
-        let key = super::encryption::get_encryption_key_with_salt(key_env, salt)?;
-
-        // 纵深防御：对直接用作密钥的原始字节（非 PBKDF2 派生输出）保留
-        // Shannon 熵校验，拒绝全零等弱密钥。
-        Self::validate_key_entropy(&*key)?;
-
-        Ok(key)
+        encryption_key_for(&self.config, salt)
     }
 
     /// 验证密钥熵（Shannon entropy）
-    /// 返回 Ok(()) 如果密钥有足够的熵（>= 4.0）
+    /// 返回 Ok(()) 如果密钥有足够的熵（>= 4.0）。
+    /// 单一事实源在 `encryption::validate_key_entropy`，此处仅委托。
+    #[cfg_attr(not(test), allow(dead_code))] // 生产路径走共享实现；测试面便捷委托
     fn validate_key_entropy(key: &[u8]) -> Result<(), InklogError> {
-        if key.is_empty() {
-            return Err(InklogError::EncryptionError {
-                message: "Encryption key cannot be empty".to_string(),
-                source: None,
-            });
-        }
-
-        let mut freq = [0u32; 256];
-        for &b in key {
-            freq[b as usize] += 1;
-        }
-
-        let len = key.len() as f64;
-        let entropy: f64 = freq
-            .iter()
-            .filter(|&&count| count > 0)
-            .map(|&count| {
-                let p = count as f64 / len;
-                -p * p.log2()
-            })
-            .sum();
-
-        const MIN_ENTROPY_THRESHOLD: f64 = 4.0;
-        if entropy < MIN_ENTROPY_THRESHOLD {
-            return Err(InklogError::EncryptionError {
-                message: format!(
-                    "Encryption key has insufficient entropy ({} < {}). \
-                     Please use a cryptographically random key.",
-                    entropy, MIN_ENTROPY_THRESHOLD
-                ),
-                source: None,
-            });
-        }
-
-        Ok(())
+        super::encryption::validate_key_entropy(key)
     }
 
     fn open_file_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
@@ -489,7 +442,10 @@ impl FileSink {
     /// # Errors
     ///
     /// 返回文件系统操作可能产生的错误
-    fn perform_cleanup(config: &FileSinkConfig, log_path: &Path) -> Result<(), InklogError> {
+    pub(crate) fn perform_cleanup(
+        config: &FileSinkConfig,
+        log_path: &Path,
+    ) -> Result<(), InklogError> {
         let parent = match log_path.parent() {
             Some(p) => p,
             None => return Ok(()),
@@ -998,254 +954,23 @@ impl FileSink {
         Ok(())
     }
 
-    /// 同步压缩文件（可在后台线程调用）
-    #[cfg(feature = "zstd")]
+    /// 同步压缩文件（可在后台线程调用）。
+    ///
+    /// 单一事实源在 [`compress_rotated`]：无条件压缩（`encrypt = true` 时
+    /// 对压缩产物加密），不读 `config.compress` 旋钮——`process_rotated`
+    /// 才负责"按旋钮分发"。
+    #[cfg_attr(not(test), allow(dead_code))] // 生产路径走 process_rotated；测试面便捷委托
     fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
-        let compressed_path = path.with_extension("zst");
-
-        let input_file = fs::File::open(path).map_err(|e| {
-            error!("Failed to open file for compression: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let output_file = fs::File::create(&compressed_path).map_err(|e| {
-            error!("Failed to create compressed file: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        let mut encoder = zstd::stream::Encoder::new(output_file, self.config.compression_level)
-            .map_err(|e| InklogError::CompressionError(e.to_string()))?
-            .auto_finish();
-
-        let mut reader = std::io::BufReader::new(input_file);
-        let mut buffer = [0u8; 8192];
-        loop {
-            let bytes_read = std::io::Read::read(&mut reader, &mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            std::io::Write::write_all(&mut encoder, &buffer[..bytes_read])?;
-        }
-
-        // Encoder is automatically finished when dropped due to auto_finish()
-        drop(encoder);
-
-        // 如果需要加密
-        if self.config.encrypt {
-            let encrypted_path = compressed_path.with_extension("zst.enc");
-            if let Err(e) = self.encrypt_file(&compressed_path, &encrypted_path) {
-                error!("Encryption failed: {}", e);
-                // 加密失败，保留压缩文件
-                let _ = fs::rename(
-                    &compressed_path,
-                    encrypted_path.with_extension("zst.unencrypted"),
-                );
-                return Err(e);
-            }
-            if let Err(e) = fs::remove_file(&compressed_path) {
-                warn!(
-                    "Failed to remove compressed original file {}: {}",
-                    compressed_path.display(),
-                    e
-                );
-            }
-            Ok(encrypted_path)
-        } else {
-            // 删除原始文件
-            if let Err(e) = fs::remove_file(path) {
-                warn!(
-                    "Failed to remove original file after compression {}: {}",
-                    path.display(),
-                    e
-                );
-            }
-            Ok(compressed_path)
-        }
+        compress_rotated(&self.config, path, None)
     }
 
-    /// 同步压缩文件 fallback（gzip feature 启用、compression feature 未启用时）。
-    ///
-    /// 当 `compression`（zstd）feature 未启用但用户配置了 `compress = true` 时，
-    /// 使用 gzip（flate2，`gzip` feature）进行压缩，而非返回错误。
-    /// 这样下游项目无需引入 zstd-sys 即可获得日志压缩能力。
-    ///
-    /// 当 `encrypt = true` 时，与 compression feature 启用时的 zstd 路径行为对齐：
-    /// 对压缩产物加密生成 `.gz.enc`，加密失败时保留压缩文件为 `.gz.unencrypted`。
-    #[cfg(all(feature = "gzip", not(feature = "zstd")))]
-    fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
-        use super::CompressionStrategy;
-        use super::GzipCompression;
-        let strategy = GzipCompression::default();
-        let compressed_path = strategy.compress_file(path, self.config.compression_level)?;
-
-        // 如果需要加密（与 compression feature 启用时的 zstd 路径行为对齐）
-        if self.config.encrypt {
-            let encrypted_path = compressed_path.with_extension("gz.enc");
-            if let Err(e) = self.encrypt_file(&compressed_path, &encrypted_path) {
-                error!("Encryption failed: {}", e);
-                // 加密失败，保留压缩文件
-                let _ = fs::rename(
-                    &compressed_path,
-                    encrypted_path.with_extension("gz.unencrypted"),
-                );
-                return Err(e);
-            }
-            if let Err(e) = fs::remove_file(&compressed_path) {
-                warn!(
-                    "Failed to remove compressed original file {}: {}",
-                    compressed_path.display(),
-                    e
-                );
-            }
-            Ok(encrypted_path)
-        } else {
-            Ok(compressed_path)
-        }
-    }
-
-    /// 同步压缩文件 fallback（无任何压缩后端 feature 时）。
-    ///
-    /// `gzip` 与 `compression` 均未启用时无法压缩：跳过压缩但保留加密语义
-    /// （`encrypt = true` 时直接加密原文件），避免静默丢弃加密保证。
-    #[cfg(not(any(feature = "zstd", feature = "gzip")))]
-    fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
-        warn!(
-            path = %path.display(),
-            "Compression requested but no compression backend feature is enabled \
-             (enable \"gzip\" or \"compression\"); leaving the file uncompressed"
-        );
-        if self.config.encrypt {
-            let encrypted_path = path.with_extension("enc");
-            self.encrypt_file(path, &encrypted_path)?;
-            if let Err(e) = fs::remove_file(path) {
-                warn!(
-                    "Failed to remove original file after encryption {}: {}",
-                    path.display(),
-                    e
-                );
-            }
-            return Ok(encrypted_path);
-        }
-        Ok(path.to_path_buf())
-    }
-
-    /// 同步加密文件（可在后台线程调用）
+    /// 同步加密文件（可在后台线程调用）。
+    /// 单一事实源在 [`encrypt_file_v2`]，此处仅委托。
     ///
     /// 输出格式 v2（与 CLI 解密工具一致）：
     /// magic(8) + version=2(2) + algo(2) + **salt(16)** + nonce(12) + ciphertext
-    ///
-    /// v2 相比 v1 新增 16 字节盐字段：密码模式密钥经 PBKDF2(密码, 盐) 确定性
-    /// 派生，盐随头存储，解密方才能重导出同一密钥（v1 密码模式文件因未存盐
-    /// 而不可解密，见 CLI 解密工具的 v1 诊断）。
     pub fn encrypt_file(&self, input_path: &Path, output_path: &Path) -> Result<(), InklogError> {
-        use aes_gcm::{Aes256Gcm, Nonce};
-        use rand::Rng;
-
-        // 生成加密安全的随机盐（16 字节），写入 v2 文件头
-        let mut salt = [0u8; 16];
-        rand::rng().fill_bytes(&mut salt);
-
-        // 获取密钥（密码模式用上面的盐确定性派生）
-        let key_bytes = self.get_encryption_key(&salt)?;
-        let cipher = Aes256Gcm::new_from_slice(&*key_bytes).map_err(|e| {
-            let mut args = crate::i18n::MsgArgs::new();
-            args.set("err", e.to_string());
-            InklogError::EncryptionError {
-                message: crate::i18n::tr_args("config-invalid_encryption_key", args),
-                source: Some(Box::new(e)),
-            }
-        })?;
-
-        // 生成加密安全的随机 nonce
-        // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 SysRng 定期种子化
-        // rand::rng() 返回 ThreadRng，它是密码学安全的
-        let mut nonce_bytes = [0u8; 12];
-        rand::rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from(nonce_bytes);
-
-        // 读取输入文件
-        let input_data = fs::read(input_path).map_err(|e| {
-            error!("Failed to read file for encryption: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        // 加密
-        let ciphertext = cipher.encrypt(&nonce, input_data.as_slice()).map_err(|e| {
-            error!("Encryption failed: {}", e);
-            InklogError::EncryptionError {
-                message: e.to_string(),
-                source: Some(Box::new(e)),
-            }
-        })?;
-
-        // 写入加密文件（0600：密文同样不该给组/其他用户可读）
-        #[cfg(unix)]
-        let mut output = {
-            use std::os::unix::fs::OpenOptionsExt;
-            OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(output_path)
-                .map_err(|e| {
-                    error!("Failed to create encrypted file: {}", e);
-                    InklogError::IoError(e)
-                })?
-        };
-        #[cfg(not(unix))]
-        let mut output = fs::File::create(output_path).map_err(|e| {
-            error!("Failed to create encrypted file: {}", e);
-            InklogError::IoError(e)
-        })?;
-
-        // 写入格式（v2，与 CLI 解密工具及 docs/SECURITY.md 一致）：
-        // magic header (8) + version (2) + algo (2) + salt (16) + nonce (12) + ciphertext
-        output.write_all(b"ENCLOG1\0")?;
-        output.write_all(&2u16.to_le_bytes())?;
-        output.write_all(&1u16.to_le_bytes())?;
-        output.write_all(&salt)?;
-        output.write_all(&nonce_bytes)?;
-        output.write_all(&ciphertext)?;
-
-        debug!("Encrypted log file: {}", output_path.display());
-        Ok(())
-    }
-
-    /// 解析轮转目标路径：`{stem}_{timestamp}.{ext}`，冲突时追加序号后缀。
-    ///
-    /// 时间戳为秒级精度（`%Y%m%d_%H%M%S`），同一秒内二次轮转会命中同名目标。
-    /// 目标已存在时依次尝试 `.1`、`.2` … 序号后缀，保证绝不覆盖既有轮转产物。
-    fn resolve_rotation_target(original: &Path, stamp: &str) -> PathBuf {
-        let make_path = |attempt: u32| -> PathBuf {
-            let suffix = if attempt == 0 {
-                String::new()
-            } else {
-                format!(".{attempt}")
-            };
-            match original.parent() {
-                Some(parent) => {
-                    let stem = original.file_stem().unwrap_or_default();
-                    let ext = original.extension().unwrap_or_default();
-                    parent.join(format!(
-                        "{}_{}.{}{}",
-                        stem.to_string_lossy(),
-                        stamp,
-                        ext.to_string_lossy(),
-                        suffix
-                    ))
-                }
-                None => PathBuf::from(format!("{}_{}{}", original.display(), stamp, suffix)),
-            }
-        };
-
-        let mut attempt = 0u32;
-        let mut candidate = make_path(attempt);
-        while candidate.exists() {
-            attempt += 1;
-            candidate = make_path(attempt);
-        }
-        candidate
+        encrypt_file_v2(&self.config, input_path, output_path, None)
     }
 
     /// 执行文件轮转
@@ -1259,7 +984,7 @@ impl FileSink {
         // 修复：`%Y%m%d_%H%M%S` 为秒级精度，同秒二次轮转会静默覆盖既有轮转
         // 产物。目标已存在时追加 `.1`、`.2` … 序号后缀，保证永不覆盖。
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let new_path = Self::resolve_rotation_target(&self.config.path, &timestamp);
+        let new_path = resolve_rotation_target(&self.config.path, &timestamp);
 
         // 尝试重命名
         if self.config.path.exists()
@@ -1295,73 +1020,25 @@ impl FileSink {
         info!("Log rotated to: {}", new_path.display());
 
         // 归档审计链：轮转成功即登记（path + SHA-256 + 时间戳），写穿 manifest
+        // （共享单一事实源 register_rotated_archive，与 CBFS 同一实现）
         if let Some(chain) = self.audit_chain.as_ref() {
-            let mut chain = chain.lock();
-            let digest = Self::sha256_file(&new_path).unwrap_or_else(|| "unavailable".to_string());
-            let event = serde_json::json!({
-                "path": new_path.display().to_string(),
-                "sha256": digest,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            })
-            .to_string();
-            chain.append(&event);
-            let manifest = Self::audit_manifest_path(&self.config.path);
-            let mut body = String::new();
-            for entry in chain.entries() {
-                body.push_str(&serde_json::to_string(entry).unwrap_or_default());
-                body.push('\n');
-            }
-            if let Err(e) = fs::write(&manifest, body) {
-                error!(
-                    "Failed to write audit chain manifest {}: {}",
-                    manifest.display(),
-                    e
-                );
-            }
+            register_rotated_archive(chain, &self.config.path, &new_path);
         }
 
-        // 如果启用压缩，在后台线程处理
-        if self.config.compress {
+        // 压缩/加密归档后处理（后台线程；单一事实源 process_rotated）
+        if self.config.compress || self.config.encrypt {
             let config = self.config.clone();
             let path = new_path.clone();
             let _ = thread::spawn(move || {
-                // Wrap thread body in catch_unwind so a compression panic is
+                // Wrap thread body in catch_unwind so a post-rotation panic is
                 // logged instead of aborting an unnoticed worker thread.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                    // 为后台线程创建一个最小化的 FileSink 实例用于压缩
-                    let inner = FileSinkInner {
-                        current_file: None,
-                        current_size: 0,
-                        last_rotation: Instant::now(),
-                        next_rotation_time: None,
-                        last_rotation_date: None,
-                        sequence: 0,
-                        fallback_sink: None,
-                        circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-                        batch_buffer: Vec::new(),
-                        last_flush_time: Instant::now(),
-                        timer_handle: None,
-                        rotation_timer: None,
-                        cleanup_timer_handle: None,
-                    };
-                    let sink = FileSink {
-                        config,
-                        rotation_interval: StdDuration::from_secs(86400),
-                        last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
-                        last_disk_check: parking_lot::Mutex::new(None),
-                        shutdown_flag: Arc::new(AtomicBool::new(false)),
-                        write_unhealthy: AtomicBool::new(false),
-                        lost_records: AtomicU64::new(0),
-                        masker: DataMasker::new(),
-                        audit_chain: None,
-                        inner: Arc::new(RwLock::new(inner)),
-                    };
-                    if let Err(e) = sink.compress_file(&path) {
-                        error!("Failed to compress rotated log: {}", e);
+                    if let Err(e) = process_rotated(&config, &path, None) {
+                        error!("Failed to post-process rotated log: {}", e);
                         crate::support::ops_event::publish_internal(
                             "sink_degraded",
                             Some("file"),
-                            serde_json::json!({ "op": "compress", "error": e.to_string() }),
+                            serde_json::json!({ "op": "archive", "error": e.to_string() }),
                         );
                     }
                 }));
@@ -1373,69 +1050,7 @@ impl FileSink {
                     } else {
                         "unknown panic".to_string()
                     };
-                    error!("Compression thread panicked: {}", msg);
-                }
-            });
-        } else if self.config.encrypt {
-            // 如果只启用加密（不压缩），直接在后台线程加密
-            let config = self.config.clone();
-            let path = new_path.clone();
-            let _ = thread::spawn(move || {
-                // Wrap thread body in catch_unwind so an encryption panic is
-                // logged instead of aborting an unnoticed worker thread.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                    // 为后台线程创建一个最小化的 FileSink 实例用于加密
-                    let inner = FileSinkInner {
-                        current_file: None,
-                        current_size: 0,
-                        last_rotation: Instant::now(),
-                        next_rotation_time: None,
-                        last_rotation_date: None,
-                        sequence: 0,
-                        fallback_sink: None,
-                        circuit_breaker: CircuitBreaker::new(5, StdDuration::from_secs(30), 3),
-                        batch_buffer: Vec::new(),
-                        last_flush_time: Instant::now(),
-                        timer_handle: None,
-                        rotation_timer: None,
-                        cleanup_timer_handle: None,
-                    };
-                    let sink = FileSink {
-                        config,
-                        rotation_interval: StdDuration::from_secs(86400),
-                        last_cleanup_time: Arc::new(parking_lot::Mutex::new(None)),
-                        last_disk_check: parking_lot::Mutex::new(None),
-                        shutdown_flag: Arc::new(AtomicBool::new(false)),
-                        write_unhealthy: AtomicBool::new(false),
-                        lost_records: AtomicU64::new(0),
-                        masker: DataMasker::new(),
-                        audit_chain: None,
-                        inner: Arc::new(RwLock::new(inner)),
-                    };
-                    let encrypted_path = path.with_extension("enc");
-                    if let Err(e) = sink.encrypt_file(&path, &encrypted_path) {
-                        error!("Failed to encrypt rotated log: {}", e);
-                        crate::support::ops_event::publish_internal(
-                            "sink_degraded",
-                            Some("file"),
-                            serde_json::json!({ "op": "encrypt", "error": e.to_string() }),
-                        );
-                    } else if let Err(e) = fs::remove_file(&path) {
-                        warn!(
-                            "Failed to remove original file after encryption during rotation: {}",
-                            e
-                        );
-                    }
-                }));
-                if let Err(panic_info) = result {
-                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                        s.to_string()
-                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                        s.clone()
-                    } else {
-                        "unknown panic".to_string()
-                    };
-                    error!("Encryption thread panicked: {}", msg);
+                    error!("Rotation post-processing thread panicked: {}", msg);
                 }
             });
         }
@@ -1456,6 +1071,388 @@ impl FileSink {
         }
 
         Ok(())
+    }
+}
+
+/// 轮转目标（或其归档衍生产物）是否已被占用。
+///
+/// 后处理线程异步加密/压缩后会**删除轮转源文件**：同秒内的下一次轮转
+/// 若只检查源文件存在性，会复用同名并覆盖既有归档产物（记录丢失）。因
+/// 此按 [`append_ext`] 语义派生产物名（追加，与 `compress_rotated`/加密
+/// 的实际产物一一对应）——不能做 `with_extension` 派生：那会把候选自身
+/// 的序号后缀当扩展名剥掉，所有 attempt 都命中同一产物，冲突循环永不
+/// 终止。
+fn rotation_family_taken(candidate: &Path) -> bool {
+    if candidate.exists() {
+        return true;
+    }
+    super::compression::append_ext(candidate, "zst").exists()
+        || super::compression::append_ext(candidate, "zst.enc").exists()
+        || super::compression::append_ext(candidate, "gz").exists()
+        || super::compression::append_ext(candidate, "gz.enc").exists()
+        || super::compression::append_ext(candidate, "enc").exists()
+}
+
+/// 解析轮转目标路径：`{stem}_{timestamp}.{ext}`，冲突时追加序号后缀。
+///
+/// 时间戳为秒级精度（`%Y%m%d_%H%M%S`），同一秒内二次轮转会命中同名目标。
+/// 目标及其归档衍生产物已存在时依次尝试 `.1`、`.2` … 序号后缀，保证绝不
+/// 覆盖既有轮转产物。
+/// FileSink 与 ChannelBufferedFileSink 轮转共用同一命名范式。
+pub(crate) fn resolve_rotation_target(original: &Path, stamp: &str) -> PathBuf {
+    let make_path = |attempt: u32| -> PathBuf {
+        let suffix = if attempt == 0 {
+            String::new()
+        } else {
+            format!(".{attempt}")
+        };
+        match original.parent() {
+            Some(parent) => {
+                let stem = original.file_stem().unwrap_or_default();
+                let ext = original.extension().unwrap_or_default();
+                parent.join(format!(
+                    "{}_{}.{}{}",
+                    stem.to_string_lossy(),
+                    stamp,
+                    ext.to_string_lossy(),
+                    suffix
+                ))
+            }
+            None => PathBuf::from(format!("{}_{}{}", original.display(), stamp, suffix)),
+        }
+    };
+
+    let mut attempt = 0u32;
+    let mut candidate = make_path(attempt);
+    while rotation_family_taken(&candidate) {
+        attempt += 1;
+        candidate = make_path(attempt);
+    }
+    candidate
+}
+
+/// 按配置解析加密密钥（密码模式用盐确定性派生）。
+///
+/// v2 加密格式：加密时生成 16 字节随机盐写入文件头，密码模式密钥经
+/// PBKDF2(密码, 盐) 确定性派生，解密方（CLI）读出盐后可重导出同一密钥。
+/// Base64 / 原始 32 字节密钥分支与盐无关。
+///
+/// key 来源：**env 优先，其次配置文件**（`encryption_key_file`，unix
+/// 权限 0600）——与 fallback journal 共享同一解析范式。
+/// 密钥（`Zeroizing` 包裹，离开作用域自动清零）。
+fn encryption_key_for(
+    config: &FileSinkConfig,
+    salt: &[u8],
+) -> Result<Zeroizing<[u8; 32]>, InklogError> {
+    let default_key = "LOG_ENCRYPTION_KEY".to_string();
+    let key_env = config.encryption_key_env.as_ref().unwrap_or(&default_key);
+
+    let material = super::encryption::resolve_key_material(
+        key_env,
+        config
+            .encryption_key_file
+            .as_deref()
+            .map(std::path::Path::new),
+    )?;
+    let key = material.derive_with_salt(salt);
+
+    // 纵深防御：对直接用作密钥的原始字节（非 PBKDF2 派生输出）保留
+    // Shannon 熵校验，拒绝全零等弱密钥。
+    super::encryption::validate_key_entropy(&*key)?;
+
+    Ok(key)
+}
+
+/// 同步加密文件（可在后台线程调用）。
+///
+/// 输出格式 v2（与 CLI 解密工具及 docs/SECURITY.md 一致）：
+/// magic(8) + version=2(2) + algo(2) + **salt(16)** + nonce(12) + ciphertext
+///
+/// v2 相比 v1 新增 16 字节盐字段：密码模式密钥经 PBKDF2(密码, 盐) 确定性
+/// 派生，盐随头存储，解密方才能重导出同一密钥（v1 密码模式文件因未存盐
+/// 而不可解密，见 CLI 解密工具的 v1 诊断）。
+///
+/// `key_override`：构造期已解析的密钥材料（长生命周期 sink 复用，key 源
+/// 事后被破坏不影响运行期轮转加密）；`None` 时按 config 现场解析。
+///
+/// 已知内存权衡（继承 FileSink 既有范式，登记于此）：整文件读入内存加密
+/// 后写盘，峰值 ≈ 2× 文件体积（明文缓冲 + 密文输出）。大归档场景的流式
+/// 加密属后续优化，不阻塞当前单文件 ≤ max_size 的部署形态。
+pub(crate) fn encrypt_file_v2(
+    config: &FileSinkConfig,
+    input_path: &Path,
+    output_path: &Path,
+    key_override: Option<&super::encryption::KeyMaterial>,
+) -> Result<(), InklogError> {
+    use aes_gcm::{Aes256Gcm, Nonce};
+    use rand::Rng;
+
+    // 生成加密安全的随机盐（16 字节），写入 v2 文件头
+    let mut salt = [0u8; 16];
+    rand::rng().fill_bytes(&mut salt);
+
+    // 获取密钥（密码模式用上面的盐确定性派生）
+    let key_bytes = match key_override {
+        Some(material) => {
+            // 构造期已解析并做过熵校验的原始密钥，直接按盐派生
+            material.derive_with_salt(&salt)
+        }
+        None => encryption_key_for(config, &salt)?,
+    };
+    let cipher = Aes256Gcm::new_from_slice(&*key_bytes).map_err(|e| {
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", e.to_string());
+        InklogError::EncryptionError {
+            message: crate::i18n::tr_args("config-invalid_encryption_key", args),
+            source: Some(Box::new(e)),
+        }
+    })?;
+
+    // 生成加密安全的随机 nonce
+    // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 SysRng 定期种子化
+    // rand::rng() 返回 ThreadRng，它是密码学安全的
+    let mut nonce_bytes = [0u8; 12];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
+
+    // 读取输入文件
+    let input_data = fs::read(input_path).map_err(|e| {
+        error!("Failed to read file for encryption: {}", e);
+        InklogError::IoError(e)
+    })?;
+
+    // 加密
+    let ciphertext = cipher.encrypt(&nonce, input_data.as_slice()).map_err(|e| {
+        error!("Encryption failed: {}", e);
+        InklogError::EncryptionError {
+            message: e.to_string(),
+            source: Some(Box::new(e)),
+        }
+    })?;
+
+    // 写入加密文件（0600：密文同样不该给组/其他用户可读）
+    #[cfg(unix)]
+    let mut output = {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(output_path)
+            .map_err(|e| {
+                error!("Failed to create encrypted file: {}", e);
+                InklogError::IoError(e)
+            })?
+    };
+    #[cfg(not(unix))]
+    let mut output = fs::File::create(output_path).map_err(|e| {
+        error!("Failed to create encrypted file: {}", e);
+        InklogError::IoError(e)
+    })?;
+
+    output.write_all(b"ENCLOG1\0")?;
+    output.write_all(&2u16.to_le_bytes())?;
+    output.write_all(&1u16.to_le_bytes())?;
+    output.write_all(&salt)?;
+    output.write_all(&nonce_bytes)?;
+    output.write_all(&ciphertext)?;
+
+    debug!("Encrypted log file: {}", output_path.display());
+    Ok(())
+}
+
+/// 轮转归档后处理（单一事实源，FileSink 与 ChannelBufferedFileSink 共用）：
+/// `compress = true` 时压缩（zstd → gzip → 无后端告警跳过），随后按
+/// `encrypt = true` 对产物加密；仅加密（不压缩）时直接加密原文件。
+/// 产物扩展名与 FileSink 既有范式一致（`.zst` / `.gz` / `.enc`）。
+///
+/// `key_override` 语义同 [`encrypt_file_v2`]：构造期已解析的密钥材料
+/// （ChannelBufferedFileSink 运行期复用），`None` 按 config 现场解析。
+/// 加密后明文残留（remove_file 失败）：warn + `sink_degraded` ops 事件
+/// 显性上报——加密产物虽已生成，但明文源仍在盘上，属安全相关降级状态。
+fn report_plaintext_residue(path: &Path, err: &std::io::Error) {
+    warn!(
+        "Failed to remove plaintext source after encryption {}: {}",
+        path.display(),
+        err
+    );
+    crate::support::ops_event::publish_internal(
+        "sink_degraded",
+        Some("file"),
+        serde_json::json!({
+            "op": "archive",
+            "error": "plaintext residue: remove after encryption failed",
+            "path": path.display().to_string(),
+            "io_error": err.to_string(),
+        }),
+    );
+}
+
+pub(crate) fn process_rotated(
+    config: &FileSinkConfig,
+    path: &Path,
+    key_override: Option<&super::encryption::KeyMaterial>,
+) -> Result<PathBuf, InklogError> {
+    if config.compress {
+        compress_rotated(config, path, key_override)
+    } else if config.encrypt {
+        let encrypted_path = super::compression::append_ext(path, "enc");
+        encrypt_file_v2(config, path, &encrypted_path, key_override)?;
+        if let Err(e) = fs::remove_file(path) {
+            report_plaintext_residue(path, &e);
+        }
+        Ok(encrypted_path)
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
+/// 压缩轮转产物（按启用 feature 选后端），`encrypt = true` 时加密压缩产物。
+///
+/// 产物命名一律**追加扩展名**（`X.log.1` → `X.log.1.zst`）而非替换：
+/// `with_extension` 会把序号候选的序号当扩展名剥掉，不同 attempt 的产物
+/// 互相覆盖、冲突检查不单射（曾致同秒高频轮转挂死）。
+#[allow(unused_variables)] // 无压缩后端组合下 config 仅加密分支使用
+fn compress_rotated(
+    config: &FileSinkConfig,
+    path: &Path,
+    key_override: Option<&super::encryption::KeyMaterial>,
+) -> Result<PathBuf, InklogError> {
+    #[cfg(feature = "zstd")]
+    {
+        let compressed_path = super::compression::append_ext(path, "zst");
+        super::compression::zstd_encode_to(path, &compressed_path, config.compression_level)?;
+
+        // 如果需要加密
+        if config.encrypt {
+            let encrypted_path = super::compression::append_ext(&compressed_path, "enc");
+            if let Err(e) = encrypt_file_v2(config, &compressed_path, &encrypted_path, key_override)
+            {
+                error!("Encryption failed: {}", e);
+                // 加密失败，保留压缩文件
+                let _ = fs::rename(
+                    &compressed_path,
+                    super::compression::append_ext(&compressed_path, "unencrypted"),
+                );
+                return Err(e);
+            }
+            if let Err(e) = fs::remove_file(&compressed_path) {
+                report_plaintext_residue(&compressed_path, &e);
+            }
+            return Ok(encrypted_path);
+        }
+        // 删除原始文件
+        if let Err(e) = fs::remove_file(path) {
+            warn!(
+                "Failed to remove original file after compression {}: {}",
+                path.display(),
+                e
+            );
+        }
+        Ok(compressed_path)
+    }
+
+    #[cfg(all(feature = "gzip", not(feature = "zstd")))]
+    {
+        // 追加命名 + 不删源（源文件删除统一在下方按需执行），与 zstd 路径
+        // 行为对齐
+        let compressed_path =
+            super::compression::gzip_compress_file_keeping_name(path, config.compression_level)?;
+
+        // 如果需要加密（与 compression feature 启用时的 zstd 路径行为对齐）
+        if config.encrypt {
+            let encrypted_path = super::compression::append_ext(&compressed_path, "enc");
+            if let Err(e) = encrypt_file_v2(config, &compressed_path, &encrypted_path, key_override)
+            {
+                error!("Encryption failed: {}", e);
+                // 加密失败，保留压缩文件
+                let _ = fs::rename(
+                    &compressed_path,
+                    super::compression::append_ext(&compressed_path, "unencrypted"),
+                );
+                return Err(e);
+            }
+            if let Err(e) = fs::remove_file(&compressed_path) {
+                report_plaintext_residue(&compressed_path, &e);
+            }
+            return Ok(encrypted_path);
+        }
+        if let Err(e) = fs::remove_file(path) {
+            warn!(
+                "Failed to remove original file after compression {}: {}",
+                path.display(),
+                e
+            );
+        }
+        Ok(compressed_path)
+    }
+
+    #[cfg(not(any(feature = "zstd", feature = "gzip")))]
+    {
+        warn!(
+            path = %path.display(),
+            "Compression requested but no compression backend feature is enabled \
+             (enable \"gzip\" or \"compression\"); leaving the file uncompressed"
+        );
+        if config.encrypt {
+            let encrypted_path = super::compression::append_ext(path, "enc");
+            encrypt_file_v2(config, path, &encrypted_path, key_override)?;
+            if let Err(e) = fs::remove_file(path) {
+                warn!(
+                    "Failed to remove original file after encryption {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+            return Ok(encrypted_path);
+        }
+        Ok(path.to_path_buf())
+    }
+}
+
+/// 归档审计链登记（FileSink 与 ChannelBufferedFileSink 共享单一事实源）：
+/// sha256 轮转产物 → 追加链条目 → 全量写穿 manifest。
+/// sha256 失败以 `sink_degraded` ops 事件显性告警——与条目内 "unavailable"
+/// 占位（链仍可验、仅摘要缺失）区分，产物不可摘要本身即需告警的状态。
+pub(crate) fn register_rotated_archive(
+    chain: &parking_lot::Mutex<crate::support::audit_chain::ArchiveChain>,
+    base_path: &Path,
+    rotated_path: &Path,
+) {
+    let digest = FileSink::sha256_file(rotated_path);
+    if digest.is_none() {
+        crate::support::ops_event::publish_internal(
+            "sink_degraded",
+            Some("file"),
+            serde_json::json!({
+                "op": "audit_chain",
+                "error": "sha256 unavailable",
+                "path": rotated_path.display().to_string(),
+            }),
+        );
+    }
+    let digest = digest.unwrap_or_else(|| "unavailable".to_string());
+    let mut chain = chain.lock();
+    let event = serde_json::json!({
+        "path": rotated_path.display().to_string(),
+        "sha256": digest,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    })
+    .to_string();
+    chain.append(&event);
+    let manifest = FileSink::audit_manifest_path(base_path);
+    let mut body = String::new();
+    for entry in chain.entries() {
+        body.push_str(&serde_json::to_string(entry).unwrap_or_default());
+        body.push('\n');
+    }
+    if let Err(e) = fs::write(&manifest, body) {
+        error!(
+            "Failed to write audit chain manifest {}: {}",
+            manifest.display(),
+            e
+        );
     }
 }
 
@@ -1906,6 +1903,7 @@ mod tests {
             compression_level: 3,
             encrypt: false,
             encryption_key_env: None,
+            encryption_key_file: None,
             retention_days: 30,
             max_total_size: "1GB".to_string(),
             cleanup_interval_minutes: 60,
@@ -3026,8 +3024,8 @@ mod tests {
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err());
-        // v2 统一走加密模块派生，未设置变量报 i18n "not set" 错误
-        assert!(result.unwrap_err().to_string().contains("not set"));
+        // v2 统一走共享密钥解析，未设置变量报显性 key-source 缺失错误
+        assert!(result.unwrap_err().to_string().contains("no key was found"));
     }
 
     #[test]
@@ -3413,6 +3411,7 @@ mod tests {
             compression_level: 3,
             encrypt: false,
             encryption_key_env: None,
+            encryption_key_file: None,
             retention_days: 30,
             max_total_size: "1KB".to_string(),
             cleanup_interval_minutes: 60,
@@ -4118,7 +4117,10 @@ mod tests {
         let sink = create_test_file_sink(config);
         let result = sink.encrypt_file(&input_path, &output_path);
         assert!(result.is_err(), "encrypt_file should fail without key");
-        assert!(result.unwrap_err().to_string().contains("not set"));
+        assert!(
+            result.unwrap_err().to_string().contains("no key was found"),
+            "missing key must surface the explicit key-source error"
+        );
     }
 
     #[test]
@@ -5496,12 +5498,12 @@ mod tests {
         let stamp = "20260909_120000";
 
         // 无冲突 → 标准名
-        let first = FileSink::resolve_rotation_target(&original, stamp);
+        let first = resolve_rotation_target(&original, stamp);
         assert_eq!(first, dir.path().join("test_20260909_120000.log"));
 
         // 同秒二次轮转：目标已存在 → 追加 .1，绝不覆盖
         std::fs::write(&first, "first rotation").unwrap();
-        let second = FileSink::resolve_rotation_target(&original, stamp);
+        let second = resolve_rotation_target(&original, stamp);
         assert_eq!(second, dir.path().join("test_20260909_120000.log.1"));
         assert_eq!(
             std::fs::read_to_string(&first).unwrap(),
@@ -5511,8 +5513,136 @@ mod tests {
 
         // 同秒三次轮转 → .2
         std::fs::write(&second, "second rotation").unwrap();
-        let third = FileSink::resolve_rotation_target(&original, stamp);
+        let third = resolve_rotation_target(&original, stamp);
         assert_eq!(third, dir.path().join("test_20260909_120000.log.2"));
+    }
+
+    #[test]
+    fn test_resolve_rotation_target_family_includes_compressed_artifacts() {
+        // 后处理线程压缩后会删除轮转源文件：同秒下一次轮转若只看源文件
+        // 存在性会复用同名覆盖既有 `.zst` 产物（记录丢失）。产物检查必须
+        // 按追加语义派生——`with_extension` 会剥掉序号后缀，所有 attempt
+        // 命中同一产物，冲突循环永不终止（曾致同秒高频轮转挂死）。
+        let dir = tempdir().unwrap();
+        let original = dir.path().join("test.log");
+        let stamp = "20260909_120000";
+
+        // 首次轮转产物已被压缩为 `X.log.zst`，源文件已删（后处理正常终态）
+        std::fs::write(
+            dir.path().join("test_20260909_120000.log.zst"),
+            b"compressed",
+        )
+        .unwrap();
+
+        let next = resolve_rotation_target(&original, stamp);
+        assert_eq!(
+            next,
+            dir.path().join("test_20260909_120000.log.1"),
+            "rotated source deleted after compression: next rotation must take .1"
+        );
+
+        // .1 也被压缩为 `X.log.1.zst` 后 → .2（追加命名保证 attempt 单射）
+        std::fs::write(
+            dir.path().join("test_20260909_120000.log.1.zst"),
+            b"compressed",
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_rotation_target(&original, stamp),
+            dir.path().join("test_20260909_120000.log.2")
+        );
+    }
+
+    // zstd 专属端到端对拍（断言 .zst 产物与 zstd 解码）：gzip-only 组合的
+    // 产物为 .gz，语义不同；无压缩后端组合无 zstd 依赖
+    #[cfg(feature = "zstd")]
+    #[tokio::test]
+    async fn test_same_second_rotations_keep_every_artifact_distinct() {
+        // 端到端对拍：同秒高频轮转 + 压缩，各 attempt 产物互不覆盖、全部可解
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("same_sec.log");
+        let mut cfg = crate::FileSinkConfig::default();
+        cfg.path = path.clone();
+        cfg.max_size = "200".to_string();
+        cfg.compress = true;
+        cfg.retention_days = 3650;
+        cfg.keep_files = 100;
+        cfg.cleanup_interval_minutes = 60 * 24 * 30;
+        let sink = crate::support::io::FileSink::new(cfg).unwrap();
+        for i in 0..30 {
+            sink.write(&crate::LogRecord::new(
+                tracing::Level::INFO,
+                "same_sec::test".to_string(),
+                format!("same-second record {i} with padding {}", "x".repeat(20)),
+            ))
+            .await
+            .unwrap();
+        }
+        sink.shutdown().await.unwrap();
+
+        // 等待后台归档线程压缩（shutdown 不 join）。追加命名保证 attempt
+        // 单射：解码全部 .zst 产物并纳入活动文件与尚未压缩的轮转源，30 条
+        // 记录各出现恰好一次（无丢失、无覆盖混杂）。目录快照与后台压缩
+        // 并发非原子（源被删而产物未入列 / 半成品产物解码失败）→ 整体重
+        // 试；到 deadline 仍不满足才判真实缺陷。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        {
+            let scan = || -> Result<String, std::io::Error> {
+                let mut all_text = String::new();
+                for entry in std::fs::read_dir(dir.path())?.filter_map(|e| e.ok()) {
+                    let p = entry.path();
+                    if p.extension().is_some_and(|x| x == "zst") {
+                        let data = std::fs::read(&p)?;
+                        let plain = zstd::stream::decode_all(&data[..]).map_err(|e| {
+                            std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e)
+                        })?;
+                        all_text.push_str(&String::from_utf8_lossy(&plain));
+                    } else if p.extension().is_some_and(|x| x == "log") {
+                        all_text.push_str(&std::fs::read_to_string(&p).unwrap_or_default());
+                    }
+                }
+                Ok(all_text)
+            };
+            let complete = |all_text: &str| -> bool {
+                (0..30).all(|i| {
+                    all_text
+                        .matches(&format!("same-second record {i} "))
+                        .count()
+                        == 1
+                })
+            };
+            let mut zst_count = 0usize;
+            let mut settled: Option<String> = None;
+            while std::time::Instant::now() < deadline {
+                if let Ok(text) = scan() {
+                    zst_count = std::fs::read_dir(dir.path())
+                        .unwrap()
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.path().extension().is_some_and(|x| x == "zst"))
+                        .count();
+                    if complete(&text) {
+                        settled = Some(text);
+                        break;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            assert!(
+                zst_count >= 2,
+                "same-second rotations must each leave a distinct .zst artifact, got {zst_count}"
+            );
+            let all_text = settled.unwrap_or_else(|| {
+                scan().expect("compressed artifacts must decode cleanly after grace period")
+            });
+            for i in 0..30 {
+                let needle = format!("same-second record {i} ");
+                let count = all_text.matches(&needle).count();
+                assert_eq!(
+                    count, 1,
+                    "record {i} must appear exactly once across artifacts, got {count}"
+                );
+            }
+        }
     }
 
     #[test]

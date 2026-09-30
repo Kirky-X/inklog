@@ -53,6 +53,201 @@ pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogEr
     key_from_env_value(env_var, &env_value, None)
 }
 
+/// 解析出的密钥材料：原始密钥（直接可用）或密码（加密时按文件头盐派生）。
+#[derive(Clone)]
+pub enum KeyMaterial {
+    /// 原始 32 字节密钥（raw 32 字节输入，或 Base64 解码恰为 32 字节）。
+    Raw(Zeroizing<[u8; 32]>),
+    /// 密码（12-127 字符），加密时以文件头存储的盐经 PBKDF2 确定性派生。
+    Password(Zeroizing<String>),
+}
+
+impl KeyMaterial {
+    /// 按盐得出最终 AES-256 密钥：Raw 直接返回副本；Password 走
+    /// PBKDF2-HMAC-SHA256（[`PBKDF2_ITERATIONS`]）确定性派生。
+    pub fn derive_with_salt(&self, salt: &[u8]) -> Zeroizing<[u8; 32]> {
+        match self {
+            KeyMaterial::Raw(key) => Zeroizing::new(**key),
+            KeyMaterial::Password(password) => {
+                let mut key = [0u8; 32];
+                pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, PBKDF2_ITERATIONS, &mut key);
+                Zeroizing::new(key)
+            }
+        }
+    }
+}
+
+/// 按密钥格式分支解析密钥材料（与 env 密钥分支语义一致）。
+///
+/// - 恰为 32 字节：直接用作原始密钥（输出弱密钥告警，与既有行为一致）；
+/// - Base64 解码 32 字节：原始密钥；解码成功但长度不符：显性报错；
+/// - 12-127 字符非 Base64：密码材料（<12 字符显性报错，与派生函数一致）；
+/// - 其余：显性报错。
+fn classify_key_value(value: &str) -> Result<KeyMaterial, InklogError> {
+    let raw_bytes = value.as_bytes();
+
+    // 语义歧义保留：32 字符密码与 32 字节随机密钥无法区分，直接用作原始
+    // 密钥（解密既有按此格式加密的文件的兼容行为）。
+    if raw_bytes.len() == 32 {
+        tracing::warn!(
+            "32-byte input used directly as a raw encryption key; \
+             prefer a Base64-encoded random key or a password whose length is not 32"
+        );
+        let mut result = [0u8; 32];
+        result.copy_from_slice(raw_bytes);
+        return Ok(KeyMaterial::Raw(Zeroizing::new(result)));
+    }
+
+    if let Ok(decoded) = general_purpose::STANDARD.decode(value) {
+        if decoded.len() == 32 {
+            let mut result = [0u8; 32];
+            result.copy_from_slice(&decoded);
+            return Ok(KeyMaterial::Raw(Zeroizing::new(result)));
+        }
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("got", decoded.len());
+        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+            "config-encryption_base64_wrong_length",
+            args,
+        )));
+    }
+
+    if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
+        // 最短密码长度在此把关（阈值与 derive_key_from_password 一致），
+        // 使 resolve_key_material 能在构造期显性拒绝无效密码
+        if raw_bytes.len() < 12 {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("got", raw_bytes.len());
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-encryption_password_too_short",
+                args,
+            )));
+        }
+        return Ok(KeyMaterial::Password(Zeroizing::new(value.to_string())));
+    }
+
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("got", raw_bytes.len());
+    Err(InklogError::ConfigError(crate::i18n::tr_args(
+        "config-encryption_key_wrong_length",
+        args,
+    )))
+}
+
+/// 解析加密密钥材料：**env 优先，其次配置文件**（key 文件 unix 权限必须
+/// 0600——组/其他可读的密钥显性拒绝）。
+///
+/// 显式启用加密的调用方在两个来源均不可用时得到 `Err`，必须显性失败，
+/// 禁止静默回退明文落盘。
+///
+/// # 参数
+///
+/// * `env_var` - 密钥环境变量名（调用方决定默认值，本函数不内置）
+/// * `key_file` - 密钥文件路径（env 未设置时读取；内容按
+///   [`classify_key_value`] 分支解析）
+pub fn resolve_key_material(
+    env_var: &str,
+    key_file: Option<&std::path::Path>,
+) -> Result<KeyMaterial, InklogError> {
+    if let Ok(value) = std::env::var(env_var) {
+        if value.is_empty() {
+            // 空值显性报错而非静默回退：调用方若想用 key 文件，应移除该
+            // 空变量（提示语义见 config-key_env_empty）
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("env", env_var);
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-key_env_empty",
+                args,
+            )));
+        }
+        return classify_key_value(&Zeroizing::new(value));
+    }
+    if let Some(path) = key_file {
+        let content = Zeroizing::new(std::fs::read_to_string(path).map_err(|e| {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("file", path.display().to_string());
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-key_file_read", args))
+        })?);
+        let value = content.trim();
+        if value.is_empty() {
+            return Err(key_source_missing(env_var, Some(path)));
+        }
+        // 0600 硬约束：密钥文件不给组/其他用户任何权限位
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(path)
+                .map(|m| m.permissions().mode())
+                .unwrap_or(0o777);
+            if mode & 0o077 != 0 {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("file", path.display().to_string());
+                args.set("mode", format!("{:o}", mode & 0o777));
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "config-key_file_permission",
+                    args,
+                )));
+            }
+        }
+        return classify_key_value(value);
+    }
+    Err(key_source_missing(env_var, None))
+}
+
+fn key_source_missing(env_var: &str, key_file: Option<&std::path::Path>) -> InklogError {
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("env", env_var);
+    args.set(
+        "file",
+        key_file
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "-".to_string()),
+    );
+    InklogError::ConfigError(crate::i18n::tr_args("config-key_source_missing", args))
+}
+
+/// 验证密钥熵（Shannon entropy >= 4.0），拒绝全零等弱密钥。
+///
+/// 纵深防御：只约束**直接用作密钥**的原始字节（PBKDF2 派生输出天然高熵）。
+pub(crate) fn validate_key_entropy(key: &[u8]) -> Result<(), InklogError> {
+    if key.is_empty() {
+        return Err(InklogError::EncryptionError {
+            message: "Encryption key cannot be empty".to_string(),
+            source: None,
+        });
+    }
+
+    let mut freq = [0u32; 256];
+    for &b in key {
+        freq[b as usize] += 1;
+    }
+
+    let len = key.len() as f64;
+    let entropy: f64 = freq
+        .iter()
+        .filter(|&&count| count > 0)
+        .map(|&count| {
+            let p = count as f64 / len;
+            -p * p.log2()
+        })
+        .sum();
+
+    const MIN_ENTROPY_THRESHOLD: f64 = 4.0;
+    if entropy < MIN_ENTROPY_THRESHOLD {
+        return Err(InklogError::EncryptionError {
+            message: format!(
+                "Encryption key has insufficient entropy ({} < {}). \
+                 Please use a cryptographically random key.",
+                entropy, MIN_ENTROPY_THRESHOLD
+            ),
+            source: None,
+        });
+    }
+
+    Ok(())
+}
+
 /// 从环境变量获取加密密钥，密码模式使用**调用方提供的盐值**做确定性派生。
 ///
 /// 这是 [`get_encryption_key`] 的确定性变体，专用于加密文件头中存储了盐值的
@@ -113,59 +308,20 @@ fn read_key_env_value(env_var: &str) -> Result<Zeroizing<String>, InklogError> {
 /// 按密钥格式分支解析出 32 字节密钥。
 ///
 /// `salt` 仅在密码分支生效：`None` 生成随机盐（加密端兼容包装），`Some(s)`
-/// 用调用方盐值确定性派生（v2 加密头场景）。
+/// 用调用方盐值确定性派生（v2 加密头场景）。分支判定统一委托
+/// [`classify_key_value`]（原始密钥直接返回，密码按盐派生）。
 fn key_from_env_value(
-    env_var: &str,
+    _env_var: &str,
     env_value: &str,
     salt: Option<&[u8]>,
 ) -> Result<Zeroizing<[u8; 32]>, InklogError> {
-    let raw_bytes = env_value.as_bytes();
-
-    // 如果长度是32字节，尝试直接使用原始字节。
-    // 注意语义歧义：32 字符的密码会走此分支被当作原始密钥而非 PBKDF2 派生。
-    // 该行为保留用于解密既有按此格式加密的文件；新部署建议使用
-    // Base64 编码的随机密钥，或长度不等于 32 字节的密码。
-    if raw_bytes.len() == 32 {
-        tracing::warn!(
-            env = %env_var,
-            "32-byte input used directly as a raw encryption key; \
-             prefer a Base64-encoded random key or a password whose length is not 32"
-        );
-        let mut result = [0u8; 32];
-        result.copy_from_slice(raw_bytes);
-        return Ok(Zeroizing::new(result));
-    }
-
-    // 尝试解码 Base64 编码的密钥
-    if let Ok(decoded) = general_purpose::STANDARD.decode(env_value) {
-        if decoded.len() == 32 {
-            let mut result = [0u8; 32];
-            result.copy_from_slice(&decoded);
-            return Ok(Zeroizing::new(result));
+    match classify_key_value(env_value)? {
+        KeyMaterial::Raw(key) => Ok(key),
+        KeyMaterial::Password(password) => {
+            let (key, _salt) = derive_key_from_password(&password, salt)?;
+            Ok(Zeroizing::new(key))
         }
-        // Base64 解码成功但长度不对，拒绝使用
-        let mut args = crate::i18n::MsgArgs::new();
-        args.set("got", decoded.len());
-        return Err(InklogError::ConfigError(crate::i18n::tr_args(
-            "config-encryption_base64_wrong_length",
-            args,
-        )));
     }
-
-    // 如果长度不是32字节，尝试使用 PBKDF2 从密码派生密钥
-    // salt: None → 随机盐（历史兼容路径），Some(s) → 调用方提供的确定性盐（v2 头）
-    if !raw_bytes.is_empty() && raw_bytes.len() < 128 {
-        let (key, _salt) = derive_key_from_password(env_value, salt)?;
-        return Ok(Zeroizing::new(key));
-    }
-
-    // 密钥长度无效
-    let mut args = crate::i18n::MsgArgs::new();
-    args.set("got", raw_bytes.len());
-    Err(InklogError::ConfigError(crate::i18n::tr_args(
-        "config-encryption_key_wrong_length",
-        args,
-    )))
 }
 
 /// 使用 PBKDF2 从密码派生加密密钥
@@ -375,6 +531,36 @@ mod tests {
             std::env::remove_var("INKLOG_TEST_EMPTY");
         }
         assert!(result.is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn test_resolve_key_material_empty_env_is_explicit_with_removal_hint() {
+        // 空 env 值：显性报错并提示"移除变量以回退 key 文件"——不得静默
+        // 回退（env 优先级语义：设了空值说明配置有误），也不得落入
+        // 泛化的 wrong_length 报错（丢失处置指引）
+        let dir = tempfile::TempDir::new().unwrap();
+        let key_file = dir.path().join("k.key");
+        std::fs::write(&key_file, "x".repeat(130)).unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_TEST_RESOLVE_EMPTY", "");
+        }
+        let result = resolve_key_material("INKLOG_TEST_RESOLVE_EMPTY", Some(&key_file));
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_RESOLVE_EMPTY");
+        }
+        let Err(err) = result else {
+            panic!("empty env value must fail explicitly");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("INKLOG_TEST_RESOLVE_EMPTY"),
+            "error must name the offending env var, got: {msg}"
+        );
+        assert!(
+            msg.contains("remove") || msg.contains("移除"),
+            "error must hint removal to fall back to the key file, got: {msg}"
+        );
     }
 
     #[test]

@@ -84,6 +84,10 @@ pub struct LoggerManager {
     /// ops 事件广播通道（每个启用的 sink 通道一个发送端：
     /// file/db 通道 + 各自定义 sink 通道），`publish_ops_event` 逐一投递。
     ops_senders: Vec<Sender<Arc<LogRecord>>>,
+    /// fallback journal（含推送端口）句柄：`shutdown` 时尽力补发推送缓冲。
+    /// 丢失窗口：本调用之后的溢出记录仅落盘（下次启动 replay 补发），
+    /// 推送通道补发到此为止；推送缓冲满溢出的最旧记录不补发（容量约束）。
+    fallback_journal: Option<Arc<crate::support::fallback_journal::FallbackJournal>>,
 }
 
 /// EnvFilter 热换装闭包类型（隐藏 `reload::Handle` 的具体类型参数）。
@@ -108,10 +112,13 @@ pub(crate) struct LevelDirectives {
     extra_raw: Option<String>,
 }
 
-/// C3：file 配置是否走 ChannelBufferedFileSink（"简单配置"转正）。
-/// 任一高级能力（非默认轮转/压缩/加密/审计链）启用即回落 FileSink。
+/// C3：file 配置是否走 ChannelBufferedFileSink（R-inklog-003 收窄）。
+/// CBFS 已覆盖轮转（size/time）/压缩/加密/审计链/保留清理（与 FileSink
+/// 同一后处理单一事实源）；仍需 FileSink 的仅剩逐批 fsync 与 JSON 出站
+/// 格式（另有磁盘空间守卫/熔断降级为无配置旋钮的固有能力差异，见
+/// docs/USER_GUIDE.md 能力矩阵）。
 pub(crate) fn file_uses_channel_buffered(cfg: &crate::FileSinkConfig) -> bool {
-    !cfg.compress && !cfg.encrypt && !cfg.audit_chain_enabled && cfg.rotation_time == "daily"
+    !cfg.fsync && cfg.output_format != crate::support::processing::template::OutputFormat::Json
 }
 
 impl LevelDirectives {
@@ -677,15 +684,45 @@ impl LoggerManager {
         }
 
         // C4 磁盘持久化 fallback journal：构建期重放一次（记录带 replayed=true
-        // 防重放循环）后清空；随后把 journal 挂到 subscriber 供运行期溢出落盘
+        // 防重放循环）后清空；随后把 journal 挂到 subscriber 供运行期溢出落盘。
+        // R-inklog-002：按配置接线可选加密与推送端口；加密而 key 缺失/无效
+        // 在此显性失败（Err 向上传播终止构建，禁止静默明文落盘）。
+        let mut fallback_journal: Option<Arc<crate::support::fallback_journal::FallbackJournal>> =
+            None;
         if config.global.fallback_journal {
             let journal_path = std::path::PathBuf::from(&config.global.fallback_journal_path);
             if let Some(parent) = journal_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let journal = Arc::new(crate::support::fallback_journal::FallbackJournal::open(
-                journal_path,
-            ));
+            let journal = if config.global.fallback_journal_encrypt {
+                crate::support::fallback_journal::FallbackJournal::with_crypto(
+                    journal_path,
+                    crate::support::fallback_journal::DEFAULT_JOURNAL_MAX_BYTES,
+                    crate::support::fallback_journal::JournalCryptoConfig {
+                        key_env: config.global.fallback_journal_key_env.clone(),
+                        key_file: config
+                            .global
+                            .fallback_journal_key_file
+                            .as_ref()
+                            .map(PathBuf::from),
+                    },
+                )?
+            } else {
+                crate::support::fallback_journal::FallbackJournal::open(journal_path)
+            };
+            let journal = match &config.global.fallback_journal_push_addr {
+                Some(addr) => {
+                    let pusher = crate::support::fallback_journal::TcpJournalPusher::new(
+                        crate::support::fallback_journal::TcpJournalPusherConfig {
+                            addr: addr.clone(),
+                            ..Default::default()
+                        },
+                    )?;
+                    journal.with_sender(Arc::new(pusher))
+                }
+                None => journal,
+            };
+            let journal = Arc::new(journal);
             let (records, skipped) = journal.replay();
             if skipped > 0 {
                 tracing::warn!(skipped, "fallback journal replay skipped corrupt lines");
@@ -713,6 +750,7 @@ impl LoggerManager {
                 }
             }
             subscriber = subscriber.with_journal(Arc::clone(&journal));
+            fallback_journal = Some(journal);
         }
 
         // ERROR/FATAL 兜底缓冲运行期补发：60s 周期任务兜底；通道恢复半满的
@@ -871,9 +909,9 @@ impl LoggerManager {
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
             file_sink_factory: Box::new(move || {
-                // C3 CBFS 转正：简单配置（默认轮转 + 无压缩/加密/审计链）用
-                // ChannelBufferedFileSink（独立 flush 线程 + 可配背压 + 掩码）；
-                // 高级能力配置回落 FileSink。能力矩阵见 docs/USER_GUIDE.md。
+                // R-inklog-003 收窄：CBFS 覆盖轮转/压缩/加密/审计链/保留清理，
+                // 仅 fsync 与 JSON 出站格式回落 FileSink。能力矩阵见
+                // docs/USER_GUIDE.md。
                 let simple = file_uses_channel_buffered(&file_sink_cfg);
                 if simple {
                     let cbfs_config = crate::ChannelBufferedConfig {
@@ -932,6 +970,7 @@ impl LoggerManager {
             level_state,
             level_reloader: Some(level_reloader),
             ops_senders,
+            fallback_journal,
         };
 
         Ok((manager, subscriber, filter, filter_layer))
@@ -1208,6 +1247,14 @@ impl LoggerManager {
             if !handle.is_finished() {
                 handle.abort();
             }
+        }
+
+        // journal 推送端口尽力补发（有界：connect_timeout + write_timeout 上限）。
+        // 丢失窗口（有意设计）：worker 停止后、本调用前溢出落盘的记录留在磁盘
+        // journal，由下次启动 replay 补发；本调用之后不再有推送补发，推送缓冲
+        // 满时溢出丢弃的最旧记录同样不补发（有界 FIFO 容量约束）。
+        if let Some(journal) = &self.fallback_journal {
+            journal.flush_pending();
         }
 
         Ok(())
@@ -3923,32 +3970,40 @@ mod set_level_tests {
 
     #[test]
     fn test_file_uses_channel_buffered_predicate() {
-        // 简单配置 → CBFS；任一高级能力 → FileSink
-        // 注意 compress 默认 true：显式关闭压缩才视为简单配置（默认磁盘行为不变）
-        let mut simple = crate::FileSinkConfig::default();
-        simple.compress = false;
-        assert!(file_uses_channel_buffered(&simple));
-
-        let mut advanced = crate::FileSinkConfig::default();
-        advanced.encrypt = true;
-        assert!(!file_uses_channel_buffered(&advanced));
+        // R-inklog-003 收窄：轮转/压缩/加密/审计链均由 CBFS 覆盖，不再回落；
+        // 仅逐批 fsync 与 JSON 出站格式仍回落 FileSink（能力矩阵见
+        // docs/USER_GUIDE.md「文件写入双路径」——注意 CBFS 时间轮转为滚动
+        // 间隔近似，FileSink 为日历对齐，矩阵已如实标注差异）
+        assert!(file_uses_channel_buffered(&crate::FileSinkConfig::default()));
 
         let mut advanced = crate::FileSinkConfig::default();
         advanced.compress = true;
-        assert!(!file_uses_channel_buffered(&advanced));
+        assert!(file_uses_channel_buffered(&advanced));
+
+        let mut advanced = crate::FileSinkConfig::default();
+        advanced.encrypt = true;
+        assert!(file_uses_channel_buffered(&advanced));
 
         let mut advanced = crate::FileSinkConfig::default();
         advanced.audit_chain_enabled = true;
-        assert!(!file_uses_channel_buffered(&advanced));
+        assert!(file_uses_channel_buffered(&advanced));
 
         let mut advanced = crate::FileSinkConfig::default();
         advanced.rotation_time = "hourly".to_string();
+        assert!(file_uses_channel_buffered(&advanced));
+
+        let mut advanced = crate::FileSinkConfig::default();
+        advanced.fsync = true;
+        assert!(!file_uses_channel_buffered(&advanced));
+
+        let mut advanced = crate::FileSinkConfig::default();
+        advanced.output_format = crate::support::processing::template::OutputFormat::Json;
         assert!(!file_uses_channel_buffered(&advanced));
     }
 
     #[tokio::test]
     async fn test_default_file_config_builds_channel_buffered_and_writes() {
-        // 转正冒烟：简单配置（显式 compress=false）构建 CBFS 路径，写入落盘可用
+        // 转正冒烟：默认 file 配置构建 CBFS 路径，写入落盘可用
         let dir = tempfile::TempDir::new().unwrap();
         let out = dir.path().join("cbfs-default.log");
         let mut config = InklogConfig::default();
@@ -4010,7 +4065,7 @@ mod set_level_tests {
                 "replay-me-1".to_string(),
             );
             rec.level = "ERROR".to_string();
-            journal.spill(&rec);
+            assert!(journal.spill(&rec));
         }
 
         let out_path = dir.path().join("out.log");

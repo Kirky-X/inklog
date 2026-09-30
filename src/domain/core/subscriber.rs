@@ -492,8 +492,11 @@ where
                     // 内存缓冲 100 条之外不再静默丢失）
                     if let Some(evicted) = buffer.pop_front()
                         && let Some(journal) = self.journal.as_ref()
+                        && !journal.spill(&evicted.record)
                     {
-                        journal.spill(&evicted.record);
+                        // 落盘失败：记录已弹出内存缓冲且未持久化，计入数据
+                        // 损失总账（瞬时 IO 失败不静默）
+                        self.metrics.inc_logs_dropped();
                     }
                 }
                 buffer.push_back(FallbackEntry { record, delivered });
