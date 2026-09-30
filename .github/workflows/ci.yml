@@ -1,4 +1,4 @@
-# CI 质量门禁:fmt / clippy / check / test / cross-platform / doc / security / coverage(≥80%)
+# CI 质量门禁:fmt / clippy / check / test / cross-platform / doc / security / coverage(≥80%) / benchmark(手动开关+宽松天花板)
 name: CI
 
 on:
@@ -6,6 +6,12 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      run_bench:
+        description: "Run benchmark job (criterion fast profile + loose ceiling)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -170,3 +176,49 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           fail_ci_if_error: false
+
+  # 基准测量对共享 runner 噪声敏感：不进 push/PR 常规门禁，仅 workflow_dispatch
+  # 勾选 run_bench 时运行（显式开关）。阈值取宽松天花板（≈16x 本地基线），只拦
+  # 灾难性回退（如热路径误接阻塞 I/O）；精确回归对照以 docs/PERFORMANCE.md
+  # 基线为人工载体，待固定 runner 后再收紧。
+  benchmark:
+    name: Benchmark (manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch' && inputs.run_bench
+    # 独立 concurrency 组且不取消：job 级覆盖 workflow 级配置，避免手动
+    # bench run 被同分支 push 的 cancel-in-progress 组连带取消
+    concurrency:
+      group: benchmark-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4716b85f2fac3e324e64fa2810f6b5c3905760a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Run rc4_pipeline_bench (fast profile)
+        run: cargo bench --bench rc4_pipeline_bench -- --warm-up-time 1 --measurement-time 2 --sample-size 10
+      - name: Run inklog_bench (fast profile)
+        run: cargo bench --bench inklog_bench -- --warm-up-time 1 --measurement-time 3 --sample-size 10
+      - name: Loose ceiling guard (write_path/template_render_text)
+        # 天花板 5 µs：本地基线 ≈0.31 µs（docs/PERFORMANCE.md），共享 runner
+        # 放宽到 ~16x；只拦灾难性回退，正常噪声不误报
+        run: |
+          est=target/criterion/write_path/template_render_text/new/estimates.json
+          test -f "$est" || { echo "missing criterion estimates: $est"; exit 1; }
+          median_ns=$(python3 -c "import json,sys;print(int(json.load(open(sys.argv[1]))['median']['point_estimate']))" "$est")
+          ceiling_ns=5000
+          echo "template_render_text median = ${median_ns} ns (ceiling ${ceiling_ns} ns)"
+          if [ "$median_ns" -gt "$ceiling_ns" ]; then
+            echo "REGRESSION: median ${median_ns} ns exceeds loose ceiling ${ceiling_ns} ns"
+            exit 1
+          fi
+      - name: Upload criterion reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: criterion-reports
+          path: target/criterion
+          retention-days: 14
+          if-no-files-found: warn

@@ -232,6 +232,9 @@ pub use integrations::InklogModule;
 pub use integrations::{
     Cache, Config, Database, InklogConfigAdapter, OxCacheAdapter, OxCacheAdapterBuilder,
 };
+// confers AuditSink 端口的 inklog 实现（审计事件 → 结构化日志 sink）
+#[cfg(feature = "confers-audit")]
+pub use integrations::ConfersAuditSink;
 // Mock 实现仅对测试面可见（src 内联测试经 cfg(test)，外部消费者需显式 test-utils）
 #[cfg(all(feature = "kit", feature = "database"))]
 pub use integrations::{InklogBuildObserver, create_inklog_scope, populate_inklog_scope};

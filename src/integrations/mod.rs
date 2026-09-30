@@ -4,6 +4,8 @@
 
 #[cfg(feature = "dbnexus-audit")]
 pub mod audit_bridge;
+#[cfg(feature = "confers-audit")]
+pub mod confers_audit;
 #[cfg(feature = "config-confers")]
 pub mod confers_config;
 pub mod infra;
@@ -16,6 +18,9 @@ pub use audit_bridge::InklogAuditStorage;
 // confers 配置加载 + watch 热更新
 #[cfg(feature = "config-confers")]
 pub use confers_config::{ConfersConfigWatcher, HotReloadValues, load_config_via_confers};
+// confers AuditSink 端口的 inklog 实现（审计事件 → 结构化日志 sink）
+#[cfg(feature = "confers-audit")]
+pub use confers_audit::ConfersAuditSink;
 
 // Re-export infra types at module level for two-level import paths
 pub use infra::{

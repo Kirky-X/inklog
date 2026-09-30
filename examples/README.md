@@ -1,6 +1,6 @@
 # inklog 示例索引
 
-本目录是 workspace 内的独立子 crate `inklog-examples`，收录 inklog 的全部 **39 个可运行示例**，按主题分为 7 类。
+本目录是 workspace 内的独立子 crate `inklog-examples`，收录 inklog 的全部 **40 个可运行示例**，按主题分为 7 类。
 
 - **Rust 版本要求**：1.97.1 及以上（与 workspace MSRV 一致）
 - **运行方式**：在仓库根目录执行 `cargo run --package inklog-examples --example <名称>`
@@ -15,6 +15,7 @@
 | `config_file` | 配置文件加载示例：从 TOML 配置文件加载 `InklogConfig`（Layer 1 本地资源，临时目录自动清理） | `cargo run --package inklog-examples --example config_file` |
 | `config_inspect` | 配置 inspect 示例：`InklogConfig::sinks_enabled()` 与 `LoggerManager::load()` 的使用 | `cargo run --package inklog-examples --example config_inspect` |
 | `env_overrides` | 环境变量覆盖加载示例：`InklogConfig::load_with_env_overrides()` 的使用 | `cargo run --package inklog-examples --example env_overrides` |
+| `confers_audit` | confers 审计桥示例：`AuditSink` 端口事件接入 inklog 结构化 sink（本地 HMAC 链文件照旧） | `cargo run --package inklog-examples --features confers-audit --bin confers_audit` |
 
 ## 核心（core）
 

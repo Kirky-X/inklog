@@ -44,7 +44,7 @@ dbnexus = { version = "0.6.0-rc.5", default-features = false, features = ["sql-p
 # （见 [features] 说明），全开必然编译失败。显式列举一组可共存的 feature——
 # 其中 sqlite 恰好满足 kit 的"至少一个驱动"编译期守卫。
 [package.metadata.docs.rs]
-features = ["default", "http", "cli", "compression", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "config-confers", "otel"]
+features = ["default", "http", "cli", "compression", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "confers-audit", "config-confers", "otel"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.lints.rust]
@@ -110,6 +110,10 @@ dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
 # confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
 # 级别/轮转参数（confers 依赖层级合法：inklog → confers）。
 config-confers = ["dep:confers", "confers/toml", "confers/watch"]
+# confers 审计桥——实现 confers AuditSink 端口（audit 事件 → inklog 结构化
+# sink 落盘）。依赖方向同 config-confers；trait 随已发布的 confers 0.6.0-rc.5
+# 提供（本地 cargo registry 已发布源 src/impl_/audit.rs:259 在案）。
+confers-audit = ["dep:confers", "confers/audit"]
 # KMS 密钥提供者——confers AsyncKeyProvider 适配 + Vault transit MVP
 kms = ["dep:confers", "confers/encryption", "confers/cloud-kms"]
 # 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主的

@@ -93,7 +93,7 @@ inklog 是面向生产环境的日志基础设施：应用代码继续使用 `lo
 - **可观测性**（`src/support/observability/`）：`Metrics`、`HealthStatus`、`SinkHealthMonitor`、回退状态
 - **校验**（`src/validation/`）：`PathValidator` 路径穿越防护、`LogSanitizer` 日志内容净化
 - **归档防篡改**（`src/support/audit_chain.rs`）：归档 HMAC-SHA256 链，防删除、重排与伪造
-- **集成适配**（`src/integrations/`）：`OxCacheAdapter`、`InklogConfigAdapter`、`DbNexusAdapter`、trait-kit `InklogModule`、dbnexus 审计桥、confers 配置与 watch
+- **集成适配**（`src/integrations/`）：`OxCacheAdapter`、`InklogConfigAdapter`、`DbNexusAdapter`、trait-kit `InklogModule`、dbnexus 审计桥、confers 配置与 watch、confers 审计桥
 - **CLI**（`src/cli/`）：`decrypt`、`generate`、`validate`、`query` 四个子命令
 
 </details>
@@ -176,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `fast-masking` | ❌ | Aho-Corasick 多模式脱敏加速 |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage 端口适配器，审计事件经 inklog DB sink 落库，可与任一后端组合 |
 | `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数 |
+| `confers-audit` | ❌ | confers `AuditSink` 端口的 inklog 实现，配置审计事件写入 inklog 结构化 sink（与 `config-confers` 共享 confers 依赖） |
 | `kms` | ❌ | KMS 密钥提供者（`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP） |
 | `net-sink` | ❌ | 网络转发 Sink（TCP 可 TLS + UDP，断线缓冲与自动重连） |
 | `otlp` | ❌ | OTLP/HTTP JSON 日志导出 MVP（手写传输，零新增依赖） |
@@ -216,6 +217,7 @@ cargo run --package inklog-examples --example <名称>
 | `config_file` | 配置文件加载（Layer 1 本地资源） | 无 |
 | `config_inspect` | 配置检查：`sinks_enabled()` 与 `LoggerManager::load()` | 无 |
 | `env_overrides` | 环境变量覆盖配置加载 | 无 |
+| `confers_audit` | confers 审计桥：AuditSink 端口事件接入 inklog sink | `confers-audit` |
 
 #### 核心（core）
 
@@ -318,7 +320,7 @@ Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重�
 | Docker 数据库集成 | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite 生命周期验证 |
 | 性能测试 | `tests/performance/` + `benches/` | 大容量、长时间运行测试与 criterion 基准 |
 
-**测试规模**（截至 v0.3.0-rc.6，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,462 个 + `tests/` 目录 558 个，共 **2,020 个测试函数**；另有 criterion 顶层基准函数 21 个（`benches/inklog_bench.rs` 17 个、`benches/rc4_pipeline_bench.rs` 4 个）。
+**测试规模**（2026-10-01 工作树，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,572 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,177 个测试函数**；另有 criterion 基准函数 40 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个，其中 1 个按 `otlp` feature 门控），基线见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
 ### 运行命令（与 CI 一致）
 

@@ -18,6 +18,7 @@ http = ["inklog/http"]
 cli = ["inklog/cli"]
 compression = ["inklog/compression", "inklog/gzip"]
 parquet = ["inklog/parquet"]
+confers-audit = ["inklog/confers-audit", "dep:confers"]
 
 [dependencies]
 inklog = { path = "..", version = "0.3.0-rc.6", features = ["test-utils"] }
@@ -43,6 +44,8 @@ log = { workspace = true }
 crossbeam-channel = { workspace = true }
 regex = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
+# confers 审计桥示例所需（与 inklog 同钉已发布 rc.5；仅 audit feature）
+confers = { version = "0.6.0-rc.5", default-features = false, features = ["audit"], optional = true }
 
 [[bin]]
 name = "console"
@@ -208,3 +211,9 @@ path = "src/bin/core/error_handling.rs"
 [[bin]]
 name = "archive_format"
 path = "src/bin/sinks/archive_format.rs"
+
+# confers 审计桥示例（confers AuditSink 端口的 inklog 实现）
+[[bin]]
+name = "confers_audit"
+path = "src/bin/config/confers_audit.rs"
+required-features = ["confers-audit"]
