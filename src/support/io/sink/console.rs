@@ -983,4 +983,47 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_failing_writer_flush_propagates_error() {
+        let mut writer = FailingWriter;
+        let result = writer.flush();
+        assert!(result.is_err(), "flush failure must surface to callers");
+    }
+
+    #[test]
+    fn test_with_masker_injects_custom_masker() {
+        let sink = get_sink().with_masker(DataMasker::new());
+        assert!(
+            sink.masker.is_some(),
+            "with_masker must store the injected masker"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_json_output_format_writes_ndjson_and_disables_color() {
+        // JSON mode: write_record serializes the full record (no template,
+        // no ANSI codes), and compute_colorize returns false at construction.
+        let config = ConsoleSinkConfig {
+            enabled: true,
+            colored: true,
+            output_format: OutputFormat::Json,
+            ..Default::default()
+        };
+        assert!(
+            !ConsoleSink::compute_colorize(&config, false),
+            "JSON mode must never colorize (would corrupt NDJSON)"
+        );
+        let (sink, writer) = sink_with_test_writer(config);
+        let record = make_record("INFO", "json payload");
+        sink.write(&record).await.unwrap();
+        let output = writer.output();
+        let parsed: serde_json::Value =
+            serde_json::from_str(output.trim_end()).expect("JSON mode must emit valid NDJSON");
+        assert_eq!(parsed["message"], "json payload");
+        assert!(
+            !output.contains('\x1b'),
+            "JSON output must contain no ANSI codes"
+        );
+    }
 }

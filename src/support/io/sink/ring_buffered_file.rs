@@ -2177,4 +2177,47 @@ mod tests {
             "both paths must persist identical (level, target, message) sets"
         );
     }
+
+    #[test]
+    fn test_with_masker_overrides_default() {
+        let dir = TempDir::new().unwrap();
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: dir.path().join("masker.log"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default())
+            .unwrap()
+            .with_masker(crate::DataMasker::new());
+        assert!(
+            sink.masker.is_some(),
+            "with_masker must store the injected masker"
+        );
+    }
+
+    #[test]
+    fn test_rotation_params_maps_named_intervals() {
+        // 命名间隔 → 固定秒数（滚动近似）；未知值回退 daily
+        let interval_of = |rotation_time: &str| {
+            let cfg = FileSinkConfig {
+                rotation_time: rotation_time.to_string(),
+                ..Default::default()
+            };
+            ChannelBufferedFileSink::rotation_params(&cfg).interval
+        };
+        assert_eq!(interval_of("hourly"), Some(StdDuration::from_secs(3600)));
+        assert_eq!(interval_of("daily"), Some(StdDuration::from_secs(86400)));
+        assert_eq!(interval_of("weekly"), Some(StdDuration::from_secs(604800)));
+        assert_eq!(
+            interval_of("monthly"),
+            Some(StdDuration::from_secs(2592000))
+        );
+        assert_eq!(
+            interval_of("nonsense"),
+            Some(StdDuration::from_secs(86400)),
+            "unknown rotation_time must fall back to daily"
+        );
+    }
 }

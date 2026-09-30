@@ -398,6 +398,28 @@ mod tests {
         }
     }
 
+    /// 计数 flush/shutdown 调用的探针：验证 SamplingSink 把生命周期调用
+    /// 真实委托给内层 sink（CollectingSink 的空实现观测不到转发）。
+    struct LifecycleProbeSink {
+        flushes: AtomicU64,
+        shutdowns: AtomicU64,
+    }
+
+    #[async_trait]
+    impl LogSink for LifecycleProbeSink {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            Ok(())
+        }
+        async fn flush(&self) -> Result<(), InklogError> {
+            self.flushes.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            self.shutdowns.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn test_sampling_sink_decorator_filters_and_delegates() {
         let inner = Arc::new(CollectingSink {
@@ -677,5 +699,45 @@ mod tests {
                 "prefix rule must take precedence over per-level rate"
             );
         }
+    }
+
+    #[test]
+    fn test_n_of_one_rejects_zero() {
+        let err = Sampler::n_of_one(0).unwrap_err();
+        assert!(
+            err.to_string().contains("sample_every_n must be >= 1"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_sampler_config_accessor_roundtrip() {
+        let sampler = Sampler::new("warn", 8, vec!["urgent".to_string()]).expect("valid sampler");
+        let (name, every_n, whitelist) = sampler.config();
+        assert_eq!(name, "WARN");
+        assert_eq!(every_n, 8);
+        assert_eq!(whitelist, &["urgent".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_sampling_sink_flush_and_shutdown_forwarded() {
+        let inner = Arc::new(LifecycleProbeSink {
+            flushes: AtomicU64::new(0),
+            shutdowns: AtomicU64::new(0),
+        });
+        let sampler = Arc::new(Sampler::n_of_one(1).expect("valid sampler"));
+        let sink = SamplingSink::new(inner.clone() as Arc<dyn LogSink>, sampler);
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+        assert_eq!(
+            inner.flushes.load(Ordering::Relaxed),
+            1,
+            "flush must be delegated to the inner sink exactly once"
+        );
+        assert_eq!(
+            inner.shutdowns.load(Ordering::Relaxed),
+            1,
+            "shutdown must be delegated to the inner sink exactly once"
+        );
     }
 }

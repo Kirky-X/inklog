@@ -710,4 +710,37 @@ mod tests {
             "get must pop from the pool"
         );
     }
+
+    #[test]
+    fn test_object_pool_config_serde_default_capacity() {
+        // 缺省字段的反序列化走字段级 serde default 函数（1024），与手写
+        // Default impl 数值一致，防止两处漂移
+        let config: ObjectPoolConfig = serde_json::from_str("{}").expect("empty map");
+        assert_eq!(config.max_capacity, 1024);
+        assert_eq!(config.ttl_secs, None);
+    }
+
+    #[test]
+    fn test_thread_local_pool_drains_prefilled_state() {
+        // drain 循环体的执行路径：先注入非空状态，再循环取空
+        let pool = ThreadLocalLogRecordPool::new(4);
+        let record = pool.get();
+        pool.put(record);
+        assert!(!pool.is_empty());
+        while !pool.is_empty() {
+            let _ = pool.get();
+        }
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_thread_local_string_pool_drains_prefilled_state() {
+        let pool = ThreadLocalStringPool::new(4);
+        pool.put("drain-me".to_string());
+        assert!(!pool.is_empty());
+        while !pool.is_empty() {
+            let _ = pool.get();
+        }
+        assert!(pool.is_empty());
+    }
 }

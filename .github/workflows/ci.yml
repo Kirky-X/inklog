@@ -1,4 +1,4 @@
-# CI 质量门禁:fmt / clippy / check / test / cross-platform / doc / security / coverage(≥80%) / benchmark(手动开关+宽松天花板)
+# CI 质量门禁:fmt / clippy / check / test / cross-platform / doc / security / coverage(≥95%) / benchmark(手动开关+宽松天花板)
 name: CI
 
 on:
@@ -167,9 +167,13 @@ jobs:
         uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
         with:
           tool: cargo-llvm-cov
-      - name: Generate coverage (gate ≥80% lines)
+      - name: Generate coverage (gate ≥95% lines)
         # Use `--lib` instead of `--workspace` to avoid linker resource exhaustion
-        run: cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 80 --lcov --output-path lcov.info
+        # 门禁分阶段抬升（80→85→90→95，R-inklog-007）；85/90 两级无独立提交与
+        # 实测留痕，历史如实注明见 reviews/ws-r14-governance-review.md §8，
+        # 终值 95 实测 95.40%、留 0.4pp 余量。
+        # zstd 用主名而非 compression 别名（对齐 R-inklog-008 命名契约）。
+        run: cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95 --lcov --output-path lcov.info
       - name: Upload coverage
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:

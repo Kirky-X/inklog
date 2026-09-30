@@ -25,6 +25,10 @@ pre-push:
   commands:
     cargo-audit:
       run: cargo audit
-    coverage-80:
-      name: coverage ≥80% lines
-      run: cargo llvm-cov --fail-under-lines 80
+    coverage-95:
+      name: coverage ≥95% lines
+      # 与 CI coverage job 同口径（显式 features + --lib）。裸 default 跑不通：
+      # tests/cli_integration.rs 经 #![cfg(feature = "cli")] 整体禁用后是空
+      # target——能构建、跑 0 tests，但不产出任何覆盖率数据，llvm-cov report
+      # 阶段以 "no coverage data found" 崩溃，门禁必红。
+      run: cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95

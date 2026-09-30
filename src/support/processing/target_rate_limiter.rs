@@ -174,4 +174,20 @@ mod tests {
         }
         assert_eq!(lim.evaluate("app::burst"), TargetQuotaVerdict::Drop);
     }
+
+    #[test]
+    fn test_debug_lists_rule_prefixes_only() {
+        let lim = limiter_from(&[("app::audit", 1000), ("app", 500)]);
+        let debug = format!("{lim:?}");
+        assert!(debug.contains("TargetRateLimiter"));
+        assert!(
+            debug.contains("app::audit"),
+            "debug must list prefixes: {debug}"
+        );
+        assert!(debug.contains("app"), "debug must list prefixes: {debug}");
+        assert!(
+            debug.starts_with("TargetRateLimiter { rules: ["),
+            "debug must expose only the prefix list, not bucket internals: {debug}"
+        );
+    }
 }

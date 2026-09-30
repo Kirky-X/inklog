@@ -261,6 +261,32 @@ mod tests {
         }
     }
 
+    /// 计数 flush/shutdown 并携带受控健康态的探针：验证 RateLimitedSink 把
+    /// 生命周期调用与健康检查真实委托给内层 sink（CollectingSink 观测不到）。
+    struct LifecycleProbeSink {
+        healthy: std::sync::atomic::AtomicBool,
+        flushes: std::sync::atomic::AtomicUsize,
+        shutdowns: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LogSink for LifecycleProbeSink {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            Ok(())
+        }
+        async fn flush(&self) -> Result<(), InklogError> {
+            self.flushes.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+        fn is_healthy(&self) -> bool {
+            self.healthy.load(Ordering::Relaxed)
+        }
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            self.shutdowns.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn test_rate_limited_sink_blocks_writes_and_counts_dropped() {
         let inner = Arc::new(CollectingSink {
@@ -329,5 +355,83 @@ mod tests {
         fn accepts(_limiter: Arc<dyn SinkRateLimit>) {}
         accepts(Arc::new(NoOpRateLimit));
         accepts(Arc::new(TokenBucketRateLimit::new(1)));
+    }
+
+    #[test]
+    fn test_noop_report_and_token_bucket_metadata() {
+        NoOpRateLimit.report(
+            &record(tracing::Level::INFO, "t"),
+            SinkWriteOutcome::Written,
+        );
+
+        let limiter = TokenBucketRateLimit::new(7);
+        assert_eq!(limiter.capacity(), 7);
+        assert_eq!(limiter.name(), "token-bucket(7)");
+        // 已归还满员时 report(Failed) 不再超出容量
+        limiter.report(&record(tracing::Level::INFO, "t"), SinkWriteOutcome::Failed);
+        assert_eq!(limiter.available(), 7);
+        assert_eq!(
+            NoOpRateLimit.name(),
+            "sink-rate-limit",
+            "default name must survive custom override on TokenBucket"
+        );
+    }
+
+    #[test]
+    fn test_token_bucket_cas_survives_contention() {
+        // 并发争抢同一桶：CAS 冲突重试后总成功数必须恰等于容量（无超卖）
+        let limiter = Arc::new(TokenBucketRateLimit::new(64));
+        let successes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let (limiter, successes) = (limiter.clone(), successes.clone());
+                scope.spawn(move || {
+                    for _ in 0..64 {
+                        if limiter.try_acquire(&record(tracing::Level::INFO, "t")) {
+                            successes.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+            }
+        });
+        assert_eq!(
+            successes.load(Ordering::Relaxed),
+            64,
+            "concurrent acquires must never oversell the budget"
+        );
+        assert_eq!(limiter.available(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limited_sink_flush_health_shutdown_forwarded() {
+        let inner = Arc::new(LifecycleProbeSink {
+            healthy: std::sync::atomic::AtomicBool::new(true),
+            flushes: std::sync::atomic::AtomicUsize::new(0),
+            shutdowns: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let sink = RateLimitedSink::new(inner.clone() as Arc<dyn LogSink>, Arc::new(NoOpRateLimit));
+        assert!(
+            sink.is_healthy(),
+            "inner healthy must surface through the wrapper"
+        );
+        inner
+            .healthy
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            !sink.is_healthy(),
+            "inner unhealthy must surface through the wrapper"
+        );
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+        assert_eq!(
+            inner.flushes.load(Ordering::Relaxed),
+            1,
+            "flush must be delegated to the inner sink exactly once"
+        );
+        assert_eq!(
+            inner.shutdowns.load(Ordering::Relaxed),
+            1,
+            "shutdown must be delegated to the inner sink exactly once"
+        );
     }
 }

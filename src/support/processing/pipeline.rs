@@ -353,6 +353,59 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_builtin_middleware_names() {
+        // 内置治理件的名值是指标标签与诊断的稳定契约
+        let quota = TargetQuotaMiddleware::new(
+            quota_limiter(&[("app", 10)]),
+            Arc::new(StressRelief::new(metrics())),
+        );
+        assert_eq!(quota.name(), "target-quota");
+
+        let global = GlobalRateLimitMiddleware::new(
+            Arc::new(RateLimiter::new(10)),
+            Arc::new(StressRelief::new(metrics())),
+        );
+        assert_eq!(global.name(), "global-rate-limit");
+
+        let identity = IdentityFieldsMiddleware::new(Arc::new(BTreeMap::new()));
+        assert_eq!(identity.name(), "identity-fields");
+
+        let sanitize = SanitizeMiddleware::new(Arc::new(LogSanitizer::new()));
+        assert_eq!(sanitize.name(), "sanitize");
+    }
+
+    #[test]
+    fn test_sanitize_field_value_truncates_beyond_max_depth() {
+        // 超过 16 层的深嵌套子树整体替换为截断标记（防栈溢出）
+        let sanitizer = Arc::new(LogSanitizer::new());
+        let mut deep = serde_json::Value::String("leaf".to_string());
+        for _ in 0..(MAX_SANITIZE_DEPTH + 4) {
+            deep = serde_json::json!({ "nested": deep });
+        }
+        SanitizeMiddleware::sanitize_field_value(&sanitizer, &mut deep);
+        // 外层结构保留，仅超限叶子子树坍缩为截断标记
+        let mut node = &deep;
+        let mut found_truncation = false;
+        loop {
+            match node {
+                serde_json::Value::Object(map) => match map.get("nested") {
+                    Some(inner) => node = inner,
+                    None => break,
+                },
+                serde_json::Value::String(s) if s == "***TRUNCATED***" => {
+                    found_truncation = true;
+                    break;
+                }
+                _ => break,
+            }
+        }
+        assert!(
+            found_truncation,
+            "over-deep leaf must collapse to the truncation marker, got: {deep}"
+        );
+    }
+
     /// 记录治理轮执行顺序的探针中间件。
     struct ProbeMiddleware {
         name: &'static str,

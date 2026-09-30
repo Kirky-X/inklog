@@ -328,6 +328,40 @@ pattern = "[invalid"
     }
 
     #[test]
+    fn test_load_from_toml_malformed_syntax_fails() {
+        // TOML 语法级错误（区别于缺字段的语义错误）
+        let result = MaskRuleRegistry::load_from_toml("not [ valid toml ==");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("TOML") || err.to_string().contains("toml"),
+            "parse error should mention TOML, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_load_from_toml_missing_pattern_fails() {
+        let toml_str = r#"
+[[masking_rules]]
+name = "no_pattern_rule"
+replacement = "x"
+"#;
+        let err = MaskRuleRegistry::load_from_toml(toml_str).unwrap_err();
+        assert!(
+            err.to_string().contains("no_pattern_rule"),
+            "missing-pattern error must name the offending rule, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_load_from_toml_missing_name_fails() {
+        let toml_str = r#"
+[[masking_rules]]
+pattern = "\\bNAMELESS-\\d+\\b"
+"#;
+        assert!(MaskRuleRegistry::load_from_toml(toml_str).is_err());
+    }
+
+    #[test]
     fn test_load_from_toml_missing_array() {
         let toml_str = "[other]\nkey = \"value\"\n";
         assert!(MaskRuleRegistry::load_from_toml(toml_str).is_err());

@@ -145,6 +145,37 @@ mod tests {
         assert!(sink.is_healthy());
     }
 
+    #[tokio::test]
+    async fn test_dummy_sink_lifecycle_methods_succeed() {
+        // 薄断言登记：DummySink 是无状态 trait 实现样例，本测试只验证
+        // LogSink 三方法的签名可用且成功路径返回 Ok——无可观测行为可断言。
+        let sink = DummySink;
+        let record = LogRecord::new(
+            tracing::Level::INFO,
+            "test".to_string(),
+            "hello".to_string(),
+        );
+        assert!(sink.write(&record).await.is_ok());
+        assert!(sink.flush().await.is_ok());
+        assert!(sink.shutdown().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rotatable_disk_sink_lifecycle_methods_succeed() {
+        // 薄断言登记：同 test_dummy_sink_lifecycle_methods_succeed——本测试的
+        // 被测对象是「LogSink + Rotatable + DiskCheckable 可共存于同一类型」
+        // 的 trait 隔离面，生命周期方法本身无状态可验。
+        let sink = RotatableDiskSink;
+        let record = LogRecord::new(
+            tracing::Level::INFO,
+            "test".to_string(),
+            "hello".to_string(),
+        );
+        assert!(sink.write(&record).await.is_ok());
+        assert!(sink.flush().await.is_ok());
+        assert!(sink.shutdown().await.is_ok());
+    }
+
     /// Test that Rotatable and DiskCheckable are separate traits
     struct RotatableDiskSink;
 

@@ -44,7 +44,7 @@ dbnexus = { version = "0.6.0-rc.5", default-features = false, features = ["sql-p
 # （见 [features] 说明），全开必然编译失败。显式列举一组可共存的 feature——
 # 其中 sqlite 恰好满足 kit 的"至少一个驱动"编译期守卫。
 [package.metadata.docs.rs]
-features = ["default", "http", "cli", "compression", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "confers-audit", "config-confers", "otel"]
+features = ["default", "http", "cli", "zstd", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "confers-audit", "config-confers", "otel"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.lints.rust]

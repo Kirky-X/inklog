@@ -491,3 +491,91 @@ pub fn convert_logs_to_parquet(
 ) -> Result<Vec<u8>, String> {
     Err("parquet feature not enabled: rebuild inklog with `parquet` feature to export logs as Parquet".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::integrations::infra::Database;
+
+    /// 恒定失败的数据库适配器：驱动写入错误路径的可控注入点。
+    struct FailingAdapter;
+
+    #[async_trait::async_trait]
+    impl Database for FailingAdapter {
+        async fn insert_batch(&self, _records: &[LogRecord]) -> Result<usize, InklogError> {
+            Err(InklogError::ConfigError(
+                "injected batch failure".to_string(),
+            ))
+        }
+
+        async fn is_healthy(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn test_finish_flush_empty_batch_is_noop() {
+        // 空批次直接放行：不触碰数据库，不更新指标
+        let sink = DatabaseSink::new(Arc::new(crate::integrations::MockDatabaseAdapter::new()))
+            .expect("sink");
+        sink.finish_flush(Vec::new(), None)
+            .await
+            .expect("empty batch must be ok");
+    }
+
+    #[tokio::test]
+    async fn test_flush_insert_failure_errors_updates_metrics_and_requeues() {
+        let metrics = Arc::new(Metrics::new());
+        let sink = DatabaseSink::new(Arc::new(FailingAdapter)).expect("sink");
+        sink.set_metrics(metrics.clone()).await;
+
+        sink.write(&LogRecord::default())
+            .await
+            .expect("buffered write");
+        let err = sink
+            .flush()
+            .await
+            .expect_err("failing adapter must propagate");
+        assert!(err.to_string().contains("injected batch failure"));
+
+        assert_eq!(
+            metrics.sink_errors(),
+            1,
+            "insert failure must count as a sink error"
+        );
+        // 失败批次必须重新入队等待重试（re-queue 语义）
+        assert_eq!(
+            sink.inner.lock().buffer.len(),
+            1,
+            "records must be re-queued"
+        );
+        // 断路器只计成功路径：失败不推进 success 计数
+        assert_eq!(sink.inner.lock().success_count, 0);
+    }
+
+    #[test]
+    fn test_enforce_buffer_cap_noop_below_capacity() {
+        let mut inner = DatabaseSinkInner {
+            buffer: Vec::new(),
+            flush_buffer: Vec::new(),
+            last_flush: Instant::now(),
+            fallback_sink: None,
+            circuit_breaker: CircuitBreaker::new(3, Duration::from_secs(30), 3),
+            current_batch_size: 16,
+            write_latencies: Vec::new(),
+            success_count: 0,
+            failure_count: 0,
+            dropped_total: 0,
+            metrics: None,
+        };
+        inner.buffer.push(LogRecord::default());
+
+        DatabaseSink::enforce_buffer_cap(&mut inner);
+        assert_eq!(
+            inner.buffer.len(),
+            1,
+            "below-capacity buffer must be untouched"
+        );
+        assert_eq!(inner.dropped_total, 0);
+    }
+}

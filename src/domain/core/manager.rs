@@ -503,6 +503,20 @@ impl LoggerManager {
             }
         }
 
+        // 无 http feature 时 HTTP 监控服务器整体不编译：`http_server.enabled = true`
+        // 会在下方被静默跳过。对配置与构建能力不匹配的宿主给出显性 warn，
+        // 避免运维侧"配了监控却看不到端口"的无提示失效。
+        #[cfg(not(feature = "http"))]
+        if let Some(ref http_cfg) = config.http_server
+            && http_cfg.enabled
+        {
+            tracing::warn!(
+                event = "http_server_config_ignored",
+                "http_server.enabled = true but the 'http' feature is not compiled in; \
+                 the monitoring server will not start"
+            );
+        }
+
         Ok(manager)
     }
 

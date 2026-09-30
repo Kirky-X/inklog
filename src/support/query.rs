@@ -655,4 +655,305 @@ not a log line
         assert_eq!(got.len(), 1, "encrypted log must be unpacked and searched");
         assert_eq!(got[0].message, "leaked");
     }
+
+    #[test]
+    fn test_encrypted_file_without_key_env_reports_config_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&[0u8; 24]);
+        let p = write_file(dir.path(), "app.log.enc", "");
+        std::fs::write(&p, &blob).unwrap();
+
+        let err = read_log_file(&p, None).unwrap_err();
+        assert!(
+            err.to_string().contains("requires a key env var"),
+            "missing key_env must produce an actionable error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_encrypted_header_too_small_reports_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&[0u8; 1]);
+        let p = dir.path().join("tiny.enc");
+        std::fs::write(&p, &blob).unwrap();
+
+        let err = read_log_file(&p, Some("INKLOG_QUERY_TEST_KEY")).unwrap_err();
+        assert!(
+            err.to_string().contains("too small for a header"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_v1_roundtrip_with_raw_key_and_wrong_key_failure() {
+        use aes_gcm::aead::Aead;
+        use aes_gcm::{Aes256Gcm, KeyInit};
+        let dir = tempfile::tempdir().unwrap();
+        let plaintext = "2026-09-11T01:00:00.000Z [INFO] app::v1 - legacy ok\n";
+        unsafe {
+            std::env::set_var("INKLOG_QUERY_V1_KEY", "0123456789abcdef0123456789abcdef");
+        }
+        let key = crate::support::io::sink::encryption::get_encryption_key("INKLOG_QUERY_V1_KEY")
+            .expect("raw key");
+
+        let make_v1 = |nonce: [u8; 12], cipher: &Aes256Gcm, pt: &[u8]| {
+            let ciphertext = cipher
+                .encrypt(&aes_gcm::Nonce::from(nonce), pt)
+                .expect("encrypt");
+            let mut blob = Vec::new();
+            blob.extend_from_slice(ENCRYPTED_MAGIC);
+            blob.extend_from_slice(&1u16.to_le_bytes());
+            blob.extend_from_slice(&1u16.to_le_bytes());
+            blob.extend_from_slice(&nonce);
+            blob.extend_from_slice(&ciphertext);
+            blob
+        };
+
+        let cipher = Aes256Gcm::new((&*key).into());
+        let nonce: [u8; 12] = rand::random();
+        let blob = make_v1(nonce, &cipher, plaintext.as_bytes());
+        let p = dir.path().join("v1.log.enc");
+        std::fs::write(&p, &blob).unwrap();
+
+        let got = read_log_file(&p, Some("INKLOG_QUERY_V1_KEY")).unwrap();
+        assert_eq!(got, plaintext, "v1 raw-key roundtrip must succeed");
+
+        // 错误密钥 → GCM 认证失败 → "decryption failed"
+        unsafe {
+            std::env::set_var("INKLOG_QUERY_V1_KEY", "ffffffffffffffffffffffffffffffff");
+        }
+        let err = read_log_file(&p, Some("INKLOG_QUERY_V1_KEY")).unwrap_err();
+        assert!(
+            err.to_string().contains("decryption failed"),
+            "wrong key must be reported as decryption failure, got: {err}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_v1_password_key_rejected_with_clear_diagnosis() {
+        use aes_gcm::aead::Aead;
+        use aes_gcm::{Aes256Gcm, KeyInit};
+        let dir = tempfile::tempdir().unwrap();
+        // 非 32 字节且非 Base64 → 密码模式；v1 头不存盐，必须提前拒绝
+        unsafe { std::env::set_var("INKLOG_QUERY_PW_KEY", "hunter2-password") };
+        let key = crate::support::io::sink::encryption::get_encryption_key("INKLOG_QUERY_PW_KEY")
+            .expect("password key material");
+        let cipher = Aes256Gcm::new((&*key).into());
+        let nonce: [u8; 12] = rand::random();
+        let ciphertext = cipher
+            .encrypt(&aes_gcm::Nonce::from(nonce), b"secret".as_ref())
+            .expect("encrypt");
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&nonce);
+        blob.extend_from_slice(&ciphertext);
+        let p = dir.path().join("pw.log.enc");
+        std::fs::write(&p, &blob).unwrap();
+
+        let err = read_log_file(&p, Some("INKLOG_QUERY_PW_KEY")).unwrap_err();
+        assert!(
+            err.to_string().contains("unrecoverable"),
+            "password-mode v1 must be rejected before decryption, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_truncated_and_unsupported_encrypted_headers() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = "INKLOG_QUERY_TEST_KEY";
+
+        // v1(algo=1) 截断：<24 字节
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&[0u8; 4]);
+        let p = dir.path().join("v1-trunc.enc");
+        std::fs::write(&p, &blob).unwrap();
+        let err = read_log_file(&p, Some(env)).unwrap_err();
+        assert!(
+            err.to_string().contains("truncated v1 header"),
+            "got: {err}"
+        );
+
+        // v1 legacy（algo≠1）截断：<22 字节
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&7u16.to_le_bytes());
+        blob.extend_from_slice(&[0u8; 2]);
+        let p = dir.path().join("legacy-trunc.enc");
+        std::fs::write(&p, &blob).unwrap();
+        let err = read_log_file(&p, Some(env)).unwrap_err();
+        assert!(
+            err.to_string().contains("truncated legacy header"),
+            "got: {err}"
+        );
+
+        // v2 截断：<40 字节
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&2u16.to_le_bytes());
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&[0u8; 8]);
+        let p = dir.path().join("v2-trunc.enc");
+        std::fs::write(&p, &blob).unwrap();
+        let err = read_log_file(&p, Some(env)).unwrap_err();
+        assert!(
+            err.to_string().contains("truncated v2 header"),
+            "got: {err}"
+        );
+
+        // 未知版本
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&9u16.to_le_bytes());
+        blob.extend_from_slice(&[0u8; 40]);
+        let p = dir.path().join("v9.enc");
+        std::fs::write(&p, &blob).unwrap();
+        let err = read_log_file(&p, Some(env)).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported encryption version 9"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_decrypted_plaintext_not_utf8_reports_error() {
+        use aes_gcm::aead::Aead;
+        use aes_gcm::{Aes256Gcm, KeyInit};
+        let dir = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_QUERY_TEST_KEY", "0123456789abcdef0123456789abcdef");
+        }
+        let key = crate::support::io::sink::encryption::get_encryption_key("INKLOG_QUERY_TEST_KEY")
+            .expect("key");
+        let cipher = Aes256Gcm::new((&*key).into());
+        let nonce: [u8; 12] = rand::random();
+        let ciphertext = cipher
+            .encrypt(
+                &aes_gcm::Nonce::from(nonce),
+                vec![0xff, 0xfe, 0xfd].as_ref(),
+            )
+            .expect("encrypt");
+        let mut blob = Vec::new();
+        blob.extend_from_slice(ENCRYPTED_MAGIC);
+        blob.extend_from_slice(&2u16.to_le_bytes());
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        let salt: [u8; 16] = rand::random();
+        blob.extend_from_slice(&salt);
+        blob.extend_from_slice(&nonce);
+        blob.extend_from_slice(&ciphertext);
+        let p = dir.path().join("binary.enc");
+        std::fs::write(&p, &blob).unwrap();
+
+        let err = read_log_file(&p, Some("INKLOG_QUERY_TEST_KEY")).unwrap_err();
+        assert!(
+            err.to_string().contains("not valid UTF-8"),
+            "decrypted binary must be reported as UTF-8 failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_plain_log_not_utf8_reports_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("binary.log");
+        std::fs::write(&p, [0xff, 0xfe, b'a']).unwrap();
+        let err = read_log_file(&p, None).unwrap_err();
+        assert!(err.to_string().contains("not valid UTF-8"), "got: {err}");
+    }
+
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_roundtrip_and_invalid_utf8_payload() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+
+        // 正常 gz：解包后可检索
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(b"2026-09-11T01:00:00.000Z [ERROR] app::gz - squeezed\n")
+            .unwrap();
+        let gz = encoder.finish().unwrap();
+        let p = dir.path().join("app.log.gz");
+        std::fs::write(&p, &gz).unwrap();
+        let got = query_paths(
+            std::slice::from_ref(&p),
+            &QueryOptions {
+                keyword: Some("squeezed".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(got.len(), 1, "gz payload must be unpacked and searched");
+
+        // gz 解包后非 UTF-8 → 显性错误
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&[0xff, 0xfe]).unwrap();
+        let gz = encoder.finish().unwrap();
+        let p = dir.path().join("binary.log.gz");
+        std::fs::write(&p, &gz).unwrap();
+        let err = read_log_file(&p, None).unwrap_err();
+        assert!(
+            err.to_string().contains("not valid UTF-8"),
+            "decompressed binary must be reported, got: {err}"
+        );
+    }
+
+    #[cfg(feature = "zstd")]
+    #[test]
+    fn test_zstd_roundtrip_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let compressed = zstd::stream::encode_all(
+            b"2026-09-11T01:00:00.000Z [WARN] app::zst - compact\n".as_slice(),
+            3,
+        )
+        .unwrap();
+        let p = dir.path().join("app.log.zst");
+        std::fs::write(&p, &compressed).unwrap();
+        let got = query_paths(
+            &[p],
+            &QueryOptions {
+                keyword: Some("compact".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(got.len(), 1, "zst payload must be unpacked and searched");
+    }
+
+    #[cfg(feature = "zstd")]
+    #[test]
+    fn test_zstd_corrupt_stream_reports_decode_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("corrupt.log.zst");
+        std::fs::write(&p, [0x28, 0xb5, 0x2f, 0xfd, 0x00, 0xde, 0xad]).unwrap();
+        let err = read_log_file(&p, None).unwrap_err();
+        assert!(
+            err.to_string().contains("zstd decode failed") || err.to_string().contains("zstd"),
+            "corrupt zstd stream must surface a decode error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_missing_input_paths_return_ok_empty() {
+        // 展开后无任何文件（路径不存在）→ 空结果而非错误（与"跳过不可读
+        // 文件继续查询"的整体语义一致）
+        let missing = tempfile::tempdir().unwrap().path().join("nope.log");
+        let got = query_paths(&[missing], &QueryOptions::default(), None).unwrap();
+        assert!(got.is_empty());
+    }
 }

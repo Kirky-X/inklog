@@ -794,3 +794,70 @@ mod output_permission_tests {
         );
     }
 }
+
+// mod 整体按 gzip/zstd 门控：两者皆关时整个 mod 连同 `use super::*` 一并消失，
+// 避免 default features 下 unused import（clippy -D warnings 必红）；两种 cfg 均用
+// outer 形式，混合 inner/outer 会触发 clippy::mixed_attributes_style
+#[cfg(test)]
+#[cfg(any(feature = "gzip", feature = "zstd"))]
+mod error_path_tests {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "gzip")]
+    fn test_gzip_compress_file_missing_input_errors_after_artifact_created() {
+        // 输入在产物创建之后才打开：打开失败必须显性报错（产物残留由
+        // 调用方轮转流程清理）
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("nope.log");
+
+        let err = GzipCompression::default()
+            .compress_file(&missing, 6)
+            .unwrap_err();
+        assert!(
+            matches!(err, InklogError::IoError(ref e) if e.kind() == std::io::ErrorKind::NotFound),
+            "missing input must surface as NotFound io error, got: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "gzip")]
+    fn test_gzip_compress_file_roundtrip_and_source_removal() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plain = dir.path().join("rt.log");
+        std::fs::write(&plain, b"roundtrip payload").unwrap();
+
+        let out = GzipCompression::default()
+            .compress_file(&plain, 6)
+            .expect("compress");
+        assert!(out.exists(), "artifact must exist");
+        assert!(
+            !plain.exists(),
+            "source must be removed after successful compression"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "zstd")]
+    fn test_zstd_compress_file_missing_input_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("nope.log");
+
+        let err = compress_file(&missing, 3).unwrap_err();
+        assert!(
+            matches!(err, InklogError::IoError(ref e) if e.kind() == std::io::ErrorKind::NotFound),
+            "missing input must surface as NotFound io error, got: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "zstd")]
+    fn test_decompress_limited_roundtrip() {
+        // decompress_limited 只负责受限读取，解码由调用方接入 Decoder 流
+        let payload = b"limited decompression payload".repeat(64);
+        let compressed = compress_data(&payload, 3).unwrap();
+        let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(compressed)).unwrap();
+        let out = decompress_limited(&mut decoder, "zstd").unwrap();
+        assert_eq!(out, payload);
+    }
+}

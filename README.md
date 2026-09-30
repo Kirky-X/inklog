@@ -331,8 +331,8 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 # Docker 数据库集成测试
 docker compose -f docker/docker-compose.test.yml up -d
 
-# 覆盖率门禁（CI 要求 ≥80% 行覆盖）
-cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 80
+# 覆盖率门禁（CI 要求 ≥95% 行覆盖）
+cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95
 
 # 基准测试
 cargo bench --bench rc4_pipeline_bench
@@ -401,7 +401,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 | 📋 | 工作区依赖传导同步 | trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0 |
 | ✅ | CI 测试矩阵按数据库后端分组 | docker 流水线按 sqlite/postgres/mysql/duckdb 四后端分组验证（duckdb 为 embedded 后端，无需容器服务） |
 | ✅ | 补齐 MySQL 集成测试环境 | MySQL 8 服务已入 docker/docker-compose.test.yml，CI mysql 分支可跑集成测试 |
-| 📋 | 提升测试覆盖率 | llvm-cov 基线约 80%，向 95%+ 目标提升 |
+| ✅ | 提升测试覆盖率 | llvm-cov CI 口径 95.4%+（行覆盖），门禁 80→85→90→95 分阶段抬升至 95% |
 
 ---
 
@@ -430,7 +430,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 
 - **Conventional Commits**：`feat: ...` / `fix: ...` / `docs: ...` 等，commit-msg 钩子强制校验；
 - **pre-commit 钩子**：rustfmt、clippy（`-D warnings` 零告警）、`cargo deny check`、私钥扫描；
-- **pre-push 钩子**：`cargo audit` 与覆盖率 ≥80% 门禁。
+- **pre-push 钩子**：`cargo audit` 与覆盖率 ≥95% 门禁（与 CI coverage job 同口径：显式 features + `--lib`，命令见 lefthook.yml）。
 
 ### Pull Request 流程
 

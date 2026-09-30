@@ -68,7 +68,7 @@ CI 主口径（`--features "sqlite http cli kit compression parquet fast-masking
 
 | 组合 | 覆盖 | 结果 |
 | --- | --- | --- |
-| sqlite+http+cli+kit+compression+parquet+fast-masking+test-utils（CI 主口径） | 全 9 目标 | 1472 passed / 0 failed / 5 ignored |
+| sqlite+http+cli+kit+zstd+gzip+parquet+fast-masking+test-utils（CI 主口径） | 全 9 目标 | 1472 passed / 0 failed / 5 ignored |
 | 单独 performance 复跑 ×2 | performance 目标稳定复验 | 11+3i ×2 全绿 |
 | integration 串行（--test-threads=1） | shutdown 回归验证 | 95+1i 全绿（31.81s） |
 | 默认 features（无 db） | lib/e2e_advanced/performance 可编译 | 编译+运行通过 |
@@ -84,3 +84,22 @@ CI 主口径（`--features "sqlite http cli kit compression parquet fast-masking
 | deny | `cargo deny check` | 4 项 ok（licenses 经 clarify 绑定 LICENSE hash：inklog/oxcache/oxcache_macros/trait-kit/dbnexus） |
 | audit | `cargo audit` | rc=0（514 crate 无命中） |
 | MSRV | rust-version = 1.97.1（workspace 统一，CI dtolnay/rust-toolchain@1.97.1） | 一致 |
+| coverage | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95`（CI/pre-push 同口径） | 95.40%（行覆盖实测留档值；分阶段抬升留痕见 [治理复核 §8](../reviews/ws-r14-governance-review.md)） |
+
+## 📉 覆盖率口径与不可测组合标注
+
+门禁口径为 `--lib`（src 内联测试）+ 显式 feature 组合；`tests/` 集成测试与 docker 容器级用例（postgres/mysql 需容器服务）独立执行，不计入行覆盖门禁。四数据库后端互斥（dbnexus 红线），不存在 `--all-features` 口径；互斥组合的编译期防护由 lib.rs `compile_error!` 守卫承担，见 [ws-R14 治理复核](../reviews/ws-r14-governance-review.md)。裸 default（不带显式 features）同样不构成可用口径：`tests/cli_integration.rs` 被 `#![cfg(feature = "cli")]` 整体禁用后成为零覆盖空 target，llvm-cov 报告阶段崩溃——pre-push 覆盖率门禁因此与 CI 同用显式 features 口径（lefthook.yml）。
+
+以下行为在行覆盖口径下不可测或防御性保留，不计入覆盖目标（截至 v0.3.0-rc.6，llvm-cov 实测）：
+
+| 位置 | 性质 |
+| --- | --- |
+| `ring_buffered_file.rs` 后台 io 线程 write/flush/final-flush 错误分支 | 需注入底层 writer 失败，当前无测试注入点；错误计数与日志为降级路径 |
+| `ring_buffered_file.rs` rename+copy 双失败、cleanup 线程 panic 捕获 | 需构造目录权限/线程崩溃的确定性环境，双失败为持续故障环境的显性上报 |
+| `compression.rs` 压缩后 `remove_file` 失败 warn | 源与产物同目录，无法确定性构造"产物可写而源删除失败"场景 |
+| `object_pool.rs` oxcache cache build/get/set 失败映射 | 防御性错误映射，底层缓存正常路径下不返回错误 |
+| `query.rs` 两次 `expand_paths` 间文件系统变化（TOCTOU 兜底） | 需查询中途删除输入文件，属竞态防御分支 |
+| `metrics.rs` 降级恢复 `max_retries` 封顶分支 | 状态机每次重新降级即重置 retry 计数，封顶当前不可达（附带发现，见治理复核记录） |
+| 各测试模块 `assert!`/`panic!` 的消息格式化参数 | 惰性求值，仅在断言失败时执行 |
+
+约束声明：本次覆盖率抬升未删除任何既有测试、未放松任何断言（R-inklog-007 红线）；全部增量来自新增测试（错误分支、边界值、Debug/Display 诊断面、异步生命周期转发、降级状态机）。

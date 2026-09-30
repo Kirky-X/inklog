@@ -331,8 +331,8 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 # Docker database integration tests
 docker compose -f docker/docker-compose.test.yml up -d
 
-# Coverage gate (CI requires ≥80% line coverage)
-cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 80
+# Coverage gate (CI requires ≥95% line coverage)
+cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95
 
 # Benchmarks
 cargo bench --bench rc4_pipeline_bench
@@ -401,7 +401,7 @@ Phased goals compiled from the existing release plan (timing may adjust with the
 | 📋 | Workspace dependency lockstep | trait-kit 0.5.0, oxcache 0.5.0, dbnexus 0.6.0 |
 | ✅ | CI test matrix grouped by database backend | The Docker pipeline validates the four mutually exclusive backends (sqlite/postgres/mysql/duckdb); duckdb is embedded and needs no container service |
 | ✅ | Provision the MySQL integration environment | A MySQL 8 service is provided in docker/docker-compose.test.yml; the CI mysql branch runs the integration tests |
-| 📋 | Raise test coverage | llvm-cov baseline is about 80%, moving toward the 95%+ target |
+| ✅ | Raise test coverage | llvm-cov CI-scope line coverage 95.4%+, gate raised in stages 80→85→90→95 to 95% |
 
 ---
 
@@ -430,7 +430,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 
 - **Conventional Commits**: `feat: ...` / `fix: ...` / `docs: ...`, enforced by the commit-msg hook;
 - **pre-commit hooks**: rustfmt, clippy (`-D warnings`, zero warnings), `cargo deny check`, private-key scan;
-- **pre-push hooks**: `cargo audit` and the coverage ≥80% gate.
+- **pre-push hooks**: `cargo audit` and the coverage ≥95% gate (same scope as the CI coverage job: explicit features + `--lib`, see lefthook.yml).
 
 ### Pull Request Process
 

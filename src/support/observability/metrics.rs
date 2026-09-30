@@ -2386,4 +2386,171 @@ mod histogram_export_tests {
         );
         assert!(out.contains("inklog_write_latency_us_count 3"));
     }
+
+    #[test]
+    fn test_get_status_all_healthy_reports_channel_usage() {
+        let metrics = Metrics::new();
+        metrics.update_sink_health("database", true, None);
+        let status = metrics.get_status(10, 100);
+        assert!(status.overall_status.is_fully_healthy());
+        assert!(
+            (status.channel_usage - 0.1).abs() < 1e-9,
+            "channel_usage must be len/cap, got {}",
+            status.channel_usage
+        );
+    }
+
+    #[test]
+    fn test_get_status_mixed_notstarted_and_healthy_is_healthy() {
+        // 一个已注册健康 + 一个未启动：非全健康、无故障/降级、非全未启动
+        // → 整体仍判 Healthy
+        let metrics = Metrics::new();
+        metrics.update_sink_health("database", true, None);
+        let status = metrics.get_status(0, 0);
+        assert!(matches!(status.overall_status, SinkStatus::Healthy));
+        // channel_cap=0 时 usage 退化为 0（除零防护）
+        assert_eq!(status.channel_usage, 0.0);
+    }
+
+    #[test]
+    fn test_fallback_disabled_failure_reports_none() {
+        let monitor = SinkHealthMonitor::new(FallbackConfig {
+            enabled: false,
+            ..FallbackConfig::default()
+        });
+        let action = monitor.check_and_fallback("database", false, Some("boom"));
+        assert!(
+            matches!(action, FallbackAction::None),
+            "disabled fallback must not escalate, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn test_failure_below_threshold_retries_then_falls_back() {
+        let monitor = SinkHealthMonitor::new(FallbackConfig {
+            failure_threshold: 3,
+            ..FallbackConfig::default()
+        });
+
+        for attempt in 1..3 {
+            let action = monitor.check_and_fallback("database", false, Some("boom"));
+            assert!(
+                matches!(action, FallbackAction::Retry { attempt: a, .. } if a == attempt),
+                "below-threshold failures must retry, got {action:?}"
+            );
+        }
+        let action = monitor.check_and_fallback("database", false, Some("boom"));
+        match action {
+            FallbackAction::Fallback { target, .. } => {
+                assert_eq!(target, "file", "database failure falls back to file sink")
+            }
+            other => panic!("threshold breach must trigger fallback, got {other:?}"),
+        }
+        assert!(matches!(
+            monitor.get_fallback_state("database"),
+            FallbackState::Fallback { .. }
+        ));
+    }
+
+    #[test]
+    fn test_recovery_from_fallback_schedules_attempt_with_backoff() {
+        let monitor = SinkHealthMonitor::new(FallbackConfig {
+            failure_threshold: 1,
+            max_retries: 2,
+            initial_delay_ms: 10,
+            ..FallbackConfig::default()
+        });
+        let fallback_target = monitor
+            .check_and_fallback("database", false, Some("boom"))
+            .fail_for_test();
+        assert_eq!(
+            fallback_target, "file",
+            "database failure must fall back to file sink"
+        );
+
+        // Fallback 态下的健康检查触发带指数退避的恢复尝试
+        let action = monitor.check_and_fallback("database", true, None);
+        assert!(
+            matches!(
+                action,
+                FallbackAction::AttemptRecovery {
+                    attempt: 1,
+                    delay_ms: 20,
+                    ..
+                }
+            ),
+            "healthy check in Fallback state must attempt recovery with 2x backoff, got {action:?}"
+        );
+        // 恢复等待期的健康检查返回 Wait（不重置退避）
+        let waiting = monitor.check_and_fallback("database", true, None);
+        assert!(
+            matches!(waiting, FallbackAction::Wait { .. }),
+            "in-flight recovery must wait, got {waiting:?}"
+        );
+        // 注：max_retries 封顶分支在当前状态机下不可达——每次重新降级都会
+        // 重置 retry 计数（见 reviews/ws-r14-governance-review.md 附带发现）
+    }
+
+    #[test]
+    fn test_encryption_error_falls_back_to_plaintext() {
+        let monitor = SinkHealthMonitor::with_defaults();
+        let action = monitor.handle_encryption_error("file", "key rotated");
+        match action {
+            FallbackAction::Fallback { target, .. } => {
+                assert_eq!(
+                    target, "plaintext",
+                    "encryption failure degrades to plaintext"
+                )
+            }
+            other => panic!("encryption error must fall back, got {other:?}"),
+        }
+        assert!(matches!(
+            monitor.get_fallback_state("file"),
+            FallbackState::Fallback { .. }
+        ));
+    }
+
+    #[test]
+    fn test_confirm_recovery_resets_fallback_state() {
+        let monitor = SinkHealthMonitor::new(FallbackConfig {
+            failure_threshold: 1,
+            ..FallbackConfig::default()
+        });
+        let fallback_target = monitor
+            .check_and_fallback("database", false, Some("boom"))
+            .fail_for_test();
+        assert_eq!(
+            fallback_target, "file",
+            "database failure must fall back to file sink"
+        );
+        assert!(matches!(
+            monitor.get_fallback_state("database"),
+            FallbackState::Fallback { .. }
+        ));
+
+        monitor.confirm_recovery("database");
+        assert!(
+            matches!(
+                monitor.get_fallback_state("database"),
+                FallbackState::Active
+            ),
+            "confirmed recovery must return to Active"
+        );
+        // Active 态的健康检查不再产生恢复动作
+        assert!(matches!(
+            monitor.check_and_fallback("database", true, None),
+            FallbackAction::None
+        ));
+    }
+}
+
+#[cfg(test)]
+impl FallbackAction {
+    /// 测试辅助：断言为 Fallback 并取回 target（避免每个用例重复 match）。
+    fn fail_for_test(self) -> String {
+        match self {
+            FallbackAction::Fallback { target, .. } => target,
+            other => panic!("expected Fallback action, got {other:?}"),
+        }
+    }
 }

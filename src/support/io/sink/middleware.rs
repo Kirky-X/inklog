@@ -254,6 +254,7 @@ impl LogSink for MiddlewareSink {
 mod tests {
     use super::*;
     use parking_lot::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tracing::Level;
 
     fn record(level: Level, message: &str) -> LogRecord {
@@ -274,6 +275,28 @@ mod tests {
             Ok(())
         }
         async fn shutdown(&self) -> Result<(), InklogError> {
+            Ok(())
+        }
+    }
+
+    /// 计数 flush/shutdown 调用的探针：转发面测试用 CollectingSink 观测不到
+    /// 这两个生命周期方法（其实现为空操作），必须靠计数验证委托真实发生。
+    struct LifecycleProbeSink {
+        flushes: AtomicUsize,
+        shutdowns: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LogSink for LifecycleProbeSink {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            Ok(())
+        }
+        async fn flush(&self) -> Result<(), InklogError> {
+            self.flushes.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            self.shutdowns.fetch_add(1, Ordering::Relaxed);
             Ok(())
         }
     }
@@ -462,5 +485,64 @@ mod tests {
             .healthy
             .store(false, std::sync::atomic::Ordering::Relaxed);
         assert!(!sink.is_healthy(), "health must be forwarded");
+    }
+
+    #[tokio::test]
+    async fn test_middleware_sink_flush_and_shutdown_forwarded() {
+        let inner = Arc::new(LifecycleProbeSink {
+            flushes: AtomicUsize::new(0),
+            shutdowns: AtomicUsize::new(0),
+        });
+        let sink = MiddlewareSink::new(inner.clone() as Arc<dyn LogSink>, MiddlewareChain::new());
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+        assert_eq!(
+            inner.flushes.load(Ordering::Relaxed),
+            1,
+            "flush must be delegated to the inner sink exactly once"
+        );
+        assert_eq!(
+            inner.shutdowns.load(Ordering::Relaxed),
+            1,
+            "shutdown must be delegated to the inner sink exactly once"
+        );
+    }
+
+    #[test]
+    fn test_middleware_names_and_chain_accessor() {
+        assert_eq!(
+            LevelFilterMiddleware::new("warn")
+                .expect("valid level")
+                .name(),
+            "level-filter"
+        );
+        assert_eq!(EnrichMiddleware::new("k", "v").name(), "enrich");
+        assert_eq!(
+            KeywordDropMiddleware {
+                keyword: "x".to_string()
+            }
+            .name(),
+            "keyword-drop"
+        );
+        assert_eq!(ReroundMiddleware.name(), "reround");
+
+        let chain = MiddlewareChain::new().push(Arc::new(EnrichMiddleware::new("k", "v")));
+        let sink = MiddlewareSink::new(
+            Arc::new(CollectingSink {
+                messages: Mutex::new(Vec::new()),
+            }),
+            chain,
+        );
+        assert_eq!(sink.chain().len(), 1);
+    }
+
+    #[test]
+    fn test_chain_debug_lists_middleware_names() {
+        let chain = MiddlewareChain::new()
+            .push(Arc::new(EnrichMiddleware::new("k", "v")))
+            .push(Arc::new(ReroundMiddleware));
+        let debug = format!("{chain:?}");
+        assert!(debug.contains("enrich"), "debug must list middleware names");
+        assert!(debug.contains("reround"));
     }
 }
