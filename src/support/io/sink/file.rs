@@ -539,7 +539,7 @@ impl FileSink {
         }
 
         // 年龄清理：独立于大小分支执行——此前藏在 else 里，max_total_size
-        // 不可解析时过期文件永远不会被清理（审计 M14 修复）
+        // 不可解析时过期文件永远不会被清理（审计修复）
         for (path, modified) in candidates.iter().take(deletable) {
             let modified_utc: DateTime<Utc> = (*modified).into();
             if modified_utc < cutoff_date
@@ -3117,7 +3117,7 @@ mod tests {
         }
     }
 
-    // ==================== T016-T019 审计加固测试 ====================
+    // ==================== 审计加固测试 ====================
 
     #[cfg(unix)]
     #[test]
@@ -3186,7 +3186,7 @@ mod tests {
 
     #[test]
     fn test_age_cleanup_runs_when_max_total_size_unparsable() {
-        // 审计 M14：年龄清理曾被 max_total_size 分支遮蔽——parse 失败时
+        // 审计：年龄清理曾被 max_total_size 分支遮蔽——parse 失败时
         // 过期文件永远不会被清理。修复后年龄清理独立执行。
         let dir = tempdir().unwrap();
         let log_path = dir.path().join("test.log");
@@ -3252,7 +3252,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_writes_produce_intact_lines() {
-        // T017：多任务并发写 1000 条后行数完整、每行可解析（BufWriter 无交错）
+        // 多任务并发写 1000 条后行数完整、每行可解析（BufWriter 无交错）
         let dir = tempdir().unwrap();
         let path = dir.path().join("concurrent.log");
         let config = FileSinkConfig {
