@@ -72,6 +72,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::error::InklogError;
 
+/// mask 入口的单条输入上限（字节）：超过则跳过脱敏原样放行并留痕——
+/// 21 趟线性扫描对超大文本是 CPU 放大器。secret-scan 门共用同一上限。
+pub(crate) const MAX_MASK_INPUT_BYTES: usize = 1024 * 1024;
+
 /// Word-boundary regex patterns for sensitive field detection.
 /// Uses \b (word boundary) to avoid false positives like "cakey" matching "key".
 static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
@@ -103,6 +107,11 @@ static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| 
         regex::Regex::new(r"(?i)\b(client[_-]?secret|client[_-]?id)\b").unwrap(),
         // Other sensitive patterns
         regex::Regex::new(r"(?i)\b(refresh[_-]?token|pin|pin[_-]?code|two[_-]?factor|totp|backup[_-]?code|recovery[_-]?code)\b").unwrap(),
+        // 中文键名族（secret-scan）：键名以敏感词收尾即视为敏感字段
+        // （数据库密码、访问令牌、api密钥）；后缀锚定排除「密码学」
+        // 「令牌环」等以敏感词开头的一般词汇
+        #[cfg(feature = "secret-scan")]
+        regex::Regex::new(r"(密钥|令牌|密码|口令|凭证|凭据|私钥)$").unwrap(),
     ]
 });
 
@@ -184,6 +193,9 @@ pub struct DataMasker {
     /// Aho-Corasick fast path for literal-pattern rules.
     #[cfg(feature = "fast-masking")]
     ac_masker: Option<super::masking_ac::AcMasker>,
+    /// secret-scan 出站门（`builder().with_secret_scan` 注入；None = 不参与）。
+    #[cfg(feature = "secret-scan")]
+    secret_gate: Option<super::secret_scan::SecretScanGate>,
 }
 
 /// Type alias for the custom apply function used in masking rules.
@@ -271,6 +283,8 @@ impl DataMasker {
             rules,
             #[cfg(feature = "fast-masking")]
             ac_masker: None,
+            #[cfg(feature = "secret-scan")]
+            secret_gate: None,
         }
     }
 
@@ -310,7 +324,6 @@ impl DataMasker {
     /// 时视为已被上游处理，直接原样返回、不再套用规则——双开关叠加下不会
     /// 产生 REDACTED 套 REDACTED 的嵌套标记。
     pub fn mask(&self, text: &str) -> String {
-        const MAX_MASK_INPUT_BYTES: usize = 1024 * 1024;
         // 超大输入跳过掩码：21 趟线性扫描对 1 MiB+ 文本是 CPU 放大器，
         // 且此类输入通常是误用（整段请求体贴进日志），原样放行并留痕
         if text.len() > MAX_MASK_INPUT_BYTES {
@@ -328,16 +341,32 @@ impl DataMasker {
             return text.to_string();
         }
 
+        // secret-scan 门先于规则集执行：在原文上定位裸 secret，归因计数
+        // 不被前序规则改写干扰。Cow 借用保证无门路径零额外分配。
+        #[cfg(feature = "secret-scan")]
+        let gated = match self.secret_gate.as_ref() {
+            Some(gate) => std::borrow::Cow::Owned(gate.mask(text)),
+            None => std::borrow::Cow::Borrowed(text),
+        };
+        #[cfg(not(feature = "secret-scan"))]
+        let gated = std::borrow::Cow::Borrowed(text);
+
+        self.apply_rule_pipeline(&gated)
+    }
+
+    /// 规则管线尾段：fast-masking（可选）+ 启用规则串行改写。`mask` 与
+    /// `mask_checked` 的 Ok 路径共用本段，保证两出口替换语义一致。
+    fn apply_rule_pipeline(&self, gated: &str) -> String {
         #[cfg(feature = "fast-masking")]
         let mut result = {
             if let Some(ref ac) = self.ac_masker {
-                ac.mask_fast(text)
+                ac.mask_fast(gated)
             } else {
-                text.to_string()
+                gated.to_string()
             }
         };
         #[cfg(not(feature = "fast-masking"))]
-        let mut result = text.to_string();
+        let mut result = gated.to_string();
 
         for rule in &self.rules {
             if rule.is_enabled() {
@@ -345,6 +374,29 @@ impl DataMasker {
             }
         }
         result
+    }
+
+    /// fail-closed 出口（feature `secret-scan`）：替换语义同 [`Self::mask`]，
+    /// 但挂有 secret-scan 门时，单条输入内任一模式命中数超过门限、或输入
+    /// 超过掩码上限（不扫描即不可证安全）即返回 `Err`，脱敏输出不可用。
+    /// Ok 路径与 `mask` 共用规则管线尾段（门产物继续过 fast-masking 与
+    /// 规则集，PII 不漏）。未挂门时退化为 `mask()`（永远 `Ok`）。
+    ///
+    /// 与 `mask` 的分叉点：超大输入在 `mask` 原样放行（fail-open，向后
+    /// 兼容），在 `mask_checked` 拒绝（fail-closed）。
+    ///
+    /// # Errors
+    /// - `InklogError::SecretScanLimit`：单条输入内某模式命中数超过门限。
+    /// - `InklogError::SecretScanOversizedInput`：输入超过掩码上限。
+    #[cfg(feature = "secret-scan")]
+    pub fn mask_checked(&self, text: &str) -> Result<String, InklogError> {
+        match self.secret_gate.as_ref() {
+            Some(gate) => {
+                let gated = gate.mask_checked(text)?;
+                Ok(self.apply_rule_pipeline(&gated))
+            }
+            None => Ok(self.mask(text)),
+        }
     }
 
     /// 检测面：报告全部已启用规则在 `text` 中的命中（规则名 + 字节区间）。
@@ -540,6 +592,9 @@ pub struct DataMaskerBuilder {
     disabled_builtins: Vec<String>,
     use_builtins: bool,
     custom_registry: Option<super::masking_registry::MaskRuleRegistry>,
+    /// secret-scan 出站门（feature `secret-scan`）。
+    #[cfg(feature = "secret-scan")]
+    secret_gate: Option<super::secret_scan::SecretScanGate>,
 }
 
 impl DataMaskerBuilder {
@@ -549,12 +604,24 @@ impl DataMaskerBuilder {
             disabled_builtins: Vec::new(),
             use_builtins: true,
             custom_registry: None,
+            #[cfg(feature = "secret-scan")]
+            secret_gate: None,
         }
     }
 
     /// Add a custom rule to the masker.
     pub fn add_rule(mut self, rule: MaskRule) -> Self {
         self.extra_rules.push(rule);
+        self
+    }
+
+    /// 挂接 secret-scan 出站门（feature `secret-scan`）。
+    ///
+    /// 门先于规则集执行：在原文上定位裸 secret 并归因计数；`mask` 失败
+    /// 放行，`mask_checked` 超限 fail-closed。
+    #[cfg(feature = "secret-scan")]
+    pub fn with_secret_scan(mut self, gate: super::secret_scan::SecretScanGate) -> Self {
+        self.secret_gate = Some(gate);
         self
     }
 
@@ -623,11 +690,17 @@ impl DataMaskerBuilder {
             DataMasker {
                 rules: regex_rules,
                 ac_masker,
+                #[cfg(feature = "secret-scan")]
+                secret_gate: self.secret_gate,
             }
         }
 
         #[cfg(not(feature = "fast-masking"))]
-        DataMasker { rules }
+        DataMasker {
+            rules,
+            #[cfg(feature = "secret-scan")]
+            secret_gate: self.secret_gate,
+        }
     }
 }
 
@@ -1611,10 +1684,14 @@ mod tests {
     #[test]
     fn test_mask_api_key_value() {
         let masker = DataMasker::new();
-        let message = "api_key=sk-1234567890abcdefghijABCDEFGH";
-        let result = masker.mask(message);
+        // 夹具经 format! 拼装：pre-commit no-private-key 钩子按
+        // 「sk- + 20 位连续字母数字」扫描暂存源文件，整段密钥形态
+        // 字面量不能落在源码里
+        let secret = format!("sk-{}", "1234567890abcdefghijABCDEFGH");
+        let message = format!("api_key={secret}");
+        let result = masker.mask(&message);
         assert!(result.contains("***REDACTED***"));
-        assert!(!result.contains("sk-1234567890abcdefghijABCDEFGH"));
+        assert!(!result.contains(&secret));
     }
 
     #[test]
@@ -2544,5 +2621,141 @@ mod tests {
         }
 
         reset_ops_hub_for_tests();
+    }
+
+    // ---- secret-scan：中文键名组 + 出站门挂载（feature 门控） ----
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_chinese_sensitive_keys_hit() {
+        for key in [
+            "密码",
+            "数据库密码",
+            "访问令牌",
+            "api密钥",
+            "登录口令",
+            "凭证",
+            "凭据",
+            "服务私钥",
+        ] {
+            assert!(
+                DataMasker::is_sensitive_field(key),
+                "chinese sensitive key must hit: {key}"
+            );
+        }
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_chinese_non_sensitive_keys_miss() {
+        // 后缀锚定：以敏感词开头的一般词汇（密码学/令牌环）与公钥不命中
+        for key in ["密码学", "令牌环", "公钥", "名称", "钥"] {
+            assert!(
+                !DataMasker::is_sensitive_field(key),
+                "generic key must not hit: {key}"
+            );
+        }
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_mask_value_chinese_key_masks_value() {
+        let masker = DataMasker::new();
+        let mut fields = serde_json::json!({"数据库密码": "hunter2", "备注": "ok"});
+        masker.mask_value(&mut fields);
+        assert_eq!(fields["数据库密码"], "***MASKED***");
+        assert_eq!(fields["备注"], "ok");
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_builder_gate_masks_bare_secret_and_counts() {
+        use crate::support::processing::{SecretPatternRegistry, SecretScanGate};
+        let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins());
+        let masker = DataMasker::builder().with_secret_scan(gate.clone()).build();
+        let raw = "connected with sk-proj-abcdefghijklmnopqrstuvwxyz123456 done";
+        let out = masker.mask(raw);
+        assert!(out.contains("***REDACTED_API_KEY***"), "{out}");
+        assert!(!out.contains("sk-proj-"), "{out}");
+        // 门先于规则集执行：归因计数基于原文，不被前序规则改写干扰
+        assert_eq!(
+            gate.hit_count("openai_sk"),
+            Some(1),
+            "gate must see raw text before rules"
+        );
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_mask_checked_fails_closed_over_limit() {
+        use crate::support::processing::{SecretPatternRegistry, SecretScanGate};
+        let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins()).with_match_limit(1);
+        let masker = DataMasker::builder().with_secret_scan(gate).build();
+        let raw = "x sk-proj-abcdefghijklmnopqrstuvwxyz123456 y \
+                   sk-proj-abcdefghijklmnopqrstuvwxyz789";
+        assert!(
+            matches!(
+                masker.mask_checked(raw),
+                Err(InklogError::SecretScanLimit { .. })
+            ),
+            "over-limit must fail closed"
+        );
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_mask_checked_without_gate_delegates_to_mask() {
+        let masker = DataMasker::new();
+        let text = "phone 13812345678";
+        let out = masker.mask_checked(text).unwrap();
+        assert_eq!(out, masker.mask(text));
+        assert!(!out.contains("13812345678"));
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_mask_checked_composes_rule_pipeline() {
+        // mask_checked Ok 路径与 mask 同语义：门产物继续走规则集，PII 不漏
+        use crate::support::processing::{SecretPatternRegistry, SecretScanGate};
+        let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins());
+        let masker = DataMasker::builder().with_secret_scan(gate).build();
+        let out = masker
+            .mask_checked("mail a@b.com key sk-proj-abcdefghijklmnopqrstuvwxyz123456")
+            .expect("single hit is under limit");
+        assert!(out.contains("***REDACTED_API_KEY***"), "{out}");
+        assert!(
+            out.contains("**@**.***"),
+            "email must be masked by the rule pipeline: {out}"
+        );
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_mask_checked_oversized_fails_closed() {
+        // 超大输入在 mask_checked 是拒绝（Err）而非 mask 的原样放行：
+        // 不扫描即不可证安全，fail-closed 出口不放行未经检测的内容
+        use crate::support::processing::{SecretPatternRegistry, SecretScanGate};
+        let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins());
+        let masker = DataMasker::builder().with_secret_scan(gate).build();
+        let big = format!("x {}", "y".repeat(1024 * 1024 + 1));
+        assert!(
+            matches!(
+                masker.mask_checked(&big),
+                Err(InklogError::SecretScanOversizedInput { .. })
+            ),
+            "oversized input must fail closed"
+        );
+    }
+
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_gate_composes_with_email_rules() {
+        // 门替换产物继续走规则集：裸 secret 与 PII 在同一出口各自改写
+        use crate::support::processing::{SecretPatternRegistry, SecretScanGate};
+        let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins());
+        let masker = DataMasker::builder().with_secret_scan(gate).build();
+        let out = masker.mask("mail a@b.com key sk-proj-abcdefghijklmnopqrstuvwxyz123456");
+        assert!(out.contains("***REDACTED_API_KEY***"), "{out}");
+        assert!(out.contains("**@**.***"), "{out}");
     }
 }

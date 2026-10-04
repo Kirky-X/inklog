@@ -799,6 +799,87 @@ let record = LogRecord::new(
 
 `LogLevel` 枚举实现 `FromStr` 与 `Display`，用于级别解析与比较（非法输入返回 `LogLevelParseError`）。
 
+## 🛡️ Secret 出站脱敏门（feature `secret-scan`）
+
+feature `secret-scan`（默认关闭）提供三类类型，挂到 sink 写出前的掩码点（与 encryption 同层）。启用后 `DataMasker` 键名检测额外覆盖中文敏感键名（`密码`/`令牌`/`密钥`/`口令`/`凭证`/`凭据`/`私钥` 结尾的键），并经 `DataMasker::builder().with_secret_scan(gate)` 注入门。
+
+### SecretPatternRegistry
+
+值形态正则注册表：识别无键名上下文的裸 secret（`sk-` 前缀、PEM 私钥块、AWS AKIA 形态、GitHub/Slack/Stripe/Google 令牌、JWT 三段式等九类内置形态）。
+
+```rust
+pub struct SecretPatternRegistry { /* ... */ }
+
+impl SecretPatternRegistry {
+    pub fn with_builtins() -> Self;                                        // 九类内置形态
+    pub fn register(&mut self, name: &str, pattern: &str, replacement: &str)
+        -> Result<(), InklogError>;                                        // 重名查重 + 正则编译校验
+    pub fn patterns(&self) -> &[SecretPattern];
+    pub fn scan(&self, text: &str) -> Vec<SecretMatch>;                    // 纯检测：模式名 + 字节区间
+}
+
+pub struct SecretMatch { pub pattern: String, pub start: usize, pub end: usize }
+```
+
+### EntropyScanner
+
+值熵扫描器：对文本 token（base64 核心字母 `[A-Za-z0-9+/]`，默认 ≥20 字符）做 Shannon 熵判定，阈值可配。与 `encryption::validate_key_entropy` 分域——那边校验加密密钥字节（bits/byte），这边探测日志内容（bits/char）。
+
+```rust
+pub struct EntropyScanner { /* ... */ }
+
+impl EntropyScanner {
+    pub fn new() -> Self;                                                  // 阈值 4.5 bits/char、最短 20 字符
+    pub fn with_config(threshold_bits: f64, min_token_chars: usize) -> Self;
+    pub fn shannon_entropy(input: &str) -> f64;
+    pub fn scan(&self, text: &str) -> Vec<(usize, usize)>;                 // 高熵 token 字节区间
+}
+```
+
+### SecretScanGate
+
+出站门：组合注册表与熵扫描，逐模式累计计数 + 超限 fail-closed。`Clone` 共享计数器（sink 各持克隆时全局聚合）。
+
+```rust
+pub struct SecretScanGate { /* ... */ }
+
+impl SecretScanGate {
+    pub fn new(registry: SecretPatternRegistry) -> Self;
+    pub fn with_entropy(self, scanner: EntropyScanner) -> Self;            // 默认关闭
+    pub fn with_match_limit(self, limit: usize) -> Self;                   // 默认 64（单条输入单模式命中上限）
+    pub fn mask(&self, text: &str) -> String;                              // 失败放行：替换 + 计数
+    pub fn mask_checked(&self, text: &str) -> Result<String, InklogError>; // 超限 Err，输出不可用
+    pub fn scan(&self, text: &str) -> Vec<SecretMatch>;                    // 纯检测，不计数
+    pub fn hit_counts(&self) -> Vec<(String, u64)>;
+    pub fn hit_count(&self, pattern: &str) -> Option<u64>;
+    pub fn total_hits(&self) -> u64;
+}
+```
+
+### `DataMasker::mask_checked`
+
+```rust
+#[cfg(feature = "secret-scan")]
+pub fn mask_checked(&self, text: &str) -> Result<String, InklogError>
+```
+
+fail-closed 出口：挂有门时，Ok 路径与 `mask` 共用规则管线（门产物继续过 fast-masking 与规则集，替换语义一致，PII 不漏）；单条输入内任一模式命中数超过门限返回 `Err(InklogError::SecretScanLimit)`，输入超过 1 MiB 掩码上限返回 `Err(InklogError::SecretScanOversizedInput)`（`mask` 对同输入原样放行，两出口在此分叉）。未挂门时退化为 `mask`（永远 `Ok`）。既有 `mask` 签名不变（失败放行，向后兼容）。
+
+**示例**
+
+```rust
+use inklog::{DataMasker, EntropyScanner, SecretPatternRegistry, SecretScanGate};
+
+let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins())
+    .with_entropy(EntropyScanner::new())
+    .with_match_limit(64);
+let probe = gate.clone();
+let masker = DataMasker::builder().with_secret_scan(gate).build();
+
+let out = masker.mask_checked("token=sk-proj-abcdefghijklmnopqrstuvwxyz123456")?;
+assert_eq!(probe.hit_count("openai_sk"), Some(1));
+```
+
 ## 🔌 Sink 类型
 
 ### LogSink trait

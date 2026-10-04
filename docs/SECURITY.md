@@ -165,6 +165,7 @@ inklog 是安全优先的 Rust 日志基础设施，为需要严格数据保护�
 | 密钥内存清零 | `zeroize` | 密钥离开作用域自动清零 |
 | KMS 密钥提供 | `support::security`（`kms` feature） | `EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP |
 | 数据脱敏 | `support::processing::masking` | 21 条内置正则规则（fancy-regex 环视实现 CJK 友好边界）+ 敏感字段名检测 + 自定义注册表；console/file/database/net/otlp 全部出口默认掩码（`masking_enabled` 门控），递归深度 16 层上限、单条 1 MiB 上限 |
+| Secret 出站脱敏门 | `support::processing::secret_scan`（`secret-scan` feature） | 值形态正则注册表（`sk-` 前缀/PEM 私钥块/AWS AKIA 等九类裸 secret）+ 值熵扫描（Shannon，阈值可配）+ 逐模式计数；`mask_checked` 超限 fail-closed 拒发输出，`mask` 失败放行向后兼容；中文敏感键名组并入键名检测 |
 | 路径安全 | `validation::path`（PathValidator） | 路径穿越防护，禁止写入用户主目录与密钥文件 |
 | 内容净化 | `validation::sanitize`（LogSanitizer） | 日志注入与控制字符防护 |
 | SQL 注入防护 | DatabaseSink / `integrations::infra::database` | 表名白名单校验 + 参数化查询 |
@@ -544,6 +545,38 @@ masking_enabled = true  # 启用数据脱敏（默认: true）
 # 环境变量
 export INKLOG_GLOBAL_MASKING_ENABLED=true
 ```
+
+### Secret 出站脱敏门（feature `secret-scan`）
+
+键名触发识别不了**无键名上下文的裸 secret**（日志正文里的 `sk-` 密钥、PEM 私钥块、AWS AKIA 形态等）。`secret-scan` feature（默认关闭）提供三层补充能力，经 `DataMasker` 挂到 sink 写出前的掩码点：
+
+- **值形态注册表** `SecretPatternRegistry`：九类内置形态正则（前缀 + 长度 + 字符集三要素），可注册自定义形态；
+- **值熵扫描** `EntropyScanner`：对 base64 核心字母 token（默认 ≥20 字符）做 Shannon 熵判定（阈值可配，默认 4.5 bits/char；hex 全集熵上限 4.0，哈希/UUID 族不误伤）。与 `encryption::validate_key_entropy` 分域——那边校验加密密钥字节，这边探测日志内容；
+- **逐模式计数 + fail-closed** `SecretScanGate`：每条模式累计命中数可查（`hit_counts`）；`mask_checked` 在单条输入内任一模式命中数超门限时返回 `Err(InklogError::SecretScanLimit)` 拒发输出，`mask` 保持失败放行（向后兼容）。
+
+```rust
+use inklog::{DataMasker, EntropyScanner, SecretPatternRegistry, SecretScanGate};
+
+let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins())
+    .with_entropy(EntropyScanner::new())
+    .with_match_limit(64);
+let probe = gate.clone();
+
+// 注入 sink 出站掩码点（console/file/net/ring_buffered 均经 with_masker 挂接）
+let masker = DataMasker::builder().with_secret_scan(gate).build();
+
+let out = masker.mask_checked("token=sk-proj-abcdefghijklmnopqrstuvwxyz123456")?;
+assert_eq!(probe.hit_count("openai_sk"), Some(1));
+```
+
+启用该 feature 后，`DataMasker` 键名检测同时覆盖中文敏感键名（以 `密码`/`令牌`/`密钥`/`口令`/`凭证`/`凭据`/`私钥` 结尾的键，如 `数据库密码`、`访问令牌`；后缀锚定排除 `密码学` 等一般词汇）。
+
+#### 接线边界与语义边界（必读）
+
+- **sink 默认走 fail-open**：库内全部 sink 出站路径（database/console/file/ring_buffered_file/net/otlp）调用 `DataMasker::mask()`——命中照常替换、超限也放行。`mask_checked()` 的 fail-closed 拒发是**消费方显式选择**的能力（自定义 sink 或自建写出管线调用它），默认不改变任何 sink 行为（向后兼容）。需要 fail-closed 落盘保护的部署须自行在写出点调用 `mask_checked` 并处理 `Err`。
+- **超大输入（> 1 MiB）两出口分叉**：`mask` 原样放行（跳过扫描，留 warn——21 趟线性扫描对超大文本是 CPU 放大器）；`mask_checked` 返回 `Err(InklogError::SecretScanOversizedInput)` 拒绝输出——不扫描即不可证安全，fail-closed 出口不豁免。
+- **脱敏标记不再关闭门的检测面**：门（`SecretScanGate`）不对 `***REDACTED` 等标记做子串短路——标记文本本身不被内置模式命中（幂等自然成立），同条消息中的裸 secret 照常替换与计数，伪造标记无法豁免整条记录。`DataMasker::mask()` 自身的标记幂等短路（更早版本的既有契约，防止 REDACTED 套 REDACTED）保持不变：经 `DataMasker` 出口的记录，含标记的输入仍整条跳过（含门）——依赖门检测标记旁内容的调用方请直接使用 `SecretScanGate::mask`/`mask_checked` 或 `DataMasker::detect`（检测面从不短路）。
+- **自定义模式的 ReDoS 责任**：门跑在每条出站记录上，底层 `fancy-regex` 为回溯引擎；`SecretPatternRegistry::register` 不做复杂度校验，自定义模式须避免嵌套无界量词与歧义字符集回退（见 `register` 文档）。
 
 ## 🧠 内存安全
 

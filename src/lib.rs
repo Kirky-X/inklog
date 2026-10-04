@@ -256,6 +256,11 @@ pub use support::processing::{
     MaskRuleRegistry, ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, TargetQuotaVerdict,
     TargetRateLimiter, get_log_record, get_string_buffer, put_log_record, put_string_buffer,
 };
+// secret-scan 出站脱敏门（feature `secret-scan`）
+#[cfg(feature = "secret-scan")]
+pub use support::processing::{
+    EntropyScanner, SecretMatch, SecretPattern, SecretPatternRegistry, SecretScanGate,
+};
 pub use validation::{
     EscapeMode, LogSanitizer, PathValidator, PathValidatorConfig, SanitizerConfig,
     ValidationResult, create_validated_file, open_validated_file,

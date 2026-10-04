@@ -174,6 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `gzip` | ❌ | Gzip 压缩后端（flate2 纯 Rust；未启用 `zstd` 时 FileSink 轮转回退 gzip） |
 | `parquet` | ❌ | Parquet/Arrow 导出（数据库 Sink 归档） |
 | `fast-masking` | ❌ | Aho-Corasick 多模式脱敏加速 |
+| `secret-scan` | ❌ | Secret 出站脱敏门：值形态正则注册表（sk-/PEM/AKIA 等裸 secret）+ 值熵扫描 + 逐模式计数与超限 fail-closed（`mask_checked`）+ 中文敏感键名 |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage 端口适配器，审计事件经 inklog DB sink 落库，可与任一后端组合 |
 | `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数 |
 | `confers-audit` | ❌ | confers `AuditSink` 端口的 inklog 实现，配置审计事件写入 inklog 结构化 sink（与 `config-confers` 共享 confers 依赖） |

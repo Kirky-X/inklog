@@ -9,6 +9,12 @@ pub mod masking_registry;
 pub mod object_pool;
 pub mod pipeline;
 pub mod rate_limiter;
+#[cfg(feature = "secret-scan")]
+pub mod secret_entropy;
+#[cfg(feature = "secret-scan")]
+pub mod secret_patterns;
+#[cfg(feature = "secret-scan")]
+pub mod secret_scan;
 pub mod target_rate_limiter;
 pub mod template;
 
@@ -25,6 +31,12 @@ pub use pipeline::{
     StressRelief, TargetQuotaMiddleware,
 };
 pub use rate_limiter::RateLimiter;
+#[cfg(feature = "secret-scan")]
+pub use secret_entropy::EntropyScanner;
+#[cfg(feature = "secret-scan")]
+pub use secret_patterns::{SecretMatch, SecretPattern, SecretPatternRegistry};
+#[cfg(feature = "secret-scan")]
+pub use secret_scan::SecretScanGate;
 pub use target_rate_limiter::{TargetQuotaVerdict, TargetRateLimiter};
 pub use template::LogTemplate;
 pub use template::OutputFormat;

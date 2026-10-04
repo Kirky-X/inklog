@@ -196,6 +196,29 @@ pub enum InklogError {
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
+    /// secret-scan fail-closed（feature `secret-scan`）：单条输入内某脱敏
+    /// 模式的命中数超过门限，脱敏输出被拒绝（防疑似密钥风暴落盘）。
+    #[cfg(feature = "secret-scan")]
+    #[error(
+        "Secret scan limit exceeded: pattern '{pattern}' hit {count} times in one input \
+         (limit {limit}); output withheld"
+    )]
+    SecretScanLimit {
+        pattern: String,
+        count: u64,
+        limit: usize,
+    },
+
+    /// secret-scan fail-closed（feature `secret-scan`）：单条输入超过掩码
+    /// 上限（`MAX_MASK_INPUT_BYTES`）——不扫描即不可证安全，fail-closed
+    /// 出口拒绝输出（`mask` 的失败放行语义不受影响）。
+    #[cfg(feature = "secret-scan")]
+    #[error(
+        "Secret scan oversized input: {size} bytes exceeds the {limit}-byte masking limit; \
+         output withheld (fail-closed)"
+    )]
+    SecretScanOversizedInput { size: usize, limit: usize },
+
     #[error("Shutdown error: {0}")]
     Shutdown(String),
 
@@ -280,6 +303,12 @@ impl InklogError {
             InklogError::CacheError(msg) => ("error-cache_error", Cow::Borrowed(msg)),
             InklogError::EncryptionError { message, .. } => {
                 ("error-encryption_error", Cow::Borrowed(message))
+            }
+            #[cfg(feature = "secret-scan")]
+            InklogError::SecretScanLimit { .. } => ("error-secret_scan_limit", Cow::Borrowed("")),
+            #[cfg(feature = "secret-scan")]
+            InklogError::SecretScanOversizedInput { .. } => {
+                ("error-secret_scan_oversized_input", Cow::Borrowed(""))
             }
             InklogError::Shutdown(msg) => ("error-shutdown_error", Cow::Borrowed(msg)),
             InklogError::ChannelError(msg) => ("error-channel_error", Cow::Borrowed(msg)),

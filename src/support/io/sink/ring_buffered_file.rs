@@ -1040,6 +1040,58 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "secret-scan")]
+    #[tokio::test]
+    async fn test_outbound_secret_scan_gate_masks_bare_secret() {
+        // 出站层挂点：secret-scan 门经 with_masker 挂到 sink 写出前的掩码点，
+        // 无键名上下文的裸 secret 在落盘前被替换，且门计数对调用方可见
+        use crate::support::processing::{SecretPatternRegistry, SecretScanGate};
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring-secret-scan.log");
+
+        let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins());
+        let cfg = ChannelBufferedConfig {
+            base_config: FileSinkConfig {
+                path: path.clone(),
+                ..Default::default()
+            },
+            channel_capacity: 64,
+            backpressure_strategy: BackpressureStrategy::Block,
+            flush_batch_size: 16,
+            flush_interval_ms: 50,
+        };
+        let masker = crate::DataMasker::builder()
+            .with_secret_scan(gate.clone())
+            .build();
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default())
+            .unwrap()
+            .with_masker(masker);
+
+        sink.write(&make_record(
+            "connected with sk-proj-abcdefghijklmnopqrstuvwxyz123456",
+        ))
+        .await
+        .unwrap();
+        sink.flush().await.unwrap();
+        sink.shutdown().await.unwrap();
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !data.contains("sk-proj-abcdefghijklmnopqrstuvwxyz123456"),
+            "bare secret must not reach disk: {data}"
+        );
+        assert!(
+            data.contains("***REDACTED_API_KEY***"),
+            "gate marker must be on disk: {data}"
+        );
+        assert_eq!(
+            gate.hit_count("openai_sk"),
+            Some(1),
+            "outbound gate must attribute the hit"
+        );
+    }
+
     #[tokio::test]
     async fn test_metrics_updated() {
         let dir = TempDir::new().unwrap();
