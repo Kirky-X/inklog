@@ -144,3 +144,20 @@ cargo bench --bench inklog_bench
 | `encryption/aes256gcm_roundtrip_1kb` | 506 ns（≈1.9 GiB/s） | 496 ns（≈1.9 GiB/s） |
 
 （`otlp_body_100` 按 `otlp` feature 门控，本次未启用，不入本表。）
+
+### secret_scan_bench 基线（2026-10-04，criterion 中位数，`--features secret-scan`）
+
+出站脱敏门热路径（`benches/secret_scan_bench.rs`，WSL2 x64 / 16 线程，与其他基线同机）。全部 8 项同会话一次跑出的中位数；连续两次全量运行观测到约 ±15% 的整体漂移（机器噪声，非代码回归），绝对值请以复现为准：
+
+| 基准 | 中位数 | 说明 |
+| --- | --- | --- |
+| `registry_scan_hit` | 16.2 µs | 9 模式扫描命中行（sk- + email 正文） |
+| `registry_scan_clean` | 14.2 µs | 同上，干净行——扫描本身主导，与命中行差值小 |
+| `gate_mask_value_shapes` | 14.7 µs | 门替换（值形态 9 模式） |
+| `gate_mask_clean` | 14.2 µs | 门替换干净行（无命中零中间分配路径） |
+| `gate_mask_with_entropy` | 14.7 µs | 门替换 + 熵扫描 |
+| `entropy_scan_only` | 544 ns | 熵扫描 token 密集行（固定计数数组快路径；前一轮实测 464 ns） |
+| `mask_fast_with_gate` | 42.2 µs | 全出站路径（门 + fast-masking + 规则集） |
+| `mask_baseline_without_gate` | 31.2 µs | 无门基线；门净成本 ≈ 上行差值 |
+
+要点：门的每行固定成本由 9 条 fancy-regex 逐模式扫描主导（clean ≈ hit），与内容是否命中几乎无关；分配侧优化（无命中零重组、计数只收非零命中、熵扫描固定数组）体现在分配次数而非常规时间项。`registry_scan_hit` 曾观测到单轮采样双峰（std_dev ≈ 29 µs），复现时建议以多次全量运行的中位区间为准。
