@@ -140,6 +140,7 @@ mod console_sink_e2e {
             colored: false,
             stderr_levels: vec!["error".to_string(), "warn".to_string()],
             masking_enabled: false,
+            secret_scan_enabled: false,
             output_format: Default::default(),
         };
         let template = LogTemplate::default();
@@ -163,6 +164,7 @@ mod console_sink_e2e {
             colored: true,
             stderr_levels: vec!["error".to_string(), "warn".to_string()],
             masking_enabled: false,
+            secret_scan_enabled: false,
             output_format: Default::default(),
         };
         let template = LogTemplate::default();
@@ -193,6 +195,7 @@ mod console_sink_e2e {
             colored: false,
             stderr_levels: vec![],
             masking_enabled: true,
+            secret_scan_enabled: false,
             output_format: Default::default(),
         };
         let template = LogTemplate::default();

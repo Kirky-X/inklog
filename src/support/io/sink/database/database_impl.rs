@@ -117,9 +117,20 @@ impl DatabaseSink {
         Ok(Self {
             inner: parking_lot::Mutex::new(inner),
             database,
-            masker: Arc::new(crate::DataMasker::new()),
+            masker: Arc::new(if config.as_ref().is_some_and(|c| c.secret_scan_enabled) {
+                crate::support::processing::secret_scan_masker()
+            } else {
+                crate::DataMasker::new()
+            }),
             stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
+    }
+
+    /// 注入自定义 masker，覆盖默认构造（与 console/file/net/otlp/
+    /// ring_buffered_file 的 `with_masker` 同一惯例）。
+    pub fn with_masker(mut self, masker: crate::DataMasker) -> Self {
+        self.masker = Arc::new(masker);
+        self
     }
 
     pub async fn set_metrics(&self, metrics: Arc<Metrics>) {

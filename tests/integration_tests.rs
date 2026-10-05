@@ -301,6 +301,7 @@ async fn test_database_batch_write_dbnexus() {
         parquet_config: inklog::config::ParquetConfig::default(),
         permissions_path: None,
         admin_role: "admin".to_string(),
+        secret_scan_enabled: false,
     };
 
     // 真实 DbNexusAdapter 接 sqlite（集成层不使用 mock）
@@ -374,6 +375,7 @@ async fn test_database_timeout_flush_dbnexus() {
         parquet_config: inklog::config::ParquetConfig::default(),
         permissions_path: None,
         admin_role: "admin".to_string(),
+        secret_scan_enabled: false,
     };
 
     // 真实 DbNexusAdapter 接 sqlite（集成层不使用 mock）

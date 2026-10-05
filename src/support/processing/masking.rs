@@ -576,6 +576,25 @@ impl DataMasker {
     }
 }
 
+/// 构造「内置 PII 规则 + secret 值形态扫描出站门」的 sink 默认 masker。
+///
+/// `secret-scan` feature 关闭时退化为 [`DataMasker::new`]（无门）——调用方
+/// （sink 内置组装）应在配置校验层对 enabled=true 发出警告。供 console/
+/// database 内置组装与外部自定义组装共用。
+pub fn secret_scan_masker() -> DataMasker {
+    #[cfg(feature = "secret-scan")]
+    {
+        let gate = super::secret_scan::SecretScanGate::new(
+            super::secret_patterns::SecretPatternRegistry::with_builtins(),
+        );
+        DataMasker::builder().with_secret_scan(gate).build()
+    }
+    #[cfg(not(feature = "secret-scan"))]
+    {
+        DataMasker::new()
+    }
+}
+
 /// Builder for assembling a [`DataMasker`] with custom rule configurations.
 ///
 /// # Example

@@ -77,6 +77,21 @@ pub struct ConsoleSinkConfig {
     #[serde(default = "default_true", alias = "pii_masking_enabled")]
     pub masking_enabled: bool,
 
+    /// Enable the secret value-pattern scan (feature `secret-scan`) on top of
+    /// PII masking: bare API keys (`sk-` families, AWS AKIA, PEM blocks, …)
+    /// are attributed and masked by the outbound gate even without a
+    /// sensitive field name.
+    ///
+    /// Only takes effect together with `masking_enabled`; requires the
+    /// `secret-scan` feature — without it the flag is ignored (a warning is
+    /// emitted during validation).
+    ///
+    /// # Default
+    ///
+    /// `false` - keeps the pre-existing masking behavior byte-identical.
+    #[serde(default)]
+    pub secret_scan_enabled: bool,
+
     /// Output format: text (template-based) or JSON (NDJSON).
     ///
     /// When `Json`, colored output is automatically disabled.
@@ -95,6 +110,7 @@ impl Default for ConsoleSinkConfig {
             colored: default_true(),
             stderr_levels: default_stderr_levels(),
             masking_enabled: default_true(),
+            secret_scan_enabled: false,
             output_format: OutputFormat::default(),
         }
     }
@@ -106,6 +122,13 @@ impl ConsoleSinkConfig {
     /// Ensures `stderr_levels` contains only valid log level names.
     /// Invalid entries are removed with a warning.
     pub fn validate(&mut self) {
+        #[cfg(not(feature = "secret-scan"))]
+        if self.secret_scan_enabled {
+            tracing::warn!(
+                "console_sink.secret_scan_enabled=true requires the `secret-scan` feature; \
+                 the flag is ignored in this build"
+            );
+        }
         let original_len = self.stderr_levels.len();
         self.stderr_levels.retain(|level| {
             if !crate::LogLevel::is_valid_level(level) {

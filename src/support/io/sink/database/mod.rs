@@ -254,6 +254,65 @@ mod tests {
         );
     }
 
+    /// secret_scan_enabled=true：写入含裸 API key 的记录，落库前被出站门脱敏
+    /// （该形态不在键名/PII 规则覆盖内，只有 secret gate 能识别）。
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg(feature = "secret-scan")]
+    async fn test_database_sink_secret_scan_masks_bare_api_key() {
+        let mock_db = Arc::new(MockDatabaseAdapter::new());
+        let config = DatabaseSinkConfig {
+            secret_scan_enabled: true,
+            ..Default::default()
+        };
+        let sink = DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
+
+        let record = LogRecord {
+            message: "endpoint sk-test-ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string(),
+            ..Default::default()
+        };
+        let _ = sink.write(&record).await;
+        let _ = sink.flush().await;
+
+        let records = mock_db.get_records();
+        assert_eq!(records.len(), 1);
+        assert!(
+            !records[0]
+                .message
+                .contains("sk-test-ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            "bare key value must be masked before persisting, got: {}",
+            records[0].message
+        );
+    }
+
+    /// with_masker：注入的自定义 masker 覆盖默认构造（与 console/file/net/
+    /// otlp/ring_buffered_file 的同名惯例一致）。禁用 email 内置规则后，
+    /// 默认构造会脱敏的邮箱应原样落库。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_database_sink_with_masker_override() {
+        let mock_db = Arc::new(MockDatabaseAdapter::new());
+        let masker = crate::DataMasker::builder()
+            .disable_builtin("email")
+            .build();
+        let sink = DatabaseSink::new(mock_db.clone())
+            .unwrap()
+            .with_masker(masker);
+
+        let record = LogRecord {
+            message: "User email: test@example.com".to_string(),
+            ..Default::default()
+        };
+        let _ = sink.write(&record).await;
+        let _ = sink.flush().await;
+
+        let records = mock_db.get_records();
+        assert_eq!(records.len(), 1);
+        assert!(
+            records[0].message.contains("test@example.com"),
+            "injected masker with disabled email builtin must override the default, got: {}",
+            records[0].message
+        );
+    }
+
     /// 测试 set_metrics 方法
     #[tokio::test(flavor = "multi_thread")]
     async fn test_database_sink_set_metrics() {

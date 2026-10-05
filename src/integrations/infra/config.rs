@@ -879,6 +879,7 @@ mod tests {
                 colored: false,
                 stderr_levels: vec!["error".to_string(), "fatal".to_string()],
                 masking_enabled: true,
+                secret_scan_enabled: false,
                 output_format: Default::default(),
             }),
             ..Default::default()

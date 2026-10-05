@@ -18,6 +18,7 @@ pub mod secret_scan;
 pub mod target_rate_limiter;
 pub mod template;
 
+pub use masking::secret_scan_masker;
 pub use masking::{DataMasker, DataMaskerBuilder, MaskMatch, MaskRule, MaskRuleBuilder};
 #[cfg(feature = "fast-masking")]
 pub use masking_ac::AcMasker;

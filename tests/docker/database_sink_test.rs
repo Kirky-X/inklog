@@ -42,6 +42,7 @@ async fn setup_sink(url: &str, batch_size: usize, flush_interval_ms: u64) -> Dat
         parquet_config: inklog::config::ParquetConfig::default(),
         permissions_path: None,
         admin_role: "admin".to_string(),
+        secret_scan_enabled: false,
     };
     DatabaseSink::new_with_config(db, Some(config)).expect("Failed to create DatabaseSink")
 }

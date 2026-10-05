@@ -226,6 +226,19 @@ pub struct DatabaseSinkConfig {
     /// Admin role name used for DDL and write operations.
     #[serde(default = "default_admin_role")]
     pub admin_role: String,
+    /// Enable the secret value-pattern scan (feature `secret-scan`) before
+    /// records are persisted: bare API keys (`sk-` families, AWS AKIA, PEM
+    /// blocks, …) are attributed and masked by the outbound gate even without
+    /// a sensitive field name.
+    ///
+    /// Requires the `secret-scan` feature — without it the flag is ignored
+    /// (a warning is emitted during validation).
+    ///
+    /// # Default
+    ///
+    /// `false` - keeps the pre-existing persisting behavior byte-identical.
+    #[serde(default)]
+    pub secret_scan_enabled: bool,
 }
 
 fn default_db_sink_name() -> String {
@@ -267,6 +280,7 @@ impl Default for DatabaseSinkConfig {
             parquet_config: ParquetConfig::default(),
             permissions_path: None,
             admin_role: default_admin_role(),
+            secret_scan_enabled: false,
         }
     }
 }
@@ -282,6 +296,13 @@ impl DatabaseSinkConfig {
     ///   busy-loops or panics at runtime.
     /// - Validates `compression_level` is within the valid zstd range (1–22).
     pub fn validate(&mut self) -> Result<(), String> {
+        #[cfg(not(feature = "secret-scan"))]
+        if self.secret_scan_enabled {
+            tracing::warn!(
+                "database_sink.secret_scan_enabled=true requires the `secret-scan` feature; \
+                 the flag is ignored in this build"
+            );
+        }
         if self.driver == DatabaseDriver::SQLite {
             if self.pool_size != 1 {
                 self.pool_size = 1;

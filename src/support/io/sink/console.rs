@@ -39,7 +39,13 @@ impl fmt::Debug for ConsoleSink {
 
 impl ConsoleSink {
     pub fn new(config: ConsoleSinkConfig, template: LogTemplate) -> Self {
-        let masker = config.masking_enabled.then(DataMasker::new);
+        let masker = config.masking_enabled.then(|| {
+            if config.secret_scan_enabled {
+                crate::support::processing::secret_scan_masker()
+            } else {
+                DataMasker::new()
+            }
+        });
         let colorize_stdout = Self::compute_colorize(&config, false);
         let colorize_stderr = Self::compute_colorize(&config, true);
         Self {
@@ -743,6 +749,55 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "secret-scan")]
+    async fn test_log_sink_write_secret_scan_masks_bare_api_key() {
+        // secret_scan_enabled=true: the masker carries the outbound
+        // SecretScanGate, so a bare API key is masked even though no
+        // sensitive field name is present.
+        let config = ConsoleSinkConfig {
+            enabled: true,
+            colored: false,
+            masking_enabled: true,
+            secret_scan_enabled: true,
+            ..Default::default()
+        };
+        let (sink, writer) = sink_with_test_writer(config);
+        // 裸 sk- 通用族（无键名前缀）：内置 PII/值形态规则不覆盖，只有
+        // secret gate 的值形态扫描能识别。
+        let record = make_record("INFO", "endpoint sk-test-ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        sink.write(&record).await.unwrap();
+        let output = writer.output();
+        assert!(
+            !output.contains("sk-test-ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            "bare key value must be masked by the secret gate, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
+    async fn test_log_sink_write_secret_scan_disabled_keeps_bare_api_key() {
+        // secret_scan_enabled=false keeps the pre-existing semantics: a bare
+        // key-shaped value WITHOUT a sensitive field name is not covered by
+        // the PII/key-name rule set and stays as-is.
+        let config = ConsoleSinkConfig {
+            enabled: true,
+            colored: false,
+            masking_enabled: true,
+            secret_scan_enabled: false,
+            ..Default::default()
+        };
+        let (sink, writer) = sink_with_test_writer(config);
+        let record = make_record("INFO", "endpoint sk-test-ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        sink.write(&record).await.unwrap();
+        let output = writer.output();
+        assert!(
+            output.contains("sk-test-ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            "without the secret gate the bare key value must stay untouched, got: {}",
+            output
+        );
+    }
+
+    #[tokio::test]
     async fn test_log_sink_write_stderr_level_writes_to_stderr_not_stdout() {
         // is_stderr=true in write() routes to io::stderr(), so the stdout
         // TestWriter should remain empty.
@@ -871,6 +926,7 @@ mod tests {
             colored: true,
             stderr_levels: vec!["error".to_string(), "warn".to_string()],
             masking_enabled: true,
+            secret_scan_enabled: false,
             output_format: Default::default(),
         };
         let sink = ConsoleSink::new(config, LogTemplate::default());

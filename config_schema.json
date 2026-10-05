@@ -40,6 +40,11 @@
           "default": "text",
           "description": "Output format: text (template-based) or JSON (NDJSON).\n\nWhen `Json`, colored output is automatically disabled."
         },
+        "secret_scan_enabled": {
+          "default": false,
+          "description": "Enable the secret value-pattern scan (feature `secret-scan`) on top of\nPII masking: bare API keys (`sk-` families, AWS AKIA, PEM blocks, …)\nare attributed and masked by the outbound gate even without a\nsensitive field name.\n\nOnly takes effect together with `masking_enabled`; requires the\n`secret-scan` feature — without it the flag is ignored (a warning is\nemitted during validation).\n\n# Default\n\n`false` - keeps the pre-existing masking behavior byte-identical.",
+          "type": "boolean"
+        },
         "stderr_levels": {
           "default": [
             "error",
@@ -128,6 +133,11 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "secret_scan_enabled": {
+          "default": false,
+          "description": "Enable the secret value-pattern scan (feature `secret-scan`) before\nrecords are persisted: bare API keys (`sk-` families, AWS AKIA, PEM\nblocks, …) are attributed and masked by the outbound gate even without\na sensitive field name.\n\nRequires the `secret-scan` feature — without it the flag is ignored\n(a warning is emitted during validation).\n\n# Default\n\n`false` - keeps the pre-existing persisting behavior byte-identical.",
+          "type": "boolean"
         },
         "table_name": {
           "default": "logs",
@@ -696,6 +706,7 @@
         "enabled": true,
         "masking_enabled": true,
         "output_format": "text",
+        "secret_scan_enabled": false,
         "stderr_levels": [
           "error",
           "warn"

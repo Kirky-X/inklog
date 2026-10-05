@@ -255,6 +255,7 @@ pub use support::processing::{
     DataMasker, DataMaskerBuilder, LogTemplate, MaskMatch, MaskRule, MaskRuleBuilder,
     MaskRuleRegistry, ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, TargetQuotaVerdict,
     TargetRateLimiter, get_log_record, get_string_buffer, put_log_record, put_string_buffer,
+    secret_scan_masker,
 };
 // secret-scan 出站脱敏门（feature `secret-scan`）
 #[cfg(feature = "secret-scan")]

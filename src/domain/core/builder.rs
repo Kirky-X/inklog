@@ -128,6 +128,57 @@ mod tests {
         assert_eq!(builder.config.global.level, "debug");
     }
 
+    #[test]
+    fn test_builder_console_secret_scan_sets_flag() {
+        let builder = LoggerBuilder::new().console_secret_scan(true);
+        let console = builder.config.console_sink.as_ref().unwrap();
+        assert!(console.secret_scan_enabled);
+
+        let builder = LoggerBuilder::new().console_secret_scan(false);
+        let console = builder.config.console_sink.as_ref().unwrap();
+        assert!(!console.secret_scan_enabled);
+    }
+
+    #[test]
+    fn test_builder_console_secret_scan_on_existing_config() {
+        // 已有 console 配置时只翻转开关，不覆盖其余字段
+        let builder = LoggerBuilder::new()
+            .console_colored(false)
+            .console_secret_scan(true);
+        let console = builder.config.console_sink.as_ref().unwrap();
+        assert!(console.secret_scan_enabled);
+        assert!(!console.colored);
+    }
+
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_builder_database_secret_scan_sets_flag() {
+        // 从无到有：enabled=true 时按默认配置创建 database_sink
+        let builder = LoggerBuilder::new().database_secret_scan(true);
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert!(db.secret_scan_enabled);
+
+        // 已有配置时只翻转开关；enabled=false 不会凭空创建配置
+        let builder = LoggerBuilder::new()
+            .database("sqlite::memory:")
+            .database_secret_scan(false);
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert!(!db.secret_scan_enabled);
+        assert_eq!(db.url, "sqlite::memory:");
+    }
+
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_builder_database_secret_scan_preserves_url() {
+        // 已有 database 配置时只翻转开关，URL/driver 等保持不变
+        let builder = LoggerBuilder::new()
+            .database("sqlite::memory:")
+            .database_secret_scan(true);
+        let db = builder.config.database_sink.as_ref().unwrap();
+        assert!(db.secret_scan_enabled);
+        assert_eq!(db.url, "sqlite::memory:");
+    }
+
     #[cfg(feature = "http")]
     #[test]
     fn test_builder_http_port_zero_does_not_write_config() {
@@ -659,6 +710,22 @@ impl LoggerBuilder {
         self
     }
 
+    /// 启用/禁用 database sink 的 secret 值形态扫描（`secret-scan` feature）。
+    ///
+    /// feature 关闭时该开关在 validate 阶段发警告并被忽略。
+    #[cfg(feature = "database")]
+    pub fn database_secret_scan(mut self, enabled: bool) -> Self {
+        if let Some(ref mut db) = self.config.database_sink {
+            db.secret_scan_enabled = enabled;
+        } else if enabled {
+            self.config.database_sink = Some(crate::DatabaseSinkConfig {
+                secret_scan_enabled: enabled,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
     /// 设置数据库批量写入大小（默认 100）
     #[cfg(feature = "database")]
     pub fn with_batch_size(mut self, batch_size: usize) -> Self {
@@ -757,6 +824,22 @@ impl LoggerBuilder {
         } else if colored {
             self.config.console_sink = Some(ConsoleSinkConfig {
                 colored,
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 启用/禁用 console sink 的 secret 值形态扫描（`secret-scan` feature）。
+    ///
+    /// 仅与 `pii_masking`（`console_sink.masking_enabled`）叠加生效；
+    /// feature 关闭时该开关在 validate 阶段发警告并被忽略。
+    pub fn console_secret_scan(mut self, enabled: bool) -> Self {
+        if let Some(ref mut console) = self.config.console_sink {
+            console.secret_scan_enabled = enabled;
+        } else if enabled {
+            self.config.console_sink = Some(ConsoleSinkConfig {
+                secret_scan_enabled: enabled,
                 ..Default::default()
             });
         }

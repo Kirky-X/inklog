@@ -562,7 +562,8 @@ let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins())
     .with_match_limit(64);
 let probe = gate.clone();
 
-// 注入 sink 出站掩码点（console/file/net/ring_buffered 均经 with_masker 挂接）
+// 注入 sink 出站掩码点（console/file/net/ring_buffered/database 均经
+// with_masker 挂接；database 自 0.3.0-rc.6 起支持）
 let masker = DataMasker::builder().with_secret_scan(gate).build();
 
 let out = masker.mask_checked("token=sk-proj-abcdefghijklmnopqrstuvwxyz123456")?;
@@ -573,6 +574,15 @@ assert_eq!(probe.hit_count("openai_sk"), Some(1));
 
 #### 接线边界与语义边界（必读）
 
+- **声明式启用（0.3.0-rc.6 起）**：`console_sink.secret_scan_enabled` 与
+  `database_sink.secret_scan_enabled`（均默认 `false`）在内置 sink 组装路径
+  挂接 `secret_scan_masker()`（内置 PII 规则 + 出站门），无需再手工组装
+  自定义 sink；builder 对应 `LoggerBuilder::console_secret_scan(bool)` /
+  `LoggerBuilder::database_secret_scan(bool)`。`secret-scan` feature 关闭时
+  该开关被忽略并在 validate 阶段发警告。注意 console 侧开关与
+  `pii_masking_enabled` 叠加生效（PII 关则整体无掩码）；database 侧此前
+  无 `with_masker` 注入口、masker 写死无门——本版本补齐（默认行为逐位
+  不变）。
 - **sink 默认走 fail-open**：库内全部 sink 出站路径（database/console/file/ring_buffered_file/net/otlp）调用 `DataMasker::mask()`——命中照常替换、超限也放行。`mask_checked()` 的 fail-closed 拒发是**消费方显式选择**的能力（自定义 sink 或自建写出管线调用它），默认不改变任何 sink 行为（向后兼容）。需要 fail-closed 落盘保护的部署须自行在写出点调用 `mask_checked` 并处理 `Err`。
 - **超大输入（> 1 MiB）两出口分叉**：`mask` 原样放行（跳过扫描，留 warn——21 趟线性扫描对超大文本是 CPU 放大器）；`mask_checked` 返回 `Err(InklogError::SecretScanOversizedInput)` 拒绝输出——不扫描即不可证安全，fail-closed 出口不豁免。
 - **脱敏标记不再关闭门的检测面**：门（`SecretScanGate`）不对 `***REDACTED` 等标记做子串短路——标记文本本身不被内置模式命中（幂等自然成立），同条消息中的裸 secret 照常替换与计数，伪造标记无法豁免整条记录。`DataMasker::mask()` 自身的标记幂等短路（更早版本的既有契约，防止 REDACTED 套 REDACTED）保持不变：经 `DataMasker` 出口的记录，含标记的输入仍整条跳过（含门）——依赖门检测标记旁内容的调用方请直接使用 `SecretScanGate::mask`/`mask_checked` 或 `DataMasker::detect`（检测面从不短路）。
