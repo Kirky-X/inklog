@@ -59,3 +59,37 @@ warn-cache_ttl_zero = OxCacheAdapterBuilder: TTL is zero, using default TTL
 
 # Subscriber messages
 subscriber-drop-fallback-pending = LoggerSubscriber dropped with { $count } unflushed fallback records
+
+# File sink batch write messages
+sink-batch_flush_failed = Batch flush error: { $err }
+sink-fsync_failed = fsync after batch write failed: { $err }
+sink-rotate_postprocess_failed = Failed to post-process rotated log: { $err }
+sink-rotate_postprocess_panicked = Rotation post-processing thread panicked: { $msg }
+sink-audit_manifest_write_failed = Failed to write audit chain manifest { $path }: { $err }
+sink-plaintext_residue = plaintext residue: remove after encryption failed
+
+# Fallback journal messages
+journal-replay-skipped-corrupt = fallback journal replay skipped corrupt lines
+journal-replay-no-durable-sink = fallback journal replay skipped: no durable sink configured
+journal-push-spawn-failed = journal push worker spawn failed: { $err }
+journal-push-empty-addr = empty addr
+journal-undecryptable-preserved = fallback journal: undecryptable segments present; file preserved
+journal-plaintext-append-refused = fallback journal: plaintext instance refused to append to an encrypted journal (config rollback)
+journal-encrypted-spill-failed = fallback journal: encrypted spill failed
+journal-aesgcm-encrypt-failed = fallback journal: AES-GCM encryption failed
+journal-unsupported-format = fallback journal: unsupported encrypted format, nothing replayed
+journal-push-failed-kept = fallback journal push failed; record kept on disk
+
+# Audit chain messages
+audit-chain-key-missing = audit_chain_enabled but INKLOG_AUDIT_KEY is not set; audit chain disabled
+
+# Secret scan / masking internal tracing messages
+secret-entropy-threshold-not-finite = EntropyScanner: threshold_bits must be finite; NaN/infinity would silently disable entropy detection
+secret-scan-oversized-rejected = oversized input rejected by the fail-closed secret scan exit
+secret-scan-limit-withheld = secret scan limit exceeded; output withheld (fail-closed)
+secret-pattern-scan-match-error = regex match error during secret pattern scan; skipping this match
+masking-detect-match-error = regex match error during detect; skipping this match
+masking-from-rules-duplicate-names = from_rules: duplicate rule names make detect attribution ambiguous
+
+# Config validation warnings
+warn-http_feature_not_compiled = http_server.enabled = true but the 'http' feature is not compiled in; the monitoring server will not start

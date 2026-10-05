@@ -118,7 +118,8 @@ impl SecretScanGate {
             tracing::warn!(
                 size = text.len(),
                 limit = MAX_MASK_INPUT_BYTES,
-                "oversized input rejected by the fail-closed secret scan exit"
+                "{}",
+                crate::i18n::tr("secret-scan-oversized-rejected")
             );
             return Err(InklogError::SecretScanOversizedInput {
                 size: text.len(),
@@ -132,7 +133,8 @@ impl SecretScanGate {
                 pattern = pattern.as_str(),
                 count = count,
                 limit,
-                "secret scan limit exceeded; output withheld (fail-closed)"
+                "{}",
+                crate::i18n::tr("secret-scan-limit-withheld")
             );
             return Err(InklogError::SecretScanLimit {
                 pattern: pattern.clone(),

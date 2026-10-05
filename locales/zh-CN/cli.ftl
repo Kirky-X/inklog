@@ -181,3 +181,15 @@ cli-verify-chain-err-line-invalid = manifest 行格式非法
 cli-verify-chain-err-key-missing = 审计链密钥环境变量未设置
 cli-verify-chain-ok = 链完整
 cli-verify-chain-tampered = 链已被篡改（检测到删除/重排/内容修改）
+cli-verify-chain-ok-detail = { $chain }: { $path }（{ $count } 个条目）
+
+# CLI generate schema 错误
+
+cli-generate-err-schema-serialize = 序列化配置 JSON Schema 失败
+
+# 示例：confers 审计桥演示
+
+example-confers-audit-title = confers 审计桥（confers-audit feature）
+example-confers-audit-write-events = 写入审计事件（三类：密钥访问/解密/配置加载）
+example-confers-audit-result = 桥接结果：accepted={ $accepted } dropped={ $dropped } write_failures={ $failures }
+example-confers-audit-chain-dir = 本地审计链文件目录：{ $path }

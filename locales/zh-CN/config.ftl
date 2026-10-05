@@ -103,3 +103,20 @@ config-key_file_read = 读取密钥文件 '{ $file }' 失败: { $err }
 config-key_file_permission = 密钥文件 '{ $file }' 权限必须为 0600（当前 { $mode }）；拒绝使用组/其他用户可读的密钥
 config-journal_header_conflict = journal 文件 '{ $file }' 为其他格式；请先重放或删除后再启用加密 journal
 config-journal_push_invalid_addr = journal 推送地址 '{ $addr }' 无效：应为 host:port
+
+# 身份字段校验错误
+config-global_identity_blank = global.{ $name } 已设置但为空白
+config-global_static_fields_empty_key = global.static_fields 包含空键
+config-control_char_rejected = { $field } 含控制字符（U+{ $code }）
+
+# 加密密钥来源校验
+config-encrypt_no_key_source = encrypt 已启用但既未设置 encryption_key_env 也未设置 encryption_key_file
+
+# 限流 / 采样配置校验错误
+config-rate_limit_rules_key_empty = rate_limit.rules 的键不能为空
+config-rate_limit_rules_rate_invalid = rate_limit.rules["{ $prefix }"] 的速率必须 >= 1，实际为 0
+config-sampling_per_level_invalid = sampling.per_level["{ $level }"] 不是有效级别。有效级别: { $valid }
+config-sampling_per_level_rate_invalid = sampling.per_level["{ $level }"] 的速率必须 >= 1，实际为 0
+config-sampling_prefix_empty = sampling.per_target_prefix 的键不能为空
+config-sampling_sample_every_n_invalid = sampling.per_target_prefix["{ $prefix }"].sample_every_n 必须 >= 1，实际为 0
+config-sampling_keep_level_invalid = sampling.per_target_prefix["{ $prefix }"].keep_level "{ $level }" 不是有效级别。有效级别: { $valid }

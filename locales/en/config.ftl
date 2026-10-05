@@ -103,3 +103,20 @@ config-key_file_read = Failed to read key file '{ $file }': { $err }
 config-key_file_permission = Key file '{ $file }' must have 0600 permissions (current mode { $mode }); refusing a group/other-readable key
 config-journal_header_conflict = Journal file '{ $file }' exists in a different format; replay or remove it before enabling the encrypted journal
 config-journal_push_invalid_addr = Invalid journal push address '{ $addr }': expected host:port
+
+# Identity field validation errors
+config-global_identity_blank = global.{ $name } is set but blank
+config-global_static_fields_empty_key = global.static_fields contains an empty key
+config-control_char_rejected = { $field } contains a control character (U+{ $code })
+
+# Encryption key source validation
+config-encrypt_no_key_source = encrypt is enabled but neither encryption_key_env nor encryption_key_file is set
+
+# Rate limit / sampling config validation errors
+config-rate_limit_rules_key_empty = rate_limit.rules key must not be empty
+config-rate_limit_rules_rate_invalid = rate_limit.rules["{ $prefix }"] rate must be >= 1, got 0
+config-sampling_per_level_invalid = sampling.per_level["{ $level }"] is not a valid level. Valid: { $valid }
+config-sampling_per_level_rate_invalid = sampling.per_level["{ $level }"] rate must be >= 1, got 0
+config-sampling_prefix_empty = sampling.per_target_prefix key must not be empty
+config-sampling_sample_every_n_invalid = sampling.per_target_prefix["{ $prefix }"].sample_every_n must be >= 1, got 0
+config-sampling_keep_level_invalid = sampling.per_target_prefix["{ $prefix }"].keep_level "{ $level }" is not a valid level. Valid: { $valid }

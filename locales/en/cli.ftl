@@ -181,3 +181,15 @@ cli-verify-chain-err-line-invalid = Invalid manifest line
 cli-verify-chain-err-key-missing = Audit key environment variable is not set
 cli-verify-chain-ok = chain intact
 cli-verify-chain-tampered = chain TAMPERED (deletion, reorder or content change detected)
+cli-verify-chain-ok-detail = { $chain }: { $path } ({ $count } entries)
+
+# CLI generate schema errors
+
+cli-generate-err-schema-serialize = Failed to serialize config JSON schema
+
+# Examples: confers audit bridge demo
+
+example-confers-audit-title = confers audit bridge (confers-audit feature)
+example-confers-audit-write-events = Writing audit events (three kinds: key access / decrypt / config load)
+example-confers-audit-result = Bridge result: accepted={ $accepted } dropped={ $dropped } write_failures={ $failures }
+example-confers-audit-chain-dir = Local audit chain file directory: { $path }

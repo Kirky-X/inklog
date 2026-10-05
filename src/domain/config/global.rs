@@ -374,14 +374,16 @@ impl GlobalConfig {
         for (name, value) in scalars {
             if let Some(v) = value {
                 if v.trim().is_empty() {
-                    return Err(format!("global.{name} is set but blank"));
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("name", name);
+                    return Err(crate::i18n::tr_args("config-global_identity_blank", args));
                 }
                 reject_control_chars(&format!("global.{name}"), v)?;
             }
         }
         for (key, value) in &self.static_fields {
             if key.is_empty() {
-                return Err("global.static_fields contains an empty key".to_string());
+                return Err(crate::i18n::tr("config-global_static_fields_empty_key"));
             }
             reject_control_chars("global.static_fields key", key)?;
             reject_control_chars(&format!("global.static_fields[{key}]"), value)?;
@@ -393,10 +395,10 @@ impl GlobalConfig {
 /// 拒绝含控制字符的配置值（CWE-117 邻域：换行/制表等会破坏日志行结构）。
 pub(crate) fn reject_control_chars(field: &str, value: &str) -> Result<(), String> {
     if let Some(c) = value.chars().find(|&c| char::is_control(c)) {
-        return Err(format!(
-            "{field} contains a control character (U+{:04X})",
-            c as u32
-        ));
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("field", field);
+        args.set("code", format!("{:04X}", c as u32));
+        return Err(crate::i18n::tr_args("config-control_char_rejected", args));
     }
     Ok(())
 }

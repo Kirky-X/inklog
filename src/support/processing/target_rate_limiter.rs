@@ -54,13 +54,16 @@ impl TargetRateLimiter {
         let mut sorted: Vec<(String, RateLimiter)> = Vec::with_capacity(rules.len());
         for (prefix, rate) in &rules {
             if prefix.is_empty() {
-                return Err(InklogError::ConfigError(
-                    "rate_limit.rules key must not be empty".to_string(),
-                ));
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "config-rate_limit_rules_key_empty",
+                )));
             }
             if *rate == 0 {
-                return Err(InklogError::ConfigError(format!(
-                    "rate_limit.rules[{prefix:?}] rate must be >= 1, got 0"
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("prefix", prefix);
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "config-rate_limit_rules_rate_invalid",
+                    args,
                 )));
             }
             // ASCII 小写存储，与 rule_index 的 eq_ignore_ascii_case 同语义

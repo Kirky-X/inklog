@@ -68,7 +68,8 @@ impl EntropyScanner {
     pub fn with_config(threshold_bits: f64, min_token_chars: usize) -> Self {
         assert!(
             threshold_bits.is_finite(),
-            "EntropyScanner: threshold_bits must be finite; NaN/infinity would silently disable entropy detection"
+            "{}",
+            crate::i18n::tr("secret-entropy-threshold-not-finite")
         );
         let min_token_chars = min_token_chars.max(1);
         let pattern = TOKEN_PATTERN_TEMPLATE.replace("@@MIN@@", &min_token_chars.to_string());

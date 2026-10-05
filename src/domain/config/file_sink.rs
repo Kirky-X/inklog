@@ -227,10 +227,7 @@ impl FileSinkConfig {
                 self.encryption_key_file.as_deref(),
             ) {
                 (None, None) => {
-                    return Err(
-                        "encrypt is enabled but neither encryption_key_env nor encryption_key_file is set"
-                            .to_string(),
-                    );
+                    return Err(crate::i18n::tr("config-encrypt_no_key_source"));
                 }
                 (Some(env_name), None) if std::env::var(env_name).is_err() => {
                     return Err(format!(

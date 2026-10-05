@@ -242,7 +242,7 @@ pub fn generate_config_schema(output_path: &Path) -> Result<()> {
     validate_output_path_safety(output_path)?;
 
     let schema = serde_json::to_string_pretty(&inklog::InklogConfig::json_schema())
-        .context("serialize config JSON schema")?;
+        .context(inklog::i18n::tr("cli-generate-err-schema-serialize"))?;
 
     let mut file = File::create(output_path).with_context(|| {
         let mut args = inklog::i18n::MsgArgs::new();

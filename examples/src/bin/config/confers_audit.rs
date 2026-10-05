@@ -25,7 +25,7 @@ use inklog_examples::common::{print_section, print_separator};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("confers 审计桥（confers-audit feature）");
+    print_separator(&inklog::i18n::tr("example-confers-audit-title"));
 
     // 1. inklog 侧结构化 sink（控制台；换成 FileSink/DatabaseSink 即改落盘目标）
     let console = ConsoleSink::new(
@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .sink(bridge.clone())
         .build();
 
-    print_section("写入审计事件（三类：密钥访问/解密/配置加载）");
+    print_section(&inklog::i18n::tr("example-confers-audit-write-events"));
     let events = vec![
         AuditEvent::KeyAccess {
             key: "db.password".to_string(),
@@ -73,13 +73,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. 等待异步 writer task 落盘后展示观测计数
     tokio::time::sleep(Duration::from_millis(200)).await;
     println!();
+    let mut result_args = inklog::i18n::MsgArgs::new();
+    result_args.set("accepted", bridge.accepted());
+    result_args.set("dropped", bridge.dropped());
+    result_args.set("failures", bridge.write_failures());
     println!(
-        "桥接结果：accepted={} dropped={} write_failures={}",
-        bridge.accepted(),
-        bridge.dropped(),
-        bridge.write_failures()
+        "{}",
+        inklog::i18n::tr_args("example-confers-audit-result", result_args)
     );
-    println!("本地审计链文件目录：{}", log_dir.path().display());
+    let mut dir_args = inklog::i18n::MsgArgs::new();
+    dir_args.set("path", log_dir.path().display().to_string());
+    println!(
+        "{}",
+        inklog::i18n::tr_args("example-confers-audit-chain-dir", dir_args)
+    );
 
     Ok(())
 }

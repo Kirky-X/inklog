@@ -59,3 +59,37 @@ warn-cache_ttl_zero = OxCacheAdapterBuilder: TTL 为零，使用默认 TTL
 
 # Subscriber 消息
 subscriber-drop-fallback-pending = LoggerSubscriber 已丢弃，尚有 { $count } 条回退记录未刷写
+
+# 文件 sink 批量写入消息
+sink-batch_flush_failed = 批量刷写失败: { $err }
+sink-fsync_failed = 批量写入后 fsync 失败: { $err }
+sink-rotate_postprocess_failed = 轮转日志后处理失败: { $err }
+sink-rotate_postprocess_panicked = 轮转后处理线程异常: { $msg }
+sink-audit_manifest_write_failed = 写入审计链 manifest { $path } 失败: { $err }
+sink-plaintext_residue = 存在明文残留：加密后删除失败
+
+# fallback journal 消息
+journal-replay-skipped-corrupt = fallback journal 重放跳过了损坏行
+journal-replay-no-durable-sink = fallback journal 重放跳过：未配置持久化 sink
+journal-push-spawn-failed = journal 推送线程启动失败: { $err }
+journal-push-empty-addr = 地址为空
+journal-undecryptable-preserved = fallback journal: 存在无法解密的段；文件已保留
+journal-plaintext-append-refused = fallback journal: 明文实例拒绝向加密 journal 追加（配置回滚）
+journal-encrypted-spill-failed = fallback journal: 加密落盘失败
+journal-aesgcm-encrypt-failed = fallback journal: AES-GCM 加密失败
+journal-unsupported-format = fallback journal: 不支持的加密格式，未重放任何记录
+journal-push-failed-kept = fallback journal 推送失败；记录已保留在磁盘
+
+# 审计链消息
+audit-chain-key-missing = 已启用 audit_chain_enabled 但未设置 INKLOG_AUDIT_KEY；审计链已禁用
+
+# Secret 扫描 / 脱敏内部追踪消息
+secret-entropy-threshold-not-finite = EntropyScanner: threshold_bits 必须是有限值；NaN/无穷大会静默禁用熵检测
+secret-scan-oversized-rejected = 超大输入被 fail-closed Secret 扫描出口拒绝
+secret-scan-limit-withheld = Secret 扫描超限；输出已扣留（fail-closed）
+secret-pattern-scan-match-error = Secret 模式扫描期间正则匹配出错；跳过本次匹配
+masking-detect-match-error = detect 期间正则匹配出错；跳过本次匹配
+masking-from-rules-duplicate-names = from_rules: 规则名重复会使 detect 归因产生歧义
+
+# 配置验证警告
+warn-http_feature_not_compiled = http_server.enabled = true 但未编译 'http' feature；监控服务器不会启动

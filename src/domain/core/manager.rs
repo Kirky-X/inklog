@@ -512,8 +512,8 @@ impl LoggerManager {
         {
             tracing::warn!(
                 event = "http_server_config_ignored",
-                "http_server.enabled = true but the 'http' feature is not compiled in; \
-                 the monitoring server will not start"
+                "{}",
+                crate::i18n::tr("warn-http_feature_not_compiled")
             );
         }
 
@@ -739,7 +739,11 @@ impl LoggerManager {
             let journal = Arc::new(journal);
             let (records, skipped) = journal.replay();
             if skipped > 0 {
-                tracing::warn!(skipped, "fallback journal replay skipped corrupt lines");
+                tracing::warn!(
+                    skipped,
+                    "{}",
+                    crate::i18n::tr("journal-replay-skipped-corrupt")
+                );
             }
             if !records.is_empty() {
                 let replay_target = if file_enabled {
@@ -759,7 +763,8 @@ impl LoggerManager {
                     }
                     None => tracing::warn!(
                         count = records.len(),
-                        "fallback journal replay skipped: no durable sink configured"
+                        "{}",
+                        crate::i18n::tr("journal-replay-no-durable-sink")
                     ),
                 }
             }

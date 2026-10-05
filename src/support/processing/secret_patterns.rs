@@ -79,7 +79,8 @@ impl SecretPattern {
                 tracing::warn!(
                     pattern = self.name.as_str(),
                     error = %e,
-                    "regex match error during secret pattern scan; skipping this match"
+                    "{}",
+                    crate::i18n::tr("secret-pattern-scan-match-error")
                 );
                 None
             }

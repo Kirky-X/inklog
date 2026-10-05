@@ -228,9 +228,7 @@ impl ChannelBufferedFileSink {
                     Some(Arc::new(Mutex::new(ArchiveChain::new(key.as_bytes()))))
                 }
                 _ => {
-                    tracing::warn!(
-                        "audit_chain_enabled but INKLOG_AUDIT_KEY is not set; audit chain disabled"
-                    );
+                    tracing::warn!("{}", crate::i18n::tr("audit-chain-key-missing"));
                     None
                 }
             }
@@ -688,7 +686,12 @@ impl ChannelBufferedFileSink {
                         && let Err(e) =
                             process_rotated(&config, &archive_path, key_material.as_ref())
                     {
-                        tracing::error!("Failed to post-process rotated log: {}", e);
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("err", &e);
+                        tracing::error!(
+                            "{}",
+                            crate::i18n::tr_args("sink-rotate_postprocess_failed", args)
+                        );
                         crate::support::ops_event::publish_internal(
                             "sink_degraded",
                             Some("file"),
@@ -704,7 +707,12 @@ impl ChannelBufferedFileSink {
                     } else {
                         "unknown panic".to_string()
                     };
-                    tracing::error!("Rotation post-processing thread panicked: {}", msg);
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("msg", msg);
+                    tracing::error!(
+                        "{}",
+                        crate::i18n::tr_args("sink-rotate_postprocess_panicked", args)
+                    );
                 }
             });
         }

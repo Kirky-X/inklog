@@ -171,9 +171,7 @@ impl FileSink {
                     crate::support::audit_chain::ArchiveChain::new(key.as_bytes()),
                 ))),
                 _ => {
-                    warn!(
-                        "audit_chain_enabled but INKLOG_AUDIT_KEY is not set; audit chain disabled"
-                    );
+                    warn!("{}", crate::i18n::tr("audit-chain-key-missing"));
                     None
                 }
             }
@@ -914,7 +912,9 @@ impl FileSink {
             && let Some(file) = &mut inner.current_file
             && let Err(e) = file.flush()
         {
-            error!("Batch flush error: {}", e);
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("err", &e);
+            error!("{}", crate::i18n::tr_args("sink-batch_flush_failed", args));
             inner.circuit_breaker.record_failure();
             // BufWriter 层整批写失败（如 /dev/full）：无法确定部分写入边界，
             // 整批回填重试（at-least-once，与"无句柄"分支语义一致）
@@ -933,7 +933,9 @@ impl FileSink {
                 && let Some(file) = &mut inner.current_file
                 && let Err(e) = file.flush().and_then(|_| file.get_ref().sync_all())
             {
-                error!("fsync after batch write failed: {}", e);
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", &e);
+                error!("{}", crate::i18n::tr_args("sink-fsync_failed", args));
                 inner.circuit_breaker.record_failure();
             }
         }
@@ -1034,7 +1036,12 @@ impl FileSink {
                 // logged instead of aborting an unnoticed worker thread.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
                     if let Err(e) = process_rotated(&config, &path, None) {
-                        error!("Failed to post-process rotated log: {}", e);
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("err", &e);
+                        error!(
+                            "{}",
+                            crate::i18n::tr_args("sink-rotate_postprocess_failed", args)
+                        );
                         crate::support::ops_event::publish_internal(
                             "sink_degraded",
                             Some("file"),
@@ -1050,7 +1057,12 @@ impl FileSink {
                     } else {
                         "unknown panic".to_string()
                     };
-                    error!("Rotation post-processing thread panicked: {}", msg);
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("msg", msg);
+                    error!(
+                        "{}",
+                        crate::i18n::tr_args("sink-rotate_postprocess_panicked", args)
+                    );
                 }
             });
         }
@@ -1282,7 +1294,7 @@ fn report_plaintext_residue(path: &Path, err: &std::io::Error) {
         Some("file"),
         serde_json::json!({
             "op": "archive",
-            "error": "plaintext residue: remove after encryption failed",
+            "error": crate::i18n::tr("sink-plaintext_residue"),
             "path": path.display().to_string(),
             "io_error": err.to_string(),
         }),
@@ -1448,10 +1460,12 @@ pub(crate) fn register_rotated_archive(
         body.push('\n');
     }
     if let Err(e) = fs::write(&manifest, body) {
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("path", manifest.display().to_string());
+        args.set("err", e);
         error!(
-            "Failed to write audit chain manifest {}: {}",
-            manifest.display(),
-            e
+            "{}",
+            crate::i18n::tr_args("sink-audit_manifest_write_failed", args)
         );
     }
 }

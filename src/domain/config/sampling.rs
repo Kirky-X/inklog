@@ -59,34 +59,47 @@ impl SamplingConfig {
     pub fn validate(&self) -> Result<(), InklogError> {
         for (level, rate) in &self.per_level {
             if !crate::LogLevel::is_valid_level(level) {
-                return Err(InklogError::ConfigError(format!(
-                    "sampling.per_level[{level:?}] is not a valid level. Valid: {}",
-                    crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("level", level);
+                args.set("valid", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "config-sampling_per_level_invalid",
+                    args,
                 )));
             }
             if *rate == 0 {
-                return Err(InklogError::ConfigError(format!(
-                    "sampling.per_level[{level:?}] rate must be >= 1, got 0"
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("level", level);
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "config-sampling_per_level_rate_invalid",
+                    args,
                 )));
             }
         }
         for (prefix, rule) in &self.per_target_prefix {
             if prefix.is_empty() {
-                return Err(InklogError::ConfigError(
-                    "sampling.per_target_prefix key must not be empty".to_string(),
-                ));
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "config-sampling_prefix_empty",
+                )));
             }
             if rule.sample_every_n == 0 {
-                return Err(InklogError::ConfigError(format!(
-                    "sampling.per_target_prefix[{prefix:?}].sample_every_n must be >= 1, got 0"
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("prefix", prefix);
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "config-sampling_sample_every_n_invalid",
+                    args,
                 )));
             }
             if let Some(keep_level) = &rule.keep_level
                 && !crate::LogLevel::is_valid_level(keep_level)
             {
-                return Err(InklogError::ConfigError(format!(
-                    "sampling.per_target_prefix[{prefix:?}].keep_level {keep_level:?} is not a valid level. Valid: {}",
-                    crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("prefix", prefix);
+                args.set("level", keep_level);
+                args.set("valid", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "config-sampling_keep_level_invalid",
+                    args,
                 )));
             }
         }

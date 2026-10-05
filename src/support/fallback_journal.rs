@@ -303,7 +303,9 @@ impl TcpJournalPusher {
             .name("inklog-journal-push".to_string())
             .spawn(move || Self::worker_loop(worker_shared))
             .map_err(|e| {
-                InklogError::ChannelError(format!("journal push worker spawn failed: {e}"))
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", e);
+                InklogError::ChannelError(crate::i18n::tr_args("journal-push-spawn-failed", args))
             })?;
         Ok(Self {
             shared,
@@ -333,10 +335,12 @@ impl TcpJournalPusher {
 
     fn connect(config: &TcpJournalPusherConfig) -> std::io::Result<std::net::TcpStream> {
         use std::net::ToSocketAddrs as _;
-        let addr =
-            config.addr.to_socket_addrs()?.next().ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty addr")
-            })?;
+        let addr = config.addr.to_socket_addrs()?.next().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                crate::i18n::tr("journal-push-empty-addr"),
+            )
+        })?;
         let stream = std::net::TcpStream::connect_timeout(&addr, config.connect_timeout)?;
         stream.set_nodelay(true).ok();
         // 写超时：对端接受连接但不排空时，写阻塞到此即出错（视为连接死亡）
@@ -681,7 +685,8 @@ impl FallbackJournal {
                     skipped,
                     replayed = records.len(),
                     path = %self.path.display(),
-                    "fallback journal: undecryptable segments present; file preserved"
+                    "{}",
+                    crate::i18n::tr("journal-undecryptable-preserved")
                 );
                 return (records, skipped);
             }
@@ -712,7 +717,8 @@ impl FallbackJournal {
         if self.current_size() > 0 && self.file_starts_with_magic() {
             tracing::error!(
                 path = %self.path.display(),
-                "fallback journal: plaintext instance refused to append to an encrypted journal (config rollback)"
+                "{}",
+                crate::i18n::tr("journal-plaintext-append-refused")
             );
             return false;
         }
@@ -743,7 +749,7 @@ impl FallbackJournal {
             Ok(salt) => salt,
             Err(e) => {
                 tracing::error!(error = %e, path = %self.path.display(),
-                    "fallback journal: encrypted spill failed");
+                    "{}", crate::i18n::tr("journal-encrypted-spill-failed"));
                 return false;
             }
         };
@@ -756,7 +762,7 @@ impl FallbackJournal {
 
         let Ok(ciphertext) = cipher.encrypt(&nonce, line) else {
             tracing::error!(path = %self.path.display(),
-                "fallback journal: AES-GCM encryption failed");
+                "{}", crate::i18n::tr("journal-aesgcm-encrypt-failed"));
             return false;
         };
 
@@ -902,7 +908,8 @@ impl FallbackJournal {
             tracing::error!(
                 version,
                 algo,
-                "fallback journal: unsupported encrypted format, nothing replayed"
+                "{}",
+                crate::i18n::tr("journal-unsupported-format")
             );
             // 版本/算法不支持：计段数使 skipped 显性可感知（文件保留）
             return (Vec::new(), count_segments(data) as u64);
@@ -951,7 +958,7 @@ impl FallbackJournal {
             Err(e) => {
                 let total = self.push_failures.fetch_add(1, Ordering::Relaxed) + 1;
                 tracing::warn!(error = %e, total,
-                    "fallback journal push failed; record kept on disk");
+                    "{}", crate::i18n::tr("journal-push-failed-kept"));
             }
         }
     }
@@ -2024,6 +2031,27 @@ mod tests {
         .unwrap()
     }
 
+    /// 轮询等待断线缓冲达到 `min_len`：`buffered_len` 是瞬时观测，投递线程
+    /// 换出批量在 `state` 锁外做建连/退避重判期间缓冲短暂为空，全量测试
+    /// 高负载下投递线程被抢占会拉长该窗口，单次读可能撞上；截止时间内
+    /// 重试吸收瞬时读数，超时仍不满足才判失败。容量上界使 `>=` 等价于
+    /// 稳态条数相等。
+    fn wait_for_buffered_len(pusher: &TcpJournalPusher, min_len: usize, msg: &str) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let len = pusher.buffered_len();
+            if len >= min_len {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{msg}: buffered_len={len} (expected >= {min_len}), dropped_total={}",
+                pusher.dropped_total()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn test_tcp_pusher_rejects_invalid_addr() {
         let result = TcpJournalPusher::new(TcpJournalPusherConfig {
@@ -2168,10 +2196,7 @@ mod tests {
         for i in 0..3 {
             pusher.push(format!("offline-{i}").as_bytes()).unwrap();
         }
-        assert!(
-            pusher.buffered_len() >= 1,
-            "offline pushes must be buffered, not dropped"
-        );
+        wait_for_buffered_len(&pusher, 1, "offline pushes must be buffered, not dropped");
         assert_eq!(pusher.dropped_total(), 0, "nothing dropped under capacity");
         pusher.flush_pending();
     }
@@ -2182,7 +2207,7 @@ mod tests {
         for i in 0..5 {
             pusher.push(format!("overflow-{i}").as_bytes()).unwrap();
         }
-        assert_eq!(pusher.buffered_len(), 2, "bounded capacity must hold");
+        wait_for_buffered_len(&pusher, 2, "bounded capacity must hold");
         assert_eq!(pusher.dropped_total(), 3, "overflow must drop oldest");
         pusher.flush_pending();
     }
@@ -2231,7 +2256,7 @@ mod tests {
             );
         }
         timer.join().unwrap();
-        assert!(pusher.buffered_len() >= 10, "all pushes must be buffered");
+        wait_for_buffered_len(&pusher, 10, "all pushes must be buffered");
         assert_eq!(pusher.dropped_total(), 0);
 
         // shutdown（Drop）在对端不可达 + 退避期必须有限时间返回

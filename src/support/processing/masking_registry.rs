@@ -118,7 +118,8 @@ impl MaskRuleRegistry {
                 names.dedup();
                 names.len() == rules.len()
             },
-            "from_rules: duplicate rule names make detect attribution ambiguous"
+            "{}",
+            crate::i18n::tr("masking-from-rules-duplicate-names")
         );
         rules.sort_by_key(|r| r.priority());
         Self { rules }

@@ -1204,7 +1204,8 @@ impl MaskRule {
         tracing::warn!(
             rule = self.name.as_str(),
             error = %error,
-            "regex match error during detect; skipping this match"
+            "{}",
+            crate::i18n::tr("masking-detect-match-error")
         );
         if !crate::support::ops_event::has_channels() {
             return;

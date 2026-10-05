@@ -279,11 +279,13 @@ fn verify_chain_manifest(manifest: &std::path::Path, key_env: &str) -> Result<i3
     let intact =
         inklog::support::audit_chain::ArchiveChain::verify_entries(&entries, key.as_bytes());
     if intact {
+        let mut args = inklog::i18n::MsgArgs::new();
+        args.set("chain", inklog::i18n::tr("cli-verify-chain-ok"));
+        args.set("path", manifest.display().to_string());
+        args.set("count", entries.len());
         println!(
-            "{}: {} ({} entries)",
-            inklog::i18n::tr("cli-verify-chain-ok"),
-            manifest.display(),
-            entries.len()
+            "{}",
+            inklog::i18n::tr_args("cli-verify-chain-ok-detail", args)
         );
     } else {
         println!(
