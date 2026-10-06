@@ -592,7 +592,12 @@ impl ChannelBufferedFileSink {
                     if let Err(e) =
                         crate::support::io::sink::file::FileSink::perform_cleanup(&config, &path)
                     {
-                        tracing::error!("ChannelBufferedFileSink cleanup failed: {}", e);
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("err", &e);
+                        tracing::error!(
+                            "{}",
+                            crate::i18n::tr_args("sink-channel_buffered_cleanup_failed", args)
+                        );
                     }
                 }
             }));
@@ -604,7 +609,12 @@ impl ChannelBufferedFileSink {
                 } else {
                     "unknown panic".to_string()
                 };
-                tracing::error!("Cleanup thread panicked: {}", msg);
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("msg", &msg);
+                tracing::error!(
+                    "{}",
+                    crate::i18n::tr_args("sink-channel_buffered_cleanup_panic", args)
+                );
             }
         })
     }
@@ -636,15 +646,22 @@ impl ChannelBufferedFileSink {
             } else {
                 // rename+copy 双失败：轮转产物缺位且源文件被续写——持续失败
                 // 环境轮转永久失效，必须显性上报（对齐 process_rotated 失败路径）
-                let error = format!(
+                // 日志面走 i18n；ops_event 的 payload 保留英文原始描述（机器可读面，
+                // 与 file.rs / 本文件 archive 失败路径的既有约定一致）
+                let detail = format!(
                     "rotation rename and copy both failed for {}",
                     base_path.display()
                 );
-                tracing::error!("{error}");
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("path", base_path.display());
+                tracing::error!(
+                    "{}",
+                    crate::i18n::tr_args("sink-rotate_rename_copy_both_failed", args)
+                );
                 crate::support::ops_event::publish_internal(
                     "sink_degraded",
                     Some("file"),
-                    serde_json::json!({ "op": "rotation", "error": error }),
+                    serde_json::json!({ "op": "rotation", "error": detail }),
                 );
             }
         }

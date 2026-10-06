@@ -788,7 +788,11 @@ impl LoggerManager {
                     }
                 })
             {
-                tracing::warn!(error = %e, "failed to spawn fallback flush ticker; ERROR/FATAL fallback only drains on exit");
+                tracing::warn!(
+                    error = %e,
+                    "{}",
+                    crate::i18n::tr("sink-fallback_flush_ticker_spawn_failed")
+                );
             }
         }
 

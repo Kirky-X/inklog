@@ -93,3 +93,11 @@ masking-from-rules-duplicate-names = from_rules: duplicate rule names make detec
 
 # Config validation warnings
 warn-http_feature_not_compiled = http_server.enabled = true but the 'http' feature is not compiled in; the monitoring server will not start
+
+# Channel-buffered file sink maintenance (cleanup thread & rotation)
+sink-channel_buffered_cleanup_failed = ChannelBufferedFileSink cleanup failed: { $err }
+sink-channel_buffered_cleanup_panic = Cleanup thread panicked: { $msg }
+sink-rotate_rename_copy_both_failed = Rotation rename and copy both failed for { $path }
+
+# Fallback flush maintenance
+sink-fallback_flush_ticker_spawn_failed = failed to spawn fallback flush ticker; ERROR/FATAL fallback only drains on exit

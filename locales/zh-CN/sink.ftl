@@ -93,3 +93,11 @@ masking-from-rules-duplicate-names = from_rules: 规则名重复会使 detect �
 
 # 配置验证警告
 warn-http_feature_not_compiled = http_server.enabled = true 但未编译 'http' feature；监控服务器不会启动
+
+# Channel-buffered 文件 Sink 维护（清理线程与轮转）
+sink-channel_buffered_cleanup_failed = ChannelBufferedFileSink 清理失败: { $err }
+sink-channel_buffered_cleanup_panic = 清理线程异常: { $msg }
+sink-rotate_rename_copy_both_failed = 轮转时重命名与复制均失败，目标文件: { $path }
+
+# Fallback 冲刷维护
+sink-fallback_flush_ticker_spawn_failed = 未能启动 fallback 定时冲刷线程；ERROR/FATAL 降级缓冲仅在退出时排空
