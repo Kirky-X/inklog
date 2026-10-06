@@ -118,6 +118,10 @@ jobs:
         run: choco install protoc -y
       - name: Build
         run: cargo build --workspace --features "sqlite http cli kit compression gzip parquet fast-masking"
+      # 零特性组合：平台相关分支（cfg(not(unix))）里的符号引用只有在此组合下才暴露，
+      # 三条 OS 腿都要跑（历史上 inklog 曾在非 unix 分支引用 feature 门控导入的 File 而 E0433）。
+      - name: Build (zero features)
+        run: cargo check --workspace --no-default-features
 
   doc:
     name: Documentation
