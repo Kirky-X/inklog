@@ -82,7 +82,7 @@ mysql = ["dep:dbnexus", "dbnexus/mysql", "dbnexus/runtime-tokio-rustls", "databa
 duckdb = ["dep:dbnexus", "dbnexus/duckdb", "dbnexus/runtime-tokio-rustls", "database"]
 # 内部聚合谓词：任一数据库后端（sqlite/postgres/mysql/duckdb）启用时为真；
 # 供 cfg 谓词收敛使用，本身不引入任何驱动依赖。
-database = []
+database = ["dep:dbnexus"]
 http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob", "schema"]
 # trait-kit lifecycle/observability integration for DbNexusAdapter and InklogModule.
