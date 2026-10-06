@@ -302,7 +302,7 @@ impl DataMasker {
 
     /// 检查字段名是否为姓名族键（`NAME_FIELD_PATTERNS` 精确匹配）。
     ///
-    /// 命中后的掩码形态是"保留首字 + `**`"（见 [`Self::mask_value_depth`]），
+    /// 命中后的掩码形态是"保留首字 + `**`"（见 `Self::mask_value_depth`），
     /// 与通用敏感键的整值 `***MASKED***` 不同。
     pub fn is_name_field(field_name: &str) -> bool {
         NAME_FIELD_PATTERNS
@@ -430,7 +430,7 @@ impl DataMasker {
     /// 检测面布尔形式：是否存在任一命中。与 [`Self::detect`] 同源
     /// （不做标记短路），找到首个命中即提前返回——存在性判断只做
     /// 首匹配查找，不物化全部命中区间。引擎级匹配错误与 detect 共用
-    /// 同一可观测出口（见 [`MaskRule::report_engine_error`]）。
+    /// 同一可观测出口（见 `MaskRule::report_engine_error`）。
     pub fn has_match(&self, text: &str) -> bool {
         self.rules
             .iter()

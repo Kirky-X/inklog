@@ -64,7 +64,7 @@ pub enum KeyMaterial {
 
 impl KeyMaterial {
     /// 按盐得出最终 AES-256 密钥：Raw 直接返回副本；Password 走
-    /// PBKDF2-HMAC-SHA256（[`PBKDF2_ITERATIONS`]）确定性派生。
+    /// PBKDF2-HMAC-SHA256（`PBKDF2_ITERATIONS`）确定性派生。
     pub fn derive_with_salt(&self, salt: &[u8]) -> Zeroizing<[u8; 32]> {
         match self {
             KeyMaterial::Raw(key) => Zeroizing::new(**key),
@@ -144,7 +144,7 @@ fn classify_key_value(value: &str) -> Result<KeyMaterial, InklogError> {
 ///
 /// * `env_var` - 密钥环境变量名（调用方决定默认值，本函数不内置）
 /// * `key_file` - 密钥文件路径（env 未设置时读取；内容按
-///   [`classify_key_value`] 分支解析）
+///   `classify_key_value` 分支解析）
 pub fn resolve_key_material(
     env_var: &str,
     key_file: Option<&std::path::Path>,

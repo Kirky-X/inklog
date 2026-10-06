@@ -262,7 +262,7 @@ impl PusherShared {
     }
 }
 
-/// TCP journal 推送器：复用 net-sink [`TcpSink`](crate::support::io::sink::net::TcpSink)
+/// TCP journal 推送器：复用 net-sink `TcpSink`（`net-sink` feature，其文档链接在该 feature 未启用时不可解析，故不用 intra-doc link）
 /// 的断线缓冲范式——有界 FIFO 缓冲（满则丢最旧）、指数退避自动重连、
 /// 连接恢复后按序补发。`push` 永不因网络失败向调用方报错（尽力而为），
 /// 丢弃量经 [`TcpJournalPusher::dropped_total`] 可观测。
@@ -447,7 +447,7 @@ impl TcpJournalPusher {
     }
 
     /// 尽力补发断线缓冲（进程退出前调用）：与投递线程共用
-    /// [`PusherShared::deliver_one_round`]（`deliver` 锁串行化，帧序一致）。
+    /// `PusherShared::deliver_one_round`（`deliver` 锁串行化，帧序一致）。
     /// 预算 = connect + write 超时——对端不可达/不排空时有限时间返回；
     /// 网络 IO 不持 `state` 锁，也不与投递线程死锁。
     pub fn flush_pending(&self) {

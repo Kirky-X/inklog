@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //! 按 target 前缀分组的配额限流（R7：per-target 分级限流）。
 //!
-//! 与全局 [`RateLimiter`](crate::support::processing::RateLimiter) 的关系：
+//! 与全局 [`RateLimiter`] 的关系：
 //! 命中前缀规则的 target 由其配额组桶独立裁决（通过后不再进入全局限流），
 //! 未命中规则的 target 维持既有全局路径——未配置规则时整体零介入。组预算
 //! 耗尽的拒绝在订阅器侧与全局限流拒绝共用同一关键级别救援（ERROR/FATAL

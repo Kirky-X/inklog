@@ -967,7 +967,7 @@ impl FileSink {
     }
 
     /// 同步加密文件（可在后台线程调用）。
-    /// 单一事实源在 [`encrypt_file_v2`]，此处仅委托。
+    /// 单一事实源在 `encrypt_file_v2`，此处仅委托。
     ///
     /// 输出格式 v2（与 CLI 解密工具一致）：
     /// magic(8) + version=2(2) + algo(2) + **salt(16)** + nonce(12) + ciphertext
