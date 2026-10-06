@@ -44,8 +44,8 @@ log = { workspace = true }
 crossbeam-channel = { workspace = true }
 regex = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-# confers 审计桥示例所需（与 inklog 同钉已发布 rc.5；仅 audit feature）
-confers = { version = "0.6.0-rc.5", default-features = false, features = ["audit"], optional = true }
+# confers 审计桥示例所需（与 inklog 同钉已发布 rc.6；仅 audit feature）
+confers = { version = "0.6.0-rc.6", default-features = false, features = ["audit"], optional = true }
 
 [[bin]]
 name = "console"

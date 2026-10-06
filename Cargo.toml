@@ -38,7 +38,7 @@ crossbeam-channel = { version = "0.5", default-features = false, features = ["st
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf"] }
-dbnexus = { version = "0.6.0-rc.5", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+dbnexus = { version = "0.6.0-rc.6", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥
 # （见 [features] 说明），全开必然编译失败。显式列举一组可共存的 feature——
@@ -148,8 +148,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.6", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
-confers = { version = "0.6.0-rc.5", default-features = false, features = ["toml", "watch"], optional = true }
+trait-kit = { version = "0.5.0-rc.7", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+confers = { version = "0.6.0-rc.6", default-features = false, features = ["toml", "watch"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -159,7 +159,7 @@ axum-server = { version = "0.8", default-features = false, features = ["tls-rust
 is-terminal = { version = "0.4", default-features = false }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
-oxcache = { version = "0.5.0-rc.4", default-features = false, features = ["memory", "serialization"] }
+oxcache = { version = "0.5.0-rc.6", default-features = false, features = ["memory", "serialization"] }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
