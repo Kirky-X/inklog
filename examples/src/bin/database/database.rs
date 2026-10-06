@@ -122,6 +122,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         parquet_config: Default::default(),
         permissions_path: Some(perm_path.to_string()),
         admin_role: "admin".to_string(),
+        secret_scan_enabled: false,
     };
 
     println!("数据库配置:");
@@ -267,6 +268,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         parquet_config: Default::default(),
         permissions_path: Some(perm_path.to_string()),
         admin_role: "admin".to_string(),
+        secret_scan_enabled: false,
     };
 
     println!("批次配置:");

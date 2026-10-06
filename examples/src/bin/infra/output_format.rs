@@ -157,6 +157,7 @@ fn show_sink_config_usage() {
         stderr_levels: vec![],
         masking_enabled: false,
         output_format: OutputFormat::Json,
+        secret_scan_enabled: false,
     };
     println!("Console Sink 配置（JSON 格式）：");
     println!("  output_format = {:?}", console_cfg.output_format);

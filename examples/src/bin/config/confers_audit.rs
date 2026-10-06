@@ -35,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             stderr_levels: vec![],
             masking_enabled: false,
             output_format: Default::default(),
+            secret_scan_enabled: false,
         },
         inklog::LogTemplate::default(),
     );

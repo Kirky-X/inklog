@@ -18,6 +18,7 @@ use inklog::config::ConsoleSinkConfig;
 /// - `colored`：是否启用 ANSI 颜色。
 /// - `stderr_levels`：哪些级别输出到 stderr（小写形式，例如 `["error", "warn"]`）。
 /// - `masking_enabled`：固定为 `false`，与示例保持一致。
+/// - `secret_scan_enabled`：固定为 `false`（密钥形态扫描为 opt-in，关闭时与既有行为逐字节一致）。
 pub fn create_console_config(colored: bool, stderr_levels: Vec<String>) -> ConsoleSinkConfig {
     ConsoleSinkConfig {
         enabled: true,
@@ -25,6 +26,7 @@ pub fn create_console_config(colored: bool, stderr_levels: Vec<String>) -> Conso
         stderr_levels,
         masking_enabled: false,
         output_format: Default::default(),
+        secret_scan_enabled: false,
     }
 }
 

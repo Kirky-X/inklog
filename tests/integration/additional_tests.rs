@@ -180,6 +180,7 @@ fn make_test_db_config(name: &str, enabled: bool) -> inklog::config::DatabaseSin
         parquet_config: inklog::config::ParquetConfig::default(),
         permissions_path: None,
         admin_role: "admin".to_string(),
+        secret_scan_enabled: false,
     }
 }
 

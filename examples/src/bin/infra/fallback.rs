@@ -180,6 +180,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         stderr_levels: vec!["error".to_string(), "warn".to_string()],
         masking_enabled: false,
         output_format: Default::default(),
+        secret_scan_enabled: false,
     };
     let console_sink = ConsoleSink::new(console_config, LogTemplate::new("[{level}] {message}"));
     println!("Console Sink: 已配置");
@@ -333,6 +334,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         stderr_levels: vec![],
         masking_enabled: false,
         output_format: Default::default(),
+        secret_scan_enabled: false,
     };
     let console_sink = ConsoleSink::new(primary_config, LogTemplate::new("[{level}] {message}"));
 
