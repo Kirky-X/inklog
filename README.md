@@ -94,7 +94,7 @@ inklog 是面向生产环境的日志基础设施：应用代码继续使用 `lo
 - **校验**（`src/validation/`）：`PathValidator` 路径穿越防护、`LogSanitizer` 日志内容净化
 - **归档防篡改**（`src/support/audit_chain.rs`）：归档 HMAC-SHA256 链，防删除、重排与伪造
 - **集成适配**（`src/integrations/`）：`OxCacheAdapter`、`InklogConfigAdapter`、`DbNexusAdapter`、trait-kit `InklogModule`、dbnexus 审计桥、confers 配置与 watch、confers 审计桥
-- **CLI**（`src/cli/`）：`decrypt`、`generate`、`validate`、`query` 四个子命令
+- **CLI**（`src/cli/`）：`decrypt`、`generate`、`validate`、`query`、`verify-chain` 五个子命令（`verify-chain` 校验归档审计链，参数 `--manifest` + `--key-env`）
 
 </details>
 
@@ -181,6 +181,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `kms` | ❌ | KMS 密钥提供者（`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP） |
 | `net-sink` | ❌ | 网络转发 Sink（TCP 可 TLS + UDP，断线缓冲与自动重连） |
 | `otlp` | ❌ | OTLP/HTTP JSON 日志导出 MVP（手写传输，零新增依赖） |
+| `otel` | ❌ | 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主 tracing-opentelemetry layer 写入）；宿主 otel 版本需与 inklog 对齐，未对齐时静默回退根 span 派生 |
+| `metrics-registry` | ❌ | 通用业务指标 registry（CounterVec / GaugeVec / HistogramVec + Prometheus 文本导出） |
 | `test-utils` | ❌ | 测试面 mock 导出（`MockCache` / `MockConfig` / `MockDatabaseAdapter`），不入 default 与任何生产组合 |
 
 > ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 互斥（经 dbnexus 强制，embedded 与 server-side 驱动不得混用），不适用 `--all-features`，请按后端分组启用。
@@ -205,10 +207,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 💻 示例
 
-[`examples/`](examples/) 是 workspace 内的独立 crate（`inklog-examples`），按目录分为 7 类共 39 个示例。在仓库根目录运行：
+[`examples/`](examples/) 是 workspace 内的独立 crate（`inklog-examples`），按目录分为 7 类共 40 个示例。在仓库根目录运行：
 
 ```bash
-cargo run --package inklog-examples --example <名称>
+cargo run --package inklog-examples --bin <名称>
 ```
 
 #### 配置（config）
@@ -304,7 +306,7 @@ inklog 采用分层异步架构：`domain`（管理器、Subscriber 与工作线
 
 ### 🧯 故障降级与自愈
 
-Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重试或触发 DB → File → Console 三级降级，健康检查线程每 10 秒巡检并自动重建不健康 Sink、重置断路器。完整流程图见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「故障降级与自愈」。
+Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重试或触发 DB → File → Console 三级降级，健康检查线程每 1 秒巡检（不健康 Sink 重建冷却 30 秒，需连续失败 >3）并自动重建、重置断路器。完整流程图见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)「故障降级与自愈」。
 
 ---
 
@@ -317,11 +319,11 @@ Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重�
 | 单元测试 | `src/` 内联 `#[cfg(test)]` | 各模块边界与异常场景，Mock 经 cfg(test) 直接可见 |
 | 集成测试 | `tests/integration/`、`tests/cli_integration.rs` | 覆盖批量写入、HTTP、CLI、压缩比、Parquet、自动恢复等，需 `sqlite,http,cli,compression,parquet,test-utils` 组合 |
 | 组合测试 | `tests/combinations/` | feature 组合矩阵与多 Sink 降级，需 `sqlite` |
-| 端到端测试 | `tests/e2e/e2e_advanced.rs` | 226 个场景、15 个场景域（见 [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md)） |
+| 端到端测试 | `tests/e2e/e2e_advanced.rs` | 228 个测试、21 个场景域（见 [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md)） |
 | Docker 数据库集成 | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite 生命周期验证 |
 | 性能测试 | `tests/performance/` + `benches/` | 大容量、长时间运行测试与 criterion 基准 |
 
-**测试规模**（2026-10-01 工作树，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,572 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,177 个测试函数**；另有 criterion 基准函数 40 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个，其中 1 个按 `otlp` feature 门控），基线见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
+**测试规模**（v0.3.0-rc.6 发布前实测，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,710 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,315 个测试函数**；另有 criterion 基准函数 48 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个、`benches/secret_scan_bench.rs` 8 个，按 `.bench_function(` 注册用例计数；其中 1 个按 `otlp` feature 门控，`secret_scan_bench` 需 `secret-scan` feature），基线见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
 ### 运行命令（与 CI 一致）
 
@@ -338,6 +340,7 @@ cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" -
 # 基准测试
 cargo bench --bench rc4_pipeline_bench
 cargo bench --bench inklog_bench
+cargo bench --bench secret_scan_bench --features secret-scan
 ```
 
 > **本地化提示**：错误消息经 ICU/Fluent 按系统 locale 渲染。若测试断言英文消息文本，请设置 `INKLOG_LOCALE=en`（如 CI 或非英文系统环境）以固定输出语言。

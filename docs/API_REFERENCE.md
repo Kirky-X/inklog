@@ -1040,10 +1040,10 @@ inklog = { version = "0.3.0-rc.6", features = ["test-utils"] }
 
 ## 💡 示例参考
 
-`examples/` crate 提供 7 类共 39 个可运行示例（完整清单见 [README](../README.md#-示例)），运行方式：
+`examples/` crate 提供 7 类共 40 个可运行示例（完整清单见 [README](../README.md#-示例)），运行方式：
 
 ```bash
-cargo run --package inklog-examples --example <名称>
+cargo run --package inklog-examples --bin <名称>
 ```
 
 与本文档对应的精选示例：

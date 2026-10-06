@@ -49,7 +49,7 @@ flowchart TD
     SUB --> PROC["support::processing<br/>template / masking / object_pool"]
     PROC --> CH["Crossbeam 有界通道"]
     CH --> W["domain::core::workers<br/>文件 / 数据库 / 健康检查线程"]
-    W --> SINK["support::io::sink<br/>console / file / database / net / otlp<br/>middleware / sampling / rate_limit"]
+    W --> SINK["support::io::sink<br/>console / file / ring_buffered_file / database / net / otlp<br/>middleware / sampling / rate_limit"]
     SINK --> STORE["存储后端<br/>文件系统 / PostgreSQL / MySQL / SQLite / DuckDB"]
     W --> OBS["support::observability<br/>Metrics / HealthStatus"]
     OBS --> HTTP["HTTP 端点<br/>健康与 Prometheus 指标"]
@@ -61,7 +61,7 @@ flowchart TD
 | `support` | Sink 实现、模板与脱敏处理、对象池、指标、校验、查询、审计链 |
 | `integrations` | 以 trait 适配 oxcache / confers / dbnexus / trait-kit，隔离外部依赖 |
 | `i18n` | Fluent + ICU 消息本地化（zh-CN / en 资源位于 `locales/`） |
-| `cli` | `inklog-cli` 二进制：decrypt / generate / validate / query |
+| `cli` | `inklog-cli` 二进制：decrypt / generate / validate / query / verify-chain |
 
 ## 🔀 核心执行链路
 
@@ -280,7 +280,7 @@ LogRecord
 | LoggerSubscriber | tokio | 非阻塞通道发送 |
 | 文件线程 | 阻塞（`spawn_blocking` OS 线程） | 文件 I/O 与轮转 |
 | 数据库线程 | 阻塞 + 独立 tokio runtime | 数据库批量操作 |
-| 健康检查线程 | 阻塞（`spawn_blocking` OS 线程） | 每 10 秒巡检 |
+| 健康检查线程 | 阻塞（`spawn_blocking` OS 线程） | 每 1 秒巡检（不健康 Sink 重建冷却 30 秒，需连续失败 >3） |
 | 动态 Sink 线程 | 阻塞（`spawn_blocking` OS 线程，每 Sink 一条） | 第三方 Sink 消费 |
 
 数据库线程的独立运行时构建方式：
@@ -340,7 +340,7 @@ flowchart TD
     RETRY -->|"成功"| OK
     RETRY -->|"失败"| DEG
     DEG --> MET["记录失败指标并更新 Sink 健康"]
-    MET --> HC["健康检查线程巡检<br/>每 10 秒"]
+    MET --> HC["健康检查线程巡检<br/>每 1 秒"]
     HC -->|"连续失败超阈值且冷却期已过"| RECOVER["发送 Sink 恢复指令"]
     RECOVER --> REINIT["重新初始化 Sink<br/>重置断路器"]
     REINIT --> OK

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <summary>📑 目录</summary>
 
 - [Unreleased](#unreleased)
-- [0.3.0-rc.6](#030-rc6---2026-09-28)
+- [0.3.0-rc.6](#030-rc6---2026-10-06)
 - [0.3.0-rc.5](#030-rc5---2026-09-21)
 - [0.3.0-rc.4](#030-rc4---2026-09-14)
 - [0.3.0-rc.2](#030-rc2---2026-09-03)
@@ -28,30 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **confers 审计桥（`confers-audit` feature）**：实现 confers `AuditSink` 端口（已发布 confers 0.6.0-rc.5 起）——`ConfersAuditSink` 把 confers 配置审计事件（KeyAccess/KeyRotation/Decrypt/LoadSuccess/ReloadTrigger）批量转换为结构化 `LogRecord`（`target = "confers::audit"`、message 为事件 JSON、变体载荷平铺进 fields）写入注入的 inklog `LogSink`，与 console/file/db sink 走同一落盘管道；同步端口 → 异步 sink 经 mpsc + 惰性 writer task 桥接，通道满/无 runtime 上下文按丢弃计数绝不阻塞 confers 审计路径，`accepted`/`dropped`/`write_failures` 计数可观测；级别映射循 confers `AuditLevel` 分类（Durable → WARN，BestEffort → INFO）；confers 为既有 optional 依赖新增 `confers/audit` feature 联动（默认 feature 零依赖零行为变化），示例 `confers_audit` + 7 项单测（批量落盘/变体平铺/级别映射/时间戳透传/失败计数/无 runtime 丢弃/通道满不阻塞）
-- **性能基线入库与 CI bench job**：`inklog_bench` 全组正式基线数字入库 docs/PERFORMANCE.md（2026-10-01，与 rc4_pipeline_bench 基线同载体续记）；`.github/workflows/ci.yml` 新增 `benchmark` job（`workflow_dispatch` 显式开关 + 宽松阈值对照，默认不阻塞 PR）
-- **fallback journal 加密与推送**：`global.fallback_journal_encrypt` 可选 AES-256-GCM 加密——文件头 `INKJRN1\0` magic + 版本 + 算法 + 16 字节随机盐，逐段 nonce(96-bit 随机，唯一性策略实现前固化并由单测断言同 key 跨段/跨文件不重复) + 密文；key 来源 **env 优先、其次 key 文件**（unix 权限强制 0600，组/其他可读显性拒绝），加密启用而 key 缺失/格式无效/熵不足时**构建期显性失败，禁止静默明文落盘**；`replay` 新旧格式自适应（旧明文 JSONL 可被加密实例重放，明文实例遇加密文件按段计数跳过）；`global.fallback_journal_push_addr` 接线推送端口 `JournalPushSender`（无网络环境可注入 mock），内置 `TcpJournalPusher` 复用 net-sink 断线缓冲范式（有界 FIFO 满则丢最旧、指数退避重连、按序补发、半开连接探测），`TransportSecurity` 预留 TLS 扩展点（non_exhaustive）。密码模式按文件头盐 PBKDF2 确定性派生（与 FileSink v2 加密头同范式），密钥解析/熵校验收敛为 `encryption::resolve_key_material`/`validate_key_entropy` 单一事实源
-- **ChannelBufferedFileSink 补齐 FileSink 高级能力**：CBFS 写路径接入按大小/时间轮转（`max_size`/`rotation_time`；时间为滚动间隔近似——自上次轮转起算，与 FileSink 的日历对齐语义不同，如实标注不宣称一致）、压缩/加密归档（与 FileSink 共用同一后处理单一事实源 `process_rotated`，加密密钥构造期显性解析——key 缺失/无效构建期报错，来源 env 优先、其次 `encryption_key_file` 0600）、审计链（轮转即登记 `<stem>.chain.jsonl`，复用 `FileSink` manifest 范式）与留存清理（复用 `FileSink::perform_cleanup`）
-- **配置 JSON Schema 导出**：新增 `schema` optional feature（schemars 1.2）——全部配置类型（`InklogConfig` 及 global/console/file/database/http/performance/sampling/rate_limit 子配置与枚举）derive `JsonSchema`；`InklogConfig::json_schema()` 程序化导出；`inklog-cli generate --schema` 输出 schema 文件（默认 `config_schema.json`）；`SinkMetadata.config_schema` 由 factory 填充真实 schema（`FileSinkFactory` 先行，未启用 feature 时维持 `None`）；产物 `config_schema.json` 入库并由漂移单测（`include_str` 对比）与 CI 步骤（重新生成 + `git diff --exit-code`）双重防漂移
-
-- **per-target 分级限流**：`rate_limit.rules`（target 前缀 → 该组每秒令牌数，最长前缀优先、ASCII 大小写不敏感）配置按前缀分组的配额限流；命中组由组桶独立裁决（放行后不再进入 `performance.rate_limit` 全局限流），未命中 target 维持既有全局路径；组预算耗尽与全局限流拒绝共用同一关键级别救援（ERROR/FATAL 按 1-in-N 采样保留），非关键级别计为 `logs_dropped`；加载期校验（前缀非空、速率 ≥ 1），未配置时整体不接线、默认全局行为不变；查找路径为无分配线性扫描（基准 `target_rate_limiter_lookup`：最长前缀命中 ≈6ns、全表未命中 ≈4ns、含组桶裁决 ≈41ns）
-- **可配采样策略**：`InklogConfig.sampling`（`SamplingConfig`：`per_level` 每级别采样率 + `per_target_prefix` 按 target 前缀规则，最长前缀优先、大小写不敏感）配置限流压力下的保留规则，加载期校验（级别合法、采样率 ≥ 1、前缀非空）；规则未命中或未配置时回退内置兜底（非关键级别丢弃、ERROR/FATAL 保留 1/100），行为与既有语义一致
-- **采样细分指标**：新增 `inklog_sampled_out_total`（`Metrics::sampled_out()`），仅统计采样决策淘汰的记录（Subscriber 压力路径采样与 `SamplingSink` 淘汰），限流非采样丢弃与通道满丢弃不计入；`MetricsSnapshot` 同步携带 `sampled_out`
-
-### Changed
-
-- **BREAKING：`MiddlewareVerdict` 由两态扩为三态**：新增 `Reround` 变体（治理轮终审放行，短路链上剩余治理件，记录继续进入改写与发送阶段；语义来源为 target 前缀配额组放行后不再进入全局限流）。对下游 `match` 穷尽匹配该枚举的代码为破坏性变更，升级时需补全新变体分支；有意不加 `#[non_exhaustive]`——`RecordMiddleware` 的下游实现者需要构造裁决值，non_exhaustive 会同时封死构造面，破坏面反而更大
-- **file sink 回落判定收窄**：轮转/压缩/加密/审计链配置不再回落 `FileSink`——`ChannelBufferedFileSink` 已全能力覆盖，仅 `fsync = true` 与 `output_format = "Json"`（NDJSON 出站）仍走 `FileSink`；默认配置落盘路径由 FileSink 变为 CBFS（独立 flush 线程 + 可配背压），能力矩阵见 docs/USER_GUIDE.md
-### Fixed
-
-- **TcpJournalPusher 推送健壮化**：`push` 收敛为锁内入队（O(1)），连接/半开探测/补发/重连全部移入专职投递线程——关键日志发送路径不再被网络停滞串行化或冻结；新增 `write_timeout`（默认 3s），对端不排空时写超时即弃用连接走既有重连缓冲路径（此前同步 `write_all` 会无限阻塞）；构造期地址校验收敛为 `host:port` 语法检查（瞬时 DNS 故障不再让「尽力而为」端口以 ConfigError 终止构建），解析延迟到投递线程
-- **journal 加密 replay 显性化**：不可识别/不可解密（版本或算法不支持、明文实例遇加密文件的配置回滚、错误密钥全军覆没）时 journal 文件原样保留并按段计数上报——此前无条件清空会销毁不可重放的记录；明文实例对加密 journal 的 spill 显性拒绝（不再追加明文破坏段结构）；加密 journal 全部写路径（头创建/段追加/截断 tmp+rename）以 0600 创建（对齐 FileSink 加密产物与 key 文件约束）；`manager::shutdown` 接线推送端口 `flush_pending` 尽力补发并文档化丢失窗口；加密 spill 头部读取收敛为 O(1)（只读头 28 字节，此前每次 spill 整文件读取）
-- **ChannelBufferedFileSink 加固对齐与轮转判定补全**：shutdown drain 路径补齐 size/time 轮转判定与 `current_file_bytes` 记账（此前 shutdown 时通道积压可无限越过 `max_size`，size 轮转断言偶发失败的根因）；活动文件打开对齐 FileSink 三处审计级加固（0600 / O_NOFOLLOW / 新建父目录 0700）；轮转 rename+copy 双失败显性上报 `sink_degraded`（此前静默吞掉，持续失败环境轮转永久失效无告警）；审计链登记（sha256 + manifest 写穿）移入既有归档后台线程并与 FileSink 收敛为共享单一事实源 `register_rotated_archive`，sha256 失败以 ops 事件显性告警；时间轮转语义如实标注为滚动间隔近似（与 FileSink 日历对齐不同）
-- **加密后明文残留显性上报**：轮转产物加密后 `remove_file` 源文件失败升级为 `sink_degraded` ops 事件（此前仅 warn 日志——明文残留属安全相关降级状态）；加密密钥环境变量为空时报错显性提示「移除该变量以回退 key 文件」（此前落入泛化长度错误丢失处置指引）
-
-## [0.3.0-rc.6] - 2026-09-28
+## [0.3.0-rc.6] - 2026-10-06
 
 ### Added
 
@@ -71,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **服务身份静态字段注入**：`GlobalConfig` 新增 `service_name`/`service_instance`/`service_env`/`service_version` 与 `static_fields`（附加键值）；配置后由 subscriber 在记录入通道前注入每条日志的 `fields`（键名同名，全部出口一致，事件显式同名字段优先），未配置时热路径零开销；支持 TOML（`[global]`）、环境变量（`INKLOG_GLOBAL_SERVICE_*`、`INKLOG_GLOBAL_STATIC_FIELDS=k=v,...`，沿用既有前缀语义）与 confers/DI 键路径（`global.service_*`）；三条配置链统一身份校验：TOML 由 `InklogConfig::validate` 硬拒绝、env 覆盖点对空白值/控制字符告警忽略、DI 装配链拒绝构建；adapter 键路径对未设置的身份字段透传 None（不产生空串注入）
 - **deferred-capabilities 四项遗留能力**：中文姓名掩码（`NAME_FIELD_PATTERNS` 姓名族键词 + 2-4 汉字值形态，保留首字脱敏）；磁盘持久化 fallback 队列 `FallbackJournal`（JSONL 10MiB 上限丢最旧、启动重放防循环、`global.fallback_journal` 默认关）；ChannelBufferedFileSink 转正为主 file sink 路径（简单配置走 CBFS，高级配置回落 FileSink，USER_GUIDE 双路径能力矩阵）；真 OTel 链路上下文（新 `otel` feature，opentelemetry 0.30，span extensions → W3C traceparent → 根 span 派生三级提取，版本未对齐静默回退）
 - **masking API 扩展**：detect-only 检测面（`MaskMatch`/`detect`/`has_match` 与 pattern 访问器）；`MaskRuleRegistry` 全量快照 `rules()` 与构造器 `from_rules()`；行级 KV 脱敏 `DataMasker::mask_kv_lines`
+- **confers 审计桥（`confers-audit` feature）**：实现 confers `AuditSink` 端口（已发布 confers 0.6.0-rc.5 起）——`ConfersAuditSink` 把 confers 配置审计事件（KeyAccess/KeyRotation/Decrypt/LoadSuccess/ReloadTrigger）批量转换为结构化 `LogRecord`（`target = "confers::audit"`、message 为事件 JSON、变体载荷平铺进 fields）写入注入的 inklog `LogSink`，与 console/file/db sink 走同一落盘管道；同步端口 → 异步 sink 经 mpsc + 惰性 writer task 桥接，通道满/无 runtime 上下文按丢弃计数绝不阻塞 confers 审计路径，`accepted`/`dropped`/`write_failures` 计数可观测；级别映射循 confers `AuditLevel` 分类（Durable → WARN，BestEffort → INFO）；confers 为既有 optional 依赖新增 `confers/audit` feature 联动（默认 feature 零依赖零行为变化），示例 `confers_audit` + 7 项单测（批量落盘/变体平铺/级别映射/时间戳透传/失败计数/无 runtime 丢弃/通道满不阻塞）
+- **性能基线入库与 CI bench job**：`inklog_bench` 全组正式基线数字入库 docs/PERFORMANCE.md（2026-10-01，与 rc4_pipeline_bench 基线同载体续记）；`.github/workflows/ci.yml` 新增 `benchmark` job（`workflow_dispatch` 显式开关 + 宽松阈值对照，默认不阻塞 PR）
+- **fallback journal 加密与推送**：`global.fallback_journal_encrypt` 可选 AES-256-GCM 加密——文件头 `INKJRN1\0` magic + 版本 + 算法 + 16 字节随机盐，逐段 nonce(96-bit 随机，唯一性策略实现前固化并由单测断言同 key 跨段/跨文件不重复) + 密文；key 来源 **env 优先、其次 key 文件**（unix 权限强制 0600，组/其他可读显性拒绝），加密启用而 key 缺失/格式无效/熵不足时**构建期显性失败，禁止静默明文落盘**；`replay` 新旧格式自适应（旧明文 JSONL 可被加密实例重放，明文实例遇加密文件按段计数跳过）；`global.fallback_journal_push_addr` 接线推送端口 `JournalPushSender`（无网络环境可注入 mock），内置 `TcpJournalPusher` 复用 net-sink 断线缓冲范式（有界 FIFO 满则丢最旧、指数退避重连、按序补发、半开连接探测），`TransportSecurity` 预留 TLS 扩展点（non_exhaustive）。密码模式按文件头盐 PBKDF2 确定性派生（与 FileSink v2 加密头同范式），密钥解析/熵校验收敛为 `encryption::resolve_key_material`/`validate_key_entropy` 单一事实源
+- **ChannelBufferedFileSink 补齐 FileSink 高级能力**：CBFS 写路径接入按大小/时间轮转（`max_size`/`rotation_time`；时间为滚动间隔近似——自上次轮转起算，与 FileSink 的日历对齐语义不同，如实标注不宣称一致）、压缩/加密归档（与 FileSink 共用同一后处理单一事实源 `process_rotated`，加密密钥构造期显性解析——key 缺失/无效构建期报错，来源 env 优先、其次 `encryption_key_file` 0600）、审计链（轮转即登记 `<stem>.chain.jsonl`，复用 `FileSink` manifest 范式）与留存清理（复用 `FileSink::perform_cleanup`）
+- **配置 JSON Schema 导出**：新增 `schema` optional feature（schemars 1.2）——全部配置类型（`InklogConfig` 及 global/console/file/database/http/performance/sampling/rate_limit 子配置与枚举）derive `JsonSchema`；`InklogConfig::json_schema()` 程序化导出；`inklog-cli generate --schema` 输出 schema 文件（默认 `config_schema.json`）；`SinkMetadata.config_schema` 由 factory 填充真实 schema（`FileSinkFactory` 先行，未启用 feature 时维持 `None`）；产物 `config_schema.json` 入库并由漂移单测（`include_str` 对比）与 CI 步骤（重新生成 + `git diff --exit-code`）双重防漂移
+
+- **per-target 分级限流**：`rate_limit.rules`（target 前缀 → 该组每秒令牌数，最长前缀优先、ASCII 大小写不敏感）配置按前缀分组的配额限流；命中组由组桶独立裁决（放行后不再进入 `performance.rate_limit` 全局限流），未命中 target 维持既有全局路径；组预算耗尽与全局限流拒绝共用同一关键级别救援（ERROR/FATAL 按 1-in-N 采样保留），非关键级别计为 `logs_dropped`；加载期校验（前缀非空、速率 ≥ 1），未配置时整体不接线、默认全局行为不变；查找路径为无分配线性扫描（基准 `target_rate_limiter_lookup`：最长前缀命中 ≈6ns、全表未命中 ≈4ns、含组桶裁决 ≈41ns）
+- **可配采样策略**：`InklogConfig.sampling`（`SamplingConfig`：`per_level` 每级别采样率 + `per_target_prefix` 按 target 前缀规则，最长前缀优先、大小写不敏感）配置限流压力下的保留规则，加载期校验（级别合法、采样率 ≥ 1、前缀非空）；规则未命中或未配置时回退内置兜底（非关键级别丢弃、ERROR/FATAL 保留 1/100），行为与既有语义一致
+- **采样细分指标**：新增 `inklog_sampled_out_total`（`Metrics::sampled_out()`），仅统计采样决策淘汰的记录（Subscriber 压力路径采样与 `SamplingSink` 淘汰），限流非采样丢弃与通道满丢弃不计入；`MetricsSnapshot` 同步携带 `sampled_out`
 
 ### Changed
 
@@ -86,6 +72,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ChannelBufferedFileSink 落盘格式**：缓冲落盘记录间补换行分隔
 
 ---
+- **BREAKING：`MiddlewareVerdict` 由两态扩为三态**：新增 `Reround` 变体（治理轮终审放行，短路链上剩余治理件，记录继续进入改写与发送阶段；语义来源为 target 前缀配额组放行后不再进入全局限流）。对下游 `match` 穷尽匹配该枚举的代码为破坏性变更，升级时需补全新变体分支；有意不加 `#[non_exhaustive]`——`RecordMiddleware` 的下游实现者需要构造裁决值，non_exhaustive 会同时封死构造面，破坏面反而更大
+- **file sink 回落判定收窄**：轮转/压缩/加密/审计链配置不再回落 `FileSink`——`ChannelBufferedFileSink` 已全能力覆盖，仅 `fsync = true` 与 `output_format = "Json"`（NDJSON 出站）仍走 `FileSink`；默认配置落盘路径由 FileSink 变为 CBFS（独立 flush 线程 + 可配背压），能力矩阵见 docs/USER_GUIDE.md
+
+### Fixed
+
+- **TcpJournalPusher 推送健壮化**：`push` 收敛为锁内入队（O(1)），连接/半开探测/补发/重连全部移入专职投递线程——关键日志发送路径不再被网络停滞串行化或冻结；新增 `write_timeout`（默认 3s），对端不排空时写超时即弃用连接走既有重连缓冲路径（此前同步 `write_all` 会无限阻塞）；构造期地址校验收敛为 `host:port` 语法检查（瞬时 DNS 故障不再让「尽力而为」端口以 ConfigError 终止构建），解析延迟到投递线程
+- **journal 加密 replay 显性化**：不可识别/不可解密（版本或算法不支持、明文实例遇加密文件的配置回滚、错误密钥全军覆没）时 journal 文件原样保留并按段计数上报——此前无条件清空会销毁不可重放的记录；明文实例对加密 journal 的 spill 显性拒绝（不再追加明文破坏段结构）；加密 journal 全部写路径（头创建/段追加/截断 tmp+rename）以 0600 创建（对齐 FileSink 加密产物与 key 文件约束）；`manager::shutdown` 接线推送端口 `flush_pending` 尽力补发并文档化丢失窗口；加密 spill 头部读取收敛为 O(1)（只读头 28 字节，此前每次 spill 整文件读取）
+- **ChannelBufferedFileSink 加固对齐与轮转判定补全**：shutdown drain 路径补齐 size/time 轮转判定与 `current_file_bytes` 记账（此前 shutdown 时通道积压可无限越过 `max_size`，size 轮转断言偶发失败的根因）；活动文件打开对齐 FileSink 三处审计级加固（0600 / O_NOFOLLOW / 新建父目录 0700）；轮转 rename+copy 双失败显性上报 `sink_degraded`（此前静默吞掉，持续失败环境轮转永久失效无告警）；审计链登记（sha256 + manifest 写穿）移入既有归档后台线程并与 FileSink 收敛为共享单一事实源 `register_rotated_archive`，sha256 失败以 ops 事件显性告警；时间轮转语义如实标注为滚动间隔近似（与 FileSink 日历对齐不同）
+- **加密后明文残留显性上报**：轮转产物加密后 `remove_file` 源文件失败升级为 `sink_degraded` ops 事件（此前仅 warn 日志——明文残留属安全相关降级状态）；加密密钥环境变量为空时报错显性提示「移除该变量以回退 key 文件」（此前落入泛化长度错误丢失处置指引）
 
 ## [0.3.0-rc.5] - 2026-09-21
 

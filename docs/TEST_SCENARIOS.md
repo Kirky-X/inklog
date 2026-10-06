@@ -10,12 +10,12 @@
 | --- | --- | --- |
 | L1 lib 单元测试 | `src/**` 内 `#[cfg(test)]` | 1009 passed（manager/workers/sink/config/i18n 等模块自测） |
 | L2 集成测试 | `tests/**`（4 个 `[[test]]` 显式注册 + 4 个顶层自动发现） | integration 95+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 34+1i / docker 25 / cli_integration 9 |
-| L3 E2E 场景 | `tests/e2e/e2e_advanced.rs`（目录承载，不裸放顶层） | 226 passed，按 mod 域隔离 |
+| L3 E2E 场景 | `tests/e2e/e2e_advanced.rs`（目录承载，不裸放顶层） | 228 passed，按 mod 域隔离 |
 | L4 容器级 | `tests/docker/`（main.rs 自动发现） | 25 passed（sqlite embedded 路径；pg/mysql 用例门控至对应驱动组） |
 
-CI 主口径（`--features "sqlite http cli kit compression parquet fast-masking test-utils"`）全量结果：**lib 1009 / unit_tests 63 / integration 95+1i / combinations 20 / performance 11+3i / integration_tests 34+1i / docker 25 / cli_integration 9 / e2e_advanced 226，0 failed**。
+CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`，与 ci.yml 一致）全量结果：**lib 1009 / unit_tests 63 / integration 95+1i / combinations 20 / performance 11+3i / integration_tests 34+1i / docker 25 / cli_integration 9 / e2e_advanced 228，0 failed**。
 
-> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见 [README](../README.md) 测试章节（v0.3.0-rc.6：src 内联 1,462 + tests 目录 558 = 2,020 个测试函数）。
+> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见 [README](../README.md) 测试章节（HEAD 07b5366：src 内联 1,702 + tests 目录 564 + examples 41 = 2,307 个测试函数）。
 
 ## 🗂️ 测试目标注册与功能域落点
 
@@ -30,7 +30,7 @@ CI 主口径（`--features "sqlite http cli kit compression parquet fast-masking
 
 目录承载约定：e2e_* 文件必须位于 `tests/e2e/`；`required-features` 未满足时 cargo 会静默跳过目标（不报错不执行），因此 CI feature 组合必须覆盖各目标的 required-features（含 `test-utils`）。
 
-## 🎬 E2E 场景定义（tests/e2e/e2e_advanced.rs，226 测试 × 15 mod 域）
+## 🎬 E2E 场景定义（tests/e2e/e2e_advanced.rs，228 测试 × 21 mod 域）
 
 | 域 | 场景要点 |
 | --- | --- |
@@ -49,6 +49,12 @@ CI 主口径（`--features "sqlite http cli kit compression parquet fast-masking
 | sink_health_monitor_e2e | 健康度采集/不健康判定/恢复 |
 | metrics_e2e | Metrics 计数/延迟记录/sink health |
 | file_sink_e2e | FileSink 写入/轮转/flush 落盘 + tracing→FileSink、log→FileSink 多组件集成 |
+| compression_e2e | 压缩策略 NoCompression/Zstd/Gzip：压缩解压回环/文件压缩/级别钳制/扩展名（`compression` 门控） |
+| i18n_e2e | LogI18nFormatter：locale 解析/数字·时间戳·级别格式化/排序比较（`i18n` 门控） |
+| log_adapter_e2e | `log` crate 桥接：LogLevel 与 log crate 级别互换映射 |
+| multi_component_e2e | 多组件集成：tracing → 模板渲染/脱敏 → FileSink → 文件落盘验证 |
+| custom_sink_e2e | 动态 Sink 注册：自定义内存 Sink 经 `add_sink` 零核心改动接入 |
+| ops_event_e2e | 内部审计事件流：publish_ops_event 经统一 Sink 通道落盘 |
 
 ## 📌 测试编写要点
 
@@ -79,7 +85,7 @@ CI 主口径（`--features "sqlite http cli kit compression parquet fast-masking
 | 门槛 | 命令口径 | 结果 |
 | --- | --- | --- |
 | fmt | `cargo fmt --all -- --check` | 净 |
-| clippy | `cargo clippy --all-targets --features "sqlite http cli kit compression parquet fast-masking test-utils" -- -D warnings` | 零告警 |
+| clippy | `cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking test-utils" -- -D warnings` | 零告警 |
 | doc | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --features "sqlite http cli kit compression parquet fast-masking"` | 零告警 |
 | deny | `cargo deny check` | 4 项 ok（licenses 经 clarify 绑定 LICENSE hash：inklog/oxcache/oxcache_macros/trait-kit/dbnexus） |
 | audit | `cargo audit` | rc=0（514 crate 无命中） |

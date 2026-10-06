@@ -310,7 +310,7 @@ git commit -m "feat(scope): description"
 |----------|------|----------|
 | 单元测试 | `src/` 内联 `#[cfg(test)]` | `cargo test --lib` |
 | 集成测试 | `tests/integration/`、`tests/unit_tests.rs` 等 | `cargo test --workspace --features <组合>` |
-| E2E 场景 | `tests/e2e/e2e_advanced.rs`（226 场景 × 15 域） | 同上 |
+| E2E 场景 | `tests/e2e/e2e_advanced.rs`（228 测试 × 21 域） | 同上 |
 | 组合测试 | `tests/combinations/` | 需 `sqlite` |
 | 容器级 | `tests/docker/` | `docker compose -f docker/docker-compose.test.yml up -d` |
 | 基准测试 | `benches/` | `cargo bench` |
@@ -529,7 +529,7 @@ inklog/
 ├── locales/                # i18n 资源（zh-CN / en）
 ├── tests/                  # 集成 / E2E / 组合 / docker / 性能测试
 ├── benches/                # criterion 基准（inklog_bench、rc4_pipeline_bench）
-├── examples/               # inklog-examples crate（7 类 39 个示例）
+├── examples/               # inklog-examples crate（7 类 40 个示例）
 ├── docs/                   # 文档（本目录）
 └── scripts/                # install-pre-commit.sh 等脚本
 ```

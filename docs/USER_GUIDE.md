@@ -65,13 +65,13 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 |------|------|
 | **数据库 Sink** | PostgreSQL、MySQL、SQLite、DuckDB（经 dbnexus，批量落库、分区表） |
 | **i18n 关闭** | `default-features = false` 裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退内嵌英文文案表 |
-| **压缩** | Zstd（`compression`）/ Gzip（`gzip`）压缩轮转文件 |
+| **压缩** | Zstd（`zstd`，`compression` 为弃用别名）/ Gzip（`gzip`）压缩轮转文件 |
 | **加密** | AES-256-GCM 轮转归档加密 |
 | **Parquet 导出** | 分析就绪的列式归档格式 |
 | **HTTP 端点** | Axum 健康检查与 Prometheus 指标端点 |
 | **网络转发** | TCP（可 TLS）+ UDP Sink，断线缓冲与自动重连 |
 | **OTLP 导出** | OTLP/HTTP JSON 日志导出 |
-| **CLI 工具** | `inklog-cli`：decrypt / generate / validate / query |
+| **CLI 工具** | `inklog-cli`：decrypt / generate / validate / query / verify-chain（审计链校验，`--manifest` + `--key-env`） |
 | **采样与限流** | 采样器（N 取 1）、令牌桶限流、中间件链装饰器、可配采样策略（per_level 采样率 + per_target_prefix 规则）、per-target 分级限流（rate_limit.rules 前缀配额组，最长前缀优先） |
 | **归档防篡改** | HMAC-SHA256 归档链，防删除、重排与伪造 |
 
@@ -100,7 +100,7 @@ inklog = { version = "0.3.0-rc.6", features = ["mysql"] }
 inklog = { version = "0.3.0-rc.6", features = ["duckdb"] }
 
 # 压缩与性能
-inklog = { version = "0.3.0-rc.6", features = ["compression", "gzip", "parquet", "fast-masking"] }
+inklog = { version = "0.3.0-rc.6", features = ["zstd", "gzip", "parquet", "fast-masking"] }
 
 # 集成与扩展
 inklog = { version = "0.3.0-rc.6", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
@@ -684,12 +684,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### 运行示例（cargo run --example）
+### 运行示例（cargo run --bin）
 
-`examples/` crate 提供 7 类共 39 个可运行示例，完整清单见 [README](../README.md#-示例)。运行方式：
+`examples/` crate 提供 7 类共 40 个可运行示例，完整清单见 [README](../README.md#-示例)。运行方式：
 
 ```bash
-cargo run --package inklog-examples --example <名称>
+cargo run --package inklog-examples --bin <名称>
 ```
 
 精选示例：
@@ -787,7 +787,7 @@ let database_sink = DatabaseSinkConfig {
 
 ### Sink 故障恢复
 
-inklog 提供断路器、三级降级（DB → File → Console）与自动恢复；健康检查线程每 10 秒巡检，连续失败超阈值且冷却期已过时自动重建 Sink。
+inklog 提供断路器、三级降级（DB → File → Console）与自动恢复；健康检查线程每 1 秒巡检（不健康 Sink 重建冷却 30 秒，需连续失败 >3），满足条件时自动重建 Sink。
 
 ```rust
 // 手动恢复特定 Sink

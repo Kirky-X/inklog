@@ -96,7 +96,7 @@ inklog is logging infrastructure built for production: application code keeps us
 - **Validation** (`src/validation/`): `PathValidator` path traversal protection, `LogSanitizer` log content sanitization
 - **Tamper-evident archival** (`src/support/audit_chain.rs`): HMAC-SHA256 archive chain against deletion, reordering, and forgery
 - **Integrations** (`src/integrations/`): `OxCacheAdapter`, `InklogConfigAdapter`, `DbNexusAdapter`, trait-kit `InklogModule`, dbnexus audit bridge, confers config loading with watch
-- **CLI** (`src/cli/`): four subcommands: `decrypt`, `generate`, `validate`, `query`
+- **CLI** (`src/cli/`): five subcommands: `decrypt`, `generate`, `validate`, `query`, `verify-chain` (`verify-chain` validates the archive audit chain via `--manifest` + `--key-env`)
 
 </details>
 
@@ -172,16 +172,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `cli` | ❌ | `inklog-cli` command-line tool (clap + glob, implies `schema`) |
 | `schema` | ❌ | Config JSON Schema export (schemars derive + `InklogConfig::json_schema()`); implicitly enabled by `cli` |
 | `kit` | ❌ | trait-kit lifecycle and observability integration (`InklogModule`); requires at least one database backend feature |
-| `compression` | ❌ | Zstd compression for rotated log files (zstd) |
+| `zstd` | ❌ | Zstd compression for rotated log files (zstd); `compression` is a deprecated compatibility alias kept for existing `--features compression` usage |
 | `gzip` | ❌ | Gzip compression backend (pure-Rust flate2; FileSink falls back to gzip for rotation when `compression` is off) |
 | `parquet` | ❌ | Parquet/Arrow export for database sink archival |
 | `fast-masking` | ❌ | Aho-Corasick accelerated multi-pattern masking |
 | `secret-scan` | ❌ | Secret outbound masking gate: value-shape pattern registry (bare `sk-`/PEM/AKIA secrets) + value entropy scanning + per-pattern counting with fail-closed limit (`mask_checked`) + Chinese sensitive key names |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage port adapter; audit events persisted through the inklog DB sink, combinable with any backend |
 | `config-confers` | ❌ | Configuration loaded via confers + watch hot-reload of level and rotation parameters |
+| `confers-audit` | ❌ | inklog implementation of the confers `AuditSink` port; configuration audit events are written into the inklog structured sink (shares the confers dependency with `config-confers`) |
 | `kms` | ❌ | KMS key providers (`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP) |
 | `net-sink` | ❌ | Network forwarding sinks (TCP with optional TLS + UDP, buffered reconnection) |
 | `otlp` | ❌ | OTLP/HTTP JSON log export MVP (hand-written transport, zero new dependencies) |
+| `otel` | ❌ | Real OpenTelemetry trace context: reads the SpanContext from span extensions (written by the host's tracing-opentelemetry layer); the host otel version must match inklog's, otherwise it silently falls back to root-span derivation |
+| `metrics-registry` | ❌ | General-purpose business metrics registry (CounterVec / GaugeVec / HistogramVec + Prometheus text export) |
 | `test-utils` | ❌ | Test-facing mock exports (`MockCache` / `MockConfig` / `MockDatabaseAdapter`); excluded from default and all production combinations |
 
 > ⚠️ **Database backend exclusivity**: `sqlite` / `postgres` / `mysql` / `duckdb` are mutually exclusive (enforced via dbnexus; embedded and server-side drivers must not be mixed). `--all-features` is not supported; enable features grouped by backend instead.
@@ -206,10 +209,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 💻 Examples
 
-[`examples/`](examples/) is a standalone workspace crate (`inklog-examples`) with 39 examples in 7 categories. Run from the repository root:
+[`examples/`](examples/) is a standalone workspace crate (`inklog-examples`) with 40 examples in 7 categories. Run from the repository root:
 
 ```bash
-cargo run --package inklog-examples --example <name>
+cargo run --package inklog-examples --bin <name>
 ```
 
 #### Configuration (config)
@@ -219,6 +222,7 @@ cargo run --package inklog-examples --example <name>
 | `config_file` | Configuration file loading (Layer 1, local resources) | none |
 | `config_inspect` | Config inspection: `sinks_enabled()` and `LoggerManager::load()` | none |
 | `env_overrides` | Environment variable override loading | none |
+| `confers_audit` | confers audit bridge: `AuditSink` port events fed into the inklog sink | `confers-audit` |
 
 #### Core (core)
 
@@ -304,7 +308,7 @@ The full sequence of a log record — emitted via `tracing` macros, masked, sent
 
 ### 🧯 Failure Handling
 
-Sink write failures go through the circuit breaker (default failure threshold 5, 30-second cooldown) into retry or the DB → File → Console three-level fallback, while the health-check thread patrols every 10 seconds, re-initializing unhealthy sinks and resetting the breaker. The full flow diagram is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Failure degradation and self-healing").
+Sink write failures go through the circuit breaker (default failure threshold 5, 30-second cooldown) into retry or the DB → File → Console three-level fallback, while the health-check thread patrols every 1 second (unhealthy-sink rebuilds observe a 30-second cooldown and require more than 3 consecutive failures), re-initializing unhealthy sinks and resetting the breaker. The full flow diagram is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ("Failure degradation and self-healing").
 
 ---
 
@@ -317,11 +321,11 @@ Sink write failures go through the circuit breaker (default failure threshold 5,
 | Unit tests | inline `#[cfg(test)]` in `src/` | Boundary and error scenarios per module; mocks visible via cfg(test) |
 | Integration tests | `tests/integration/`, `tests/cli_integration.rs` | Batch writes, HTTP, CLI, compression ratio, Parquet, auto recovery, and more; requires the `sqlite,http,cli,compression,parquet,test-utils` combination |
 | Combination tests | `tests/combinations/` | Feature combination matrix and multi-sink fallback; requires `sqlite` |
-| End-to-end tests | `tests/e2e/e2e_advanced.rs` | 226 scenarios across 15 scenario domains (see [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md)) |
+| End-to-end tests | `tests/e2e/e2e_advanced.rs` | 228 tests across 21 scenario domains (see [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md)) |
 | Docker database integration | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite lifecycle verification |
 | Performance tests | `tests/performance/` + `benches/` | Large-volume and long-running tests plus criterion benchmarks |
 
-**Test suite size** (as of v0.3.0-rc.6, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,462 inline in `src/` + 558 in `tests/` for a total of **2,020 test functions**, plus 21 top-level criterion benchmark functions (17 in `benches/inklog_bench.rs`, 4 in `benches/rc4_pipeline_bench.rs`).
+**Test suite size** (measured before the v0.3.0-rc.6 release, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,710 inline in `src/` + 564 in `tests/` + 41 in `examples/` for a total of **2,315 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature).
 
 ### Commands (matching CI)
 
@@ -338,6 +342,7 @@ cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" -
 # Benchmarks
 cargo bench --bench rc4_pipeline_bench
 cargo bench --bench inklog_bench
+cargo bench --bench secret_scan_bench --features secret-scan
 ```
 
 > **Locale note**: error messages are localized via ICU/Fluent based on the system locale. If tests assert English message text, set `INKLOG_LOCALE=en` (e.g. in CI or non-English environments) to pin the output language.
