@@ -122,7 +122,7 @@ Or declare it explicitly in `Cargo.toml` (`default = ["i18n"]`; core capabilitie
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.6"
+inklog = "0.3.0-rc.7"
 ```
 
 ### Minimal Runnable Example
@@ -325,7 +325,7 @@ Sink write failures go through the circuit breaker (default failure threshold 5,
 | Docker database integration | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite lifecycle verification |
 | Performance tests | `tests/performance/` + `benches/` | Large-volume and long-running tests plus criterion benchmarks |
 
-**Test suite size** (measured before the v0.3.0-rc.6 release, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,710 inline in `src/` + 564 in `tests/` + 41 in `examples/` for a total of **2,315 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature).
+**Test suite size** (measured before the v0.3.0-rc.7 release, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,710 inline in `src/` + 564 in `tests/` + 41 in `examples/` for a total of **2,315 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature).
 
 ### Commands (matching CI)
 
@@ -403,7 +403,7 @@ Phased goals compiled from the existing release plan (timing may adjust with the
 
 | Status | Goal | Notes |
 |:----:|------|------|
-| 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.6 → 0.3.0 stable release |
+| 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.7 → 0.3.0 stable release |
 | 📋 | Workspace dependency lockstep | trait-kit 0.5.0, oxcache 0.5.0, dbnexus 0.6.0 |
 | ✅ | CI test matrix grouped by database backend | The Docker pipeline validates the four mutually exclusive backends (sqlite/postgres/mysql/duckdb); duckdb is embedded and needs no container service |
 | ✅ | Provision the MySQL integration environment | A MySQL 8 service is provided in docker/docker-compose.test.yml; the CI mysql branch runs the integration tests |
@@ -454,6 +454,7 @@ The full version history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md) (Keep a
 
 ### Recent Releases
 
+- **0.3.0-rc.7** (2026-10-07): fix `E0433` in `create_compressed_output` on non-unix targets when neither zstd nor gzip is enabled (hit by limiteron with `default-features = false`); the CI build matrix now also checks the zero-feature build to prevent regressions
 - **0.3.0-rc.6** (2026-09-28): full egress PII masking coverage with hardened regex rules (fancy-regex lookaround); ERROR/FATAL fallback re-emission, fsync crash consistency and 0600 file permissions; audit chain wired into rotation with `inklog-cli verify-chain`; service identity static fields; deferred-capabilities four items (Chinese name masking / FallbackJournal / CBFS promotion / real OTel trace context); masking detection-face and KV-redaction APIs; i18n feature-gating; CI database matrix extended with duckdb;
 - **0.3.0-rc.4** (2026-09-14, including the original rc.3 batch): added `init_inklog_logger` singleton initialization, runtime level hot-reload (`set_level`), dynamic sink registration (`LoggerBuilder::add_sink`), `trace_id`/`span_id` correlation, `inklog-cli query` log search, network forwarding sinks (TCP/UDP), an OTLP export MVP, the tamper-evident archive chain, and the first performance baseline in `docs/PERFORMANCE.md` (version 0.3.0-rc.3 was skipped and never published; its content shipped with this release);
 - **0.3.0-rc.2** (2026-09-03): integrated trait-kit 0.5.0-rc.2 and the i18n refactor with a version bump; removed the three mocks from the default public API (BREAKING; external test consumers must enable `test-utils`);

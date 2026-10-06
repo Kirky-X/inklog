@@ -1,6 +1,6 @@
 # 📘 inklog API 参考
 
-本文档提供 inklog v0.3.0-rc.6 公共 API 的逐项参考：核心类型、配置结构体、错误类型、健康监控、Sink 家族、依赖注入 trait 与测试 Mock。使用教程见 [📖 用户指南](USER_GUIDE.md)，内部设计见 [🏗️ 架构设计](ARCHITECTURE.md)。
+本文档提供 inklog v0.3.0-rc.7 公共 API 的逐项参考：核心类型、配置结构体、错误类型、健康监控、Sink 家族、依赖注入 trait 与测试 Mock。使用教程见 [📖 用户指南](USER_GUIDE.md)，内部设计见 [🏗️ 架构设计](ARCHITECTURE.md)。
 
 <details open>
 <summary>📑 目录</summary>
@@ -991,7 +991,7 @@ pub trait Database: Send + Sync {
 
 ```toml
 [dev-dependencies]
-inklog = { version = "0.3.0-rc.6", features = ["test-utils"] }
+inklog = { version = "0.3.0-rc.7", features = ["test-utils"] }
 ```
 
 ### MockCache
