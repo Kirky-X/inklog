@@ -149,12 +149,15 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
         },
         channel_capacity: 4,
         backpressure_strategy: BackpressureStrategy::DropNewest,
-        flush_batch_size: 2,
+        // `flush_batch_size = 0` 使 IO 线程不从通道排空，溢出（即 DropNewest 丢弃）
+        // 成为确定结果，而非与 IO 线程排空速度赛跑——与库内
+        // `test_backpressure_drop_newest` 采用同一确定性口径。
+        flush_batch_size: 0,
         flush_interval_ms: 1000, // 拉长 flush 间隔，迫使 channel 被填满
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
-    println!("channel_capacity = 4, flush_interval = 1000ms");
+    println!("channel_capacity = 4, flush_batch_size = 0（不自动排空）, flush_interval = 1000ms");
 
     print_section("3.2 快速写入 64 条日志（超出容量）");
     for i in 0..64 {
@@ -196,12 +199,14 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
         },
         channel_capacity: 4,
         backpressure_strategy: BackpressureStrategy::DropOldest,
-        flush_batch_size: 2,
+        // 同第 3 节：`flush_batch_size = 0` 使 IO 线程永不排空，超出容量的每次写入
+        // 都确定性地驱逐最旧条目（与库内 `test_backpressure_drop_oldest` 口径一致）。
+        flush_batch_size: 0,
         flush_interval_ms: 1000,
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
-    println!("channel_capacity = 4, flush_interval = 1000ms");
+    println!("channel_capacity = 4, flush_batch_size = 0（不自动排空）, flush_interval = 1000ms");
 
     print_section("4.2 快速写入 64 条日志（超出容量）");
     for i in 0..64 {
