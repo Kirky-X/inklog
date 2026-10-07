@@ -390,17 +390,8 @@ impl LogRecord {
     /// 模块（`mask_sensitive_fields`、`LoggerSubscriber` 的 sanitizer 路径等）
     /// 统一引用本实现，禁止再复制本地副本（DRY，防安全行为分叉）。
     pub(crate) fn is_sensitive_key(key: &str) -> bool {
-        // 无分隔符的单段键（如 "PASSWORD"、"pAsSwOrD"、"apiKey"）：
-        // 驼峰切分会把交替大小写撕碎，先按小写整体比对
-        if !key.chars().any(|c| !c.is_ascii_alphanumeric()) {
-            let lowered = key.to_lowercase();
-            if Self::SENSITIVE_KEY_PATTERNS.contains(&lowered.as_str())
-                || lowered == "key"
-                || lowered == "keys"
-                || Self::is_glued_sensitive_key(&lowered)
-            {
-                return true;
-            }
+        if Self::is_unsegmented_sensitive_key(key) {
+            return true;
         }
         let tokens = Self::key_tokens(key);
         if tokens
@@ -414,12 +405,30 @@ impl LogRecord {
             // 仅当去掉 key 后的前缀是敏感限定词时才视为敏感
             [single] => single == "key" || single == "keys" || Self::is_glued_sensitive_key(single),
             // 多 token：仅当 "key"/"keys" 与敏感限定词相邻时才视为敏感
-            _ => tokens.windows(2).any(|w| {
-                let (a, b) = (w[0].as_str(), w[1].as_str());
-                (a == "key" || a == "keys") && Self::SENSITIVE_KEY_QUALIFIERS.contains(&b)
-                    || Self::SENSITIVE_KEY_QUALIFIERS.contains(&a) && (b == "key" || b == "keys")
-            }),
+            _ => Self::has_adjacent_key_qualifier(&tokens),
         }
+    }
+
+    /// 无分隔符的单段键（如 "PASSWORD"、"pAsSwOrD"、"apiKey"）判定：
+    /// 驼峰切分会把交替大小写撕碎，先按小写整体比对。
+    fn is_unsegmented_sensitive_key(key: &str) -> bool {
+        if key.chars().any(|c| !c.is_ascii_alphanumeric()) {
+            return false;
+        }
+        let lowered = key.to_lowercase();
+        Self::SENSITIVE_KEY_PATTERNS.contains(&lowered.as_str())
+            || lowered == "key"
+            || lowered == "keys"
+            || Self::is_glued_sensitive_key(&lowered)
+    }
+
+    /// 多 token 形态：仅当 "key"/"keys" 与敏感限定词相邻时才视为敏感。
+    fn has_adjacent_key_qualifier(tokens: &[String]) -> bool {
+        tokens.windows(2).any(|w| {
+            let (a, b) = (w[0].as_str(), w[1].as_str());
+            (a == "key" || a == "keys") && Self::SENSITIVE_KEY_QUALIFIERS.contains(&b)
+                || Self::SENSITIVE_KEY_QUALIFIERS.contains(&a) && (b == "key" || b == "keys")
+        })
     }
 
     /// 粘连形式（无分隔符）的 "…key/…keys" 判定：去掉 key 后缀的前缀必须是

@@ -142,6 +142,24 @@ enum Placeholder {
     Literal(String),
 }
 
+/// 占位符名 → 占位符；未知名称按原文保留为 Literal（渲染时还原 `{原文}`，
+/// 含大小写与空白——`name` 是 trim+小写后的匹配键，`raw` 是花括号间原文）。
+fn placeholder_from_name(name: &str, raw: &str) -> Placeholder {
+    match name {
+        "timestamp" => Placeholder::Timestamp,
+        "level" => Placeholder::Level,
+        "target" => Placeholder::Target,
+        "message" => Placeholder::Message,
+        "file" => Placeholder::File,
+        "line" => Placeholder::Line,
+        "thread_id" => Placeholder::ThreadId,
+        "trace_id" => Placeholder::TraceId,
+        "span_id" => Placeholder::SpanId,
+        "fields" => Placeholder::Fields,
+        _ => Placeholder::Literal(format!("{{{raw}}}")),
+    }
+}
+
 impl LogTemplate {
     /// Creates a new `LogTemplate` from a template string.
     ///
@@ -224,21 +242,7 @@ impl LogTemplate {
 
                 if in_placeholder {
                     let placeholder_name = current.trim().to_lowercase();
-                    match placeholder_name.as_str() {
-                        "timestamp" => placeholders.push(Placeholder::Timestamp),
-                        "level" => placeholders.push(Placeholder::Level),
-                        "target" => placeholders.push(Placeholder::Target),
-                        "message" => placeholders.push(Placeholder::Message),
-                        "file" => placeholders.push(Placeholder::File),
-                        "line" => placeholders.push(Placeholder::Line),
-                        "thread_id" => placeholders.push(Placeholder::ThreadId),
-                        "trace_id" => placeholders.push(Placeholder::TraceId),
-                        "span_id" => placeholders.push(Placeholder::SpanId),
-                        "fields" => placeholders.push(Placeholder::Fields),
-                        _ => {
-                            placeholders.push(Placeholder::Literal(format!("{{{}}}", current)));
-                        }
-                    }
+                    placeholders.push(placeholder_from_name(&placeholder_name, &current));
                     current.clear();
                     in_placeholder = false;
                 } else {

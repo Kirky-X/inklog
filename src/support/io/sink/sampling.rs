@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
-use crate::domain::config::sampling::SamplingConfig;
+use crate::domain::config::sampling::{SamplingConfig, TargetSamplingRule};
 use crate::support::io::LogSink;
 use crate::support::query::level_rank;
 use crate::{InklogError, LogRecord, Metrics};
@@ -171,6 +171,69 @@ pub struct SamplingPolicy {
     per_target_prefix: Vec<(String, Sampler)>,
 }
 
+/// 级别采样率表校验与编译：非法级别名、0 采样率、同秩别名冲突均为配置错误。
+fn per_level_samplers(
+    per_level: &HashMap<String, u64>,
+) -> Result<HashMap<u8, Sampler>, InklogError> {
+    let mut samplers = HashMap::with_capacity(per_level.len());
+    for (level, rate) in per_level {
+        let rank = level_rank(level);
+        if rank == u8::MAX {
+            return Err(InklogError::ConfigError(format!(
+                "Invalid sampling level '{level}'. Valid: trace/debug/info/warn/error/fatal"
+            )));
+        }
+        if *rate == 0 {
+            return Err(InklogError::ConfigError(format!(
+                "sampling rate for level '{level}' must be >= 1"
+            )));
+        }
+        if samplers.keys().any(|r| *r == rank) {
+            return Err(InklogError::ConfigError(format!(
+                "sampling levels '{level}' and a rank-equivalent alias both configured; \
+                 keep one per level rank"
+            )));
+        }
+        // 级别路由由 per_level 键完成，采样器只承担 N 取 1
+        samplers.insert(rank, Sampler::n_of_one(*rate)?);
+    }
+    Ok(samplers)
+}
+
+/// target 前缀规则表校验与编译：空前缀、0 阈值、非法 keep_level 均为配置错误。
+fn per_target_prefix_samplers(
+    per_target_prefix: &HashMap<String, TargetSamplingRule>,
+) -> Result<Vec<(String, Sampler)>, InklogError> {
+    let mut samplers = Vec::with_capacity(per_target_prefix.len());
+    for (prefix, rule) in per_target_prefix {
+        if prefix.is_empty() {
+            return Err(InklogError::ConfigError(
+                "sampling target prefix must not be empty".to_string(),
+            ));
+        }
+        if rule.sample_every_n == 0 {
+            return Err(InklogError::ConfigError(format!(
+                "sample_every_n for prefix '{prefix}' must be >= 1"
+            )));
+        }
+        let sampler = match rule.keep_level.as_deref() {
+            Some(keep_level) => {
+                if level_rank(keep_level) == u8::MAX {
+                    return Err(InklogError::ConfigError(format!(
+                        "Invalid keep_level '{keep_level}'. \
+                         Valid: trace/debug/info/warn/error/fatal"
+                    )));
+                }
+                Sampler::new(keep_level, rule.sample_every_n, Vec::new())?
+            }
+            // 未配置豁免阈值：纯 N 取 1
+            None => Sampler::n_of_one(rule.sample_every_n)?,
+        };
+        samplers.push((prefix.to_lowercase(), sampler));
+    }
+    Ok(samplers)
+}
+
 impl SamplingPolicy {
     /// 从采样配置构建策略。
     ///
@@ -179,56 +242,8 @@ impl SamplingPolicy {
     /// 级别名非法、采样率为 0、前缀为空或别名键（`warn`/`warning` 等）
     /// 映射到同一级别时返回 [`InklogError::ConfigError`]。
     pub fn from_config(config: &SamplingConfig) -> Result<Self, InklogError> {
-        let mut per_level = HashMap::with_capacity(config.per_level.len());
-        for (level, rate) in &config.per_level {
-            let rank = level_rank(level);
-            if rank == u8::MAX {
-                return Err(InklogError::ConfigError(format!(
-                    "Invalid sampling level '{level}'. Valid: trace/debug/info/warn/error/fatal"
-                )));
-            }
-            if *rate == 0 {
-                return Err(InklogError::ConfigError(format!(
-                    "sampling rate for level '{level}' must be >= 1"
-                )));
-            }
-            if per_level.keys().any(|r| *r == rank) {
-                return Err(InklogError::ConfigError(format!(
-                    "sampling levels '{level}' and a rank-equivalent alias both configured; \
-                     keep one per level rank"
-                )));
-            }
-            // 级别路由由 per_level 键完成，采样器只承担 N 取 1
-            per_level.insert(rank, Sampler::n_of_one(*rate)?);
-        }
-        let mut per_target_prefix: Vec<(String, Sampler)> =
-            Vec::with_capacity(config.per_target_prefix.len());
-        for (prefix, rule) in &config.per_target_prefix {
-            if prefix.is_empty() {
-                return Err(InklogError::ConfigError(
-                    "sampling target prefix must not be empty".to_string(),
-                ));
-            }
-            if rule.sample_every_n == 0 {
-                return Err(InklogError::ConfigError(format!(
-                    "sample_every_n for prefix '{prefix}' must be >= 1"
-                )));
-            }
-            let sampler = match rule.keep_level.as_deref() {
-                Some(keep_level) => {
-                    if level_rank(keep_level) == u8::MAX {
-                        return Err(InklogError::ConfigError(format!(
-                            "Invalid keep_level '{keep_level}'. \
-                             Valid: trace/debug/info/warn/error/fatal"
-                        )));
-                    }
-                    Sampler::new(keep_level, rule.sample_every_n, Vec::new())?
-                }
-                // 未配置豁免阈值：纯 N 取 1
-                None => Sampler::n_of_one(rule.sample_every_n)?,
-            };
-            per_target_prefix.push((prefix.to_lowercase(), sampler));
-        }
+        let per_level = per_level_samplers(&config.per_level)?;
+        let mut per_target_prefix = per_target_prefix_samplers(&config.per_target_prefix)?;
         // 最长前缀优先：更具体的规则胜出
         per_target_prefix.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
         Ok(Self {
