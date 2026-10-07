@@ -17,11 +17,11 @@ use std::path::{Path, PathBuf};
 use tracing::error;
 
 /// 解压输出上限：1 GiB（压缩炸弹防护，与 query 路径共用语义）。
-#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 pub(crate) const DECOMPRESSION_OUTPUT_LIMIT: u64 = 1024 * 1024 * 1024;
 
 /// 受限解压：读取至多 limit+1 字节以区分"恰好到限"与"超限"。
-#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 pub(crate) fn decompress_limited<R: std::io::Read>(
     reader: &mut R,
     codec: &str,
@@ -41,7 +41,7 @@ pub(crate) fn decompress_limited<R: std::io::Read>(
 }
 
 /// 创建 0600 权限的压缩产物文件（unix；其余平台退化为默认权限）。
-#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 fn create_compressed_output(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     #[cfg(unix)]
     {
@@ -55,10 +55,6 @@ fn create_compressed_output(path: &std::path::Path) -> std::io::Result<std::fs::
     }
     #[cfg(not(unix))]
     {
-        // 全限定路径：本函数的 `#[cfg(not(unix))]` 分支可能在 zstd/gzip 均未启用时
-        // 被编译（函数体本身不受这两个 feature 门控），而顶层 `use std::fs::File`
-        // 是 feature 门控的——裸 `File` 在该组合下会 E0433（非 unix 消费者如
-        // `default-features = false` 依赖方会踩中）。
         std::fs::File::create(path)
     }
 }

@@ -240,23 +240,6 @@ impl FileSink {
         super::rotation::parse_size(size_str).ok()
     }
 
-    /// 获取加密密钥（密码模式用文件头中的盐确定性派生）。
-    /// 单一事实源在 [`encryption_key_for`]，此处仅委托。
-    ///
-    /// 密钥（`Zeroizing` 包裹，离开作用域自动清零）
-    #[cfg_attr(not(test), allow(dead_code))] // 生产路径走 encryption_key_for；测试面便捷委托
-    fn get_encryption_key(&self, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, InklogError> {
-        encryption_key_for(&self.config, salt)
-    }
-
-    /// 验证密钥熵（Shannon entropy）
-    /// 返回 Ok(()) 如果密钥有足够的熵（>= 4.0）。
-    /// 单一事实源在 `encryption::validate_key_entropy`，此处仅委托。
-    #[cfg_attr(not(test), allow(dead_code))] // 生产路径走共享实现；测试面便捷委托
-    fn validate_key_entropy(key: &[u8]) -> Result<(), InklogError> {
-        super::encryption::validate_key_entropy(key)
-    }
-
     fn open_file_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
         // vuln-0002: 验证路径安全性，防止路径遍历和敏感文件访问。
         // 必须在 `create_dir_all` 之前执行，避免恶意路径创建目录。
@@ -954,16 +937,6 @@ impl FileSink {
         self.check_rotation_inner(inner)?;
 
         Ok(())
-    }
-
-    /// 同步压缩文件（可在后台线程调用）。
-    ///
-    /// 单一事实源在 [`compress_rotated`]：无条件压缩（`encrypt = true` 时
-    /// 对压缩产物加密），不读 `config.compress` 旋钮——`process_rotated`
-    /// 才负责"按旋钮分发"。
-    #[cfg_attr(not(test), allow(dead_code))] // 生产路径走 process_rotated；测试面便捷委托
-    fn compress_file(&self, path: &Path) -> Result<PathBuf, InklogError> {
-        compress_rotated(&self.config, path, None)
     }
 
     /// 同步加密文件（可在后台线程调用）。
@@ -1838,6 +1811,7 @@ mod tests {
     use super::*;
     use crate::FileSinkConfig;
     use crate::LogRecord;
+    use crate::support::io::sink::encryption::validate_key_entropy;
     use base64::Engine;
     use chrono::Timelike;
     use chrono::Utc;
@@ -1955,7 +1929,7 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let key_result = sink.get_encryption_key(b"test-salt-16bytes");
+        let key_result = encryption_key_for(&sink.config, b"test-salt-16bytes");
         assert!(key_result.is_ok());
         assert_eq!(key_result.unwrap().len(), 32);
 
@@ -2146,7 +2120,7 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let result = sink.get_encryption_key(b"test-salt-16bytes");
+        let result = encryption_key_for(&sink.config, b"test-salt-16bytes");
         assert!(result.is_err());
     }
 
@@ -2161,7 +2135,7 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let result = sink.get_encryption_key(b"test-salt-16bytes");
+        let result = encryption_key_for(&sink.config, b"test-salt-16bytes");
         // When encryption_key_env is None, it tries to use LOG_ENCRYPTION_KEY env var
         // This test expects the env var to be set or the test to handle missing env
         // Let's check if we get an error and skip if env var is not set
@@ -2223,21 +2197,21 @@ mod tests {
             0x2e, 0x6f, 0x9b, 0x3c, 0x8d, 0x1e, 0x4b, 0x6a, 0x2b, 0x6c, 0x9f, 0x3a, 0x8b, 0x1c,
             0x4d, 0x7e, 0x2f, 0x6a,
         ];
-        assert!(FileSink::validate_key_entropy(&strong_key).is_ok());
+        assert!(validate_key_entropy(&strong_key).is_ok());
     }
 
     #[test]
     fn test_validate_key_entropy_weak() {
         // 使用弱密钥（全相同字节）
         let weak_key = [0xaa; 32];
-        assert!(FileSink::validate_key_entropy(&weak_key).is_err());
+        assert!(validate_key_entropy(&weak_key).is_err());
     }
 
     #[test]
     fn test_validate_key_entropy_empty() {
         // 空密钥应该返回错误
         let empty_key: [u8; 0] = [];
-        assert!(FileSink::validate_key_entropy(&empty_key).is_err());
+        assert!(validate_key_entropy(&empty_key).is_err());
     }
 
     #[test]
@@ -2257,7 +2231,7 @@ mod tests {
 
         let sink = create_test_file_sink(config);
 
-        let result = sink.get_encryption_key(b"test-salt-16bytes");
+        let result = encryption_key_for(&sink.config, b"test-salt-16bytes");
         assert!(result.is_err());
         // v2 统一走加密模块派生：base64 解码成功但只有 4 字节 → 长度错误
         assert!(result.unwrap_err().to_string().contains("32 bytes"));
@@ -2723,7 +2697,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&original_path);
+        let result = compress_rotated(&sink.config, &original_path, None);
         assert!(result.is_ok());
         let compressed_path = result.unwrap();
         assert_eq!(compressed_path.extension().unwrap(), "zst");
@@ -2751,7 +2725,7 @@ mod tests {
             ..Default::default()
         };
         let sink = create_test_file_sink(config);
-        let result = sink.compress_file(&nonexistent);
+        let result = compress_rotated(&sink.config, &nonexistent, None);
         assert!(result.is_err());
     }
 
@@ -2780,7 +2754,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&original_path);
+        let result = compress_rotated(&sink.config, &original_path, None);
         assert!(result.is_ok(), "compress_file failed: {:?}", result.err());
         let encrypted_path = result.unwrap();
         assert_eq!(encrypted_path.extension().unwrap(), "enc");
@@ -2844,7 +2818,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&original_path);
+        let result = compress_rotated(&sink.config, &original_path, None);
         assert!(
             result.is_ok(),
             "gzip fallback compress_file failed: {:?}",
@@ -2908,7 +2882,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&original_path);
+        let result = compress_rotated(&sink.config, &original_path, None);
         assert!(result.is_ok(), "err: {:?}", result.err());
         assert_eq!(result.unwrap(), original_path);
         assert!(original_path.exists(), "file should be left in place");
@@ -2938,7 +2912,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&original_path);
+        let result = compress_rotated(&sink.config, &original_path, None);
         assert!(result.is_ok(), "err: {:?}", result.err());
         let encrypted_path = result.unwrap();
         assert_eq!(encrypted_path.extension().unwrap(), "enc");
@@ -3935,15 +3909,12 @@ mod tests {
         }
 
         let sink = create_test_file_sink(config);
-        let k1 = sink
-            .get_encryption_key(b"fixed-salt-16byt")
+        let k1 = encryption_key_for(&sink.config, b"fixed-salt-16byt")
             .expect("password mode with salt should derive a key");
-        let k2 = sink
-            .get_encryption_key(b"fixed-salt-16byt")
+        let k2 = encryption_key_for(&sink.config, b"fixed-salt-16byt")
             .expect("second derive with same salt should succeed");
         assert_eq!(*k1, *k2, "same password + same salt must be deterministic");
-        let k3 = sink
-            .get_encryption_key(b"other-salt-16byt")
+        let k3 = encryption_key_for(&sink.config, b"other-salt-16byt")
             .expect("derive with different salt should succeed");
         assert_ne!(*k1, *k3, "different salt must derive a different key");
 
@@ -4035,7 +4006,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&log_path);
+        let result = compress_rotated(&sink.config, &log_path, None);
         assert!(result.is_ok(), "compress_file should succeed");
         let compressed_path = result.unwrap();
         assert!(compressed_path.exists(), "compressed file should exist");
@@ -4061,7 +4032,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&nonexistent);
+        let result = compress_rotated(&sink.config, &nonexistent, None);
         assert!(
             result.is_err(),
             "compress_file should fail for nonexistent input"
@@ -4196,7 +4167,7 @@ mod tests {
         }
 
         let sink = create_test_file_sink(config);
-        let result = sink.compress_file(&log_path);
+        let result = compress_rotated(&sink.config, &log_path, None);
         assert!(
             result.is_ok(),
             "compress_file with encryption should succeed"
@@ -4369,7 +4340,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        let result = sink.compress_file(&original_path);
+        let result = compress_rotated(&sink.config, &original_path, None);
         assert!(
             result.is_err(),
             "compress_file should fail when encryption key is invalid"
@@ -4886,7 +4857,7 @@ mod tests {
     fn test_validate_key_entropy_single_byte_repeated() {
         // 单字节重复 32 次：熵为 0，应被拒绝
         let weak_key = [0x42; 32];
-        let result = FileSink::validate_key_entropy(&weak_key);
+        let result = validate_key_entropy(&weak_key);
         assert!(
             result.is_err(),
             "single-byte repeated key should be rejected"
@@ -4900,7 +4871,7 @@ mod tests {
         for (i, byte) in pattern_key.iter_mut().enumerate() {
             *byte = if i % 2 == 0 { 0xAA } else { 0x55 };
         }
-        let result = FileSink::validate_key_entropy(&pattern_key);
+        let result = validate_key_entropy(&pattern_key);
         assert!(
             result.is_err(),
             "two-byte pattern key should be rejected (entropy < 4.0)"
@@ -4915,7 +4886,7 @@ mod tests {
         for (i, byte) in pattern_key.iter_mut().enumerate() {
             *byte = pattern[i % 4];
         }
-        let result = FileSink::validate_key_entropy(&pattern_key);
+        let result = validate_key_entropy(&pattern_key);
         assert!(
             result.is_err(),
             "four-byte pattern key should be rejected (entropy = 2.0 < 4.0)"
@@ -4973,7 +4944,7 @@ mod tests {
             ..Default::default()
         };
         let sink = create_test_file_sink(config);
-        let result = sink.compress_file(&log_path);
+        let result = compress_rotated(&sink.config, &log_path, None);
 
         // 恢复权限以便 tempdir 能清理（先恢复再断言，避免泄漏）
         std::fs::set_permissions(temp_dir.path(), original_perms).unwrap();
