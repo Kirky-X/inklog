@@ -106,51 +106,57 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
     }
 
     match path.extension().and_then(|e| e.to_str()) {
-        Some("zst") => {
-            #[cfg(feature = "zstd")]
-            {
-                let mut decoder =
-                    zstd::stream::Decoder::new(std::io::Cursor::new(&raw)).map_err(|e| {
-                        InklogError::ConfigError(format!(
-                            "zstd decode failed for '{}': {e}",
-                            path.display()
-                        ))
-                    })?;
-                // 流式读取 + 输出上限：恶意高压缩比样本不再可 OOM 查询进程
-                read_with_limit(&mut decoder, path, "zstd")
-            }
-            #[cfg(not(feature = "zstd"))]
-            {
-                let _ = path;
-                Err(InklogError::ConfigError(
-                    "'.zst' log files require the 'compression' feature".to_string(),
-                ))
-            }
-        }
-        Some("gz") => {
-            #[cfg(feature = "gzip")]
-            {
-                let mut decoder = flate2::read::GzDecoder::new(std::io::Cursor::new(&raw));
-                read_with_limit(&mut decoder, path, "gzip")
-            }
-            #[cfg(not(feature = "gzip"))]
-            {
-                let _ = path;
-                Err(InklogError::ConfigError(
-                    "'.gz' log files require the 'gzip' feature".to_string(),
-                ))
-            }
-        }
-        _ => String::from_utf8(raw).map_err(|e| {
-            InklogError::ConfigError(format!(
-                "log file '{}' is not valid UTF-8: {e}",
-                path.display()
-            ))
-        }),
+        Some("zst") => decode_zst(&raw, path),
+        Some("gz") => decode_gz(&raw, path),
+        _ => decode_utf8(raw, path),
     }
 }
 
+/// `.zst` 归档解包（`zstd` feature 未启用时返回配置错误）。
+#[cfg(feature = "zstd")]
+fn decode_zst(raw: &[u8], path: &Path) -> Result<String, InklogError> {
+    let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(raw)).map_err(|e| {
+        InklogError::ConfigError(format!("zstd decode failed for '{}': {e}", path.display()))
+    })?;
+    // 流式读取 + 输出上限：恶意高压缩比样本不再可 OOM 查询进程
+    read_with_limit(&mut decoder, path, "zstd")
+}
+
+#[cfg(not(feature = "zstd"))]
+fn decode_zst(raw: &[u8], path: &Path) -> Result<String, InklogError> {
+    let _ = (raw, path);
+    Err(InklogError::ConfigError(
+        "'.zst' log files require the 'compression' feature".to_string(),
+    ))
+}
+
+/// `.gz` 归档解包（`gzip` feature 未启用时返回配置错误）。
+#[cfg(feature = "gzip")]
+fn decode_gz(raw: &[u8], path: &Path) -> Result<String, InklogError> {
+    let mut decoder = flate2::read::GzDecoder::new(std::io::Cursor::new(raw));
+    read_with_limit(&mut decoder, path, "gzip")
+}
+
+#[cfg(not(feature = "gzip"))]
+fn decode_gz(raw: &[u8], path: &Path) -> Result<String, InklogError> {
+    let _ = (raw, path);
+    Err(InklogError::ConfigError(
+        "'.gz' log files require the 'gzip' feature".to_string(),
+    ))
+}
+
+/// 未压缩归档：按 UTF-8 文本读取。
+fn decode_utf8(raw: Vec<u8>, path: &Path) -> Result<String, InklogError> {
+    String::from_utf8(raw).map_err(|e| {
+        InklogError::ConfigError(format!(
+            "log file '{}' is not valid UTF-8: {e}",
+            path.display()
+        ))
+    })
+}
+
 #[cfg(test)]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 mod bomb_guard_tests {
     use super::*;
     use std::io::Read;
@@ -183,11 +189,11 @@ mod bomb_guard_tests {
 const ENCRYPTED_MAGIC: &[u8] = b"ENCLOG1\0";
 
 /// 解压输出上限（默认 1 GiB）：压缩炸弹防护（审计 M16b）。
-#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 pub(crate) const DECOMPRESSION_OUTPUT_LIMIT: u64 = 1024 * 1024 * 1024;
 
 /// 流式解压读取：超过 [`DECOMPRESSION_OUTPUT_LIMIT`] 立即报错而非继续分配。
-#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 fn read_with_limit(
     reader: &mut impl std::io::Read,
     path: &Path,
@@ -197,7 +203,7 @@ fn read_with_limit(
 }
 
 /// [`read_with_limit`] 的可注入上限版本（测试用小 limit 驱动同一实现）。
-#[cfg_attr(not(any(feature = "zstd", feature = "gzip")), allow(dead_code))]
+#[cfg(any(feature = "zstd", feature = "gzip"))]
 pub(crate) fn read_with_limit_inner(
     reader: &mut impl std::io::Read,
     path: &Path,
@@ -401,6 +407,33 @@ fn expand_paths(inputs: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
+/// 单条记录是否通过 [`QueryOptions`] 过滤（级别下限/时间窗/关键词）。
+fn entry_passes_filters(entry: &LogEntry, opts: &QueryOptions, min_rank: Option<u8>) -> bool {
+    if let Some(min) = min_rank {
+        let rank = level_rank(&entry.level);
+        if rank == u8::MAX || rank < min {
+            return false;
+        }
+    }
+    if let Some(since) = opts.since
+        && entry.timestamp.is_none_or(|t| t < since)
+    {
+        return false;
+    }
+    if let Some(until) = opts.until
+        && entry.timestamp.is_none_or(|t| t > until)
+    {
+        return false;
+    }
+    if let Some(keyword) = &opts.keyword
+        && !entry.message.contains(keyword.as_str())
+        && !entry.target.contains(keyword.as_str())
+    {
+        return false;
+    }
+    true
+}
+
 /// 对文件/目录集合执行检索（核心入口）。
 ///
 /// 单个不可读/不可解包的文件不中断整体查询（跳过并继续）；全部失败时
@@ -427,26 +460,7 @@ pub fn query_paths(
             let Some(entry) = parse_line(line, &path) else {
                 continue;
             };
-            if let Some(min) = min_rank {
-                let rank = level_rank(&entry.level);
-                if rank == u8::MAX || rank < min {
-                    continue;
-                }
-            }
-            if let Some(since) = opts.since
-                && entry.timestamp.is_none_or(|t| t < since)
-            {
-                continue;
-            }
-            if let Some(until) = opts.until
-                && entry.timestamp.is_none_or(|t| t > until)
-            {
-                continue;
-            }
-            if let Some(keyword) = &opts.keyword
-                && !entry.message.contains(keyword.as_str())
-                && !entry.target.contains(keyword.as_str())
-            {
+            if !entry_passes_filters(&entry, opts, min_rank) {
                 continue;
             }
             entries.push(entry);
