@@ -55,7 +55,11 @@ fn create_compressed_output(path: &std::path::Path) -> std::io::Result<std::fs::
     }
     #[cfg(not(unix))]
     {
-        File::create(path)
+        // 全限定路径：本函数的 `#[cfg(not(unix))]` 分支可能在 zstd/gzip 均未启用时
+        // 被编译（函数体本身不受这两个 feature 门控），而顶层 `use std::fs::File`
+        // 是 feature 门控的——裸 `File` 在该组合下会 E0433（非 unix 消费者如
+        // `default-features = false` 依赖方会踩中）。
+        std::fs::File::create(path)
     }
 }
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <summary>📑 目录</summary>
 
 - [Unreleased](#unreleased)
+- [0.3.0-rc.7](#030-rc7---2026-10-07)
 - [0.3.0-rc.6](#030-rc6---2026-10-06)
 - [0.3.0-rc.5](#030-rc5---2026-09-21)
 - [0.3.0-rc.4](#030-rc4---2026-09-14)
@@ -27,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 </details>
 
 ## [Unreleased]
+
+## [0.3.0-rc.7] - 2026-10-07
+
+### Fixed
+
+- **非 unix 平台在零压缩特性下无法编译（`E0433`）**：`support/io/sink/compression.rs` 的 `create_compressed_output` 函数体不受 `zstd`/`gzip` 门控（仅 `allow(dead_code)`），而其 `#[cfg(not(unix))]` 分支使用的裸 `File` 来自 `#[cfg(any(feature = "zstd", feature = "gzip"))]` 门控导入——因此以 `default-features = false` 依赖 inklog 的 Windows 消费者（limiteron 0.3.0-rc.6 起）会直接编译失败。改为全限定 `std::fs::File::create`，并在注释中记录该 cfg 组合成因。
+
+### Changed
+
+- **CI 构建腿补零特性检查**：`build` job 增加 `cargo check --workspace --no-default-features`，使 windows/macos 腿也能覆盖"未启用压缩特性"的编译组合（原仅 ubuntu 的 check job 跑零特性，而平台分支错误只有非 unix 才触发）。
 
 ## [0.3.0-rc.6] - 2026-10-06
 
