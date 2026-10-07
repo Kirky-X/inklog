@@ -273,7 +273,7 @@ bash scripts/install-pre-commit.sh   # 等价于 lefthook install
 | **pre-commit** | 私钥文件扫描 | 阻止 `BEGIN ... PRIVATE KEY` 等内容入库 |
 | **commit-msg** | Conventional Commits 校验 | `feat: ...` / `fix: ...` 等格式强制 |
 | **pre-push** | `cargo audit` | RustSec 安全公告 |
-| **pre-push** | `cargo llvm-cov --fail-under-lines 80` | 行覆盖率 ≥ 80% 门禁 |
+| **pre-push** | `cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 95` | 行覆盖率 ≥ 95% 门禁 |
 
 ### 禁止事项
 
@@ -300,7 +300,7 @@ git commit -m "feat(scope): description"
 | **Clippy** | Lint 检查（警告视为错误） | `cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking" -- -D warnings` |
 | **cargo-deny** | 依赖漏洞 / 许可证 / 重复依赖 | `cargo deny check` |
 | **cargo-audit** | RustSec 安全公告 | `cargo audit` |
-| **cargo-llvm-cov** | 行覆盖率 | `cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 80` |
+| **cargo-llvm-cov** | 行覆盖率 | `cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 95` |
 
 ## 🧪 测试
 
@@ -443,7 +443,7 @@ git commit -m "feat(file): add zstd compression support
 | **格式化** | `cargo fmt --all -- --check` | 运行 `cargo fmt --all` |
 | **Clippy** | `-D warnings` 零告警 | 修复警告 |
 | **测试** | CI feature 组合全量测试 | 修复失败测试 |
-| **覆盖率** | llvm-cov 行覆盖 ≥ 80% | 补充测试 |
+| **覆盖率** | llvm-cov 行覆盖 ≥ 95% | 补充测试 |
 | **安全审计** | `cargo deny check` + `cargo audit` | 升级或替换依赖 |
 
 ### PR 合并策略
@@ -505,7 +505,7 @@ cargo clippy --all-targets --features "sqlite http cli kit compression gzip parq
 cargo deny check
 
 # 覆盖率
-cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 80
+cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 95
 
 # 基准
 cargo bench --bench rc4_pipeline_bench

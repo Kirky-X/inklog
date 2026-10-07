@@ -1056,8 +1056,8 @@ cargo deny check bans
 cargo deny check licenses
 cargo audit
 
-# 4. 代码覆盖率（门禁 ≥ 80%）
-cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 80
+# 4. 代码覆盖率（门禁 ≥ 95%）
+cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 95
 
 # 5. 检查日志文件权限
 find logs/ -type f -exec chmod 600 {} \;
