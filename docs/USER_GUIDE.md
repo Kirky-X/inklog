@@ -829,9 +829,12 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
     let deps = LoggerDependencies {
         cache: Some(Arc::new(MockCache::new())),
         config: Some(Arc::new(MockConfig::new().with_value("level", "debug"))),
+        custom_sinks: Vec::new(), // 必填：无第三方 sink 时置空（经 LoggerBuilder::add_sink 注册则携带对应列表）
         database: Some(database.clone()),
     };
 
+    // LoggerManager::with_dependencies 自 0.3.0 起已弃用（DI 入口收敛到 builder，调用会产生 deprecated 告警）：
+    // 新代码改用 LoggerManager::builder() 链式构建
     let logger = LoggerManager::with_dependencies(deps).await?;
 
     log::info!("Test message");
@@ -935,8 +938,11 @@ impl TestContext {
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: Some(Arc::new(MockConfig::new())),
+            custom_sinks: Vec::new(), // 必填字段
             database: Some(self.database.clone()),
         };
+        // 已弃用入口（since 0.3.0）：仅用于隔离测试的依赖注入演示，调用会产生 deprecated 告警；
+        // 生产代码请改用 LoggerManager::builder()
         LoggerManager::with_dependencies(deps).await
     }
 

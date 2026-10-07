@@ -159,6 +159,8 @@ let logger = LoggerManager::with_config(config).await?;
 pub async fn with_dependencies(deps: LoggerDependencies) -> Result<Self, InklogError>
 ```
 
+> **⚠️ 已弃用**（`#[deprecated(since = "0.3.0", note = "use LoggerManager::builder() instead")]`）：DI 入口已收敛，本方法仅为向后兼容保留，行为为直接转发内部构建逻辑。新代码请用 [`builder()`](#builder)（`LoggerBuilder` 支持 `add_sink` 等第三方 sink 注册）；若必须手写 `LoggerDependencies` 字面量，注意 `custom_sinks` 为**必填**字段（无第三方 sink 时置 `Vec::new()`）。
+
 ##### `builder`
 
 创建 `LoggerBuilder` 实例。
@@ -435,7 +437,7 @@ pub struct InklogConfig {
 pub struct GlobalConfig {
     pub level: String,                    // 默认 "info"
     pub format: String,                   // 默认 "{timestamp} [{level}] {target} - {message}"
-    pub masking_enabled: bool,            // 默认 true
+    pub masking_enabled: bool,            // 默认 true（推荐新名 `sanitizer_enabled`，旧名为 serde 兼容别名，序列化始终输出旧名）
     pub auto_fallback: bool,              // 默认 true
     pub fallback_initial_delay_ms: u64,   // 默认 1000
     pub fallback_max_delay_ms: u64,       // 默认 60000
@@ -453,7 +455,8 @@ pub struct ConsoleSinkConfig {
     pub enabled: bool,               // 默认 true
     pub colored: bool,               // 默认 true（NO_COLOR / TERM=dumb 时自动禁用）
     pub stderr_levels: Vec<String>,  // 默认 ["error", "warn"]
-    pub masking_enabled: bool,       // 默认 true
+    pub masking_enabled: bool,       // 默认 true（推荐新名 `pii_masking_enabled`，旧名为 serde 兼容别名，序列化始终输出旧名）
+    pub secret_scan_enabled: bool,   // 默认 false；需 `secret-scan` 特性，且与 masking_enabled 叠加生效（PII 关则整体无掩码）
     pub output_format: OutputFormat, // 默认 Text
 }
 ```
@@ -471,17 +474,44 @@ pub struct FileSinkConfig {
     pub compression_level: i32,               // 默认 3（0-22）
     pub encrypt: bool,                        // 默认 false
     pub encryption_key_env: Option<String>,   // 默认 None
+    pub encryption_key_file: Option<String>,  // 默认 None；加密密钥文件路径（`encrypt` 开启时生效，env 设置时优先覆盖）——unix 权限必须 0600，组/其他可读在密钥解析期显性拒绝
     pub retention_days: u32,                  // 默认 30
     pub max_total_size: String,               // 默认 "1GB"
     pub cleanup_interval_minutes: u64,        // 默认 60
     pub batch_size: usize,                    // 默认 100
     pub flush_interval_ms: u64,               // 默认 100
-    pub masking_enabled: bool,                // 默认 true
+    pub fsync: bool,                          // 默认 false；每批写盘后 `sync_all`（fsync）：崩溃一致性增强，吞吐优先默认关，等保/审计场景建议开启
+    pub audit_chain_enabled: bool,            // 默认 false；归档审计链（HMAC-SHA256 前向链）：轮转成功后向 `<stem>.chain.jsonl` manifest 追加 `{path, sha256, timestamp}`，可检测归档篡改/删除/重排；密钥读 `INKLOG_AUDIT_KEY`，缺失时链禁用并告警
+    pub masking_enabled: bool,                // 默认 true（推荐新名 `pii_masking_enabled`，旧名为 serde 兼容别名）
     pub output_format: OutputFormat,          // 默认 Text
 }
 ```
 
 > 压缩需 `compression`（Zstd）或 `gzip`（flate2）feature；未启用任一压缩 feature 时轮转文件保持未压缩。加密与压缩仅作用于轮转归档（先压缩后加密），活跃文件保持明文。
+
+### ChannelBufferedConfig
+
+`ChannelBufferedFileSink`（通道缓冲高吞吐文件 Sink，`ring_buffered_file`）的配置入参：
+
+```rust
+pub struct ChannelBufferedConfig {
+    pub base_config: FileSinkConfig,                 // 默认 FileSinkConfig::default()（轮转/压缩/加密/脱敏全部继承其语义）
+    pub channel_capacity: usize,                     // 默认 10_000（生产者与 writer 线程间的有界通道容量）
+    pub backpressure_strategy: BackpressureStrategy, // 默认 Block
+    pub flush_batch_size: usize,                     // 默认 1000（攒批阈值）
+    pub flush_interval_ms: u64,                      // 默认 100（时隙阈值）
+}
+```
+
+`BackpressureStrategy`（`Debug/Clone/Copy/PartialEq/Eq/Default`，默认 `Block`）决定通道打满时的行为：
+
+| 变体 | 行为 |
+|------|------|
+| `Block` | `write()` 走异步阻塞路径等待空位（不丢日志，代价是拖慢生产者） |
+| `DropNewest` | `try_send` 满则丢弃**新到达**条目并计入丢弃计数 |
+| `DropOldest` | `try_send` 满则先驱逐**队首**旧条目腾位，仍无位则计入丢弃 |
+
+丢弃计数经 `metrics() -> ChannelBufferedMetrics` 暴露；Sink 已关停（通道断开）导致的未送达**不计入丢弃**。三种策略下，只要条目未送达，`LogSink::write()` 均返回 `Err(InklogError::ChannelError)`（消息携带当前丢弃计数），而非静默成功。
 
 ### DatabaseSinkConfig
 
@@ -500,8 +530,11 @@ pub struct DatabaseSinkConfig {
     pub parquet_config: ParquetConfig,    // 默认 default()
     pub permissions_path: Option<String>, // 默认 None（RBAC 权限配置）
     pub admin_role: String,               // 默认 "admin"
+    pub secret_scan_enabled: bool,        // 默认 false；需 `secret-scan` 特性，未启用时该标记被忽略（校验阶段发 warn）
 }
 ```
+
+> `secret_scan_enabled`（console / database 内置 sink 出站门）：开启后裸凭据（`sk-` 系列、AWS AKIA、PEM 块等）无需敏感字段名即可被归因并掩码，落库/输出前生效。声明式接线与默认值说明见 [安全文档](SECURITY.md)。
 
 #### DatabaseDriver
 
@@ -940,15 +973,20 @@ impl<T: LogSink + ?Sized> AsyncSink for T {}
 ### LoggerDependencies
 
 ```rust
+#[derive(Default)]
 pub struct LoggerDependencies {
     pub cache: Option<Arc<dyn Cache>>,
     pub config: Option<Arc<dyn Config>>,
-    #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql", feature = "duckdb"))]
+    /// 动态注册的第三方 sink（经 `LoggerBuilder::add_sink` 注册）
+    pub custom_sinks: Vec<Arc<dyn LogSink>>,
+    #[cfg(feature = "database")]
     pub database: Option<Arc<dyn Database>>,
 }
 ```
 
 未注入的依赖使用默认实现（`OxCacheAdapter` / `InklogConfigAdapter` / 无数据库）。
+
+> 结构体派生 `Default`，手写时可用 `..Default::default()` 兜底；但**字段名不得省略**：`custom_sinks` 与 `database` 都是普通字段，无 `#[serde(default)]` 之类的机制，字面量缺少任一项都会编译失败。`database` 的门控是 `database` feature（该 feature 蕴含 `dep:dbnexus`，提供核心非驱动 API），不是驱动 feature 的 `any(...)` 组合。
 
 ### Cache trait
 

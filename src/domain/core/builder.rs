@@ -17,7 +17,13 @@ use std::sync::Arc;
 /// LoggerManager 的依赖集合
 ///
 /// 用于依赖注入模式，允许外部提供缓存、配置和数据库实现。
-/// 所有字段都是可选的，未提供的依赖将使用默认实现。
+/// 所有字段都是可选的，未提供的依赖将使用默认实现；但结构体字面量必须列出全部
+/// 字段（无 `#[serde(default)]` 之类的机制），无第三方 sink 时 `custom_sinks` 置
+/// `Vec::new()`，也可用 `..Default::default()` 兜底。本示例标 `ignore`（Mock 类型随
+/// `test-utils` 特性门控，不参与 doctest 编译），字段形状以本结构体定义为准。
+///
+/// 入口已收敛：`LoggerManager::with_dependencies` 自 0.3.0 起弃用，生产代码请用
+/// [`LoggerManager::builder`](super::LoggerManager::builder)。
 ///
 /// # 示例
 ///
@@ -31,6 +37,7 @@ use std::sync::Arc;
 ///     let deps = LoggerDependencies {
 ///         cache: Some(Arc::new(MockCache::new())),
 ///         config: Some(Arc::new(MockConfig::new())),
+///         custom_sinks: Vec::new(),
 ///         #[cfg(feature = "database")]
 ///         database: None,
 ///     };
@@ -58,7 +65,7 @@ pub struct LoggerDependencies {
     /// 通用 SinkWorker，第三方 Sink 零核心改动接入。
     pub custom_sinks: Vec<Arc<dyn crate::LogSink>>,
 
-    /// 数据库依赖（可选，仅当启用 dbnexus feature 时）
+    /// 数据库依赖（可选，仅当启用 `database` feature 时存在；该 feature 蕴含 `dep:dbnexus`）
     ///
     /// 用于日志记录的持久化存储。
     /// 如果未提供但配置了数据库 sink，LoggerManager 将创建默认连接池。
