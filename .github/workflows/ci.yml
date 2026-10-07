@@ -70,6 +70,11 @@ jobs:
       # 防止 schema 门控代码误引用 cli 门控符号时门禁全绿
       - name: Check bare schema feature
         run: cargo check --workspace --features schema
+      # 零特性组合的测试目标：cargo check 不编译 test 目标，零特性下测试代码的
+      # 编译裂缝与行为回归此前无覆盖（三条 OS 腿的 Build (zero features) 只 check）。
+      # 实测 --no-default-features 全量测试绿色（含 lib/集成/组合各目标）。
+      - name: Test zero features
+        run: cargo test --workspace --no-default-features
 
   test:
     name: Test
