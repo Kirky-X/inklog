@@ -90,11 +90,11 @@ CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-ma
 | deny | `cargo deny check` | 4 项 ok（licenses 经 clarify 绑定 LICENSE hash：inklog/oxcache/oxcache_macros/trait-kit/dbnexus） |
 | audit | `cargo audit` | rc=0（514 crate 无命中） |
 | MSRV | rust-version = 1.97.1（workspace 统一，CI dtolnay/rust-toolchain@1.97.1） | 一致 |
-| coverage | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95`（CI/pre-push 同口径） | 95.40%（行覆盖实测留档值；分阶段抬升留痕见 [治理复核 §8](../reviews/ws-r14-governance-review.md)） |
+| coverage | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95`（CI/pre-push 同口径） | 95.40%（行覆盖实测留档值；85/90 两级无独立提交与实测留痕） |
 
 ## 📉 覆盖率口径与不可测组合标注
 
-门禁口径为 `--lib`（src 内联测试）+ 显式 feature 组合；`tests/` 集成测试与 docker 容器级用例（postgres/mysql 需容器服务）独立执行，不计入行覆盖门禁。四数据库后端互斥（dbnexus 红线），不存在 `--all-features` 口径；互斥组合的编译期防护由 lib.rs `compile_error!` 守卫承担，见 [ws-R14 治理复核](../reviews/ws-r14-governance-review.md)。裸 default（不带显式 features）同样不构成可用口径：`tests/cli_integration.rs` 被 `#![cfg(feature = "cli")]` 整体禁用后成为零覆盖空 target，llvm-cov 报告阶段崩溃——pre-push 覆盖率门禁因此与 CI 同用显式 features 口径（lefthook.yml）。
+门禁口径为 `--lib`（src 内联测试）+ 显式 feature 组合；`tests/` 集成测试与 docker 容器级用例（postgres/mysql 需容器服务）独立执行，不计入行覆盖门禁。四数据库后端互斥（dbnexus 红线），不存在 `--all-features` 口径；互斥组合的编译期防护由 lib.rs `compile_error!` 守卫承担。裸 default（不带显式 features）同样不构成可用口径：`tests/cli_integration.rs` 被 `#![cfg(feature = "cli")]` 整体禁用后成为零覆盖空 target，llvm-cov 报告阶段崩溃——pre-push 覆盖率门禁因此与 CI 同用显式 features 口径（lefthook.yml）。
 
 以下行为在行覆盖口径下不可测或防御性保留，不计入覆盖目标（截至 v0.3.0-rc.6，llvm-cov 实测）：
 

@@ -2495,7 +2495,7 @@ mod histogram_export_tests {
             "in-flight recovery must wait, got {waiting:?}"
         );
         // 注：max_retries 封顶分支在当前状态机下不可达——每次重新降级都会
-        // 重置 retry 计数（见 reviews/ws-r14-governance-review.md 附带发现）
+        // 重置 retry 计数
     }
 
     #[test]
