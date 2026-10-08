@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 //! HTTP 服务器配置与错误模式测试。
 //!
-//! 核正：`HttpServerConfig` 新增 `auth`/`ip_whitelist`/`tls` 字段（以
-//! `..Default::default()` 补齐）；`HttpErrorMode` 仅剩 `Warn`/`Strict`
-//! （`Panic` 变体已移除，默认 `Strict`）；环境变量覆盖经公开入口
-//! `InklogConfig::load_with_env_overrides()`，变量名为 `INKLOG_HTTP_SERVER_*`。
+//! 覆盖 `HttpServerConfig` 的 `auth`/`ip_whitelist`/`tls` 字段（以
+//! `..Default::default()` 补齐）、`HttpErrorMode` 的 `Warn`/`Strict` 两态
+//! （默认 `Strict`），以及环境变量覆盖经公开入口
+//! `InklogConfig::load_with_env_overrides()`（变量名 `INKLOG_HTTP_SERVER_*`）。
 use inklog::InklogConfig;
 use inklog::config::{HttpErrorMode, HttpServerConfig};
 use serial_test::serial;
@@ -74,7 +74,7 @@ async fn test_http_server_startup_with_default_config() {
 async fn test_http_server_error_mode_default_strict() {
     clear_inklog_env();
 
-    // HttpErrorMode 仅 Warn/Strict（Panic 已移除），#[default] 为 Strict
+    // HttpErrorMode 仅 Warn/Strict 两态，#[default] 为 Strict
     let config = HttpServerConfig::default();
     assert!(
         matches!(config.error_mode, HttpErrorMode::Strict),

@@ -1569,7 +1569,7 @@ mod tests {
         assert_eq!(skipped, 0, "env key must win over key file");
         assert_eq!(records.len(), 1);
 
-        // 仅 key file（env 已移除）：解密失败 → skipped（证明写入用的是 env key）。
+        // 仅 key file（不注入 env）：解密失败 → skipped（证明写入用的是 env key）。
         // 注意：上方 env_reader.replay() 已清空文件，此处 spill 重建头后
         // 仅 1 段（密钥材料在 writer 实例内缓存，仍为 env key）。
         unsafe {

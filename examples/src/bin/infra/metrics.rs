@@ -515,7 +515,7 @@ fn show_prometheus_export() {
     assert!(output.contains("# TYPE inklog_sink_healthy gauge"));
     assert!(output.contains("inklog_sink_healthy{sink=\"console\"} 1"));
     assert!(output.contains("inklog_sink_healthy{sink=\"database\"} 0"));
-    // 原生直方图（累积桶 + sum + count）；重复的非累积 bucket 导出已移除
+    // 原生直方图形态：累积桶 + sum + count
     assert!(output.contains("# TYPE inklog_write_latency_us histogram"));
     assert!(output.contains("inklog_write_latency_us_bucket{le=\"+Inf\"}"));
     assert!(output.contains("inklog_write_latency_us_count"));

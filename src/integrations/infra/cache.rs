@@ -617,12 +617,11 @@ mod tests {
     }
 
     // ============================================================================
-    // Default 实现测试 - 覆盖 MockCache::default（OxCacheAdapter::default 已移除）
+    // Default 实现测试 - 覆盖 MockCache::default
     // ============================================================================
 
     #[tokio::test]
     async fn test_mock_cache_default_equals_new() {
-        // 覆盖 MockCache::default() 实现
         let default_cache = MockCache::default();
         let new_cache = MockCache::new();
         // 两者行为应等价：初始为空

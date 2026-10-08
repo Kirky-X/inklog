@@ -1011,7 +1011,7 @@ fn test_log_template_builder() {
 
 #[test]
 fn test_masking_sensitive_data() {
-    // mask_sensitive_data 已移除：公开 API 为 inklog::masking::{mask_email, mask_phone}
+    // 敏感字段脱敏的公开 API 为 inklog::masking::{mask_email, mask_phone}
     let masked = inklog::masking::mask_email("user@example.com");
     assert_eq!(masked, "**@**.***");
     assert!(!masked.contains("user@example.com"));

@@ -205,7 +205,6 @@ mod performance_test {
             })
             .collect();
 
-        // 计算统计信息
         let avg_latency: Duration = latencies.iter().sum();
         let avg_latency = avg_latency / iterations as u32;
 
