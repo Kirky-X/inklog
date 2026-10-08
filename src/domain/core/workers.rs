@@ -245,21 +245,8 @@ pub(crate) fn update_adaptive_capacity(
 const FACTORY_RETRY_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const FACTORY_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
-/// 测试钩子：非零时覆盖工厂重试的初始退避（毫秒），避免测试等待真实的秒级退避。
-/// 用完全限定路径声明，避免非测试构建出现未使用的导入。
-#[cfg(test)]
-static FACTORY_RETRY_INITIAL_BACKOFF_MS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// 当前生效的工厂重试初始退避（测试可注入更短值）。
+/// 当前生效的工厂重试初始退避。
 fn factory_retry_initial_backoff() -> Duration {
-    #[cfg(test)]
-    {
-        let ms = FACTORY_RETRY_INITIAL_BACKOFF_MS.load(Ordering::Relaxed);
-        if ms > 0 {
-            return Duration::from_millis(ms);
-        }
-    }
     FACTORY_RETRY_INITIAL_BACKOFF
 }
 
@@ -1310,9 +1297,6 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_file_worker_failing_factory_counts_failed_and_exits_on_sender_drop() {
-        // 注入毫秒级退避，避免测试等待真实的秒级退避
-        FACTORY_RETRY_INITIAL_BACKOFF_MS.store(20, Ordering::Relaxed);
-
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -1386,7 +1370,7 @@ mod tests {
         }
         drop(file_tx);
 
-        // 等待 worker 消费并计数（退避 20ms，循环 tick 100ms）
+        // 等待 worker 消费并计数（降级模式消费不依赖工厂退避，循环 tick 100ms）
         let deadline = Instant::now() + Duration::from_secs(5);
         while metrics.sink_errors() < N && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(20));
@@ -1435,9 +1419,6 @@ mod tests {
             all_finished,
             "workers must terminate after shutdown even in degraded retry mode"
         );
-
-        // 恢复测试钩子，避免影响其他测试
-        FACTORY_RETRY_INITIAL_BACKOFF_MS.store(0, Ordering::Relaxed);
     }
 
     // ========================================================================

@@ -173,10 +173,12 @@ fn main() {
 // 不生效；ctor 于 main() 之前设置文档化最高优先级 override
 // （INKLOG_LOCALE，见 i18n/locale_manager.rs），对全进程测试生效。
 #[cfg(test)]
-#[ctor::ctor(unsafe)]
-fn init_test_locale() {
-    // 测试进程启动期（单线程、无其他线程读 env），set_var 无 UB 风险
-    unsafe {
-        std::env::set_var("INKLOG_LOCALE", "en");
+mod test_locale_init {
+    #[ctor::ctor(unsafe)]
+    fn set_test_locale() {
+        // 测试进程启动期（单线程、无其他线程读 env），set_var 无 UB 风险
+        unsafe {
+            std::env::set_var("INKLOG_LOCALE", "en");
+        }
     }
 }

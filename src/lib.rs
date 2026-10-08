@@ -362,3 +362,18 @@ pub async fn init_inklog_logger_with_config(config: InklogConfig) -> Result<(), 
     std::mem::forget(manager);
     Ok(())
 }
+
+// lib 单元测试进程固定 locale 为 en：与 CI（Linux，LANG 未设）行为一致。
+// Windows 中文系统的 sys-locale 检测出 zh，会使断言英文错误消息的测试
+// 失败；ctor 于测试进程启动期设置文档化最高优先级 override
+// （INKLOG_LOCALE，见 i18n/locale_manager.rs），对全进程测试生效。
+#[cfg(test)]
+mod test_locale_init {
+    #[ctor::ctor(unsafe)]
+    fn set_test_locale() {
+        // 测试进程启动期（单线程、无其他线程读 env），set_var 无 UB 风险
+        unsafe {
+            std::env::set_var("INKLOG_LOCALE", "en");
+        }
+    }
+}

@@ -556,14 +556,6 @@ impl ChannelBufferedFileSink {
         self.inner.lock().cleanup_thread = Some(handle);
     }
 
-    /// 测试注入短周期清理线程（替换常规线程槽位；被替换线程与实例共享
-    /// shutdown_flag，shutdown 时自行退出）。
-    #[cfg(test)]
-    fn start_cleanup_timer_for_test(&self, interval: StdDuration) {
-        let handle = self.spawn_cleanup_thread(interval);
-        self.inner.lock().cleanup_thread = Some(handle);
-    }
-
     fn spawn_cleanup_thread(&self, check_interval: StdDuration) -> thread::JoinHandle<()> {
         let shutdown_flag = self.shutdown_flag.clone();
         let config = self.config.base_config.clone();
@@ -2174,7 +2166,9 @@ mod tests {
             set_file_mtime(&f, old).unwrap();
         }
 
-        sink.start_cleanup_timer_for_test(std::time::Duration::from_millis(50));
+        // 测试直接注入短周期清理线程（共享实例 shutdown_flag，shutdown 时退出）
+        let handle = sink.spawn_cleanup_thread(std::time::Duration::from_millis(50));
+        sink.inner.lock().cleanup_thread = Some(handle);
 
         // 轮询等待清理：只保留最新 1 个，其余删除
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

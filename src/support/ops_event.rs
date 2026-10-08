@@ -120,12 +120,6 @@ pub fn has_channels() -> bool {
     !OPS_EVENT_HUB.read().is_empty()
 }
 
-/// 清空注册（测试隔离用）。
-#[cfg(test)]
-pub fn reset_ops_hub_for_tests() {
-    OPS_EVENT_HUB.write().clear();
-}
-
 /// 内部故障/恢复路径的轻量发布入口：轮转失败、压缩/加密失败、sink
 /// 降级与恢复等站点调用。无注册通道时为 no-op（事件通道满/关闭时
 /// 静默丢弃——不得反压主日志链路，与 manager 侧语义一致）。
@@ -151,8 +145,21 @@ pub fn publish_internal(kind: &str, sink: Option<&str>, detail: serde_json::Valu
     delivered
 }
 
+/// hub 是进程级全局单例：需要清空注册做隔离的测试（含 masking 的引擎
+/// 错误广播测试）经本 mod 操作，生产构建下整体不编译。
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::OPS_EVENT_HUB;
+
+    /// 清空注册（测试隔离用）。
+    pub(crate) fn reset_ops_hub_for_tests() {
+        OPS_EVENT_HUB.write().clear();
+    }
+}
+
 #[cfg(test)]
 mod internal_publish_tests {
+    use super::test_support::reset_ops_hub_for_tests;
     use super::*;
     use crossbeam_channel::bounded;
     use serial_test::serial;

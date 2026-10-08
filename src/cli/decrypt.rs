@@ -3,16 +3,6 @@
 use aes_gcm::Aes256Gcm;
 use aes_gcm::aead::{Aead, KeyInit};
 use anyhow::{Context, Result, anyhow};
-#[cfg(test)]
-use base64::{Engine as _, engine::general_purpose};
-#[cfg(test)]
-use inklog::sink::encryption::derive_key_from_password;
-#[cfg(test)]
-use sha2::Digest as Sha256Digest;
-#[cfg(test)]
-use sha2::Sha256;
-#[cfg(test)]
-use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
@@ -215,84 +205,6 @@ fn validate_glob_pattern(pattern: &str) -> Result<()> {
 }
 
 const MAGIC_HEADER: &[u8] = b"ENCLOG1\0";
-
-/// Decrypt a single encrypted file (legacy format).
-///
-/// Supports the original header-less encryption format.
-#[cfg(test)]
-pub fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) -> Result<()> {
-    let mut file = File::open(input_path).with_context(|| {
-        let mut args = inklog::i18n::MsgArgs::new();
-        args.set("path", input_path.display().to_string());
-        inklog::i18n::tr_args("config-open_input_failed", args)
-    })?;
-
-    let mut header = [0u8; 24];
-    file.read_exact(&mut header)
-        .with_context(|| inklog::i18n::tr("config-read_header_failed"))?;
-
-    if &header[..8] != MAGIC_HEADER {
-        return Err(anyhow!("{}", inklog::i18n::tr("config-invalid_header")));
-    }
-
-    let version = u16::from_le_bytes([header[8], header[9]]);
-    if version != 1 {
-        let mut args = inklog::i18n::MsgArgs::new();
-        args.set("version", version.to_string());
-        return Err(anyhow!(
-            "{}",
-            inklog::i18n::tr_args("config-unsupported_version", args)
-        ));
-    }
-
-    let algo = u16::from_le_bytes([header[10], header[11]]);
-    if algo != 1 {
-        let mut args = inklog::i18n::MsgArgs::new();
-        args.set("algo", algo.to_string());
-        return Err(anyhow!(
-            "{}",
-            inklog::i18n::tr_args("config-unsupported_algorithm", args)
-        ));
-    }
-
-    let key = get_encryption_key_cli(key_env).with_context(|| {
-        let mut args = inklog::i18n::MsgArgs::new();
-        args.set("env", key_env);
-        inklog::i18n::tr_args("config-get_key_failed", args)
-    })?;
-
-    let nonce_arr: [u8; 12] = header[12..24]
-        .try_into()
-        .expect("nonce slice must be 12 bytes");
-    let nonce = aes_gcm::Nonce::from(nonce_arr);
-
-    let mut ciphertext = Vec::new();
-    file.read_to_end(&mut ciphertext)
-        .with_context(|| inklog::i18n::tr("config-read_ciphertext_failed"))?;
-
-    let cipher = Aes256Gcm::new((&*key).into());
-
-    let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
-        let mut args = inklog::i18n::MsgArgs::new();
-        args.set("err", e.to_string());
-        anyhow!(
-            "{}",
-            inklog::i18n::tr_args("config-decryption_failed", args)
-        )
-    })?;
-
-    let mut output_file = File::create(output_path).with_context(|| {
-        let mut args = inklog::i18n::MsgArgs::new();
-        args.set("path", output_path.display().to_string());
-        inklog::i18n::tr_args("config-create_output_failed", args)
-    })?;
-
-    output_file
-        .write_all(&plaintext)
-        .with_context(|| inklog::i18n::tr("config-write_decrypted_failed"))?;
-
-    Ok(())
-}
 
 pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &str) -> Result<()> {
     // O_NOFOLLOW 打开：关闭校验后输入路径被替换为符号链接的竞态
@@ -732,8 +644,90 @@ mod tests {
     use super::*;
     use aes_gcm::Aes256Gcm;
     use aes_gcm::aead::{Aead, KeyInit};
+    use base64::{Engine as _, engine::general_purpose};
+    use inklog::sink::encryption::derive_key_from_password;
     use rand::RngExt;
+    use sha2::Digest as Sha256Digest;
+    use sha2::Sha256;
+    use std::fs::File;
     use std::io::Write;
+
+    /// Decrypt a single encrypted file (legacy format).
+    ///
+    /// Supports the original header-less encryption format.
+    fn decrypt_file(input_path: &PathBuf, output_path: &PathBuf, key_env: &str) -> Result<()> {
+        let mut file = File::open(input_path).with_context(|| {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("path", input_path.display().to_string());
+            inklog::i18n::tr_args("config-open_input_failed", args)
+        })?;
+
+        let mut header = [0u8; 24];
+        file.read_exact(&mut header)
+            .with_context(|| inklog::i18n::tr("config-read_header_failed"))?;
+
+        if &header[..8] != MAGIC_HEADER {
+            return Err(anyhow!("{}", inklog::i18n::tr("config-invalid_header")));
+        }
+
+        let version = u16::from_le_bytes([header[8], header[9]]);
+        if version != 1 {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("version", version.to_string());
+            return Err(anyhow!(
+                "{}",
+                inklog::i18n::tr_args("config-unsupported_version", args)
+            ));
+        }
+
+        let algo = u16::from_le_bytes([header[10], header[11]]);
+        if algo != 1 {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("algo", algo.to_string());
+            return Err(anyhow!(
+                "{}",
+                inklog::i18n::tr_args("config-unsupported_algorithm", args)
+            ));
+        }
+
+        let key = get_encryption_key_cli(key_env).with_context(|| {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("env", key_env);
+            inklog::i18n::tr_args("config-get_key_failed", args)
+        })?;
+
+        let nonce_arr: [u8; 12] = header[12..24]
+            .try_into()
+            .expect("nonce slice must be 12 bytes");
+        let nonce = aes_gcm::Nonce::from(nonce_arr);
+
+        let mut ciphertext = Vec::new();
+        file.read_to_end(&mut ciphertext)
+            .with_context(|| inklog::i18n::tr("config-read_ciphertext_failed"))?;
+
+        let cipher = Aes256Gcm::new((&*key).into());
+
+        let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("err", e.to_string());
+            anyhow!(
+                "{}",
+                inklog::i18n::tr_args("config-decryption_failed", args)
+            )
+        })?;
+
+        let mut output_file = File::create(output_path).with_context(|| {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("path", output_path.display().to_string());
+            inklog::i18n::tr_args("config-create_output_failed", args)
+        })?;
+
+        output_file
+            .write_all(&plaintext)
+            .with_context(|| inklog::i18n::tr("config-write_decrypted_failed"))?;
+
+        Ok(())
+    }
 
     /// Generate a test key from a seed (allows deterministic or environment-based keys)
     fn get_test_key(seed: &str) -> [u8; 32] {

@@ -2358,6 +2358,14 @@ mod metrics_tests {
 mod histogram_export_tests {
     use super::*;
 
+    /// 断言动作为 Fallback 并取回 target（避免每个用例重复 match）。
+    fn expect_fallback_action(action: FallbackAction) -> String {
+        match action {
+            FallbackAction::Fallback { target, .. } => target,
+            other => panic!("expected Fallback action, got {other:?}"),
+        }
+    }
+
     #[test]
     fn test_native_histogram_export_buckets_sum_count() {
         let metrics = Metrics::new();
@@ -2460,9 +2468,8 @@ mod histogram_export_tests {
             initial_delay_ms: 10,
             ..FallbackConfig::default()
         });
-        let fallback_target = monitor
-            .check_and_fallback("database", false, Some("boom"))
-            .fail_for_test();
+        let fallback_target =
+            expect_fallback_action(monitor.check_and_fallback("database", false, Some("boom")));
         assert_eq!(
             fallback_target, "file",
             "database failure must fall back to file sink"
@@ -2516,9 +2523,8 @@ mod histogram_export_tests {
             failure_threshold: 1,
             ..FallbackConfig::default()
         });
-        let fallback_target = monitor
-            .check_and_fallback("database", false, Some("boom"))
-            .fail_for_test();
+        let fallback_target =
+            expect_fallback_action(monitor.check_and_fallback("database", false, Some("boom")));
         assert_eq!(
             fallback_target, "file",
             "database failure must fall back to file sink"
@@ -2541,16 +2547,5 @@ mod histogram_export_tests {
             monitor.check_and_fallback("database", true, None),
             FallbackAction::None
         ));
-    }
-}
-
-#[cfg(test)]
-impl FallbackAction {
-    /// 测试辅助：断言为 Fallback 并取回 target（避免每个用例重复 match）。
-    fn fail_for_test(self) -> String {
-        match self {
-            FallbackAction::Fallback { target, .. } => target,
-            other => panic!("expected Fallback action, got {other:?}"),
-        }
     }
 }

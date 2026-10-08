@@ -187,12 +187,6 @@ impl LevelDirectives {
     }
 }
 
-/// 级别指令集 → EnvFilter 指令字符串（全局级别在前，target 指令在后）。
-#[cfg(test)]
-pub(crate) fn directives_to_filter_string(directives: &LevelDirectives) -> String {
-    directives.to_filter_string()
-}
-
 /// 自定义 sink 通道：名称 + sink + 独立接收端（build 时成对启动 worker）
 type CustomChannel = (
     String,
@@ -3838,23 +3832,17 @@ mod set_level_tests {
             vec![("hyper".to_string(), "warn".to_string())],
             None,
         );
-        assert_eq!(directives_to_filter_string(&d), "info,hyper=warn");
+        assert_eq!(d.to_filter_string(), "info,hyper=warn");
 
         // 全局覆盖
         d.upsert(None, "debug");
-        assert_eq!(directives_to_filter_string(&d), "debug,hyper=warn");
+        assert_eq!(d.to_filter_string(), "debug,hyper=warn");
         // 新 target 追加
         d.upsert(Some("my_crate"), "trace");
-        assert_eq!(
-            directives_to_filter_string(&d),
-            "debug,hyper=warn,my_crate=trace"
-        );
+        assert_eq!(d.to_filter_string(), "debug,hyper=warn,my_crate=trace");
         // 已有 target 覆盖（不重复追加）
         d.upsert(Some("hyper"), "error");
-        assert_eq!(
-            directives_to_filter_string(&d),
-            "debug,hyper=error,my_crate=trace"
-        );
+        assert_eq!(d.to_filter_string(), "debug,hyper=error,my_crate=trace");
         assert_eq!(d.targets.len(), 2, "upsert must not duplicate targets");
     }
 
@@ -3867,7 +3855,7 @@ mod set_level_tests {
         );
         d.upsert(None, "error");
         assert_eq!(
-            directives_to_filter_string(&d),
+            d.to_filter_string(),
             "error,nebulaid=debug,hyper=warn",
             "RUST_LOG extra directives must survive set_level rebuilds"
         );

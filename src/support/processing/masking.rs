@@ -1470,7 +1470,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_engine_error_broadcast_dedup_and_attribution() {
-        crate::support::ops_event::reset_ops_hub_for_tests();
+        crate::support::ops_event::test_support::reset_ops_hub_for_tests();
         assert!(
             !crate::support::ops_event::has_channels(),
             "hub must be empty after reset"
@@ -1524,7 +1524,7 @@ mod tests {
             Some(&1),
             "each distinct rule gets its own broadcast"
         );
-        crate::support::ops_event::reset_ops_hub_for_tests();
+        crate::support::ops_event::test_support::reset_ops_hub_for_tests();
         assert!(!crate::support::ops_event::has_channels());
     }
 
@@ -2570,9 +2570,8 @@ mod tests {
     #[test]
     #[serial]
     fn test_engine_error_report_broadcast_is_rate_limited_per_rule() {
-        use crate::support::ops_event::{
-            has_channels, register_ops_channel, reset_ops_hub_for_tests,
-        };
+        use crate::support::ops_event::test_support::reset_ops_hub_for_tests;
+        use crate::support::ops_event::{has_channels, register_ops_channel};
         use crossbeam_channel::bounded;
 
         // 零开销门：hub 无注册通道时 has_channels 为 false
