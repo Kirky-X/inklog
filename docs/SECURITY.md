@@ -60,12 +60,12 @@ inklog 目前处于 0.x 预发布阶段（当前版本 **0.3.0-rc.7**），暂�
 
 **首选方式**：
 
-- 邮件：[Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
-- PGP 密钥：(将在安全页面提供)
+- [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)（仓库页 Security → Report a vulnerability）
 
 **备选方式**：
 
-- [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)
+- 邮件：[Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
+- PGP 密钥：(将在安全页面提供)
 
 ### 报告内容
 
