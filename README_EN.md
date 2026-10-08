@@ -122,7 +122,7 @@ Or declare it explicitly in `Cargo.toml` (`default = ["i18n"]`; core capabilitie
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.7"
+inklog = "0.3.0-rc.8"
 ```
 
 ### Minimal Runnable Example
@@ -403,7 +403,7 @@ Phased goals compiled from the existing release plan (timing may adjust with the
 
 | Status | Goal | Notes |
 |:----:|------|------|
-| 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.7 → 0.3.0 stable release |
+| 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.8 → 0.3.0 stable release |
 | 📋 | Workspace dependency lockstep | trait-kit 0.5.0, oxcache 0.5.0, dbnexus 0.6.0 |
 | ✅ | CI test matrix grouped by database backend | The Docker pipeline validates the four mutually exclusive backends (sqlite/postgres/mysql/duckdb); duckdb is embedded and needs no container service |
 | ✅ | Provision the MySQL integration environment | A MySQL 8 service is provided in docker/docker-compose.test.yml; the CI mysql branch runs the integration tests |
@@ -453,6 +453,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 The full version history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md) (Keep a Changelog format, semantic versioning).
 
 ### Recent Releases
+- **0.3.0-rc.8** (2026-10-08): production API surface reduced — removed test-only public functions (`decrypt_file`, `reset_ops_hub_for_tests`); complexity hotspots converged via helper extraction, dead delegates removed with feature-gating replacing `allow` markers; governance records and the specmark directory moved out of git tracking; vulnerability reporting channels unified
 
 - **0.3.0-rc.7** (2026-10-07): fix `E0433` in `create_compressed_output` on non-unix targets when neither zstd nor gzip is enabled (hit by limiteron with `default-features = false`); the CI build matrix now also checks the zero-feature build to prevent regressions
 - **0.3.0-rc.6** (2026-09-28): full egress PII masking coverage with hardened regex rules (fancy-regex lookaround); ERROR/FATAL fallback re-emission, fsync crash consistency and 0600 file permissions; audit chain wired into rotation with `inklog-cli verify-chain`; service identity static fields; deferred-capabilities four items (Chinese name masking / FallbackJournal / CBFS promotion / real OTel trace context); masking detection-face and KV-redaction APIs; i18n feature-gating; CI database matrix extended with duckdb;

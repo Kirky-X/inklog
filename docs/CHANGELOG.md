@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <summary>📑 目录</summary>
 
 - [Unreleased](#unreleased)
+- [0.3.0-rc.8](#030-rc8---2026-10-08)
 - [0.3.0-rc.7](#030-rc7---2026-10-07)
 - [0.3.0-rc.6](#030-rc6---2026-10-06)
 - [0.3.0-rc.5](#030-rc5---2026-09-21)
@@ -28,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 </details>
 
 ## [Unreleased]
+
+## [0.3.0-rc.8] - 2026-10-08
+
+### Removed
+
+- **生产 API 收缩：删除测试专用公共函数**：`support::io::sink::ring_buffered_file` 公开链上的 `decrypt_file` 与 observability 面的 `reset_ops_hub_for_tests` 等仅测试使用的 `pub` 函数从生产代码移除——公共 API 面收缩，外部消费者如引用需迁移至既有入口或 `test-utils` feature。
+
+### Changed
+
+- **复杂热点收敛与死代码清理**：敏感键/采样/模板热点抽取辅助函数，query 解码过滤路径抽公共助手，压缩守卫按特性隔离；测试面死委托删除并以特性隔离替代 `allow` 标记。
+- **治理与注释卫生**：specmark 目录与 ws-R14 治理复核记录移出 git 跟踪；注释清理（变更史叙述与任务编号残留）；漏洞报告渠道统一为 GH 安全通告首选、邮箱备选。
 
 ## [0.3.0-rc.7] - 2026-10-07
 

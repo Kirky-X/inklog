@@ -21,7 +21,7 @@ parquet = ["inklog/parquet"]
 confers-audit = ["inklog/confers-audit", "dep:confers"]
 
 [dependencies]
-inklog = { path = "..", version = "0.3.0-rc.7", features = ["test-utils"] }
+inklog = { path = "..", version = "0.3.0-rc.8", features = ["test-utils"] }
 async-trait = { workspace = true }
 dbnexus = { workspace = true, optional = true }
 tokio = { workspace = true }
@@ -45,7 +45,7 @@ crossbeam-channel = { workspace = true }
 regex = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 # confers 审计桥示例所需（与 inklog 同钉已发布 rc.6；仅 audit feature）
-confers = { version = "0.6.0-rc.6", default-features = false, features = ["audit"], optional = true }
+confers = { version = "0.6.0-rc.7", default-features = false, features = ["audit"], optional = true }
 
 [[bin]]
 name = "console"

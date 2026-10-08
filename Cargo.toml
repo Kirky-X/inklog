@@ -13,7 +13,7 @@ resolver = "2"
 members = [".", "examples"]
 
 [workspace.package]
-version = "0.3.0-rc.7"
+version = "0.3.0-rc.8"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Kirky-X <Kirky-X@outlook.com>"]
@@ -148,8 +148,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.7", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
-confers = { version = "0.6.0-rc.6", default-features = false, features = ["toml", "watch"], optional = true }
+trait-kit = { version = "0.5.0-rc.8", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+confers = { version = "0.6.0-rc.7", default-features = false, features = ["toml", "watch"], optional = true }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -159,7 +159,7 @@ axum-server = { version = "0.8", default-features = false, features = ["tls-rust
 is-terminal = { version = "0.4", default-features = false }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
-oxcache = { version = "0.5.0-rc.6", default-features = false, features = ["memory", "serialization"] }
+oxcache = { version = "0.5.0-rc.7", default-features = false, features = ["memory", "serialization"] }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }

@@ -81,7 +81,7 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.7"
+inklog = "0.3.0-rc.8"
 ```
 
 ### 启用可选 feature
