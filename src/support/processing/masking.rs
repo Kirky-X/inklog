@@ -847,6 +847,58 @@ static PRIVATE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .expect("Invalid private key regex")
 });
 
+/// 引擎级匹配错误统一留痕/广播出口：apply 闭包无 self，以规则名直呼；
+/// 语义同 MaskRule::report_engine_error（warn 逐次留痕 + ops 事件按规则限频首报）。
+fn report_engine_error_for(rule: &str, error: &fancy_regex::Error) {
+    static REPORTED: LazyLock<Mutex<HashSet<String>>> =
+        LazyLock::new(|| Mutex::new(HashSet::new()));
+    tracing::warn!(
+        rule = rule,
+        error = %error,
+        "{}",
+        crate::i18n::tr("masking-detect-match-error")
+    );
+    if !crate::support::ops_event::has_channels() {
+        return;
+    }
+    // 锁中毒时放弃本次广播：错误路径不传播 panic
+    let Ok(mut reported) = REPORTED.lock() else {
+        return;
+    };
+    // 常态（已首报）经 contains(&str) 免分配短路，仅首次插入才 clone
+    if reported.contains(rule) {
+        return;
+    }
+    // 投递确认后才标记首报：通道满被丢弃的「首报」不算数，
+    // 下次引擎错误自动重报
+    if crate::support::ops_event::publish_internal(
+        "masking_engine_error",
+        Some(rule),
+        serde_json::json!({ "error": error.to_string() }),
+    ) {
+        reported.insert(rule.to_string());
+    }
+}
+
+/// 日志路径兜底替换：fancy_regex 的 replace_all/replacen 在引擎错误
+/// （BacktrackLimitExceeded 等）上内部 unwrap，会让 console worker panic
+/// 离场、日志双通道静默终止，本模块统一走 try_replacen——失败即经统一
+/// 出口留痕并返回原文（漏报可观测优于日志通道死亡）。
+fn replace_all_masked(
+    rule: &str,
+    regex: &Regex,
+    text: &str,
+    replacement: impl fancy_regex::Replacer,
+) -> String {
+    match regex.try_replacen(text, 0, replacement) {
+        Ok(masked) => masked.into_owned(),
+        Err(e) => {
+            report_engine_error_for(rule, &e);
+            text.to_string()
+        }
+    }
+}
+
 impl MaskRule {
     fn new_email_rule() -> Self {
         Self::build_from_regex("email", EMAIL_REGEX.clone(), "**@**.***", 100, None)
@@ -863,7 +915,7 @@ impl MaskRule {
             "MASK_ID_CARD",
             100,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex.replace_all(text, "******$3").to_string()
+                replace_all_masked("id_card", regex, text, "******$3")
             })),
         )
     }
@@ -875,8 +927,11 @@ impl MaskRule {
             "MASK_BANK_CARD",
             100,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex
-                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
+                replace_all_masked(
+                    "bank_card",
+                    regex,
+                    text,
+                    |caps: &fancy_regex::Captures<'_, str>| {
                         let matched = caps.get(0).unwrap().as_str();
                         if matched.len() >= 12 {
                             let last_four = &matched[matched.len() - 4..];
@@ -884,8 +939,8 @@ impl MaskRule {
                         } else {
                             matched.to_string()
                         }
-                    })
-                    .to_string()
+                    },
+                )
             })),
         )
     }
@@ -934,17 +989,19 @@ impl MaskRule {
         priority: i32,
         apply_fn: Option<ApplyFn>,
     ) -> Self {
+        let rule_name = name.to_string();
         MaskRule {
             name: name.to_string(),
             pattern: regex,
             replacement: replacement.to_string(),
             priority,
             enabled: true,
-            apply_fn: apply_fn.unwrap_or_else(|| {
-                Arc::new(|regex: &Regex, text: &str, replacement: &str| {
+            apply_fn: apply_fn.unwrap_or_else(move || {
+                Arc::new(move |regex: &Regex, text: &str, replacement: &str| {
                     // fancy-regex 的 &str replacer 支持 ${1}/$1 组展开；匹配期
-                    // 错误对已编译规则实际不可达，兜底返回原文（日志路径禁 panic）
-                    regex.replace_all(text, replacement).to_string()
+                    // 错误实际可达（长文本回溯上限），统一出口留痕并返回原文
+                    // （日志路径禁 panic，漏报可观测优于日志通道死亡）
+                    replace_all_masked(&rule_name, regex, text, replacement)
                 })
             }),
             is_literal: false,
@@ -970,8 +1027,11 @@ impl MaskRule {
             "***REDACTED_CC***",
             15,
             Some(Arc::new(|regex: &Regex, text: &str, replacement: &str| {
-                regex
-                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
+                replace_all_masked(
+                    "credit_card",
+                    regex,
+                    text,
+                    |caps: &fancy_regex::Captures<'_, str>| {
                         let number = caps.get(0).unwrap().as_str();
                         let digits: Vec<u32> =
                             number.chars().filter_map(|c| c.to_digit(10)).collect();
@@ -998,8 +1058,8 @@ impl MaskRule {
                         } else {
                             format!("****-****-****-{}", last4)
                         }
-                    })
-                    .to_string()
+                    },
+                )
             })),
         )
     }
@@ -1011,16 +1071,19 @@ impl MaskRule {
             "***.***.***.XXX",
             20,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex
-                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
+                replace_all_masked(
+                    "ipv4",
+                    regex,
+                    text,
+                    |caps: &fancy_regex::Captures<'_, str>| {
                         let ip = caps.get(0).unwrap().as_str();
                         if let Some(pos) = ip.rfind('.') {
                             format!("***.***.***.{}", &ip[pos + 1..])
                         } else {
                             "***.***.***.***".to_string()
                         }
-                    })
-                    .to_string()
+                    },
+                )
             })),
         )
     }
@@ -1032,8 +1095,11 @@ impl MaskRule {
             "****:****:****:XXXX",
             21,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex
-                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
+                replace_all_masked(
+                    "ipv6",
+                    regex,
+                    text,
+                    |caps: &fancy_regex::Captures<'_, str>| {
                         let ip = caps.get(0).unwrap().as_str();
                         if let Some(pos) = ip.rfind(':') {
                             let last_group = &ip[pos + 1..];
@@ -1048,8 +1114,8 @@ impl MaskRule {
                         } else {
                             ip.to_string()
                         }
-                    })
-                    .to_string()
+                    },
+                )
             })),
         )
     }
@@ -1061,8 +1127,11 @@ impl MaskRule {
             "XX:**:**:**:**:XX",
             19,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex
-                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
+                replace_all_masked(
+                    "mac_address",
+                    regex,
+                    text,
+                    |caps: &fancy_regex::Captures<'_, str>| {
                         let mac = caps.get(0).unwrap().as_str();
                         let sep = if mac.contains(':') { ':' } else { '-' };
                         let parts: Vec<&str> = mac.split(sep).collect();
@@ -1074,8 +1143,8 @@ impl MaskRule {
                         } else {
                             mac.to_string()
                         }
-                    })
-                    .to_string()
+                    },
+                )
             })),
         )
     }
@@ -1089,14 +1158,17 @@ impl MaskRule {
             "******XX",
             30,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex
-                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
+                replace_all_masked(
+                    "passport",
+                    regex,
+                    text,
+                    |caps: &fancy_regex::Captures<'_, str>| {
                         let passport = caps.get(0).unwrap().as_str();
                         let first = &passport[..1];
                         let last2 = &passport[passport.len() - 2..];
                         format!("{}******{}", first, last2)
-                    })
-                    .to_string()
+                    },
+                )
             })),
         )
     }
@@ -1108,13 +1180,16 @@ impl MaskRule {
             "***-**-XXXX",
             35,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
-                regex
-                    .replace_all(text, |caps: &fancy_regex::Captures<'_, str>| {
+                replace_all_masked(
+                    "ssn",
+                    regex,
+                    text,
+                    |caps: &fancy_regex::Captures<'_, str>| {
                         let ssn = caps.get(0).unwrap().as_str();
                         let last4 = &ssn[ssn.len() - 4..];
                         format!("***-**-{}", last4)
-                    })
-                    .to_string()
+                    },
+                )
             })),
         )
     }
@@ -1218,34 +1293,7 @@ impl MaskRule {
     /// 被丢弃）不标记，下次错误自动重报。hub 无注册通道时零开销返回
     /// （detail 不构造），广播路径不反压主日志链路。
     fn report_engine_error(&self, error: &fancy_regex::Error) {
-        static REPORTED: LazyLock<Mutex<HashSet<String>>> =
-            LazyLock::new(|| Mutex::new(HashSet::new()));
-        tracing::warn!(
-            rule = self.name.as_str(),
-            error = %error,
-            "{}",
-            crate::i18n::tr("masking-detect-match-error")
-        );
-        if !crate::support::ops_event::has_channels() {
-            return;
-        }
-        // 锁中毒时放弃本次广播：错误路径不传播 panic
-        let Ok(mut reported) = REPORTED.lock() else {
-            return;
-        };
-        // 常态（已首报）经 contains(&str) 免分配短路，仅首次插入才 clone
-        if reported.contains(self.name.as_str()) {
-            return;
-        }
-        // 投递确认后才标记首报：通道满被丢弃的「首报」不算数，
-        // 下次引擎错误自动重报
-        if crate::support::ops_event::publish_internal(
-            "masking_engine_error",
-            Some(self.name.as_str()),
-            serde_json::json!({ "error": error.to_string() }),
-        ) {
-            reported.insert(self.name.clone());
-        }
+        report_engine_error_for(&self.name, error);
     }
 
     /// Returns the name of this rule.
@@ -1365,6 +1413,7 @@ impl MaskRuleBuilder {
     /// # Errors
     /// Returns `Err(InklogError)` if the pattern is missing or an invalid regex.
     pub fn build(self) -> Result<MaskRule, InklogError> {
+        let rule_name = self.name.clone();
         let pattern_str = self.pattern.ok_or_else(|| {
             let mut args = crate::i18n::MsgArgs::new();
             args.set("name", &self.name);
@@ -1385,9 +1434,9 @@ impl MaskRuleBuilder {
             replacement: self.replacement,
             priority: self.priority,
             enabled: self.enabled,
-            apply_fn: self.apply_fn.unwrap_or_else(|| {
-                Arc::new(|regex: &Regex, text: &str, replacement: &str| {
-                    regex.replace_all(text, replacement).to_string()
+            apply_fn: self.apply_fn.unwrap_or_else(move || {
+                Arc::new(move |regex: &Regex, text: &str, replacement: &str| {
+                    replace_all_masked(&rule_name, regex, text, replacement)
                 })
             }),
             is_literal: self.is_literal,
@@ -1463,6 +1512,38 @@ pub fn mask_phone(phone: &str) -> String {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    // ---- apply 路径引擎错误回归：fancy_regex replace_all 内部 unwrap 曾使
+    // console worker panic、日志双通道静默终止（外部库 0.19.2 缺陷），
+    // apply 必须经 try_replacen 优雅降级 ----
+
+    #[test]
+    #[serial]
+    fn test_apply_engine_error_does_not_panic_and_skips_masking() {
+        // 灾难性回溯模式：尾部非 'a' 字符使匹配必败，指数回溯在默认预算内
+        // 触发 BacktrackLimitExceeded——确定性引擎错误。
+        let rule = MaskRule::builder("zz-catastrophic")
+            .pattern(r"^(?:a+)+$")
+            .build()
+            .unwrap();
+        let text = format!("log prefix {} tail", "a".repeat(40));
+        // 修复前：此处 panic；修复后：留痕并返回原文
+        let out = rule.apply(&text);
+        assert_eq!(out, text);
+    }
+
+    #[test]
+    fn test_credit_card_apply_on_v051_scale_input_does_not_panic() {
+        // V051（12306 站点种子 250KB 级）真实场景规模：credit_card 规则
+        // 扫描长 SQL 语句曾触发同型 panic；断言不 panic 且输出非空即可
+        // （掩码成功或优雅跳过均为合法终态）。
+        let rule = MaskRule::new_credit_card_rule();
+        let unit =
+            "INSERT INTO station VALUES ('VNP','北京南','beijingnan','010','1000001234567890');"
+                .repeat(4000);
+        let out = rule.apply(&unit);
+        assert!(!out.is_empty());
+    }
 
     // ---- 引擎错误可观测出口：限频、归因与 hub 状态（进程级广播面，
     // 与其他 serial 测试互斥执行） ----
