@@ -6,7 +6,7 @@
 - **运行方式**：在仓库根目录执行 `cargo run --package inklog-examples --example <名称>`
 - **Feature 说明**：部分示例需要启用对应 feature 才能运行（数据库类需 `sqlite` / `postgres` / `mysql`，压缩与归档需 `compression` / `parquet`），命令中已逐一标注；其中 `compression` 与 `di_example` 在 `Cargo.toml` 中声明了 `required-features`，未启用时 cargo 会自动跳过编译
 
-完整项目介绍见 [主 README](../README.md)，安全策略见 [SECURITY.md](../SECURITY.md)。
+完整项目介绍见 [主 README](../README.md)，安全策略见 [docs/SECURITY.md](../docs/SECURITY.md)。
 
 ## 配置（config）
 

@@ -91,6 +91,6 @@ cargo update
 
 The pre-commit hook mirrors the checks performed by the GitHub CI pipeline:
 
-- CI Workflow: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+- CI Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 - Pre-commit checks are a fast subset of CI checks
 - Full CI runs on every push to `main` and `develop` branches
