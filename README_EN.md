@@ -179,9 +179,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `fast-masking` | ❌ | Aho-Corasick accelerated multi-pattern masking |
 | `secret-scan` | ❌ | Secret outbound masking gate: value-shape pattern registry (bare `sk-`/PEM/AKIA secrets) + value entropy scanning + per-pattern counting with fail-closed limit (`mask_checked`) + Chinese sensitive key names |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage port adapter; audit events persisted through the inklog DB sink, combinable with any backend |
-| `config-confers` | ❌ | Configuration loaded via confers + watch hot-reload of level and rotation parameters |
-| `confers-audit` | ❌ | inklog implementation of the confers `AuditSink` port; configuration audit events are written into the inklog structured sink (shares the confers dependency with `config-confers`) |
-| `kms` | ❌ | KMS key providers (`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP) |
+| `config-confers` | ❌ | Configuration loaded via confers + watch hot-reload of level and rotation parameters; confers 0.6.0-rc.6 is a non-optional core dependency (the `INKLOG_*` env override mapping goes through the confers source chain), this feature additionally enables confers' `toml`/`watch` features (kept for compatibility) |
+| `confers-audit` | ❌ | inklog implementation of the confers `AuditSink` port; configuration audit events are written into the inklog structured sink; confers is a non-optional core dependency, this feature additionally enables confers' `audit` feature |
+| `kms` | ❌ | KMS key providers (`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP); confers is a non-optional core dependency, this feature additionally enables confers' `encryption`/`cloud-kms` features |
 | `net-sink` | ❌ | Network forwarding sinks (TCP with optional TLS + UDP, buffered reconnection) |
 | `otlp` | ❌ | OTLP/HTTP JSON log export MVP (hand-written transport, zero new dependencies) |
 | `otel` | ❌ | Real OpenTelemetry trace context: reads the SpanContext from span extensions (written by the host's tracing-opentelemetry layer); the host otel version must match inklog's (currently opentelemetry 0.33, paired with tracing-opentelemetry 0.34), otherwise it silently falls back to root-span derivation |
@@ -483,7 +483,7 @@ inklog builds on these outstanding open-source projects:
 - [Project Fluent](https://projectfluent.org/) and [ICU](https://icu4x.unicode.org/): internationalized message formatting
 - [criterion](https://github.com/bheisler/criterion.rs): statistically rigorous benchmarking
 
-Database, cache, configuration, and lifecycle integrations are provided by the sibling workspace projects dbnexus, oxcache, confers, and trait-kit.
+Database, cache, configuration, and lifecycle integrations are provided by the sibling workspace projects dbnexus, oxcache, confers, and trait-kit; rate limiting, retry, and circuit-breaking primitives come from limiteron. Following the "self-developed libraries first" strategy, so that algorithm fixes for worker retries, token buckets, and circuit breakers converge on a single place in the libraries, limiteron 0.3.0-rc.6 (`default-features = false`, `retry` + `sync` features) and confers 0.6.0-rc.6 (`default-features = false`, `toml` + `watch` features) are both **non-optional core dependencies** — sink worker pool retry values, the three token bucket kernels, and the `INKLOG_*` environment override mapping are single-sourced to limiteron and confers respectively.
 
 ---
 

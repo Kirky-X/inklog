@@ -177,9 +177,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `fast-masking` | ❌ | Aho-Corasick 多模式脱敏加速 |
 | `secret-scan` | ❌ | Secret 出站脱敏门：值形态正则注册表（sk-/PEM/AKIA 等裸 secret）+ 值熵扫描 + 逐模式计数与超限 fail-closed（`mask_checked`）+ 中文敏感键名 |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage 端口适配器，审计事件经 inklog DB sink 落库，可与任一后端组合 |
-| `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数 |
-| `confers-audit` | ❌ | confers `AuditSink` 端口的 inklog 实现，配置审计事件写入 inklog 结构化 sink（与 `config-confers` 共享 confers 依赖） |
-| `kms` | ❌ | KMS 密钥提供者（`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP） |
+| `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数；confers 0.6.0-rc.6 为非 optional 核心依赖（INKLOG_* env 覆盖映射经 confers 源链），本 feature 增开 confers 的 `toml`/`watch` 特性（兼容保留） |
+| `confers-audit` | ❌ | confers `AuditSink` 端口的 inklog 实现，配置审计事件写入 inklog 结构化 sink；confers 为非 optional 核心依赖，本 feature 增开 confers 的 `audit` 特性 |
+| `kms` | ❌ | KMS 密钥提供者（`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP）；confers 为非 optional 核心依赖，本 feature 增开 confers 的 `encryption`/`cloud-kms` 特性 |
 | `net-sink` | ❌ | 网络转发 Sink（TCP 可 TLS + UDP，断线缓冲与自动重连） |
 | `otlp` | ❌ | OTLP/HTTP JSON 日志导出 MVP（手写传输，零新增依赖） |
 | `otel` | ❌ | 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主 tracing-opentelemetry layer 写入）；宿主 otel 版本需与 inklog 对齐（当前 opentelemetry 0.33，配套 tracing-opentelemetry 0.34），未对齐时静默回退根 span 派生 |
@@ -481,7 +481,7 @@ inklog 的实现依赖这些优秀的开源项目：
 - [Project Fluent](https://projectfluent.org/) 与 [ICU](https://icu4x.unicode.org/)：国际化消息格式
 - [criterion](https://github.com/bheisler/criterion.rs)：统计严谨的基准测试框架
 
-数据库、缓存、配置与生命周期集成分别由同工作区项目 dbnexus、oxcache、confers、trait-kit 提供。
+数据库、缓存、配置与生命周期集成分别由同工作区项目 dbnexus、oxcache、confers、trait-kit 提供；限流/重试/熔断原理由 limiteron 提供。为把 worker 重试、令牌桶与熔断等算法修复收敛到库侧单处（「自研库优先」策略），limiteron 0.3.0-rc.6（`default-features = false`，`retry` + `sync` 特性）与 confers 0.6.0-rc.6（`default-features = false`，`toml` + `watch` 特性）均为**非 optional 核心依赖**——sink worker 池重试数值、三处令牌桶内核与 INKLOG_* 环境变量覆盖映射分别单源于 limiteron 与 confers。
 
 ---
 
