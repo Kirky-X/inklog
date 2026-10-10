@@ -401,6 +401,26 @@ mod tests {
     }
 
     #[test]
+    fn test_half_open_admits_multiple_probes() {
+        // 半开多探针：HalfOpen 态连续两次（及以上）can_execute 均放行——
+        // 探针间互不排斥（limiteron sync 版为单探针 admit，此项为适配缺口，
+        // D7 保留现状路径下由 inklog 状态机直接承载）
+        let cb = CircuitBreaker::new(1, StdDuration::from_millis(50), 2);
+        cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Open);
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(cb.can_execute()); // Open → HalfOpen（惰性转换 + 清零成功计数）
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+        assert!(cb.can_execute(), "first probe must be admitted");
+        assert!(
+            cb.can_execute(),
+            "second concurrent probe must also be admitted in HalfOpen"
+        );
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
+    }
+
+    #[test]
     fn test_open_state_can_execute_before_timeout() {
         // In Open state before timeout, can_execute should return false
         let cb = CircuitBreaker::new(1, StdDuration::from_secs(60), 2);
