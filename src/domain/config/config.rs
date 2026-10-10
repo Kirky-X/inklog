@@ -17,9 +17,6 @@ use super::performance::PerformanceConfig;
 use super::rate_limit::RateLimitConfig;
 use super::sampling::SamplingConfig;
 
-// Re-export HttpErrorMode for env override match in this file
-use super::http::HttpErrorMode;
-
 // ============================================================================
 // InklogConfig - Root configuration struct
 // ============================================================================
@@ -64,6 +61,462 @@ pub struct InklogConfig {
 
 fn default_console_sink() -> Option<ConsoleSinkConfig> {
     Some(ConsoleSinkConfig::default())
+}
+
+/// INKLOG_* 环境变量覆盖前缀（搜索路径 `INKLOG_CONFIG_PATH` 与 STATIC_FIELDS
+/// 专用钩子之外的覆盖变量全集）。
+const ENV_PREFIX: &str = "INKLOG_";
+
+/// env 覆盖值的取值规则：对应目标字段的语义类型；非法值 warn 后保留现值。
+#[derive(Clone, Copy)]
+enum EnvValueRule {
+    /// 任意字符串（数值/布尔字面量按原文字符串落位）
+    Str,
+    /// 合法日志级别（`LogLevel::is_valid_level`）
+    Level,
+    /// 非空字符串（空值 warn 后保留现值）
+    Format,
+    /// 布尔（true/false；不可解析不覆盖）
+    Bool,
+    /// 只启用语义：仅可解析为 `true` 时生效（sink `ENABLED` 单向闸门）
+    EnableOnly,
+    /// u16 端口
+    Port,
+    /// usize
+    Usize,
+    /// u32
+    U32,
+    /// u64
+    U64,
+    /// 文件路径：拒绝 `ParentDir`/NUL（遍历安全）
+    SafePath,
+    /// HTTP 路径：解码后 `/` 开头且无遍历/反斜杠/控制字符
+    SafeHttpPath,
+    /// 体积字符串：去空白后以 ASCII 数字开头
+    SizeStr,
+    /// HTTP error_mode：`strict`/`warn`（大小写不敏感，落位规范化小写）
+    ErrorMode,
+    /// 数据库 URL：拒绝 `ParentDir`/NUL
+    DbUrl,
+    /// 服务身份字段：非空白且无控制字符
+    Identity,
+}
+
+/// 一条 env 覆盖映射：环境变量名 → 点分配置路径 + 取值规则。
+struct EnvOverrideSpec {
+    env_name: &'static str,
+    path: &'static str,
+    rule: EnvValueRule,
+    /// 旧实现先 `get_or_insert_with` 再赋值的路径：env 变量出现即实体化
+    /// Option 父节点（值非法时也实体化，字段保持默认）——既有测试钉死的
+    /// 加载语义，此处显式保留
+    materialize: bool,
+}
+
+/// INKLOG_* 覆盖的单一映射表。
+///
+/// 取代原逐字段 `std::env::var("INKLOG_*")` 硬编码分支：读取为前缀过滤的
+/// 通用遍历、映射与本表单源、定型经 confers `EnvSource::infer_config_value`
+/// （确定性类型推断）。`INKLOG_GLOBAL_STATIC_FIELDS` 不列入（逗号 k=v 表由
+/// 专用钩子承载）；`INKLOG_CONFIG_PATH` 是搜索路径而非覆盖项。未列入本表的
+/// INKLOG_* 变量与既有行为一致——忽略。
+static ENV_OVERRIDE_SPECS: &[EnvOverrideSpec] = &[
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_LEVEL",
+        path: "global.level",
+        rule: EnvValueRule::Level,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_FORMAT",
+        path: "global.format",
+        rule: EnvValueRule::Format,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_MASKING_ENABLED",
+        path: "global.masking_enabled",
+        rule: EnvValueRule::Bool,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_AUTO_FALLBACK",
+        path: "global.auto_fallback",
+        rule: EnvValueRule::Bool,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_SERVICE_NAME",
+        path: "global.service_name",
+        rule: EnvValueRule::Identity,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_SERVICE_INSTANCE",
+        path: "global.service_instance",
+        rule: EnvValueRule::Identity,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_SERVICE_ENV",
+        path: "global.service_env",
+        rule: EnvValueRule::Identity,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_GLOBAL_SERVICE_VERSION",
+        path: "global.service_version",
+        rule: EnvValueRule::Identity,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_FILE_SINK_ENABLED",
+        path: "file_sink.enabled",
+        rule: EnvValueRule::EnableOnly,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_FILE_SINK_PATH",
+        path: "file_sink.path",
+        rule: EnvValueRule::SafePath,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_FILE_SINK_MAX_SIZE",
+        path: "file_sink.max_size",
+        rule: EnvValueRule::SizeStr,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_HTTP_SERVER_ENABLED",
+        path: "http_server.enabled",
+        rule: EnvValueRule::EnableOnly,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_HTTP_SERVER_HOST",
+        path: "http_server.host",
+        rule: EnvValueRule::Str,
+        materialize: true,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_HTTP_SERVER_PORT",
+        path: "http_server.port",
+        rule: EnvValueRule::Port,
+        materialize: true,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_HTTP_SERVER_METRICS_PATH",
+        path: "http_server.metrics_path",
+        rule: EnvValueRule::SafeHttpPath,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_HTTP_SERVER_HEALTH_PATH",
+        path: "http_server.health_path",
+        rule: EnvValueRule::SafeHttpPath,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_HTTP_SERVER_ERROR_MODE",
+        path: "http_server.error_mode",
+        rule: EnvValueRule::ErrorMode,
+        materialize: true,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_PERFORMANCE_WORKER_THREADS",
+        path: "performance.worker_threads",
+        rule: EnvValueRule::Usize,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_PERFORMANCE_CHANNEL_CAPACITY",
+        path: "performance.channel_capacity",
+        rule: EnvValueRule::Usize,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_DATABASE_SINK_URL",
+        path: "database_sink.url",
+        rule: EnvValueRule::DbUrl,
+        materialize: false,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_DATABASE_SINK_POOL_SIZE",
+        path: "database_sink.pool_size",
+        rule: EnvValueRule::U32,
+        materialize: true,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_DATABASE_SINK_BATCH_SIZE",
+        path: "database_sink.batch_size",
+        rule: EnvValueRule::Usize,
+        materialize: true,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_DATABASE_SINK_FLUSH_INTERVAL_MS",
+        path: "database_sink.flush_interval_ms",
+        rule: EnvValueRule::U64,
+        materialize: true,
+    },
+    EnvOverrideSpec {
+        env_name: "INKLOG_DATABASE_SINK_TABLE_NAME",
+        path: "database_sink.table_name",
+        rule: EnvValueRule::Str,
+        materialize: true,
+    },
+];
+
+/// 按规则解释单条 env 值：`Some(v)` = 可应用的补丁值，`None` = 已 warn、
+/// 保留现值不应用。`current` 仅用于 warn 文案的现值参数。
+fn interpret_env_value(
+    spec: &EnvOverrideSpec,
+    raw: &str,
+    current: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    // 定型单源于 confers：确定性推断（bool → i64 → u64 → f64 → String）
+    let inferred = confers::config::EnvSource::infer_config_value(raw);
+    match spec.rule {
+        EnvValueRule::Str => Some(serde_json::Value::String(raw.to_string())),
+        EnvValueRule::Level => {
+            if crate::LogLevel::is_valid_level(raw) {
+                Some(serde_json::Value::String(raw.to_string()))
+            } else {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("val", raw);
+                args.set(
+                    "current",
+                    current.and_then(|v| v.as_str()).unwrap_or_default(),
+                );
+                tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_level", args));
+                None
+            }
+        }
+        EnvValueRule::Format => {
+            if raw.is_empty() {
+                tracing::warn!("{}", crate::i18n::tr("config-env_invalid_format"));
+                None
+            } else {
+                Some(serde_json::Value::String(raw.to_string()))
+            }
+        }
+        EnvValueRule::Bool => inferred.as_bool().map(serde_json::Value::Bool),
+        EnvValueRule::EnableOnly => match inferred.as_bool() {
+            Some(true) => Some(serde_json::Value::Bool(true)),
+            _ => None,
+        },
+        EnvValueRule::Port => fit_uint::<u16>(&inferred).map(serde_json::Value::from),
+        EnvValueRule::Usize => fit_uint::<usize>(&inferred).map(serde_json::Value::from),
+        EnvValueRule::U32 => fit_uint::<u32>(&inferred).map(serde_json::Value::from),
+        EnvValueRule::U64 => fit_uint::<u64>(&inferred).map(serde_json::Value::from),
+        EnvValueRule::SafePath => unsafe_path_reason(raw).map_or_else(
+            || Some(serde_json::Value::String(raw.to_string())),
+            |()| {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("path", raw);
+                tracing::warn!("{}", crate::i18n::tr_args("config-env_unsafe_path", args));
+                None
+            },
+        ),
+        EnvValueRule::SafeHttpPath => {
+            if is_safe_http_path(raw) {
+                Some(serde_json::Value::String(raw.to_string()))
+            } else {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("path", raw);
+                args.set("env_var", spec.env_name);
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("config-env_unsafe_http_path", args)
+                );
+                None
+            }
+        }
+        EnvValueRule::SizeStr => {
+            let has_numeric = raw
+                .trim()
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .count()
+                > 0;
+            if has_numeric {
+                Some(serde_json::Value::String(raw.to_string()))
+            } else {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("val", raw);
+                tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_size", args));
+                None
+            }
+        }
+        EnvValueRule::ErrorMode => {
+            let lower = raw.to_ascii_lowercase();
+            if lower == "strict" || lower == "warn" {
+                Some(serde_json::Value::String(lower))
+            } else {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("val", raw);
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("config-env_unknown_error_mode", args)
+                );
+                None
+            }
+        }
+        EnvValueRule::DbUrl => unsafe_path_reason(raw).map_or_else(
+            || Some(serde_json::Value::String(raw.to_string())),
+            |()| {
+                tracing::warn!("{}", crate::i18n::tr("config-env_invalid_db_url"));
+                None
+            },
+        ),
+        EnvValueRule::Identity => {
+            if raw.trim().is_empty() {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("var", spec.env_name);
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("config-env_blank_value_ignored", args)
+                );
+                None
+            } else if crate::domain::config::global::reject_control_chars(spec.env_name, raw)
+                .is_err()
+            {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("var", spec.env_name);
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("config-env_control_char_ignored", args)
+                );
+                None
+            } else {
+                Some(serde_json::Value::String(raw.to_string()))
+            }
+        }
+    }
+}
+
+/// 路径类 env 值的安全判定：含 `ParentDir` 组件或 NUL 字节时返回 `Some(())`。
+fn unsafe_path_reason(raw: &str) -> Option<()> {
+    let has_traversal = std::path::PathBuf::from(raw)
+        .components()
+        .any(|c| c == std::path::Component::ParentDir);
+    (has_traversal || raw.contains('\0')).then_some(())
+}
+
+/// 推断值须为目标无符号整型可容纳的整数字面量（否则按「不可解析」保留现值——
+/// 与旧实现 `parse().unwrap_or(current)` 的静默回退一致）。
+fn fit_uint<T>(inferred: &confers::types::ConfigValue) -> Option<T>
+where
+    T: TryFrom<i64> + TryFrom<u64>,
+{
+    match inferred {
+        confers::types::ConfigValue::I64(v) => T::try_from(*v).ok(),
+        confers::types::ConfigValue::U64(v) => T::try_from(*v).ok(),
+        _ => None,
+    }
+}
+
+/// STATIC_FIELDS 专用钩子：逗号分隔 k=v 表逐段校验（空段跳过；键/值非空且
+/// 无控制字符才入库，坏段 warn 后跳过该段），合法段合并进
+/// `global.static_fields`（插入语义，与文件配置同键共存时 env 段追加）。
+fn apply_static_fields_env(env_vars: &[(String, String)], json: &mut serde_json::Value) {
+    let Some((_, raw)) = env_vars
+        .iter()
+        .find(|(name, _)| name == "INKLOG_GLOBAL_STATIC_FIELDS")
+    else {
+        return;
+    };
+    for segment in raw.split(',') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        match segment.split_once('=') {
+            Some((key, value))
+                if !key.trim().is_empty()
+                    && !value.is_empty()
+                    && crate::domain::config::global::reject_control_chars(
+                        "static field",
+                        value,
+                    )
+                    .is_ok()
+                    && crate::domain::config::global::reject_control_chars(
+                        "static field key",
+                        key,
+                    )
+                    .is_ok() =>
+            {
+                json_path_set(
+                    json,
+                    "global.static_fields",
+                    serde_json::json!({ key.trim(): value }),
+                );
+            }
+            _ => {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("segment", segment);
+                args.set("raw", raw);
+                tracing::warn!(
+                    "{}",
+                    crate::i18n::tr_args("config-env_invalid_static_field", args)
+                );
+            }
+        }
+    }
+}
+
+/// 在 JSON 树上按点分路径读取现值（用于 warn 文案参数）。
+fn json_path_get<'a>(json: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = json;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+/// 按点分路径设置补丁值；叶值为对象且目标已存在对象时逐键合并
+/// （static_fields 的插入语义，不整表替换）。
+fn json_path_set(json: &mut serde_json::Value, path: &str, value: serde_json::Value) {
+    let segments: Vec<&str> = path.split('.').collect();
+    let (leaf, parents) = segments
+        .split_last()
+        .expect("dotted path has at least one segment");
+    let mut current = json;
+    for segment in parents {
+        let map = current
+            .as_object_mut()
+            .expect("config tree intermediate nodes are objects");
+        let entry = map
+            .entry(*segment)
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        // Option 字段序列化为 null：补丁进入前先实体化为对象（各字段由
+        // serde default 补齐，等价旧实现 get_or_insert_with(Default::default)）
+        if entry.is_null() {
+            *entry = serde_json::Value::Object(serde_json::Map::new());
+        }
+        current = entry;
+    }
+    let map = current
+        .as_object_mut()
+        .expect("config tree leaf parent is an object");
+    let both_objects = matches!(
+        (map.get(*leaf), &value),
+        (
+            Some(serde_json::Value::Object(_)),
+            serde_json::Value::Object(_)
+        )
+    );
+    if both_objects {
+        if let (Some(serde_json::Value::Object(existing)), serde_json::Value::Object(new)) =
+            (map.get_mut(*leaf), value)
+        {
+            for (k, v) in new {
+                existing.insert(k, v);
+            }
+        }
+    } else {
+        map.insert((*leaf).to_string(), value);
+    }
 }
 
 /// Decode `%XX` percent-encoding so path validation cannot be bypassed with
@@ -165,244 +618,52 @@ impl InklogConfig {
         Ok(config)
     }
 
-    /// Apply environment variable overrides to the configuration.
+    /// Apply INKLOG_* environment variable overrides to the configuration.
+    ///
+    /// 读取→映射→定型三段均为数据驱动：前缀过滤的通用环境变量遍历、
+    /// [`ENV_OVERRIDE_SPECS`] 单一映射表（env 名 → 点分配置路径 + 取值
+    /// 规则）、confers `EnvSource::infer_config_value` 确定性定型。逐字段
+    /// 语义（级别校验、路径安全、ENABLED 单向闸门、服务身份约束）由规则
+    /// 解释器执行：非法值 warn 后保留现值，加载不失败（既有语义）。
+    /// 未列入映射表的 INKLOG_* 变量与既有行为一致——忽略。
     fn apply_env_overrides(config: &mut Self) {
-        // Global config overrides
-        if let Ok(val) = std::env::var("INKLOG_GLOBAL_LEVEL") {
-            // Validate against known log levels before applying (case-insensitive, includes aliases)
-            if crate::LogLevel::is_valid_level(&val) {
-                config.global.level = val;
-            } else {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("val", &val);
-                args.set("current", &config.global.level);
-                tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_level", args));
-            }
-        }
-        if let Ok(val) = std::env::var("INKLOG_GLOBAL_FORMAT") {
-            if !val.is_empty() {
-                config.global.format = val;
-            } else {
-                tracing::warn!("{}", crate::i18n::tr("config-env_invalid_format"));
-            }
-        }
-        if let Ok(val) = std::env::var("INKLOG_GLOBAL_MASKING_ENABLED") {
-            config.global.masking_enabled = val.parse().unwrap_or(config.global.masking_enabled);
-        }
-        if let Ok(val) = std::env::var("INKLOG_GLOBAL_AUTO_FALLBACK") {
-            config.global.auto_fallback = val.parse().unwrap_or(config.global.auto_fallback);
-        }
-        // 服务身份静态字段：沿用既有 INKLOG_GLOBAL_ 前缀语义。env 覆盖在
-        // validate 之后执行，因此空值与控制字符在覆盖点就地告警忽略（不依赖
-        // 后置校验）；TOML 链则由 InklogConfig::validate() 硬拒绝
-        for (env_suffix, slot) in [
-            ("SERVICE_NAME", &mut config.global.service_name),
-            ("SERVICE_INSTANCE", &mut config.global.service_instance),
-            ("SERVICE_ENV", &mut config.global.service_env),
-            ("SERVICE_VERSION", &mut config.global.service_version),
-        ] {
-            let env_var = format!("INKLOG_GLOBAL_{env_suffix}");
-            if let Ok(val) = std::env::var(&env_var) {
-                if val.trim().is_empty() {
-                    let mut args = crate::i18n::MsgArgs::new();
-                    args.set("var", &env_var);
-                    tracing::warn!(
-                        "{}",
-                        crate::i18n::tr_args("config-env_blank_value_ignored", args)
-                    );
-                } else if crate::domain::config::global::reject_control_chars(&env_var, &val)
-                    .is_err()
-                {
-                    let mut args = crate::i18n::MsgArgs::new();
-                    args.set("var", &env_var);
-                    tracing::warn!(
-                        "{}",
-                        crate::i18n::tr_args("config-env_control_char_ignored", args)
-                    );
-                } else {
-                    *slot = Some(val);
-                }
-            }
-        }
-        if let Ok(val) = std::env::var("INKLOG_GLOBAL_STATIC_FIELDS") {
-            for segment in val.split(',') {
-                let segment = segment.trim();
-                if segment.is_empty() {
-                    continue;
-                }
-                match segment.split_once('=') {
-                    Some((key, value))
-                        if !key.trim().is_empty()
-                            && !value.is_empty()
-                            && crate::domain::config::global::reject_control_chars(
-                                "static field",
-                                value,
-                            )
-                            .is_ok()
-                            && crate::domain::config::global::reject_control_chars(
-                                "static field key",
-                                key,
-                            )
-                            .is_ok() =>
-                    {
-                        config
-                            .global
-                            .static_fields
-                            .insert(key.trim().to_string(), value.to_string());
-                    }
-                    _ => {
-                        let mut args = crate::i18n::MsgArgs::new();
-                        args.set("segment", segment);
-                        args.set("raw", &val);
-                        tracing::warn!(
-                            "{}",
-                            crate::i18n::tr_args("config-env_invalid_static_field", args)
+        let env_vars: Vec<(String, String)> = std::env::vars()
+            .filter(|(name, _)| name.starts_with(ENV_PREFIX))
+            .collect();
+
+        // JSON 视图承载补丁：规则解释读取现值（warn 文案参数）与补丁落位
+        // 共用同一棵树；序列化途经自有的 Serialize derive，不引入外部数据。
+        let mut json = serde_json::to_value(config.clone())
+            .expect("InklogConfig serialization cannot fail (derived pure data)");
+
+        for spec in ENV_OVERRIDE_SPECS {
+            let Some((_, raw)) = env_vars.iter().find(|(name, _)| *name == spec.env_name) else {
+                continue;
+            };
+            let current = json_path_get(&json, spec.path);
+            match interpret_env_value(spec, raw, current) {
+                Some(value) => json_path_set(&mut json, spec.path, value),
+                // 值非法且该路径旧语义为「变量出现即实体化」：补一个空对象把
+                // Option 父节点落地，字段保持默认（如 ERROR_MODE 未知值场景）
+                None if spec.materialize => {
+                    if let Some((parent, _)) = spec.path.rsplit_once('.') {
+                        json_path_set(
+                            &mut json,
+                            parent,
+                            serde_json::Value::Object(serde_json::Map::new()),
                         );
                     }
                 }
+                None => {}
             }
         }
 
-        // File sink overrides
-        if let Ok(val) = std::env::var("INKLOG_FILE_SINK_ENABLED")
-            && val.parse::<bool>().unwrap_or(false)
-        {
-            let file_config = config.file_sink.get_or_insert_with(Default::default);
-            file_config.enabled = true;
-        }
-        if let Ok(val) = std::env::var("INKLOG_FILE_SINK_PATH") {
-            // 验证路径不含遍历模式或可疑字符
-            let path_buf = std::path::PathBuf::from(&val);
-            let has_traversal = path_buf
-                .components()
-                .any(|c| c == std::path::Component::ParentDir);
-            let has_null = val.contains('\0');
-            if has_traversal || has_null {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("path", &val);
-                tracing::warn!("{}", crate::i18n::tr_args("config-env_unsafe_path", args));
-            } else {
-                let file_config = config.file_sink.get_or_insert_with(Default::default);
-                file_config.path = path_buf;
-            }
-        }
-        if let Ok(val) = std::env::var("INKLOG_FILE_SINK_MAX_SIZE") {
-            // Validate that the value looks like a parseable size string
-            let trimmed = val.trim();
-            let has_numeric = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
-            if has_numeric == 0 {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("val", &val);
-                tracing::warn!("{}", crate::i18n::tr_args("config-env_invalid_size", args));
-            } else {
-                let file_config = config.file_sink.get_or_insert_with(Default::default);
-                file_config.max_size = val;
-            }
-        }
+        // STATIC_FIELDS 逗号分隔 k=v 表：通用映射无法表达，保留专用 env
+        // 钩子（分段校验复用 reject_control_chars，坏段 warn 后跳过）
+        apply_static_fields_env(&env_vars, &mut json);
 
-        // HTTP server overrides
-        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_ENABLED")
-            && val.parse::<bool>().unwrap_or(false)
-        {
-            let http_config = config.http_server.get_or_insert_with(Default::default);
-            http_config.enabled = true;
-        }
-        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_HOST") {
-            let http_config = config.http_server.get_or_insert_with(Default::default);
-            http_config.host = val;
-        }
-        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_PORT") {
-            let http_config = config.http_server.get_or_insert_with(Default::default);
-            http_config.port = val.parse().unwrap_or(http_config.port);
-        }
-        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_METRICS_PATH") {
-            // Validate HTTP path: must start with '/' and contain no traversal
-            // (checked on the percent-decoded value to catch encoded variants)
-            if is_safe_http_path(&val) {
-                let http_config = config.http_server.get_or_insert_with(Default::default);
-                http_config.metrics_path = val;
-            } else {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("path", &val);
-                args.set("env_var", "INKLOG_HTTP_SERVER_METRICS_PATH");
-                tracing::warn!(
-                    "{}",
-                    crate::i18n::tr_args("config-env_unsafe_http_path", args)
-                );
-            }
-        }
-        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_HEALTH_PATH") {
-            // Validate HTTP path: must start with '/' and contain no traversal
-            // (checked on the percent-decoded value to catch encoded variants)
-            if is_safe_http_path(&val) {
-                let http_config = config.http_server.get_or_insert_with(Default::default);
-                http_config.health_path = val;
-            } else {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("path", &val);
-                args.set("env_var", "INKLOG_HTTP_SERVER_HEALTH_PATH");
-                tracing::warn!(
-                    "{}",
-                    crate::i18n::tr_args("config-env_unsafe_http_path", args)
-                );
-            }
-        }
-        if let Ok(val) = std::env::var("INKLOG_HTTP_SERVER_ERROR_MODE") {
-            let http_config = config.http_server.get_or_insert_with(Default::default);
-            http_config.error_mode = if val.eq_ignore_ascii_case("strict") {
-                HttpErrorMode::Strict
-            } else if val.eq_ignore_ascii_case("warn") {
-                HttpErrorMode::Warn
-            } else {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("val", &val);
-                tracing::warn!(
-                    "{}",
-                    crate::i18n::tr_args("config-env_unknown_error_mode", args)
-                );
-                http_config.error_mode.clone()
-            };
-        }
-
-        // Performance overrides
-        if let Ok(val) = std::env::var("INKLOG_PERFORMANCE_WORKER_THREADS") {
-            config.performance.worker_threads =
-                val.parse().unwrap_or(config.performance.worker_threads);
-        }
-        if let Ok(val) = std::env::var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY") {
-            config.performance.channel_capacity =
-                val.parse().unwrap_or(config.performance.channel_capacity);
-        }
-
-        // Database sink overrides
-        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_URL") {
-            let path_buf = std::path::PathBuf::from(&val);
-            let has_traversal = path_buf
-                .components()
-                .any(|c| c == std::path::Component::ParentDir);
-            if has_traversal || val.contains('\0') {
-                tracing::warn!("{}", crate::i18n::tr("config-env_invalid_db_url"));
-            } else {
-                let db_config = config.database_sink.get_or_insert_with(Default::default);
-                db_config.url = val;
-            }
-        }
-        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_POOL_SIZE") {
-            let db_config = config.database_sink.get_or_insert_with(Default::default);
-            db_config.pool_size = val.parse().unwrap_or(db_config.pool_size);
-        }
-        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_BATCH_SIZE") {
-            let db_config = config.database_sink.get_or_insert_with(Default::default);
-            db_config.batch_size = val.parse().unwrap_or(db_config.batch_size);
-        }
-        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_FLUSH_INTERVAL_MS") {
-            let db_config = config.database_sink.get_or_insert_with(Default::default);
-            db_config.flush_interval_ms = val.parse().unwrap_or(db_config.flush_interval_ms);
-        }
-        if let Ok(val) = std::env::var("INKLOG_DATABASE_SINK_TABLE_NAME") {
-            let db_config = config.database_sink.get_or_insert_with(Default::default);
-            db_config.table_name = val;
-        }
+        *config = serde_json::from_value(json)
+            .expect("env patches preserve field types (validated per rule)");
     }
 
     /// Search paths (first existing file wins):
@@ -692,6 +953,7 @@ impl std::str::FromStr for InklogConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::config::http::HttpErrorMode;
 
     // Mutex to serialize env var tests (env vars are process-global state)
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1185,6 +1447,93 @@ level = "debug"
         unsafe {
             std::env::remove_var("INKLOG_GLOBAL_MASKING_ENABLED");
             std::env::remove_var("INKLOG_GLOBAL_AUTO_FALLBACK");
+        }
+    }
+
+    #[test]
+    fn test_env_override_mapping_table_single_source() {
+        // 映射表是 env→路径→规则的唯一来源：每条目带前缀、点分路径、非空规则
+        assert_eq!(ENV_OVERRIDE_SPECS.len(), 24);
+        for spec in ENV_OVERRIDE_SPECS {
+            assert!(
+                spec.env_name.starts_with(ENV_PREFIX),
+                "env name must carry the INKLOG_ prefix: {}",
+                spec.env_name
+            );
+            assert!(
+                spec.path.contains('.') && !spec.path.starts_with('.'),
+                "path must be a dotted config path: {}",
+                spec.path
+            );
+            if spec.materialize {
+                assert!(
+                    spec.path
+                        .rsplit_once('.')
+                        .is_some_and(|(parent, _)| !parent.contains('.')),
+                    "materialize specs patch a depth-2 parent: {}",
+                    spec.path
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_env_override_mapping_table_nested_paths() {
+        // 规格映射表：每字段一条 INKLOG_* → 值断言（嵌套路径经点分路径落位）
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
+            std::env::set_var("INKLOG_GLOBAL_FORMAT", "json");
+            std::env::set_var("INKLOG_FILE_SINK_PATH", "/var/log/x.log");
+            std::env::set_var("INKLOG_HTTP_SERVER_PORT", "9999");
+            std::env::set_var("INKLOG_DATABASE_SINK_URL", "sqlite:///tmp/audit.db");
+            std::env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "4");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(config.global.level, "debug");
+        assert_eq!(config.global.format, "json");
+        assert_eq!(
+            config.file_sink.as_ref().unwrap().path,
+            std::path::PathBuf::from("/var/log/x.log")
+        );
+        assert_eq!(config.http_server.as_ref().unwrap().port, 9999);
+        assert_eq!(
+            config.database_sink.as_ref().unwrap().url,
+            "sqlite:///tmp/audit.db"
+        );
+        assert_eq!(config.performance.worker_threads, 4);
+        unsafe {
+            std::env::remove_var("INKLOG_GLOBAL_LEVEL");
+            std::env::remove_var("INKLOG_GLOBAL_FORMAT");
+            std::env::remove_var("INKLOG_FILE_SINK_PATH");
+            std::env::remove_var("INKLOG_HTTP_SERVER_PORT");
+            std::env::remove_var("INKLOG_DATABASE_SINK_URL");
+            std::env::remove_var("INKLOG_PERFORMANCE_WORKER_THREADS");
+        }
+    }
+
+    #[test]
+    fn test_env_override_enabled_invalid_does_not_enable() {
+        // ENABLED 单向语义：不可解析为 true 的值（如 "banana"）不启用组件
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("INKLOG_FILE_SINK_ENABLED", "banana");
+            std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "banana");
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert!(
+            config.file_sink.is_none(),
+            "invalid ENABLED value must not enable the file sink"
+        );
+        assert!(
+            config.http_server.is_none(),
+            "invalid ENABLED value must not enable the http server"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_FILE_SINK_ENABLED");
+            std::env::remove_var("INKLOG_HTTP_SERVER_ENABLED");
         }
     }
 
