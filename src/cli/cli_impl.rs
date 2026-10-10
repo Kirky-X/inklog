@@ -10,7 +10,7 @@ use super::{Cli, Commands, decrypt, generate, query, validate};
 /// 展开 anyhow 因果链为单行错误信息：每层 `InklogError` 走本地化文案，
 /// 其余层按 Display 原样。避免 `to_string()` 只取最外层而吞掉底层明细
 /// （如密钥长度、密码长度诊断）。
-fn format_error_chain(e: &anyhow::Error) -> String {
+pub(super) fn format_error_chain(e: &anyhow::Error) -> String {
     e.chain()
         .map(|cause| {
             cause

@@ -745,9 +745,10 @@ static BANK_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .expect("Invalid bank card regex")
 });
 
-/// API Key 模式 - 匹配常见的 API key 格式
+/// API Key 模式 - 匹配常见的 API key 格式（组 1 = 键名与分隔符，组 2 = 值；
+/// 值不放组 1，否则替换会把键名连同值一起展开、再被 generic_secret 二次命中）
 static API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(api[_-]?key[^\s:=]*\s*[=:]\s*[a-zA-Z0-9_-]{20,})")
+    Regex::new(r"(?i)(api[_-]?key[^\s:=]*\s*[=:]\s*)([a-zA-Z0-9_-]{20,})")
         .expect("Invalid API key regex")
 });
 
@@ -788,9 +789,14 @@ static IPV4_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .expect("Invalid IPv4 regex")
 });
 
-/// IPv6 address
+/// IPv6 地址 - 完整 8 组形式与 `::` 压缩形式（RFC 5952 规范写法，日志中最常见）。
+/// 环视代替 `\b`：压缩形式以 `:` 起止处无词边界（理由同 PHONE_REGEX）；
+/// 分支按「长匹配优先」排序，防止 `2001:db8::1` 只被截到 `2001:db8::`。
 static IPV6_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b").expect("Invalid IPv6 regex")
+    Regex::new(
+        r"(?<![0-9A-Za-z])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?|:(?::[0-9a-fA-F]{1,4})+|::)(?![0-9A-Za-z])",
+    )
+    .expect("Invalid IPv6 regex")
 });
 
 /// MAC address
@@ -1092,7 +1098,7 @@ impl MaskRule {
         Self::build_from_regex(
             "ipv6",
             IPV6_REGEX.clone(),
-            "****:****:****:XXXX",
+            "****:****:****:****:****:****:****:XXXX",
             21,
             Some(Arc::new(|regex: &Regex, text: &str, _replacement: &str| {
                 replace_all_masked(
@@ -1100,20 +1106,16 @@ impl MaskRule {
                     regex,
                     text,
                     |caps: &fancy_regex::Captures<'_, str>| {
+                        // 统一 8 组形态：末段分组保留真实值，其余 7 组以 ****
+                        // 替换；`1::`/`::` 这类无末段分组的写法整段全掩码
                         let ip = caps.get(0).unwrap().as_str();
-                        if let Some(pos) = ip.rfind(':') {
-                            let last_group = &ip[pos + 1..];
-                            let prefix_count = ip.matches(':').count();
-                            let mut result = "****".to_string();
-                            for _ in 1..prefix_count {
-                                result.push_str(":****");
-                            }
-                            result.push(':');
-                            result.push_str(last_group);
-                            result
+                        let last_group = ip.rsplit(':').next().unwrap_or("");
+                        let tail = if last_group.is_empty() {
+                            "****"
                         } else {
-                            ip.to_string()
-                        }
+                            last_group
+                        };
+                        format!("****:****:****:****:****:****:****:{tail}")
                     },
                 )
             })),
@@ -1796,6 +1798,16 @@ mod tests {
     }
 
     #[test]
+    fn test_mask_api_key_single_marker() {
+        let masker = DataMasker::new();
+        // 标记幂等契约（USER_GUIDE「Sink 出口脱敏契约」）：每个标记仅来自
+        // 一次真实脱敏——键名保留、值整体替换为单标记；双标记即 api_key
+        // 规则把整段匹配当作组 1 展开后再被 generic_secret 二次命中
+        let result = masker.mask("api_key=abcdefghijklmnopqrstuvwxyz");
+        assert_eq!(result, "api_key=***REDACTED***");
+    }
+
+    #[test]
     fn test_mask_password_value() {
         let masker = DataMasker::new();
         // Use a test case that matches the generic secret pattern
@@ -2031,6 +2043,36 @@ mod tests {
         let result = masker.mask("IPv6: 2001:0db8:85a3:0000:0000:8a2e:0370:7334");
         assert!(!result.contains("2001:0db8:85a3:0000:0000:8a2e:0370:7334"));
         assert!(result.contains("7334"));
+    }
+
+    #[test]
+    fn test_mask_ipv6_compressed() {
+        let masker = DataMasker::new();
+        // :: 压缩写法是 RFC 5952 规范形式（日志中最常见），漏脱敏即网络标识泄露
+        let result = masker.mask("Gateway: 2001:db8::1");
+        assert!(
+            !result.contains("2001:db8::1"),
+            "compressed IPv6 must be masked, got: {result}"
+        );
+        assert!(
+            result.contains("****:****:****:****:****:****:****:1"),
+            "末段分组保留真实值，got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_mask_ipv6_compressed_loopback() {
+        let masker = DataMasker::new();
+        // 前导 ::（无前导分组）：\b 语义下无词边界，须由环视锚定
+        let result = masker.mask("peer=[::1]:8080");
+        assert!(
+            !result.contains("::1"),
+            "loopback ::1 must be masked, got: {result}"
+        );
+        assert!(
+            result.contains("[****:****:****:****:****:****:****:1]:8080"),
+            "got: {result}"
+        );
     }
 
     #[test]

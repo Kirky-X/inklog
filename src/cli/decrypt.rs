@@ -462,7 +462,10 @@ pub fn decrypt_directory_compatible(
                 if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
                     let mut args = inklog::i18n::MsgArgs::new();
                     args.set("path", path.display().to_string());
-                    args.set("err", e.to_string());
+                    // 展开因果链：e.to_string() 只取最外层 context，会吞掉
+                    // 密钥长度/密码长度诊断（与单文件出口 format_error_chain
+                    // 同款契约）
+                    args.set("err", crate::cli_impl::format_error_chain(&e));
                     eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-fail", args));
                     failure_count += 1;
                 }
@@ -622,7 +625,8 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
         if let Err(e) = decrypt_file_compatible(&path, &output_path, key_env) {
             let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
-            args.set("err", e.to_string());
+            // 展开因果链：理由同目录模式（e.to_string() 吞底层明细）
+            args.set("err", crate::cli_impl::format_error_chain(&e));
             eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-fail", args));
             failure_count += 1;
         } else {
@@ -1183,6 +1187,33 @@ mod tests {
         let err = result.err().unwrap().to_string();
         assert!(err.contains("32 bytes"));
         unsafe { std::env::remove_var("TEST_WRONG_LEN_KEY") };
+    }
+
+    #[test]
+    fn test_decrypt_file_error_chain_keeps_key_length_detail() {
+        // 目录/批量模式逐文件报错经 format_error_chain 展开因果链后输出：
+        // 密钥长度明细不得被外层 context 吞掉（单文件出口同款契约）
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input_file = temp_dir.path().join("bad_key.enc");
+        let output_file = temp_dir.path().join("bad_key.log");
+        let test_key = generate_test_key();
+        create_encrypted_file_v1(&input_file, b"key detail check", &test_key).unwrap();
+
+        let wrong_key = general_purpose::STANDARD.encode([0u8; 16]);
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::set_var("TEST_CHAIN_KEY", &wrong_key) };
+
+        let result = decrypt_file_compatible(&input_file, &output_file, "TEST_CHAIN_KEY");
+
+        // SAFETY: test-only env var mutation
+        unsafe { std::env::remove_var("TEST_CHAIN_KEY") };
+
+        let err = result.expect_err("wrong-length key must fail");
+        let rendered = crate::cli_impl::format_error_chain(&err);
+        assert!(
+            rendered.contains("32 bytes"),
+            "key length detail must survive the chain, got: {rendered}"
+        );
     }
 
     #[test]

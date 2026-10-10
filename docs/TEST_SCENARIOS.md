@@ -8,12 +8,12 @@
 
 | 层级 | 承载 | 数量基线 |
 | --- | --- | --- |
-| L1 lib 单元测试 | `src/**` 内 `#[cfg(test)]` | 1009 passed（manager/workers/sink/config/i18n 等模块自测） |
-| L2 集成测试 | `tests/**`（4 个 `[[test]]` 显式注册 + 4 个顶层自动发现） | integration 95+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 34+1i / docker 25 / cli_integration 9 |
+| L1 lib 单元测试 | `src/**` 内 `#[cfg(test)]` | lib 目标 1466 passed（manager/workers/sink/config/i18n 等模块自测）；另有 src/cli/main.rs bin 目标 110 与 examples 包 lib 目标 35，同属 src 内联测试 |
+| L2 集成测试 | `tests/**`（4 个 `[[test]]` 显式注册 + 4 个顶层自动发现） | integration 102+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 35+1i / docker 27 / cli_integration 17 |
 | L3 E2E 场景 | `tests/e2e/e2e_advanced.rs`（目录承载，不裸放顶层） | 228 passed，按 mod 域隔离 |
-| L4 容器级 | `tests/docker/`（main.rs 自动发现） | 25 passed（sqlite embedded 路径；pg/mysql 用例门控至对应驱动组） |
+| L4 容器级 | `tests/docker/`（main.rs 自动发现） | 27 passed（sqlite embedded 路径；pg/mysql 用例门控至对应驱动组） |
 
-CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`，与 ci.yml 一致）全量结果：**lib 1009 / unit_tests 63 / integration 95+1i / combinations 20 / performance 11+3i / integration_tests 34+1i / docker 25 / cli_integration 9 / e2e_advanced 228，0 failed**。
+CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`，与 ci.yml 一致）全量结果：**lib 1466 / cli-bin 110 / examples-bin 35 / unit_tests 63 / integration 102+1i / combinations 20 / integration_tests 35+1i / docker 27 / cli_integration 17 / performance 11+3i / e2e_advanced 228 / examples integration_test 6，0 failed**（合计 2120 passed / 5 ignored；examples 包的 integration_test 6 条属 examples crate，不计入 inklog tests/** 基线）。
 
 > **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见 [README](../README.md) 测试章节（HEAD deab699：src 内联 1,712 + tests 目录 564 + examples 41 = 2,317 个测试函数）。
 
@@ -74,7 +74,7 @@ CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-ma
 
 | 组合 | 覆盖 | 结果 |
 | --- | --- | --- |
-| sqlite+http+cli+kit+zstd+gzip+parquet+fast-masking+test-utils（CI 主口径） | 全 9 目标 | 1472 passed / 0 failed / 5 ignored |
+| sqlite+http+cli+kit+compression+gzip+parquet+fast-masking+test-utils（CI 主口径） | 全 12 目标 | 2120 passed / 0 failed / 5 ignored |
 | 单独 performance 复跑 ×2 | performance 目标稳定复验 | 11+3i ×2 全绿 |
 | integration 串行（--test-threads=1） | shutdown 回归验证 | 95+1i 全绿（31.81s） |
 | 默认 features（无 db） | lib/e2e_advanced/performance 可编译 | 编译+运行通过 |
