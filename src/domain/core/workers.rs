@@ -10,6 +10,7 @@ use crate::support::io::LogSink;
 use crate::{InklogError, LogRecord};
 use chrono::Utc;
 use crossbeam_channel::{Receiver, Sender, bounded};
+use limiteron::retry::{RetryPolicy, delay_for_attempt};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -71,8 +72,32 @@ pub(crate) struct CustomSinkEntry {
 pub(crate) type WorkerStartResult =
     Result<(Vec<tokio::task::JoinHandle<()>>, Vec<Sender<()>>), InklogError>;
 
-/// 自定义 sink 写失败重试上限（与内置 worker 的 WRITE_MAX_ATTEMPTS 一致）。
-const CUSTOM_SINK_WRITE_ATTEMPTS: u32 = 3;
+/// sink 写失败重试的档位（内置 worker 与 custom sink 共用）：
+/// `max_retries = 2`（含首调共 3 次尝试）、固定间隔 10ms×attempt。
+/// 次数语义单源于 limiteron `RetryPolicy`（公开访问器 `max_retries`）；
+/// async 执行器（内部 tokio sleep）不进入同步 worker 路径。
+fn write_retry_policy() -> RetryPolicy {
+    RetryPolicy::new(2, Duration::from_millis(10))
+}
+
+/// sink 写失败重试上限（含首次写入）。
+fn write_max_attempts() -> u32 {
+    write_retry_policy().max_retries() + 1
+}
+
+/// sink 工厂重试的退避时长（`attempt` 从 1 起）：1s、2s、4s、8s、16s，
+/// 第 6 档起封顶 30s。公式与数值单源于 limiteron `delay_for_attempt`
+/// 纯函数（jitter=0，无时钟副作用），同步工厂循环直接消费，不引入
+/// tokio 时钟；降级模式下工厂持续重试不放弃。
+fn factory_retry_delay(attempt: u32) -> Duration {
+    delay_for_attempt(
+        attempt,
+        Duration::from_secs(1),
+        2.0,
+        Duration::from_secs(30),
+        0.0,
+    )
+}
 
 /// 通用 SinkWorker 主循环，消费动态注册 sink 的专属 channel。
 ///
@@ -109,8 +134,9 @@ pub(crate) fn run_custom_sink_worker(
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(record) => {
                 metrics.record_latency(record_age(&record));
+                let max_attempts = write_max_attempts();
                 let mut written = false;
-                for attempt in 1..=CUSTOM_SINK_WRITE_ATTEMPTS {
+                for attempt in 1..=max_attempts {
                     match runtime_handle.block_on(async { entry.sink.write(&record).await }) {
                         Ok(_) => {
                             metrics.inc_logs_written();
@@ -129,13 +155,13 @@ pub(crate) fn run_custom_sink_worker(
                                 tracing::Level::ERROR,
                                 "inklog::custom_sink".to_string(),
                                 format!(
-                                    "custom sink '{}' write failed (attempt {attempt}/{CUSTOM_SINK_WRITE_ATTEMPTS}): {e}",
+                                    "custom sink '{}' write failed (attempt {attempt}/{max_attempts}): {e}",
                                     entry.name
                                 ),
                             );
                             let _ = runtime_handle
                                 .block_on(async { console_sink.write(&error_record).await });
-                            if attempt == CUSTOM_SINK_WRITE_ATTEMPTS {
+                            if attempt == max_attempts {
                                 metrics.inc_sink_error();
                                 metrics.update_sink_health(&entry.name, false, Some(e.to_string()));
                                 let _ = runtime_handle
@@ -250,20 +276,6 @@ pub(crate) fn update_adaptive_capacity(
     }
 }
 
-/// sink 工厂失败重试的初始退避：1s 起，每轮翻倍，上限 30s。
-/// 持续重试而非放弃，下游存储恢复后 worker 自动恢复写入。
-const FACTORY_RETRY_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
-const FACTORY_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(30);
-
-/// 当前生效的工厂重试初始退避。
-fn factory_retry_initial_backoff() -> Duration {
-    FACTORY_RETRY_INITIAL_BACKOFF
-}
-
-/// sink 写失败重试上限（含首次写入）：达到该次数后计 sink_error、
-/// 健康置 false 并降级写 console。
-const WRITE_MAX_ATTEMPTS: u32 = 3;
-
 /// 同类 sink worker 间的静态差异：健康/降级记录使用的名字与文案 key。
 struct SinkWorkerDescriptor {
     /// 健康状态与降级记录使用的 sink 名
@@ -319,8 +331,10 @@ struct SinkWorkerState {
     /// 当前 sink；None 表示降级模式（工厂持续失败）
     sink: Option<Box<dyn LogSink>>,
     failures: FailureState,
-    /// 工厂重试退避（1s 起指数翻倍，上限 30s）
-    factory_backoff: Duration,
+    /// 工厂重试的退避档位序号（`attempt` 从 1 起：等待 1s、2s、4s…
+    /// 封顶 30s，由 limiteron [`factory_retry_delay`] 计算；失败递增加一，
+    /// 成功后复位）
+    factory_attempts: u32,
     last_factory_attempt: Instant,
     /// 本轮降级是否已广播 `sink_degraded` ops 事件。
     ///
@@ -368,7 +382,7 @@ impl SinkWorker<'_> {
         SinkWorkerState {
             sink,
             failures: FailureState::default(),
-            factory_backoff: factory_retry_initial_backoff(),
+            factory_attempts: 1,
             last_factory_attempt: Instant::now(),
             degraded_announced: false,
         }
@@ -439,7 +453,8 @@ impl SinkWorker<'_> {
     }
 
     /// 单条记录的带重试写入；返回是否最终成功。
-    /// 契约：最多 3 次尝试，失败间隔 sleep(10ms×attempt)；第 3 次失败后
+    /// 契约：最多 3 次尝试（[`write_max_attempts`]，limiteron RetryPolicy
+    /// max_retries=2 单源），失败间隔 sleep(10ms×attempt)；第 3 次失败后
     /// 计 sink_error、健康置 false 并降级写 console。
     fn write_with_retry(
         &self,
@@ -447,8 +462,9 @@ impl SinkWorker<'_> {
         record: &Arc<LogRecord>,
         failures: &mut FailureState,
     ) -> bool {
+        let max_attempts = write_max_attempts();
         let mut attempts = 0;
-        while attempts < WRITE_MAX_ATTEMPTS {
+        while attempts < max_attempts {
             match self
                 .runtime_handle
                 .block_on(async { sink.write(record).await })
@@ -467,7 +483,7 @@ impl SinkWorker<'_> {
 
                     self.write_error_log(&e);
 
-                    if attempts == WRITE_MAX_ATTEMPTS {
+                    if attempts == max_attempts {
                         self.metrics.inc_sink_error();
                         self.metrics
                             .update_sink_health(self.desc.name, false, Some(e.to_string()));
@@ -546,7 +562,7 @@ impl SinkWorker<'_> {
                 tracing::info!("{}", crate::i18n::tr(self.desc.recovery_received_key));
                 if let Ok(new_sink) = create_sink() {
                     state.sink = Some(new_sink);
-                    state.factory_backoff = factory_retry_initial_backoff();
+                    state.factory_attempts = 1;
                     state.failures.consecutive_failures = 0;
                     state.failures.last_failure_time = None;
                     state.degraded_announced = false;
@@ -569,13 +585,15 @@ impl SinkWorker<'_> {
     /// 用时间判断而非 sleep，循环保持即时响应 shutdown 与控制消息；
     /// 放在 recv 之前，降级路径跳过记录处理时也不会跳过重试。
     fn retry_factory_if_due(&self, state: &mut SinkWorkerState, create_sink: SinkFactory<'_>) {
-        if state.sink.is_some() || state.last_factory_attempt.elapsed() < state.factory_backoff {
+        if state.sink.is_some()
+            || state.last_factory_attempt.elapsed() < factory_retry_delay(state.factory_attempts)
+        {
             return;
         }
         match create_sink() {
             Ok(new_sink) => {
                 state.sink = Some(new_sink);
-                state.factory_backoff = factory_retry_initial_backoff();
+                state.factory_attempts = 1;
                 state.degraded_announced = false;
                 self.metrics.update_sink_health(self.desc.name, true, None);
                 tracing::info!(
@@ -584,13 +602,13 @@ impl SinkWorker<'_> {
                 );
             }
             Err(e) => {
+                state.factory_attempts += 1;
                 tracing::error!(
                     error = %e,
-                    next_retry_in_ms = state.factory_backoff.as_millis() as u64,
+                    next_retry_in_ms = factory_retry_delay(state.factory_attempts).as_millis() as u64,
                     "{} sink factory retry failed; keeping the worker alive and retrying with exponential backoff",
                     self.desc.label
                 );
-                state.factory_backoff = (state.factory_backoff * 2).min(FACTORY_RETRY_MAX_BACKOFF);
             }
         }
         state.last_factory_attempt = Instant::now();
@@ -1079,6 +1097,28 @@ mod tests {
     fn test_should_attempt_recovery_after_cooldown() {
         let old = Instant::now() - Duration::from_secs(60);
         assert!(should_attempt_recovery(Some(&old), Duration::from_secs(30)));
+    }
+
+    // ========================================================================
+    // 重试数值单源（limiteron retry：RetryPolicy / delay_for_attempt）
+    // ========================================================================
+
+    #[test]
+    fn test_factory_retry_backoff_sequence() {
+        // 初始 1s、因子 2.0 翻倍、封顶 30s（limiteron delay_for_attempt 纯函数单源）
+        assert_eq!(factory_retry_delay(1), Duration::from_secs(1));
+        assert_eq!(factory_retry_delay(2), Duration::from_secs(2));
+        assert_eq!(factory_retry_delay(3), Duration::from_secs(4));
+        assert_eq!(factory_retry_delay(4), Duration::from_secs(8));
+        assert_eq!(factory_retry_delay(5), Duration::from_secs(16));
+        assert_eq!(factory_retry_delay(6), Duration::from_secs(30));
+        assert_eq!(factory_retry_delay(7), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_write_retry_attempts_three() {
+        // max_retries=2 → 含首次写入共 3 次尝试（内置 worker 与 custom sink 同源）
+        assert_eq!(write_max_attempts(), 3);
     }
 
     // ========================================================================
@@ -1809,6 +1849,84 @@ mod custom_sink_worker_tests {
             sink.records.lock().len(),
             0,
             "record must not be written after all attempts failed"
+        );
+
+        drop(tx);
+    }
+
+    #[test]
+    fn test_custom_sink_retry_exhausts_exactly_three_attempts() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        // fail_times=3：恰好耗尽 3 次尝试——少于 3 次会残留 fail_times，
+        // 多于 3 次则第 4 次成功写入（fail_times 已归零）进 records
+        let sink = Arc::new(MemorySink::new(3));
+        let (tx, rx) = bounded::<Arc<LogRecord>>(10);
+        let entry = CustomSinkEntry {
+            name: "custom-exact".to_string(),
+            sink: sink.clone() as Arc<dyn LogSink>,
+            receiver: rx,
+        };
+        let (_shutdown_tx, shutdown_rx) = bounded::<()>(1);
+        let metrics = Arc::new(Metrics::new());
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            Default::default(),
+            crate::LogTemplate::new("t"),
+        )) as Arc<dyn LogSink>;
+
+        {
+            let metrics = metrics.clone();
+            let console = console_sink.clone();
+            let runtime_handle = runtime.handle().clone();
+            thread::spawn(move || {
+                run_custom_sink_worker(
+                    &runtime_handle,
+                    &metrics,
+                    &console,
+                    &entry,
+                    &entry.receiver,
+                    &shutdown_rx,
+                );
+            });
+        }
+
+        tx.send(Arc::new(LogRecord {
+            timestamp: Utc::now(),
+            level: "INFO".to_string(),
+            target: "custom::exact".to_string(),
+            message: "record with exactly three attempts".to_string(),
+            fields: Default::default(),
+            file: None,
+            line: None,
+            thread_id: "test".to_string(),
+            trace_id: None,
+            span_id: None,
+        }))
+        .unwrap();
+
+        // 等待重试耗尽（10ms + 20ms 间隔）
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while metrics.sink_errors() < 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        // 第 3 次失败后降级：sink_error 恰计 1，3 次尝试全部失败（无第 4 次成功写入）
+        assert_eq!(
+            metrics.sink_errors(),
+            1,
+            "exactly one sink error after 3 attempts"
+        );
+        assert_eq!(
+            sink.fail_times.load(Ordering::SeqCst),
+            0,
+            "all 3 attempts must have been consumed"
+        );
+        assert!(
+            sink.records.lock().is_empty(),
+            "no attempt beyond 3 may succeed"
         );
 
         drop(tx);
