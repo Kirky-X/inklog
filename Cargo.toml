@@ -39,7 +39,7 @@ regex = { version = "1.13", default-features = false, features = ["std", "perf",
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf"] }
 dbnexus = { version = "0.6.0-rc.6", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
-limiteron = { version = "0.3.0-rc.6", default-features = false, features = ["retry", "sync"] }
+limiteron = { version = "0.3.0-rc.6", default-features = false, features = ["retry", "sync", "test-clock"] }
 
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥
 # （见 [features] 说明），全开必然编译失败。显式列举一组可共存的 feature——

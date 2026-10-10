@@ -4,25 +4,24 @@
 //!
 //! Provides a thread-safe rate limiter using the token bucket algorithm
 //! to prevent log flooding and protect downstream systems.
+//!
+//! 算法内核委托 limiteron [`TokenBucketLimiter`]（手写 `Mutex<f64>` 桶与
+//! 补充公式已删除）：`new(rate)` 映射 `TokenBucketLimiter::new(rate, rate)`
+//! （桶满 rate、每秒补 rate）；同步 `try_acquire()` 经
+//! `futures::executor::block_on` 桥接异步 `allow(1)`；拒绝计数
+//! [`RateLimiter::dropped_count`] 由 inklog 自持（limiteron 无诊断字段）。
 
-use parking_lot::Mutex;
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use limiteron::limiters::{Limiter, TokenBucketLimiter};
 
 /// Token bucket rate limiter for controlling log throughput.
 ///
-/// Uses `parking_lot::Mutex` for low-contention locking (~20ns per acquire).
-/// The `try_acquire()` method is O(1): refill tokens based on elapsed time,
-/// then attempt to consume one token.
+/// 容量 = 速率 = `rate`：桶满 `rate`、每秒补 `rate`（与既有
+/// `Mutex<f64>` 实现语义等价）。`try_acquire()` 为 O(1) 同步决策点。
 pub struct RateLimiter {
-    inner: Mutex<RateLimiterInner>,
-}
-
-struct RateLimiterInner {
-    tokens: f64,
-    max_tokens: f64,
-    refill_rate: f64,
-    last_refill: Instant,
-    dropped_count: u64,
+    limiter: TokenBucketLimiter,
+    dropped_count: AtomicU64,
 }
 
 impl RateLimiter {
@@ -31,15 +30,18 @@ impl RateLimiter {
     /// The bucket starts full (tokens = max_tokens = rate).
     /// `refill_rate` equals `rate` — tokens replenish at the same rate they consume.
     pub fn new(rate: u64) -> Self {
-        let rate_f = rate as f64;
         Self {
-            inner: Mutex::new(RateLimiterInner {
-                tokens: rate_f,
-                max_tokens: rate_f,
-                refill_rate: rate_f,
-                last_refill: Instant::now(),
-                dropped_count: 0,
-            }),
+            limiter: TokenBucketLimiter::new(rate, rate),
+            dropped_count: AtomicU64::new(0),
+        }
+    }
+
+    /// 时钟注入构造（单元测试确定性时间；生产走 [`Self::new`] 系统时钟）。
+    #[cfg(test)]
+    pub(crate) fn with_clock(rate: u64, clock: std::sync::Arc<dyn limiteron::Clock>) -> Self {
+        Self {
+            limiter: TokenBucketLimiter::with_clock(rate, rate, clock),
+            dropped_count: AtomicU64::new(0),
         }
     }
 
@@ -47,54 +49,27 @@ impl RateLimiter {
     ///
     /// On rejection, increments the internal dropped counter.
     pub fn try_acquire(&self) -> bool {
-        let mut inner = self.inner.lock();
-        inner.refill();
-        if inner.tokens >= 1.0 {
-            inner.tokens -= 1.0;
+        // 同步决策点桥接 limiteron 异步判定；cost=1 恒合法，错误路径
+        // fail-closed（拒绝并计数）不放大写入压力
+        if futures::executor::block_on(self.limiter.allow(1)).unwrap_or(false) {
             true
         } else {
-            inner.dropped_count += 1;
+            self.dropped_count.fetch_add(1, Ordering::Relaxed);
             false
         }
     }
 
     /// Total number of logs dropped due to rate limiting.
     pub fn dropped_count(&self) -> u64 {
-        self.inner.lock().dropped_count
-    }
-}
-
-impl RateLimiterInner {
-    /// Refill tokens based on elapsed time since last refill.
-    fn refill(&mut self) {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
-        if elapsed > 0.0 {
-            self.tokens = (self.tokens + elapsed * self.refill_rate).min(self.max_tokens);
-            self.last_refill = now;
-        }
+        self.dropped_count.load(Ordering::Relaxed)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Builds a limiter whose refill window is far longer than any test
-    /// execution gap (1 token/hour), so rejections never depend on how much
-    /// real time elapses between adjacent statements on a slow CI.
-    fn limiter_with_slow_refill(max_tokens: u64) -> RateLimiter {
-        let max_tokens_f = max_tokens as f64;
-        RateLimiter {
-            inner: Mutex::new(RateLimiterInner {
-                tokens: max_tokens_f,
-                max_tokens: max_tokens_f,
-                refill_rate: 1.0 / 3600.0,
-                last_refill: Instant::now(),
-                dropped_count: 0,
-            }),
-        }
-    }
+    use limiteron::MockClock;
+    use std::sync::Arc;
 
     #[test]
     fn test_rate_limiter_allows_within_limit() {
@@ -107,24 +82,40 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_rejects_when_exhausted() {
-        // Bucket of 2 tokens with a negligible refill rate
-        let limiter = limiter_with_slow_refill(2);
+        // 冻结时钟（MockClock 不推进）→ 无时间补充，拒绝与真实耗时无关
+        let clock = Arc::new(MockClock::new());
+        let limiter = RateLimiter::with_clock(2, clock);
         // Consume both tokens
         assert!(limiter.try_acquire());
         assert!(limiter.try_acquire());
-        // Third should be rejected (refill window far exceeds test duration)
+        // Third must be rejected without any time-based flakiness
         assert!(!limiter.try_acquire());
     }
 
     #[test]
     fn test_rate_limiter_dropped_count_increments() {
-        let limiter = limiter_with_slow_refill(1);
+        let clock = Arc::new(MockClock::new());
+        let limiter = RateLimiter::with_clock(1, clock);
         // Consume the single token
         assert!(limiter.try_acquire());
         // These should be dropped
         assert!(!limiter.try_acquire());
         assert!(!limiter.try_acquire());
         assert_eq!(limiter.dropped_count(), 2);
+    }
+
+    #[test]
+    fn test_rate_limiter_refill_is_time_driven() {
+        // 冻结时钟耗尽后推进 1s：恰补充 rate 个令牌（limiteron 时间积分）
+        let clock = Arc::new(MockClock::new());
+        let limiter = RateLimiter::with_clock(2, clock.clone());
+        assert!(limiter.try_acquire());
+        assert!(limiter.try_acquire());
+        assert!(!limiter.try_acquire());
+        clock.advance(std::time::Duration::from_secs(1));
+        assert!(limiter.try_acquire(), "1s at 2/s must refill 2 tokens");
+        assert!(limiter.try_acquire());
+        assert!(!limiter.try_acquire());
     }
 
     #[test]
