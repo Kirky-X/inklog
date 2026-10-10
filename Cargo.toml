@@ -118,13 +118,13 @@ secret-scan = []
 dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
 # confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
 # 级别/轮转参数（confers 依赖层级合法：inklog → confers）。
-config-confers = ["dep:confers", "confers/toml", "confers/watch"]
+config-confers = ["confers/toml", "confers/watch"]
 # confers 审计桥——实现 confers AuditSink 端口（audit 事件 → inklog 结构化
 # sink 落盘）。依赖方向同 config-confers；trait 随已发布的 confers 0.6.0-rc.5
 # 提供（本地 cargo registry 已发布源 src/impl_/audit.rs:259 在案）。
-confers-audit = ["dep:confers", "confers/audit"]
+confers-audit = ["confers/audit"]
 # KMS 密钥提供者——confers AsyncKeyProvider 适配 + Vault transit MVP
-kms = ["dep:confers", "confers/encryption", "confers/cloud-kms"]
+kms = ["confers/encryption", "confers/cloud-kms"]
 # 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主的
 # tracing-opentelemetry layer 写入）。宿主 otel 版本需与 inklog 对齐，未对齐
 # 时静默回退根 span 派生（deferred-capabilities C2）。
@@ -151,7 +151,7 @@ serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 trait-kit = { version = "0.5.0-rc.7", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
-confers = { version = "0.6.0-rc.6", default-features = false, features = ["toml", "watch"], optional = true }
+confers = { version = "0.6.0-rc.6", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false, features = [] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
