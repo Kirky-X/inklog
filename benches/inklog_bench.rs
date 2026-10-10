@@ -785,10 +785,11 @@ fn bench_sampling_stress_overhead(c: &mut Criterion) {
 /// per-target 分级限流的查找路径开销（R7）。
 ///
 /// `governs` 是纯前缀查找（规则按前缀长度降序 + 无分配 ASCII 大小写不敏感
-/// 比较）；`evaluate` 额外含组桶决策（一次 parking_lot 锁 + 时间补充）。
+/// 比较）；`evaluate` 额外含组桶决策（令牌扣减 + 时间补充，组桶内核为
+/// limiteron TokenBucketLimiter 的原子 CAS）。
 /// 两条路径分开测：前者即 <100ns 基线的锁定对象，后者给出含配额扣减的
 /// 端到端每记录代价。注意 evaluate 为单线程无竞争地板值——组桶是组内
-/// 所有生产者共享的单锁，高速率组的真实代价含锁竞争。
+/// 所有生产者共享的原子状态，高速率组的真实代价含 CAS 竞争。
 fn bench_target_rate_limiter_lookup(c: &mut Criterion) {
     use inklog::support::processing::TargetRateLimiter;
 

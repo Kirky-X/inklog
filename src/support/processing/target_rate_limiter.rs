@@ -10,11 +10,17 @@
 //! 查找为无分配的线性扫描（规则按前缀长度降序，最长前缀优先），目标规模
 //! 典型 <8 条，量级在 100ns 以内（benches/inklog_bench.rs 的
 //! `target_rate_limiter_lookup` 组持续锁定该基线）。
+//!
+//! 组桶算法内核单源于 limiteron [`TokenBucketLimiter`]（容量 = 速率）。规则
+//! 表 → 组的映射保留 inklog 无分配前缀索引（D6 降级路径）：limiteron
+//! `RuleMatcher` 的 `RequestContext` 为 HTTP 形态（user_id/ip/headers 等），
+//! 逐次构造含堆分配，与 <100ns 无分配基线冲突；「自定义 target 提取器」
+//! 库侧需求见 upstream-requests。
 
 use std::collections::HashMap;
 
 use crate::InklogError;
-use crate::support::processing::rate_limiter::RateLimiter;
+use limiteron::limiters::{Limiter, TokenBucketLimiter};
 
 /// 前缀配额组裁决结果：组预算放行 / 组预算耗尽 / 无规则管辖。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,8 +35,9 @@ pub enum TargetQuotaVerdict {
 
 /// target 前缀配额组限流器：规则 = 前缀 → 该组每秒令牌数（组内共享预算）。
 pub struct TargetRateLimiter {
-    /// (小写前缀, 组桶)；按前缀长度降序排列，首个命中生效
-    rules: Vec<(String, RateLimiter)>,
+    /// (小写前缀, 组桶)；按前缀长度降序排列，首个命中生效。
+    /// 组桶为 limiteron [`TokenBucketLimiter`]（容量 = 速率）
+    rules: Vec<(String, TokenBucketLimiter)>,
 }
 
 impl std::fmt::Debug for TargetRateLimiter {
@@ -51,7 +58,7 @@ impl TargetRateLimiter {
     /// 前缀为空或速率为 0 返回 [`InklogError::ConfigError`]（与采样配置
     /// 一致的硬拒绝语义：配额直接决定压力下的日志保留）。
     pub fn from_rules(rules: HashMap<String, u64>) -> Result<Self, InklogError> {
-        let mut sorted: Vec<(String, RateLimiter)> = Vec::with_capacity(rules.len());
+        let mut sorted: Vec<(String, TokenBucketLimiter)> = Vec::with_capacity(rules.len());
         for (prefix, rate) in &rules {
             if prefix.is_empty() {
                 return Err(InklogError::ConfigError(crate::i18n::tr(
@@ -67,7 +74,10 @@ impl TargetRateLimiter {
                 )));
             }
             // ASCII 小写存储，与 rule_index 的 eq_ignore_ascii_case 同语义
-            sorted.push((prefix.to_ascii_lowercase(), RateLimiter::new(*rate)));
+            sorted.push((
+                prefix.to_ascii_lowercase(),
+                TokenBucketLimiter::new(*rate, *rate),
+            ));
         }
         sorted.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
         Ok(Self { rules: sorted })
@@ -82,7 +92,13 @@ impl TargetRateLimiter {
     /// [`TargetQuotaVerdict::Ungoverned`]。
     pub fn evaluate(&self, target: &str) -> TargetQuotaVerdict {
         match self.rule_index(target) {
-            Some(idx) if self.rules[idx].1.try_acquire() => TargetQuotaVerdict::Pass,
+            // 同步热路径桥接 limiteron 异步判定；cost=1 恒合法，错误
+            // fail-closed（拒绝）不放大写入压力
+            Some(idx)
+                if futures::executor::block_on(self.rules[idx].1.allow(1)).unwrap_or(false) =>
+            {
+                TargetQuotaVerdict::Pass
+            }
             Some(_) => TargetQuotaVerdict::Drop,
             None => TargetQuotaVerdict::Ungoverned,
         }
