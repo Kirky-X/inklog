@@ -24,7 +24,6 @@
 //! ```
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use async_trait::async_trait;
 
@@ -71,70 +70,52 @@ impl SinkRateLimit for NoOpRateLimit {
     }
 }
 
-/// 简单的全局令牌桶实现（端口语义验证与测试基线；生产推荐 limiteron）。
+/// 全局令牌桶（[`SinkRateLimit`] 端口的内置基线实现）。
+///
+/// 算法内核委托 limiteron [`TokenBucketLimiter`]（CAS + 补充时间积分守恒
+/// 修复，算法修复收敛库侧单处）：`new(capacity)` 映射
+/// `TokenBucketLimiter::new(capacity, 0)`——`refill_rate = 0` 保持既有纯
+/// 预算语义（无时间补充，预算耗尽后不放行）。同步决策点（trait 契约）经
+/// `futures::executor::block_on` 桥接异步 `allow(1)`。
+///
+/// 语义变更：`report(Failed)` 不再归还预算——limiteron 无 refund API
+/// （方法面仅 allow/peek/remaining/snapshot），写失败的预算由 worker 层
+/// 重试兜底；归还 API 的库侧需求见 upstream-requests。
 pub struct TokenBucketRateLimit {
-    tokens: std::sync::atomic::AtomicU64,
-    capacity: u64,
+    limiter: limiteron::limiters::TokenBucketLimiter,
     name: String,
 }
 
 impl TokenBucketRateLimit {
-    /// 以固定容量创建（无后台补充线程；`refill` 可在 report 中按需扩展）。
+    /// 以固定容量创建（`refill_rate = 0` 纯预算：无后台补充线程，无时间补充）。
     pub fn new(capacity: u64) -> Self {
         Self {
-            tokens: std::sync::atomic::AtomicU64::new(capacity),
-            capacity,
+            limiter: limiteron::limiters::TokenBucketLimiter::new(capacity, 0),
             name: format!("token-bucket({capacity})"),
         }
     }
 
     /// 当前剩余预算。
     pub fn available(&self) -> u64 {
-        self.tokens.load(Ordering::Relaxed)
+        self.limiter.tokens()
     }
 
     /// 归还预算上限。
     pub fn capacity(&self) -> u64 {
-        self.capacity
+        self.limiter.capacity()
     }
 }
 
 impl SinkRateLimit for TokenBucketRateLimit {
     fn try_acquire(&self, _record: &LogRecord) -> bool {
-        // CAS 扣减，避免超卖
-        let mut current = self.tokens.load(Ordering::Relaxed);
-        loop {
-            if current == 0 {
-                return false;
-            }
-            match self.tokens.compare_exchange_weak(
-                current,
-                current - 1,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return true,
-                Err(actual) => current = actual,
-            }
-        }
+        // 同步热路径桥接 limiteron 异步判定；cost=1 恒合法，错误路径
+        // fail-closed（视为拒绝）不放大写入压力
+        futures::executor::block_on(limiteron::limiters::Limiter::allow(&self.limiter, 1))
+            .unwrap_or(false)
     }
 
-    fn report(&self, _record: &LogRecord, outcome: SinkWriteOutcome) {
-        // 被拒绝的记录不消费预算；写失败归还预算（下次重试有额度）
-        if outcome == SinkWriteOutcome::Failed {
-            let mut current = self.tokens.load(Ordering::Relaxed);
-            while current < self.capacity {
-                match self.tokens.compare_exchange_weak(
-                    current,
-                    current + 1,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => return,
-                    Err(actual) => current = actual,
-                }
-            }
-        }
+    fn report(&self, _record: &LogRecord, _outcome: SinkWriteOutcome) {
+        // limiteron 无预算归还 API：写失败的预算不归还（语义变更，测试钉死）
     }
 
     fn name(&self) -> &str {
@@ -204,6 +185,7 @@ impl LogSink for RateLimitedSink {
 mod tests {
     use super::*;
     use parking_lot::Mutex;
+    use std::sync::atomic::Ordering;
 
     fn record(level: tracing::Level, target: &str) -> LogRecord {
         LogRecord::new(level, target.to_string(), "msg".to_string())
@@ -222,7 +204,8 @@ mod tests {
     }
 
     #[test]
-    fn test_token_bucket_budget_and_refund() {
+    fn test_token_bucket_budget_without_refund() {
+        // 纯预算语义（limiteron refill_rate=0）：耗尽后不放行；写失败不再归还
         let limiter = TokenBucketRateLimit::new(3);
         assert!(limiter.try_acquire(&record(tracing::Level::INFO, "t")));
         assert!(limiter.try_acquire(&record(tracing::Level::INFO, "t")));
@@ -232,10 +215,30 @@ mod tests {
             !limiter.try_acquire(&record(tracing::Level::ERROR, "t")),
             "exhausted budget must reject (even severe records; per-target policy is upper-layer)"
         );
-        // 写失败归还预算
+        // 写失败不归还预算（limiteron 无 refund API，语义变更钉死）
         limiter.report(&record(tracing::Level::INFO, "t"), SinkWriteOutcome::Failed);
-        assert_eq!(limiter.available(), 1);
+        assert_eq!(
+            limiter.available(),
+            0,
+            "failed write must NOT refund the budget"
+        );
+        assert!(
+            !limiter.try_acquire(&record(tracing::Level::INFO, "t")),
+            "budget stays exhausted after a failed write"
+        );
+    }
+
+    #[test]
+    fn test_token_bucket_pure_budget_no_time_refill() {
+        // refill_rate=0：经过时间也不补充（纯预算语义由 new(capacity) 的
+        // limiteron new(capacity, 0) 映射保证）
+        let limiter = TokenBucketRateLimit::new(2);
         assert!(limiter.try_acquire(&record(tracing::Level::INFO, "t")));
+        assert!(limiter.try_acquire(&record(tracing::Level::INFO, "t")));
+        assert_eq!(limiter.available(), 0);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(limiter.available(), 0, "no time-based refill must occur");
+        assert!(!limiter.try_acquire(&record(tracing::Level::INFO, "t")));
     }
 
     /// 捕获型内层 sink。
@@ -325,7 +328,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_rate_limited_sink_reports_failure_for_budget_refund() {
+    async fn test_rate_limited_sink_reports_failure_without_budget_refund() {
         let inner = Arc::new(CollectingSink {
             messages: Mutex::new(Vec::new()),
             fail_once: std::sync::atomic::AtomicBool::new(true),
@@ -333,19 +336,19 @@ mod tests {
         let limiter = Arc::new(TokenBucketRateLimit::new(2));
         let sink = RateLimitedSink::new(inner.clone() as Arc<dyn LogSink>, limiter.clone());
 
-        // 首条：预算扣 1，写失败 → 预算归还
+        // 首条：预算扣 1，写失败 → 预算不归还（limiteron 无 refund API）
         let r = sink.write(&record(tracing::Level::INFO, "t")).await;
         assert!(r.is_err(), "inner failure must propagate");
         assert_eq!(
             limiter.available(),
-            2,
-            "failed write must refund the budget"
+            1,
+            "failed write must not refund the budget"
         );
-        // 次条：写成功 → 消耗 1
+        // 次条：写成功 → 再消耗 1
         sink.write(&record(tracing::Level::INFO, "t"))
             .await
             .unwrap();
-        assert_eq!(limiter.available(), 1);
+        assert_eq!(limiter.available(), 0);
         assert_eq!(inner.messages.lock().len(), 1);
     }
 
@@ -367,7 +370,7 @@ mod tests {
         let limiter = TokenBucketRateLimit::new(7);
         assert_eq!(limiter.capacity(), 7);
         assert_eq!(limiter.name(), "token-bucket(7)");
-        // 已归还满员时 report(Failed) 不再超出容量
+        // 满员时 report(Failed) 不超出容量（不归还语义下 available 恒不变）
         limiter.report(&record(tracing::Level::INFO, "t"), SinkWriteOutcome::Failed);
         assert_eq!(limiter.available(), 7);
         assert_eq!(

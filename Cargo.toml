@@ -155,6 +155,9 @@ confers = { version = "0.6.0-rc.6", default-features = false, features = ["toml"
 thiserror = { version = "2.0", default-features = false, features = [] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+# 同步 trait 决策点桥接 limiteron 异步原语（try_acquire → TokenBucketLimiter::allow）：
+# futures 轻量执行器不引入 tokio 时钟或 reactor
+futures = { version = "0.3", default-features = false, features = ["executor"] }
 chrono = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["json", "tokio", "http1"], optional = true }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
