@@ -63,7 +63,7 @@ cargo bench --bench inklog_bench
 
 其中 `sampling_stress_overhead` 组锁定限流压力路径的采样决策每记录开销：`RateLimiter::new(0)` 使每条记录都进入压力分支，对比 `no_policy_builtin_fallback`（内置兜底：非关键级别丢弃）与 `policy_per_level_and_prefix`（per_level 采样率 + target 前缀规则的 `SamplingPolicy` 决策）两态，即采样策略的每记录增量代价。
 
-`target_rate_limiter_lookup` 组锁定 per-target 分级限流的查找路径开销：`lookup_longest_prefix_hit`（最长前缀命中）与 `lookup_no_rule_fallthrough`（未命中全表扫完）为纯前缀查找基线（实测 ≈6ns / ≈4ns，远低于 100ns 量级），`evaluate_governed_pass` 为含组桶锁与令牌扣减的端到端裁决（实测 ≈41ns，单线程无竞争地板值；组桶为组内共享单锁，多生产者场景含锁竞争）。2026-10-01 同环境复测值（≈8ns / ≈4ns / ≈39ns）见下方正式基线表。
+`target_rate_limiter_lookup` 组锁定 per-target 分级限流的查找路径开销：`lookup_longest_prefix_hit`（最长前缀命中）与 `lookup_no_rule_fallthrough`（未命中全表扫完）为纯前缀查找基线（实测 ≈6ns / ≈4ns，远低于 100ns 量级），`evaluate_governed_pass` 为含组桶令牌扣减的端到端裁决（实测 ≈41ns，单线程无竞争地板值；组桶内核为 limiteron `TokenBucketLimiter` 原子 CAS，多生产者场景含 CAS 竞争）。2026-10-01 同环境复测值（≈8ns / ≈4ns / ≈39ns）见下方正式基线表。
 
 ### inklog_bench 正式基线（2026-10-01，criterion 中位数）
 
@@ -101,6 +101,16 @@ cargo bench --bench inklog_bench
 | `target_rate_limiter_lookup/lookup_longest_prefix_hit` | 7.6 ns | 最长前缀命中 |
 | `target_rate_limiter_lookup/lookup_no_rule_fallthrough` | 4.2 ns | 未命中全表扫完 |
 | `target_rate_limiter_lookup/evaluate_governed_pass` | 39 ns | 组桶裁决端到端 |
+
+**2026-10-11 复测**（selfdev-lib-adoption-r1 变更后：组桶内核由手写 `Mutex<f64>` 桶切换为 limiteron `TokenBucketLimiter`；同环境同口径 `--warm-up-time 1 --measurement-time 3 --sample-size 10`）：
+
+| 组 / 基准 | 复测中位 | 基线（10-01） | 变化 |
+| --- | --- | --- | --- |
+| `target_rate_limiter_lookup/lookup_longest_prefix_hit` | 6.56 ns | 7.6 ns | −14% |
+| `target_rate_limiter_lookup/lookup_no_rule_fallthrough` | 4.06 ns | 4.2 ns | −3% |
+| `target_rate_limiter_lookup/evaluate_governed_pass` | 41.5 ns | 39 ns | +6.4% |
+
+组均值 17.4 ns vs 基线 16.9 ns（+2.5%），满足 `target_rate_limiter_lookup` 组均值劣化 ≤10% 的验收；两条纯前缀查找基线无劣化（规则索引无分配线性扫描未变）。
 
 要点：
 
