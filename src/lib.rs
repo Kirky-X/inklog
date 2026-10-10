@@ -229,9 +229,9 @@ pub use integrations::DbNexusAdapter;
 pub use integrations::InklogModule;
 
 // Infrastructure trait and adapter re-exports for dependency injection
-pub use integrations::{
-    Cache, Config, Database, InklogConfigAdapter, OxCacheAdapter, OxCacheAdapterBuilder,
-};
+pub use integrations::{Cache, Config, Database, InklogConfigAdapter};
+#[cfg(feature = "cache")]
+pub use integrations::{OxCacheAdapter, OxCacheAdapterBuilder};
 // confers AuditSink 端口的 inklog 实现（审计事件 → 结构化日志 sink）
 #[cfg(feature = "confers-audit")]
 pub use integrations::ConfersAuditSink;
@@ -251,9 +251,11 @@ pub use support::observability::{
     FallbackAction, FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealth,
     SinkHealthMonitor, SinkStatus,
 };
+#[cfg(feature = "cache")]
+pub use support::processing::ObjectPool;
 pub use support::processing::{
     DataMasker, DataMaskerBuilder, LogTemplate, MaskMatch, MaskRule, MaskRuleBuilder,
-    MaskRuleRegistry, ObjectPool, ObjectPoolConfig, OutputFormat, RateLimiter, TargetQuotaVerdict,
+    MaskRuleRegistry, ObjectPoolConfig, OutputFormat, RateLimiter, TargetQuotaVerdict,
     TargetRateLimiter, get_log_record, get_string_buffer, put_log_record, put_string_buffer,
     secret_scan_masker,
 };

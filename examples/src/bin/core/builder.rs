@@ -6,21 +6,23 @@
 //!
 //! # 运行
 //! ```bash
-//! cargo run --bin builder
+//! cargo run --package inklog-examples --bin builder
 //! ```
 //!
 //! # 示例内容
 //! - 基础 Builder 用法：最简单的链式配置
 //! - 多 Sink 配置：同时启用 Console 和 File Sink
-//! - 高级选项：展示日志级别、格式、性能参数等配置
+//! - 高级选项：展示日志级别、JSON 输出、性能参数等配置
 //! - 配置构建器展示：展示 Builder 的灵活性
+//!
+//! 各配置片段以字符串展示（不在本示例中实际初始化）；`LoggerManager::builder()`
+//! 本身没有限制，真实项目在 async 函数中调用 `build().await` 即生效。
 
 use inklog_examples::common::print_section;
 
 fn main() {
     println!("=== inklog Builder 模式配置示例 ===\n");
 
-    // 展示各种配置组合
     show_basic_builder();
     show_multi_sink_builder();
     show_advanced_options_builder();
@@ -32,8 +34,8 @@ fn main() {
     show_builder_pattern_flexibility();
 
     println!("\n所有配置示例已展示完毕。");
-    println!("\n注意：由于 inklog 库的限制，本示例仅展示配置代码。");
-    println!("要在实际项目中使用，请在 async 函数中调用 build().await");
+    println!("\n注意：以上代码片段以字符串形式展示（便于逐段阅读），未在本示例中实际初始化；");
+    println!("Builder 无此限制，真实项目中在 async 函数里调用 build().await 即生效。");
 }
 
 /// 展示基础 Builder 用法
@@ -88,13 +90,12 @@ fn show_advanced_options_builder() {
     print_section("示例 3：高级配置选项");
 
     let code = r#"
-// JSON 格式 + 最详细日志级别
+// Console 输出 JSON 行 + 最详细日志级别
 let _logger = LoggerManager::builder()
     .level("trace")                   // 最详细的日志级别
-    .format("json")                   // JSON 格式输出
     .console(true)                    // 启用控制台
-    .console_colored(true)            // 启用彩色输出
-    .file("logs/app.json")            // 启用文件输出
+    .console_json(true)               // Console 输出整条 JSON（而非文本模板）
+    .file("logs/app.log")             // 启用文件输出（文件格式独立配置）
     .build()
     .await?;
 "#;
@@ -102,9 +103,11 @@ let _logger = LoggerManager::builder()
     println!("代码示例：\n{}", code);
     println!("配置说明：");
     println!("  ✓ 日志级别: TRACE（最详细）");
-    println!("  ✓ 输出格式: JSON");
-    println!("  ✓ Console Sink: 彩色输出");
-    println!("  ✓ File Sink: logs/app.json\n");
+    println!("  ✓ Console 输出: JSON 行（console_json(true)）");
+    println!("  ✓ File Sink: logs/app.log\n");
+    println!("注意：format() 设置的是文本渲染模板（如 \"{{timestamp}} [{{level}}] ...\"），");
+    println!("与输出格式正交——format(\"json\") 只会把模板文字原样输出，");
+    println!("JSON 输出必须用 console_json(true)（JSON 模式下不着色）\n");
 }
 
 /// 展示性能配置选项
@@ -119,7 +122,7 @@ let _logger = LoggerManager::builder()
     .level("info")
     .console(true)
     .file("logs/app.log")
-    .channel_capacity(10000)          // Channel 容量 10,000
+    .channel_capacity(50000)          // Channel 容量 50,000
     .worker_threads(4)                // 4 个 Worker 线程
     .build()
     .await?;
@@ -127,8 +130,8 @@ let _logger = LoggerManager::builder()
 
     println!("代码示例：\n{}", code);
     println!("配置说明：");
-    println!("  ✓ Channel 容量: 10,000（默认 1,000）");
-    println!("  ✓ Worker 线程数: 4（默认 2）");
+    println!("  ✓ Channel 容量: 50,000（默认 10,000）");
+    println!("  ✓ Worker 线程数: 4（默认 3）");
     println!("  ✓ 适用场景: 高吞吐量生产环境\n");
 }
 
@@ -168,7 +171,7 @@ let _logger = LoggerManager::builder()
     .level("info")
     .file("logs/app.log")             // 文件路径
     .file_max_size("100MB")           // 单文件最大 100MB
-    .file_compress(true)              // 启用 Zstd 压缩
+    .file_compress(true)              // 启用 Zstd 压缩（需 compression/gzip feature）
     .file_rotation_time("daily")      // 每日轮转
     .file_keep_files(7)               // 保留 7 个历史文件
     .build()
@@ -179,9 +182,11 @@ let _logger = LoggerManager::builder()
     println!("配置说明：");
     println!("  ✓ 文件路径: logs/app.log");
     println!("  ✓ 单文件大小: 100MB");
-    println!("  ✓ 压缩: Zstd（高压缩比）");
+    println!("  ✓ 压缩: Zstd（需 inklog 启用 `compression`/`zstd` 或 `gzip` feature）");
     println!("  ✓ 轮转策略: 每日轮转");
     println!("  ✓ 保留文件: 7 个\n");
+    println!("注意：压缩后端是可选 feature（默认关闭）；未启用时 file_compress(true)");
+    println!("仅告警并保持轮转文件未压缩，不会报错\n");
 }
 
 /// 展示 Builder 模式的灵活性

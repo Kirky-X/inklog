@@ -69,20 +69,19 @@ impl AsyncAutoBuilder for InklogModule {
         kit: &'a AsyncKit,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Capability, Self::Error>> + Send + 'a>> {
         Box::pin(async move {
-            // 1. Require DbNexusModule capability (Arc<dyn ConnectionPool + Send + Sync>).
+            // Require the DbNexusModule connection-pool capability, then adapt it
+            // to Database via DbNexusAdapter.
             let pool = kit.require::<DbNexusModule>().map_err(|e| {
                 let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
                 InklogError::database_error(crate::i18n::tr_args("config-require_dbnexus", args))
             })?;
 
-            // 2. Wrap in DbNexusAdapter — adapts ConnectionPool to Database.
             let adapter = DbNexusAdapter::from_connection_pool(
                 pool,
                 crate::support::io::sink::entity::TABLE_NAME,
             )?;
 
-            // 3. Return as Arc<dyn Database + Send + Sync>.
             Ok(Arc::new(adapter) as Arc<dyn Database + Send + Sync>)
         })
     }

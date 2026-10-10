@@ -60,7 +60,7 @@
 //! ## 条件编译
 //!
 //! - `DbNexusAdapter` 需要启用 `dbnexus` feature
-//! - `OxCacheAdapter`、`InklogConfigAdapter` 默认可用
+//! - `OxCacheAdapter` 需要启用 `cache` feature（default 组合已含）；`InklogConfigAdapter` 默认可用
 
 pub mod cache;
 pub mod config;
@@ -72,6 +72,7 @@ pub use config::Config;
 pub use database::Database;
 
 // 适配器导出
+#[cfg(feature = "cache")]
 pub use cache::OxCacheAdapter;
 pub use config::InklogConfigAdapter;
 
@@ -81,6 +82,7 @@ pub use database::DbNexusAdapter;
 // ============================================================================
 // 构建器导出
 // ============================================================================
+#[cfg(feature = "cache")]
 pub use cache::OxCacheAdapterBuilder;
 
 // ============================================================================

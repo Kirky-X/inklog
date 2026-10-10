@@ -1,4 +1,4 @@
-# 覆盖率状态口径：项目与补丁目标统一 90%（与 CI / pre-push 门禁同口径）
+# 覆盖率状态口径：项目与补丁目标统一 90%（codecov 状态展示口径；CI 与 pre-push 的 llvm-cov 门禁为 --fail-under-lines 95，见 ci.yml 与 lefthook.yml）
 coverage:
   status:
     project:

@@ -1,13 +1,11 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 // 大数据量性能测试
-// 测量口径变更（2026-09-26，commit a491563）：console sink 统一 enabled=false
-// （禁用丢弃语义），console 路径退出测量；与历史基线不可比，需重采基线。
 //
-// 核正：with_config 内部 set_global_default 为进程级单次语义，多用例并发时后装者
-// 日志流向首个 logger 导致记录丢失（metadata.len() 断言随机失败）。统一改造为
-// 本仓测试口径（additional_tests.rs 范本）：build_detached + 线程级 set_default
-// + tracing::info!；serial 不再需要（无进程级全局状态竞争）。
+// 测量口径（tests/integration/additional_tests.rs 范本）：build_detached + 线程级
+// set_default + tracing::info!——with_config 的 set_global_default 为进程级单次
+// 语义，多用例并发时后装者日志流向首个 logger 导致记录丢失；console sink 统一
+// enabled=false（禁用丢弃语义），与历史基线不可比，需重采基线。
 
 #[cfg(test)]
 mod large_volume {
@@ -68,7 +66,6 @@ mod large_volume {
         // shutdown 触发 flush_batch 确保全部落盘后再断言（替代原 sleep(2s) 轮询等待）
         let _ = logger.shutdown();
 
-        // 验证数据已写入
         assert!(log_path.exists());
         let metadata = std::fs::metadata(&log_path).unwrap();
         assert!(

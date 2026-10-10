@@ -125,10 +125,37 @@ cargo bench --bench inklog_bench
 cargo bench --bench rc4_pipeline_bench -- --warm-up-time 1 --measurement-time 2 --sample-size 10
 cargo bench --bench inklog_bench -- --warm-up-time 1 --measurement-time 3 --sample-size 10
 
-# 完整基线（默认参数，约 15 分钟）
+# 完整基线（默认参数；2026-10-10 同机实测 ≈11 分钟：
+# rc4 ≈1 分钟 + inklog ≈9 分钟 + secret_scan ≈1.3 分钟）
 cargo bench --bench rc4_pipeline_bench
 cargo bench --bench inklog_bench
+cargo bench --bench secret_scan_bench --features secret-scan
 ```
+
+> `inklog_bench` 的 `console_sink_latency/console_sync_latency` 会向 stdout 输出约 145 万行
+> （console sink 即被测路径，默认参数下约 110 MB），完整跑建议重定向：
+> `cargo bench --bench inklog_bench > /tmp/inklog_bench.log 2>&1`。
+
+### 基准口径修正续记（2026-10-10）
+
+`inklog_bench` 的三个 logger helper 在此前用 `file_sink: None` / `console_sink: None`
+表达"不启用"，但 manager 语义下 `None` 一律表示**默认启用**（file：
+`is_none_or(|cfg| cfg.enabled)`＝true；console：`ConsoleSinkConfig::default().enabled`＝true）。
+后果与修正（`benches/inklog_bench.rs` 已显式 `enabled: false` 关闭非被测 sink）：
+
+| 项 | 修正前 | 修正后 |
+| --- | --- | --- |
+| `noop_sink/async_noop_log`（默认参数单基准） | 10 分 42 秒（实测） | 41.8 秒 |
+| `console_sink_latency/console_sync_latency`（默认参数单基准） | 10 分 42 秒（实测） | 24.9 秒 |
+| `cargo bench --bench inklog_bench` 全量默认参数 | 28 分 42 秒（实测） | 9 分 01 秒（实测） |
+| `noop_sink/async_noop_log` 中位值 | 1.06 µs（含 stdout/file 通道成分） | 1.40 µs（纯订阅开销） |
+| `console_sink_latency/console_sync_latency` 中位值 | 3.51 ms（file 通道背压主导） | 4.30 µs（console 路径本征） |
+
+修正前 `noop_sink` 实际向 stdout 洪泛输出（实测全量约 145 万行）并启用默认路径
+`logs/app.log` 的 file 通道：stdout 洪泛阻塞 console worker，且每次采样 teardown 需排水巨量积压，两个基准合计占全量运行的
+74%；`setup_file_logger` 同样因 `console_sink: None` 附带启用 console（每个 file 基准
+额外输出百万行）。文件/通道类基准的**被测区域未变**，但其历史数字（上表
+`console_sink_latency` 390 µs、`noop_sink` 3.88 µs 等）为修正前口径，跨版本对照时需注意。
 
 ### rc4_pipeline_bench 续记（2026-10-01，同环境同口径）
 

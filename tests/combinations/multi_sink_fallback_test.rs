@@ -3,12 +3,6 @@
 // 多 Sink 降级功能测试
 // 测试 File Sink 故障时降级到 Database，Database 故障时降级到 Console
 // 验证降级后消息不丢失，以及恢复后自动切回
-//
-// 核正：FallbackState 已从 struct（new/enter_fallback/exit_fallback 方法族）
-// 重构为纯状态 enum（Active/Fallback/Recovering），状态机行为由
-// SinkHealthMonitor（check_and_fallback/confirm_recovery/get_fallback_state 等）
-// 承载；FallbackConfig 的 auto_fallback 字段更名为 enabled。状态机用例改按
-// Monitor 真实 API 重写；LoggerManager::shutdown 为同步方法，移除多余 .await。
 
 #[cfg(test)]
 mod multi_sink_fallback {

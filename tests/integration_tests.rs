@@ -1343,7 +1343,6 @@ async fn create_logs_table(url: &str) -> Result<(), String> {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_log_crate_native_support() {
-    // 初始化 inklog
     let _logger = LoggerManager::builder().level("debug").build().await;
 
     // 使用 log crate 的宏（使用完整路径避免与 tracing 冲突）
@@ -1625,7 +1624,6 @@ async fn test_memory_stability() {
     // 等待异步 worker 完成 flush
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-    // 验证数据已写入
     assert!(log_path.exists());
     let metadata = std::fs::metadata(&log_path).unwrap();
     assert!(
@@ -1635,4 +1633,69 @@ async fn test_memory_stability() {
     );
 
     let _ = logger.shutdown();
+}
+
+// ============ 降级 sink 自激循环回归测试 ============
+
+/// 降级 file sink 下 ops 事件回流不得形成自激循环。
+///
+/// ops 事件（sink_degraded 等）会广播到已启用的 file/db/自定义通道；降级
+/// worker 收到事件后若逐条再次广播，会在「降级 → 事件到达 → 再降级」间
+/// 自激，把 sink_errors/logs_dropped 无界放大（修复前实测 ~2k/s）。本测试
+/// 在只读目录下启动 file sink（工厂持续失败），无用户日志也应保持有界。
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn test_degraded_file_sink_does_not_self_amplify_metrics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let logdir = dir.path().join("ro");
+    std::fs::create_dir_all(&logdir).expect("create ro dir");
+
+    // Windows 无 unix 权限语义：该平台跳过（权限位不产生 EACCES）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let rw = std::fs::metadata(&logdir).expect("metadata").permissions();
+        let mut ro = rw.clone();
+        ro.set_mode(0o555);
+        std::fs::set_permissions(&logdir, ro).expect("chmod ro");
+
+        let mut config = inklog::InklogConfig::default();
+        let file = inklog::config::FileSinkConfig {
+            enabled: true,
+            path: logdir.join("degraded.log"),
+            batch_size: 1,
+            ..Default::default()
+        };
+        config.file_sink = Some(file);
+        config.console_sink = Some(inklog::ConsoleSinkConfig {
+            enabled: false,
+            ..Default::default()
+        });
+
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("manager must build in degraded mode");
+        std::thread::sleep(Duration::from_millis(1200));
+        let health = manager.get_health_status();
+        let _ = std::fs::set_permissions(&logdir, rw);
+        let _ = manager.shutdown();
+
+        assert!(
+            health.metrics.sink_errors < 100,
+            "degraded sink must not self-amplify sink_errors, got {}",
+            health.metrics.sink_errors
+        );
+        assert!(
+            health.metrics.logs_dropped < 100,
+            "degraded sink must not self-amplify logs_dropped, got {}",
+            health.metrics.logs_dropped
+        );
+        assert!(
+            health
+                .sinks
+                .get("file")
+                .is_some_and(|s| !s.status.is_operational()),
+            "file sink must be reported unhealthy while the factory keeps failing"
+        );
+    }
 }

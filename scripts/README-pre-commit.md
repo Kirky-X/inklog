@@ -4,14 +4,14 @@ This directory contains the pre-commit hook for the Inklog project.
 
 ## Installation
 
-Run the installation script to set up the pre-commit hook:
+Run the installation script to set up the pre-commit hooks:
 
 ```bash
 # From the project root directory
 ./scripts/install-pre-commit.sh
 ```
 
-Or manually create the symlink:
+The script installs the Python [pre-commit](https://pre-commit.com/) framework (`pip install pre-commit` + `pre-commit install`), which reads `.pre-commit-config.yaml`. The legacy bash hook described in this document (`scripts/pre-commit`) is installed manually by symlink:
 
 ```bash
 ln -s ../../scripts/pre-commit .git/hooks/pre-commit
@@ -32,11 +32,11 @@ Before each commit, the pre-commit hook automatically runs:
 
 3. **Compilation Check** (`cargo check`)
    - Verifies the code compiles successfully
-   - Uses `cargo check --all-features`
+   - Runs per mutually exclusive database backend group: `cargo check --features 'sqlite,kit,compression,fast-masking'` and `cargo check --features 'postgres,kit,compression,fast-masking'` (`--all-features` is rejected by the database mutual-exclusion guard)
 
 4. **Unit Tests** (`cargo test`)
-   - Runs the library unit tests
-   - Uses `cargo test --lib --all-features`
+   - Runs the library unit tests per backend group
+   - `cargo test --lib --features 'sqlite,kit,compression,fast-masking' -- --test-threads=4` and the same with `postgres,kit,compression,fast-masking`
 
 ## Skipping the Hook
 

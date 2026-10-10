@@ -123,7 +123,6 @@ fn show_env_override_demo() {
 
     println!("测试 ID: {}（隔离并发运行）\n", test_id);
 
-    // 1. 加载默认配置作为基线
     let baseline = InklogConfig::load_with_env_overrides().expect("baseline load");
     println!("基线配置（无环境变量覆盖）：");
     println!("  global.level = \"{}\"", baseline.global.level);
@@ -136,7 +135,6 @@ fn show_env_override_demo() {
         baseline.performance.worker_threads
     );
 
-    // 2. 设置环境变量
     println!("\n设置环境变量：");
     let env_vars = [
         ("INKLOG_GLOBAL_LEVEL", "debug"),
@@ -153,7 +151,6 @@ fn show_env_override_demo() {
         unsafe { std::env::set_var(env_vars[2].0, env_vars[2].1) };
     }
 
-    // 3. 重新加载并验证覆盖生效
     let overridden = InklogConfig::load_with_env_overrides().expect("overridden load");
     println!("\n覆盖后配置：");
     println!(
@@ -169,7 +166,6 @@ fn show_env_override_demo() {
         overridden.performance.worker_threads
     );
 
-    // 验证
     let level_ok = overridden.global.level == "debug";
     let capacity_ok = overridden.performance.channel_capacity == 20000;
     let workers_ok = overridden.performance.worker_threads == 4;
@@ -191,7 +187,6 @@ fn show_env_override_demo() {
         if workers_ok { "✓" } else { "✗" }
     );
 
-    // 4. 清理环境变量
     for (key, _) in env_vars {
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var(key) };

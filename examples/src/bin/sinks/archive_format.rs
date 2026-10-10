@@ -69,7 +69,6 @@ fn show_from_str_parsing() {
         }
     }
 
-    // 验证解析结果
     assert_eq!(
         ArchiveFormat::from_str("json").unwrap(),
         ArchiveFormat::Json
@@ -80,7 +79,6 @@ fn show_from_str_parsing() {
     );
     assert_eq!(ArchiveFormat::from_str("csv").unwrap(), ArchiveFormat::Csv);
 
-    // 无效值
     let invalid = ArchiveFormat::from_str("xml");
     assert!(invalid.is_err());
     println!("\n  {:?} → 错误（无效值）: {}", "xml", invalid.unwrap_err());

@@ -115,7 +115,6 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
         }
     }
 
-    // 设置一些 sink 健康状态
     metrics.sink_started("console");
     metrics.sink_started("file");
     metrics.update_sink_health("console", true, None);
@@ -125,7 +124,6 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
     metrics.set_db_batch_size(50);
     metrics.set_pool_hit_rate(95.5);
 
-    // 查找随机可用端口
     let port = find_available_port()?;
     let addr = format!("127.0.0.1:{}", port);
 
@@ -136,17 +134,14 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
     println!("  - GET /metrics → Prometheus 格式指标");
     println!();
 
-    // 创建 TCP 监听器
     let listener = TcpListener::bind(&addr).await?;
     println!("✓ HTTP 服务器已启动在端口 {}", port);
 
-    // 创建 shutdown 信号
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     // 克隆 metrics 用于异步处理
     let metrics = std::sync::Arc::new(metrics);
 
-    // 启动 HTTP 服务器任务
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -197,7 +192,6 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// 注意：接收 `Arc<Metrics>`（而非引用），便于在外层任务中
 /// 通过 `tokio::spawn` 独立运行（future 需满足 `'static` 约束）。
 async fn handle_connection(mut stream: TcpStream, metrics: std::sync::Arc<Metrics>) -> Result<()> {
-    // 读取请求
     let mut buffer = Vec::new();
     let mut temp_buf = [0u8; 8192];
 
@@ -232,11 +226,9 @@ async fn handle_connection(mut stream: TcpStream, metrics: std::sync::Arc<Metric
         return Ok(());
     }
 
-    // 解析请求行
     let request = String::from_utf8_lossy(&buffer);
     let first_line = request.lines().next().unwrap_or("");
 
-    // 提取路径
     let path = first_line
         .split_whitespace()
         .nth(1)
@@ -245,7 +237,6 @@ async fn handle_connection(mut stream: TcpStream, metrics: std::sync::Arc<Metric
 
     print_section(&format!("收到请求: {}", path));
 
-    // 根据路径返回响应
     let (status_line, content_type, body) = match path.as_str() {
         "/health" => {
             let health = build_health_response(metrics.as_ref());
@@ -270,7 +261,6 @@ async fn handle_connection(mut stream: TcpStream, metrics: std::sync::Arc<Metric
         }
     };
 
-    // 构建响应头
     let response = if body.is_empty() {
         format!(
             "{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -286,7 +276,6 @@ async fn handle_connection(mut stream: TcpStream, metrics: std::sync::Arc<Metric
         )
     };
 
-    // 发送响应
     stream.write_all(response.as_bytes()).await?;
 
     Ok(())
@@ -373,7 +362,6 @@ fn build_health_response(metrics: &Metrics) -> HealthResponse {
 
 /// 使用简单的 HTTP 客户端发送请求并获取响应
 async fn http_get(url: &str) -> Result<(u16, String, String)> {
-    // 解析 URL
     let url_parsed = url.trim_start_matches("http://");
     let (host_port, path) = if let Some(idx) = url_parsed.find('/') {
         (&url_parsed[..idx], &url_parsed[idx..])
@@ -390,18 +378,15 @@ async fn http_get(url: &str) -> Result<(u16, String, String)> {
         (host_port, 80)
     };
 
-    // 建立 TCP 连接
     let addr = format!("{}:{}", host, port);
     let mut stream = TcpStream::connect(&addr).await?;
 
-    // 发送 HTTP 请求
     let request = format!(
         "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
         path, host
     );
     stream.write_all(request.as_bytes()).await?;
 
-    // 读取响应
     let mut response = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -414,7 +399,6 @@ async fn http_get(url: &str) -> Result<(u16, String, String)> {
 
     let response_str = String::from_utf8_lossy(&response).to_string();
 
-    // 解析状态码
     let status_code = if let Some(line) = response_str.lines().next() {
         line.split_whitespace()
             .nth(1)
@@ -431,7 +415,6 @@ async fn http_get(url: &str) -> Result<(u16, String, String)> {
         response_str.clone()
     };
 
-    // 提取 Content-Type
     let content_type = response_str
         .lines()
         .find(|l| l.to_lowercase().starts_with("content-type:"))
@@ -458,7 +441,6 @@ async fn health_endpoint(port: u16) -> Result<()> {
     println!("响应状态: {}", status_code);
     println!("Content-Type: {}", content_type);
 
-    // 读取并解析响应体
     println!("\n响应内容 (JSON):\n");
     let json: serde_json::Value = serde_json::from_str(&body)?;
     println!(
@@ -466,7 +448,6 @@ async fn health_endpoint(port: u16) -> Result<()> {
         safe_body_preview(&serde_json::to_string_pretty(&json)?)
     );
 
-    // 验证响应结构
     assert!(
         json.get("overall_status").is_some(),
         "缺少 overall_status 字段"
@@ -481,7 +462,6 @@ async fn health_endpoint(port: u16) -> Result<()> {
     let overall_status = json["overall_status"].as_str().unwrap();
     println!("\n✓ 健康状态: {}", overall_status);
 
-    // 检查 sink 状态
     if let Some(sinks) = json["sinks"].as_object() {
         for (name, health) in sinks {
             println!("  ✓ Sink '{}': {}", name, health["status"]);
@@ -500,7 +480,6 @@ async fn metrics_endpoint(port: u16) -> Result<()> {
 
     print_section("发送 GET /metrics 请求");
 
-    // 发送 HTTP 请求
     let url = format!("http://127.0.0.1:{}/metrics", port);
     println!("请求 URL: {}\n", url);
 
@@ -522,7 +501,6 @@ async fn metrics_endpoint(port: u16) -> Result<()> {
         "缺少 sink_healthy 指标"
     );
 
-    // 解析并显示关键指标
     print_section("关键指标摘要");
 
     let metrics: Vec<&str> = body
@@ -588,22 +566,17 @@ fn find_available_port() -> Result<u16> {
 async fn main() -> Result<()> {
     println!("=== inklog HTTP 健康检查和指标端点示例 ===\n");
 
-    // 1. 启动 HTTP 服务器
     let (port, shutdown) = start_http_server().await?;
 
     // 等待服务器完全启动
     sleep(Duration::from_millis(100)).await;
 
-    // 2. 测试健康检查端点
     health_endpoint(port).await?;
 
-    // 3. 测试指标端点
     metrics_endpoint(port).await?;
 
-    // 4. 测试错误处理
     error_endpoint_demo(port).await?;
 
-    // 完成
     print_separator("5. 集成指南");
 
     println!("\n在 Prometheus 中配置抓取:");
@@ -626,7 +599,6 @@ async fn main() -> Result<()> {
     println!("  curl http://localhost:{}/metrics", port);
     println!();
 
-    // 发送 shutdown 信号
     let _ = shutdown.send(());
 
     println!("\n按 Ctrl+C 退出...");

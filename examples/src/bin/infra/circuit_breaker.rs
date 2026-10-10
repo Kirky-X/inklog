@@ -42,7 +42,6 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog 断路器示例 ===\n");
 
-    // 1. 基础创建与初始状态
     show_creation();
 
     // 2. Closed → Open：失败计数触发熔断
@@ -60,7 +59,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6. with_config + CircuitBreakerConfig 配置式构建
     show_with_config();
 
-    // 7. reset() 手动重置
     show_reset();
 
     // 8. 真实场景模拟：用 can_execute() 守护操作

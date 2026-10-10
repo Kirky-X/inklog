@@ -11,7 +11,7 @@
 //! # 运行
 //!
 //! ```bash
-//! cargo run --bin config_inspect
+//! cargo run --package inklog-examples --bin config_inspect
 //! ```
 
 use inklog::config::{ConsoleSinkConfig, DatabaseSinkConfig, FileSinkConfig, InklogConfig};
@@ -48,10 +48,26 @@ fn db_enabled(c: &Option<DatabaseSinkConfig>) -> bool {
 fn show_sinks_enabled_all_disabled() {
     print_section("示例 1：所有 Sink 禁用 → sinks_enabled() 返回空");
 
-    let config = InklogConfig::default();
+    // 注意：InklogConfig::default() 的 console_sink 默认启用，直接取
+    // sinks_enabled() 会得到 ["console"]；要得到空列表必须显式禁用全部 Sink
+    let config = InklogConfig {
+        console_sink: Some(ConsoleSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
+        file_sink: Some(FileSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
+        database_sink: Some(DatabaseSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
     let sinks = config.sinks_enabled();
 
-    println!("默认配置（仅 console_sink 默认启用）：");
+    println!("显式禁用全部 Sink：");
     println!(
         "  console_sink.enabled   = {}",
         console_enabled(&config.console_sink)
@@ -66,6 +82,12 @@ fn show_sinks_enabled_all_disabled() {
     );
     println!("\nsinks_enabled() = {:?}", sinks);
     println!("返回 Vec 长度 = {}", sinks.len());
+    assert!(sinks.is_empty(), "全部禁用时 sinks_enabled() 应为空");
+
+    println!("\n对照：InklogConfig::default() 的 console_sink 默认启用");
+    let default_sinks = InklogConfig::default().sinks_enabled();
+    println!("  default().sinks_enabled() = {:?}", default_sinks);
+    assert_eq!(default_sinks, vec!["console"]);
 }
 
 /// 演示仅 Console Sink 启用
@@ -142,7 +164,6 @@ fn show_sinks_enabled_multi_sink() {
     println!("\nsinks_enabled() = {:?}", sinks);
     println!("Sink 数量 = {} (期望 3)", sinks.len());
 
-    // 验证所有 Sink 都在列表中
     let has_console = sinks.contains(&"console");
     let has_file = sinks.contains(&"file");
     let has_database = sinks.contains(&"database");
@@ -170,9 +191,16 @@ fn show_logger_manager_load_usage() {
 
     println!("LoggerManager::load() 流程：");
     println!("  1. 调用 InklogConfig::load_sync() 搜索配置文件");
-    println!("     - 搜索路径：当前目录 → ~/.config/inklog/ → /etc/inklog/");
-    println!("     - 文件名：inklog_config.toml");
-    println!("     - 找不到则返回 Default::default()");
+    println!("     - 搜索路径（首个存在的文件生效）：");
+    println!("         1. $INKLOG_CONFIG_PATH（环境变量显式指定，优先级最高）");
+    println!("         2. ./inklog_config.toml（当前目录）");
+    println!(
+        "         3. ~/.config/inklog/config.toml（用户配置目录，Linux 遵循 XDG_CONFIG_HOME）"
+    );
+    println!(
+        "         4. /etc/inklog/config.toml（系统配置；Windows 为 %ProgramData%\\inklog\\config.toml）"
+    );
+    println!("     - 找不到任何配置文件时返回 Default::default()（console_sink 默认启用）");
     println!("  2. 用加载的配置调用 LoggerManager::with_config()");
     println!("  3. 初始化所有启用的 Sink 和 HTTP 服务器");
 
@@ -234,7 +262,7 @@ fn show_config_inspection_workflow() {
     if sinks.is_empty() {
         println!("  → 使用 LoggerManager::new() (仅默认 Console)");
     } else if InklogConfig::load_with_env_overrides().is_ok() {
-        println!("  → 使用 LoggerManager::load() (从配置文件加载)");
+        println!("  → 使用 LoggerManager::load() (自动搜索配置，找不到文件时用默认配置)");
     } else {
         println!("  → 使用 LoggerManager::with_config() (显式配置)");
     }

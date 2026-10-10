@@ -121,7 +121,6 @@ mod async_file_test {
             span_id: None,
         };
 
-        // 写入
         let result = sink.write(&record);
         assert!(result.is_ok());
 
@@ -222,7 +221,6 @@ mod async_file_test {
         let template = LogTemplate::default();
         let mut sink = AsyncFileSink::new(config, template).unwrap();
 
-        // 写入一些数据
         let record = inklog::LogRecord {
             timestamp: chrono::Utc::now(),
             level: "INFO".to_string(),
@@ -238,7 +236,6 @@ mod async_file_test {
 
         sink.write(&record).ok();
 
-        // 关闭
         let result = sink.shutdown();
         assert!(result.is_ok());
     }

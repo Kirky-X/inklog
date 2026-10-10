@@ -44,7 +44,6 @@ async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
     };
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
-    // 写入各级别日志
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     for level in levels {
         let record = LogRecord {
@@ -94,7 +93,6 @@ async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
     };
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
-    // 写入各级别日志
     print_section("彩色日志输出");
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     for level in levels {
@@ -153,7 +151,6 @@ async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
     };
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
-    // 写入不同级别的日志
     let test_cases = [
         ("INFO", "这是 INFO 日志（→ stdout）"),
         ("DEBUG", "这是 DEBUG 日志（→ stdout）"),

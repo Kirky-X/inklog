@@ -50,13 +50,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> {
     print_section("示例 1：ObjectPool 基本操作");
 
-    // 1.1 默认配置
     print_section("1.1 new() 默认配置（容量 1024）");
     let pool = ObjectPool::<String, String>::new().await?;
     println!("默认对象池构建成功");
     assert_eq!(pool.len(), 0, "新建池应为空");
 
-    // 1.2 自定义配置
     print_section("1.2 with_config(ObjectPoolConfig) 自定义配置");
     let config = ObjectPoolConfig {
         max_capacity: 64,
@@ -65,7 +63,6 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
     let pool = ObjectPool::<String, String>::with_config(config).await?;
     println!("自定义配置构建成功");
 
-    // 1.3 put/get 存取
     print_section("1.3 put() / get() 存取");
     pool.put(&"greeting".to_string(), "hello".to_string())
         .await?;
@@ -89,7 +86,6 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(missing, None, "不存在的键应返回 None");
     println!("✓ 所有存取断言通过");
 
-    // 1.4 覆盖写入
     print_section("1.4 覆盖写入");
     pool.put(&"greeting".to_string(), "world".to_string())
         .await?;
@@ -98,7 +94,6 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
     println!("覆盖 greeting: hello → world");
     println!("✓ 覆盖写入验证通过");
 
-    // 1.5 Result 类型验证
     print_section("1.5 错误显性传播（Result 返回）");
     let put_result = pool.put(&"k".to_string(), "v".to_string()).await;
     assert!(put_result.is_ok(), "put 应返回 Ok");
@@ -153,7 +148,6 @@ async fn show_pool_with_ttl_config() -> Result<(), Box<dyn std::error::Error>> {
 fn show_global_log_record_functions() {
     print_section("示例 3：get_log_record / put_log_record 全局函数");
 
-    // 3.1 获取默认 LogRecord
     print_section("3.1 get_log_record() 获取 LogRecord");
     let mut record: LogRecord = get_log_record();
     println!("从全局池获取 LogRecord：level = {}", record.level);
@@ -164,7 +158,6 @@ fn show_global_log_record_functions() {
     put_log_record(record);
     println!("已修改 message 并放回全局池（put 会自动 reset 记录）");
 
-    // 3.2 验证 reset 行为
     print_section("3.2 再次 get_log_record() 验证 reset");
     let record2 = get_log_record();
     println!("再次获取：level = {}", record2.level);
@@ -190,7 +183,6 @@ fn show_global_log_record_functions() {
 fn show_global_string_functions() {
     print_section("示例 4：get_string_buffer / put_string_buffer 全局函数");
 
-    // 4.1 获取空 String
     print_section("4.1 get_string_buffer() 获取 String");
     let buf: String = get_string_buffer();
     println!("从全局池获取 String：len = {}", buf.len());
@@ -202,7 +194,6 @@ fn show_global_string_functions() {
     put_string_buffer(buf);
     println!("已填充 'inklog string buffer' 并放回全局池");
 
-    // 4.2 再次获取
     print_section("4.2 再次 get_string_buffer()");
     let s = get_string_buffer();
     println!("再次获取：len = {}", s.len());

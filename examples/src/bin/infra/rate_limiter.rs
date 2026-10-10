@@ -43,7 +43,6 @@ fn show_basic_creation() {
     println!("  初始状态：桶已满（tokens = max_tokens = 1000）");
     println!("  补充速率：1000 tokens/sec");
 
-    // 初始状态应允许获取
     assert!(limiter.try_acquire());
     println!("  ✓ try_acquire() → true（桶满，允许）");
 }
@@ -84,7 +83,6 @@ fn show_dropped_count() {
     let limiter = RateLimiter::new(2);
     println!("RateLimiter::new(2) — 每秒 2 个令牌\n");
 
-    // 消耗全部 2 个令牌
     assert!(limiter.try_acquire());
     assert!(limiter.try_acquire());
     println!(
@@ -110,7 +108,6 @@ fn show_token_refill() {
     let limiter = RateLimiter::new(100);
     println!("RateLimiter::new(100) — 每秒 100 个令牌\n");
 
-    // 耗尽所有令牌
     for _ in 0..100 {
         limiter.try_acquire();
     }

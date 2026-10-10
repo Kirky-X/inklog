@@ -2858,4 +2858,61 @@ mod tests {
         assert!(out.contains("***REDACTED_API_KEY***"), "{out}");
         assert!(out.contains("**@**.***"), "{out}");
     }
+
+    // ---- fast-masking 等价性：AC 加速路径与逐规则 regex 逐字节一致 ----
+
+    #[cfg(feature = "fast-masking")]
+    #[test]
+    fn test_fast_masking_ac_equals_sequential_regex_byte_for_byte() {
+        // 固定串（literal=true 的契约面）：AC 单趟 LeftmostLongest 的长模式
+        // 优先必须与逐规则 regex（长模式优先串行改写）逐字节一致，重叠模式
+        // 无残留。
+        let rules: [(&str, &str); 3] = [
+            ("CORP_SECRET_TOKEN_EXTENDED", "***LONG***"),
+            ("CORP_SECRET_TOKEN", "***TOKEN***"),
+            ("SECRET", "***S***"),
+        ];
+        let mut builder = DataMasker::builder();
+        for (pattern, replacement) in rules {
+            builder = builder.add_rule(
+                MaskRule::builder("ac-equivalence")
+                    .pattern(pattern)
+                    .replacement(replacement)
+                    .literal(true)
+                    .build()
+                    .expect("literal rule must build"),
+            );
+        }
+        let fast = builder.build();
+        assert!(fast.ac_masker.is_some(), "AC path must be wired");
+
+        let samples = [
+            "plain text without secrets",
+            "header CORP_SECRET_TOKEN tail",
+            "overlap CORP_SECRET_TOKEN_EXTENDED tail",
+            "both CORP_SECRET_TOKEN and CORP_SECRET_TOKEN_EXTENDED",
+            "orphan SECRET and prefix CORP_SECRET_TOKEN",
+            "token at end CORP_SECRET_TOKEN",
+            "partial CORP_SECRET_TOK",
+        ];
+        for sample in samples {
+            let ac_out = fast.mask(sample);
+            // 参考实现：同一组规则按长模式优先逐条 regex 串行改写
+            let mut sequential = sample.to_string();
+            for (pattern, replacement) in rules {
+                let re = Regex::new(pattern).expect("metachar-free pattern");
+                sequential = re.replace_all(&sequential, replacement).to_string();
+            }
+            assert_eq!(
+                ac_out, sequential,
+                "AC output must match the sequential regex path byte-for-byte for {sample:?}"
+            );
+            for (pattern, _) in rules {
+                assert!(
+                    !ac_out.contains(pattern),
+                    "no residue of {pattern:?} after masking: {ac_out:?}"
+                );
+            }
+        }
+    }
 }

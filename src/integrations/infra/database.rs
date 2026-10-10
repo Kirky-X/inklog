@@ -195,7 +195,6 @@ impl DbNexusAdapter {
     ) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
 
-        // 创建 DbConfig
         let config = DbConfig {
             url: url.to_string(),
             pool_config: dbnexus::foundation::config::PoolConfig {
@@ -869,10 +868,6 @@ impl Database for MockDatabaseAdapter {
         self.healthy.load(Ordering::SeqCst)
     }
 }
-
-// ============================================================================
-// 测试
-// ============================================================================
 
 #[cfg(test)]
 mod tests {

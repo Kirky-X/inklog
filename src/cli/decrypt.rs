@@ -349,15 +349,18 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
     Ok(())
 }
 
+/// 保留 `InklogError` 类型透传（`?` 自动装箱），使 CLI 出口能给出
+/// 密钥长度/密码长度等本地化明细；字符串化会丢失长度诊断。
 fn get_encryption_key_cli(env_var: &str) -> Result<Zeroizing<[u8; 32]>> {
-    inklog::sink::encryption::get_encryption_key(env_var).map_err(|e| anyhow!("{}", e))
+    Ok(inklog::sink::encryption::get_encryption_key(env_var)?)
 }
 
 /// v2 路径的密钥获取：密码模式用**文件头中的盐**确定性派生，
 /// 与加密端 `FileSink::encrypt_file` 的派生方式严格对齐。
 fn get_encryption_key_with_salt_cli(env_var: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>> {
-    inklog::sink::encryption::get_encryption_key_with_salt(env_var, salt)
-        .map_err(|e| anyhow!("{}", e))
+    Ok(inklog::sink::encryption::get_encryption_key_with_salt(
+        env_var, salt,
+    )?)
 }
 
 pub fn decrypt_directory_compatible(

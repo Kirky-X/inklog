@@ -341,7 +341,6 @@ mod tests {
 
         let adapter = LogAdapter::new(console_tx, async_tx, metrics);
 
-        // 创建一个测试 log::Record
         let metadata = log::Metadata::builder()
             .target("test::module")
             .level(Level::Info)

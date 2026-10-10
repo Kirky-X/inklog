@@ -116,7 +116,7 @@ inklog 是面向生产环境的日志基础设施：应用代码继续使用 `lo
 cargo add inklog
 ```
 
-或在 `Cargo.toml` 中显式声明（`default = []`，默认仅启用核心能力）：
+或在 `Cargo.toml` 中显式声明（`default = ["i18n", "cache"]`，默认启用核心能力 + 国际化 + 缓存后端）：
 
 ```toml
 [dependencies]
@@ -150,18 +150,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 1. **初始化**：`LoggerManager` 负责安装全局 tracing subscriber 与 `log` crate 前端，进程内单例语义（`init_inklog_logger()` 提供便捷入口）。
 2. **记录**：业务代码使用 `tracing::info!` 等标准宏，无侵入。
 3. **Sink**：输出目标抽象（`LogSink` / `AsyncSink` trait），console / file / database / net / otlp 内置实现，可自定义。
-4. **配置**：`InklogConfig` 支持 TOML 文件与 `INKLOG_*` 环境变量覆盖，优先级为环境变量 > 配置文件 > 默认值。
+4. **配置**：`InklogConfig` 支持 TOML 文件；`INKLOG_*` 环境变量覆盖仅在经 `InklogConfig::load_with_env_overrides()` 加载时应用（优先级为环境变量 > 配置文件 > 默认值），`LoggerManager::new()` / `LoggerManager::load()` 走 `load_sync()`，不应用 env 覆盖。
 5. **关闭**：应用退出前调用 `shutdown()`，等待通道中剩余日志全部写入。
 
 ---
 
 ## 🎨 特性标志
 
-`default = ["i18n"]`：默认组合为核心能力 + 国际化；下列其余 feature 按需显式启用（依据 `Cargo.toml` `[features]` 定义）。以 `default-features = false` 引入可裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退到内嵌英文文案表。
+`default = ["i18n", "cache"]`：默认组合为核心能力 + 国际化 + 缓存后端；下列其余 feature 按需显式启用（依据 `Cargo.toml` `[features]` 定义）。以 `default-features = false` 引入即同时关闭 i18n 与 cache，可裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退到内嵌英文文案表。
 
 | 标志 | 默认 | 说明 |
 |------|:----:|------|
-| `i18n` | ✅ | 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + `INKLOG_LOCALE` 覆盖；关闭后依赖树不含 icu/fluent |
+| `i18n` | ✅ | 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + `INKLOG_LOCALE` 覆盖 |
+| `cache` | ✅ | 缓存后端：oxcache 适配器（`OxCacheAdapter`）与 `ObjectPool`；oxcache 的 icu/fluent 依赖非可选，裁掉 icu/fluent 需同时关闭 `i18n` 与 `cache`（即 `default-features = false`） |
 | `sqlite` | ❌ | SQLite 数据库后端（经 dbnexus，rustls 运行时） |
 | `postgres` | ❌ | PostgreSQL 数据库后端（经 dbnexus） |
 | `mysql` | ❌ | MySQL 数据库后端（经 dbnexus） |
@@ -181,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `kms` | ❌ | KMS 密钥提供者（`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP） |
 | `net-sink` | ❌ | 网络转发 Sink（TCP 可 TLS + UDP，断线缓冲与自动重连） |
 | `otlp` | ❌ | OTLP/HTTP JSON 日志导出 MVP（手写传输，零新增依赖） |
-| `otel` | ❌ | 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主 tracing-opentelemetry layer 写入）；宿主 otel 版本需与 inklog 对齐，未对齐时静默回退根 span 派生 |
+| `otel` | ❌ | 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主 tracing-opentelemetry layer 写入）；宿主 otel 版本需与 inklog 对齐（当前 opentelemetry 0.33，配套 tracing-opentelemetry 0.34），未对齐时静默回退根 span 派生 |
 | `metrics-registry` | ❌ | 通用业务指标 registry（CounterVec / GaugeVec / HistogramVec + Prometheus 文本导出） |
 | `test-utils` | ❌ | 测试面 mock 导出（`MockCache` / `MockConfig` / `MockDatabaseAdapter`），不入 default 与任何生产组合 |
 
@@ -275,7 +276,7 @@ cargo run --package inklog-examples --bin <名称>
 
 | 示例 | 说明 | 特性要求 |
 |------|------|----------|
-| `http` | HTTP 健康检查与指标端点演示 | 无 |
+| `http` | HTTP 健康检查与指标端点演示 | `http`（经 required-features 强制） |
 | `http_auth` | HTTP 认证与 IP 白名单配置 | 无 |
 | `tls_config` | TLS 配置 | 无 |
 
@@ -323,7 +324,7 @@ Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重�
 | Docker 数据库集成 | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite 生命周期验证 |
 | 性能测试 | `tests/performance/` + `benches/` | 大容量、长时间运行测试与 criterion 基准 |
 
-**测试规模**（v0.3.0-rc.7 发布前实测，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,710 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,315 个测试函数**；另有 criterion 基准函数 48 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个、`benches/secret_scan_bench.rs` 8 个，按 `.bench_function(` 注册用例计数；其中 1 个按 `otlp` feature 门控，`secret_scan_bench` 需 `secret-scan` feature），基线见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
+**测试规模**（HEAD 实测，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,712 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,317 个测试函数**；另有 criterion 基准函数 48 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个、`benches/secret_scan_bench.rs` 8 个，按 `.bench_function(` 注册用例计数；其中 1 个按 `otlp` feature 门控，`secret_scan_bench` 需 `secret-scan` feature），基线见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
 ### 运行命令（与 CI 一致）
 
@@ -369,7 +370,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 | 有界通道背压 | `channel_capacity` 默认 10000 | 防止内存溢出，通道水位经指标暴露 |
 | 数据库批量写入 | `batch_size` 默认 100，刷新间隔默认 500 ms | docs/ARCHITECTURE.md 参考值：批量 100 条约 10,000 行/s，逐条插入约 100 行/s |
 | 脱敏按需开启 | `masking_enabled` | 正则脱敏是主链路中最贵的安全环节，建议仅在需要的 sink 开启 |
-| Zstd 压缩 | 级别 0-22，默认 3 | 默认级别压缩比约 3.5x |
+| Zstd 压缩 | 级别 1-22，默认 3 | 默认级别压缩比约 3.5x |
 
 复现方式见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)「复现」章节。
 
@@ -419,7 +420,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 |------|------|
 | Rust 1.97.1 | 经 `rust-toolchain.toml` 固定 |
 | protobuf 编译器 | 含数据库 feature 的组合构建需要 `protoc` |
-| lefthook | `bash scripts/install-pre-commit.sh` 安装钩子 |
+| Git 钩子 | `bash scripts/install-pre-commit.sh` 安装 Python pre-commit 钩子（读 `.pre-commit-config.yaml`）；lefthook 用户执行 `lefthook install`（配置见 `lefthook.yml`） |
 
 ```bash
 git clone https://github.com/Kirky-X/inklog.git
@@ -433,7 +434,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 ### 提交约定
 
 - **Conventional Commits**：`feat: ...` / `fix: ...` / `docs: ...` 等，commit-msg 钩子强制校验；
-- **pre-commit 钩子**：rustfmt、clippy（`-D warnings` 零告警）、`cargo deny check`、私钥扫描；
+- **pre-commit 钩子**（`.pre-commit-config.yaml`）：rustfmt、clippy（`-D warnings` 零告警）、`cargo check`、私钥/密钥扫描（detect-private-key、detect-secrets）与 typos 等；`cargo deny check` 位于 lefthook 配置（`lefthook.yml`）；
 - **pre-push 钩子**：`cargo audit` 与覆盖率 ≥95% 门禁（与 CI coverage job 同口径：显式 features + `--lib`，命令见 lefthook.yml）。
 
 ### Pull Request 流程
@@ -453,7 +454,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 ### 最近版本
 
 - **0.3.0-rc.7**（2026-10-07）：修复 `create_compressed_output` 在非 unix 且 zstd/gzip 均未启用时的 `E0433` 编译失败（limiteron 以 `default-features = false` 依赖时踩中）；CI 构建腿补零特性检查防回归
-- **0.3.0-rc.6**（2026-09-28）：全出口 PII 掩码覆盖与脱敏正则加固（fancy-regex 环视）；ERROR/FATAL 兜底补发、fsync 崩溃一致性与文件权限 0600；审计链接入轮转管线与 `inklog-cli verify-chain`；服务身份静态字段注入；deferred-capabilities 四项（中文姓名掩码/FallbackJournal/CBFS 转正/真 OTel 链路上下文）；masking 检测面与 KV 脱敏 API；i18n feature 化；CI 数据库矩阵补齐 duckdb；
+- **0.3.0-rc.6**（2026-10-06）：全出口 PII 掩码覆盖与脱敏正则加固（fancy-regex 环视）；ERROR/FATAL 兜底补发、fsync 崩溃一致性与文件权限 0600；审计链接入轮转管线与 `inklog-cli verify-chain`；服务身份静态字段注入；deferred-capabilities 四项（中文姓名掩码/FallbackJournal/CBFS 转正/真 OTel 链路上下文）；masking 检测面与 KV 脱敏 API；i18n feature 化；CI 数据库矩阵补齐 duckdb；
 - **0.3.0-rc.4**（2026-09-14，含原 rc.3 批次）：新增 `init_inklog_logger` 单例初始化、运行时级别热调（`set_level`）、动态 Sink 注册（`LoggerBuilder::add_sink`）、`trace_id`/`span_id` 追踪关联、`inklog-cli query` 日志检索、网络转发 Sink（TCP/UDP）、OTLP 导出 MVP、归档防篡改链与 `docs/PERFORMANCE.md` 首份性能基线；
 - **0.3.0-rc.2**（2026-09-03）：集成 trait-kit 0.5.0-rc.2 与 i18n 重构并升级版本号；默认公共 API 移除三个 Mock（BREAKING，外部测试消费者需启用 `test-utils`）；
 - **0.2.0**（2026-08-05）：新增 `compression` / `parquet` / `fast-masking` feature 与 i18n 核心模块；新增 ChannelBufferedFileSink、断路器保护与环形缓冲文件 Sink；edition 2024、MSRV 1.94。

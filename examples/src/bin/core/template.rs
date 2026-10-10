@@ -54,7 +54,6 @@ fn default_template() {
     println!("模板: {{timestamp}} [{{level}}] {{target}} - {{message}}");
     println!("输出: {}", rendered);
 
-    // 验证渲染结果
     assert!(rendered.contains("[INFO]"), "应包含日志级别");
     assert!(rendered.contains("my_app::module"), "应包含 target");
     assert!(rendered.contains("用户登录成功"), "应包含消息");

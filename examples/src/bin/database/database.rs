@@ -67,7 +67,6 @@ fn escape_sql_string(s: &str, driver: &DatabaseDriver) -> String {
 fn create_temp_permission_file() -> Result<tempfile::NamedTempFile, Box<dyn std::error::Error>> {
     use std::io::Write;
 
-    // 创建临时文件
     let mut temp_file = tempfile::NamedTempFile::new()?;
 
     // 写入权限配置 YAML
@@ -103,7 +102,6 @@ fn create_temp_permission_file() -> Result<tempfile::NamedTempFile, Box<dyn std:
 fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例1: SQLite 内存数据库连接");
 
-    // 创建临时权限配置文件
     let temp_perm_file = create_temp_permission_file()?;
     let perm_path = temp_perm_file.path().to_str().ok_or("Invalid temp path")?;
 
@@ -150,7 +148,6 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        // 创建连接池
         let pool = match dbnexus::DbPool::with_config(db_config).await {
             Ok(p) => {
                 println!("✓ 连接池创建成功");
@@ -162,7 +159,6 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // 获取会话
         let session: dbnexus::database::pool::Session = match pool.get_session("admin").await {
             Ok(s) => {
                 println!("✓ 会话获取成功");
@@ -174,7 +170,6 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // 创建 logs 表
         let create_result: dbnexus::foundation::error::DbResult<_> = session.execute_raw_ddl(
             "CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,7 +191,6 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => println!("⚠ logs 表创建失败 (可能已存在): {:?}", e),
         }
 
-        // 写入测试日志
         print_section("写入测试日志");
 
         let test_logs = vec![
@@ -221,7 +215,6 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // 查询验证
         print_section("查询验证");
         let result: dbnexus::foundation::error::DbResult<_> = session
             .execute_raw("SELECT COUNT(*) as count FROM logs")
@@ -250,7 +243,6 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
 fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例2: 批量写入演示");
 
-    // 创建临时权限配置文件
     let temp_perm_file = create_temp_permission_file()?;
     let perm_path = temp_perm_file.path().to_str().ok_or("Invalid temp path")?;
 
@@ -290,7 +282,6 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        // 创建连接池
         let pool = match dbnexus::DbPool::with_config(db_config).await {
             Ok(p) => p,
             Err(e) => {
@@ -307,7 +298,6 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // 创建 logs 表
         let _: dbnexus::foundation::error::DbResult<_> = session.execute_raw_ddl(
             "CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -324,7 +314,6 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             )"
         ).await;
 
-        // 批量写入不同级别的日志
         print_section("批量写入日志");
 
         let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
@@ -376,7 +365,6 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             println!("  第 {} 轮完成: {} / {} 条成功\n", round, success_count, levels.len());
         }
 
-        // 统计总数
         let result: dbnexus::foundation::error::DbResult<_> = session
             .execute_raw("SELECT COUNT(*) as total FROM logs")
             .await;
@@ -403,7 +391,6 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
 fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例3: 查询功能演示");
 
-    // 创建临时权限配置文件
     let temp_perm_file = create_temp_permission_file()?;
     let perm_path = temp_perm_file.path().to_str().ok_or("Invalid temp path")?;
 
@@ -422,7 +409,6 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        // 创建连接池
         let pool = match dbnexus::DbPool::with_config(db_config).await {
             Ok(p) => p,
             Err(e) => {
@@ -439,7 +425,6 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // 创建表
         let _: dbnexus::foundation::error::DbResult<_> = session.execute_raw_ddl(
             "CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -456,7 +441,6 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             )"
         ).await;
 
-        // 写入测试数据
         print_section("准备测试数据");
         println!("写入不同级别的日志记录...\n");
 
@@ -491,7 +475,6 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("✓ 已写入 {} 条测试数据\n", test_data.len());
 
-        // 查询 1: 统计各级别日志数量
         print_section("查询1: 按级别统计");
         println!("SQL: SELECT level, COUNT(*) as count FROM logs GROUP BY level\n");
 
@@ -507,7 +490,6 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("  └───────┴───────┘");
         println!("  Total: 11 条\n");
 
-        // 查询 2: 按目标模块统计
         print_section("查询2: 按目标模块统计");
         println!("SQL: SELECT target, COUNT(*) as count FROM logs GROUP BY target\n");
 
@@ -532,7 +514,6 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("  [ERROR] database_example::database  - 数据库连接超时");
         println!("  [ERROR] database_example::database  - 查询执行失败\n");
 
-        // 查询 4: 搜索关键词
         print_section("查询4: 搜索日志内容");
         println!("SQL: SELECT * FROM logs WHERE message LIKE '%超时%' OR message LIKE '%失败%'\n");
 
@@ -540,7 +521,6 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("  [ERROR] database_example::database  - 数据库连接超时");
         println!("  [ERROR] database_example::database  - 查询执行失败\n");
 
-        // 查询 5: 获取最新日志
         print_section("查询5: 获取最近日志");
         println!("SQL: SELECT * FROM logs ORDER BY id DESC LIMIT 5\n");
 
@@ -551,13 +531,11 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("   8. [WARN]  database_example::auth    - 认证令牌即将过期");
         println!("   7. [INFO]  database_example::api    - 响应发送成功\n");
 
-        // 查询 6: 时间范围查询
         print_section("查询6: 时间范围查询");
         println!("SQL: SELECT * FROM logs WHERE timestamp > '2024-01-01'\n");
 
         println!("预期结果: 所有日志 (因为都是最近写入的)\n");
 
-        // 查询 7: 多条件组合查询
         print_section("查询7: 多条件组合查询");
         println!("SQL: SELECT level, target, message FROM logs");
         println!("       WHERE level IN ('WARN', 'ERROR') AND target LIKE '%database%'\n");

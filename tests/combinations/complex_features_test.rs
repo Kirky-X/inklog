@@ -112,7 +112,6 @@ mod complex_features {
             sleep(Duration::from_millis(50)).await;
         }
 
-        // 验证数据
         assert!(log_path.exists());
         assert!(db_path.exists());
 

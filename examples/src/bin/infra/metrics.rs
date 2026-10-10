@@ -490,7 +490,6 @@ fn show_prometheus_export() {
     metrics.set_db_batch_size(128);
     metrics.add_db_batch_records_total(128);
     metrics.set_pool_hit_rate(92.5);
-    // 设置 Sink 健康
     metrics.sink_started("console");
     metrics.sink_started("file");
     metrics.sink_started("database");

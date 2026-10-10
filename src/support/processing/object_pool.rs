@@ -33,13 +33,18 @@
 //! # }
 //! ```
 
+#[cfg(feature = "cache")]
 use crate::InklogError;
 use crate::LogRecord;
+#[cfg(feature = "cache")]
 use oxcache::Cache;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "cache")]
 use std::sync::Arc;
 use std::sync::LazyLock;
+#[cfg(feature = "cache")]
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "cache")]
 use std::time::Duration;
 
 /// Pool configuration - configurable via InklogConfig.performance.object_pool
@@ -83,6 +88,7 @@ impl Default for ObjectPoolConfig {
 /// underlying oxcache `Cache` and stats via `Arc`. Both clones read and
 /// write the same backing store. This is by design for multi-producer
 /// scenarios where several tasks need access to the same pool.
+#[cfg(feature = "cache")]
 #[derive(Clone)]
 pub struct ObjectPool<K, V>
 where
@@ -95,6 +101,7 @@ where
     stats: Arc<PoolStats>,
 }
 
+#[cfg(feature = "cache")]
 impl<K, V> ObjectPool<K, V>
 where
     K: oxcache::CacheKey + Send + Sync + 'static,
@@ -334,6 +341,7 @@ pub fn log_record_pool_len() -> usize {
 }
 
 /// Internal pool statistics
+#[cfg(feature = "cache")]
 #[derive(Debug, Default)]
 struct PoolStats {
     pub(crate) total_items: AtomicUsize,
@@ -350,6 +358,7 @@ mod tests {
     // ObjectPool async 测试
     // ============================================================================
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_new_default_capacity() {
         let pool = ObjectPool::<String, String>::new()
@@ -358,6 +367,7 @@ mod tests {
         assert_eq!(pool.len(), 0);
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_with_config() {
         let pool = ObjectPool::<String, i32>::with_config(ObjectPoolConfig {
@@ -369,6 +379,7 @@ mod tests {
         assert_eq!(pool.len(), 0);
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_put_and_get() {
         let pool = ObjectPool::<String, i32>::new().await.expect("build");
@@ -383,6 +394,7 @@ mod tests {
         assert_eq!(pool.get(&"missing".to_string()).await.expect("get"), None);
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_get_returns_result_on_cache_error() {
         // 验证 get 返回 Result，错误显性传播
@@ -393,6 +405,7 @@ mod tests {
         assert_eq!(result.unwrap(), None);
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_put_returns_result() {
         let pool = ObjectPool::<String, i32>::new().await.expect("build");
@@ -401,6 +414,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_with_ttl_config() {
         let pool = ObjectPool::<String, String>::with_config(ObjectPoolConfig {
@@ -418,6 +432,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_is_empty() {
         // 覆盖 is_empty() 方法 (行 162-163) 和 get() 内部 cache 访问 (行 128)

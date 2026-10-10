@@ -13,6 +13,19 @@ use serde_json::Value;
 
 use crate::LogRecord;
 
+/// ops 事件记录的 target（[`InklogOpsEvent::to_log_record`] 写入；供故障
+/// 路径做递归抑制判定复用）。
+pub(crate) const OPS_TARGET: &str = "inklog::ops";
+
+/// 判定记录是否为内部 ops 事件。
+///
+/// ops 事件经 [`publish_internal`] 广播到已启用的 sink 通道，可能回流到
+/// 产生它的故障路径：对自身事件再次发布会在「故障 → 事件 → 故障」间形成
+/// 自激循环。发布方据此跳过对 ops 事件的再发布。
+pub(crate) fn is_ops_record(record: &LogRecord) -> bool {
+    record.target == OPS_TARGET
+}
+
 /// 内部运维/审计事件。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InklogOpsEvent {
@@ -52,7 +65,7 @@ impl InklogOpsEvent {
             } else {
                 tracing::Level::INFO
             },
-            "inklog::ops".to_string(),
+            OPS_TARGET.to_string(),
             serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string()),
         );
         record

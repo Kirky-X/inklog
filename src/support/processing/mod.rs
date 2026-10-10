@@ -23,9 +23,10 @@ pub use masking::{DataMasker, DataMaskerBuilder, MaskMatch, MaskRule, MaskRuleBu
 #[cfg(feature = "fast-masking")]
 pub use masking_ac::AcMasker;
 pub use masking_registry::MaskRuleRegistry;
+#[cfg(feature = "cache")]
+pub use object_pool::ObjectPool;
 pub use object_pool::{
-    ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record,
-    put_string_buffer,
+    ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record, put_string_buffer,
 };
 pub use pipeline::{
     GlobalRateLimitMiddleware, IdentityFieldsMiddleware, ProcessingPipeline, SanitizeMiddleware,

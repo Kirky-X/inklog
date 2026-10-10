@@ -145,7 +145,6 @@ async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Erro
     );
     println!("✓ 错误日志已记录\n");
 
-    // 优雅关闭
     logger.shutdown()?;
     println!("✓ 已优雅关闭\n");
 
@@ -213,7 +212,6 @@ async fn show_health_check_after_init() -> Result<(), Box<dyn std::error::Error>
         .build()
         .await?;
 
-    // 检查健康状态
     let health = logger.get_health_status();
     println!("健康状态检查：");
     println!("  overall_status:     {:?}", health.overall_status);
@@ -230,7 +228,6 @@ async fn show_health_check_after_init() -> Result<(), Box<dyn std::error::Error>
     let health2 = logger.get_health_status();
     println!("  写入日志后 overall_status: {:?}", health2.overall_status);
 
-    // 检查 Channel 信息
     let capacity = logger.effective_channel_capacity();
     let queued = logger.channel_len();
     println!("\nChannel 信息：");
@@ -266,7 +263,6 @@ async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
     let queued_before = logger.channel_len();
     println!("  关闭前 Channel 队列: {} 条", queued_before);
 
-    // 执行关闭
     logger.shutdown()?;
     println!("✓ shutdown() 完成");
     println!("  - 所有日志已持久化到 Sink");
@@ -282,7 +278,6 @@ async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
 async fn show_error_handling() {
     println!("--- 示例 6：错误处理 ---\n");
 
-    // 场景 1：不存在的配置文件
     println!("场景 1：加载不存在的配置文件");
     match LoggerManager::from_file("/nonexistent/config.toml").await {
         Ok(_) => println!("  意外成功"),

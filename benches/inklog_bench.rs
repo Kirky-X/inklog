@@ -31,6 +31,11 @@ fn create_benchmark_runtime() -> Runtime {
 }
 
 /// Sets up a file-based logger for benchmarking
+///
+/// `console_sink: None` 在 manager 语义下是"默认启用"（取
+/// `ConsoleSinkConfig::default()`，enabled=true），会让每个"file 基准"同时
+/// 向 stdout 写每条记录（默认参数下一次全量运行产生数百 MB 输出并引入
+/// console worker 干扰）。显式关闭以对齐函数名与本文档的基准口径。
 async fn setup_file_logger(log_path: &Path, channel_capacity: usize) -> (LoggerManager, impl Drop) {
     let config = InklogConfig {
         file_sink: Some(FileSinkConfig {
@@ -38,7 +43,10 @@ async fn setup_file_logger(log_path: &Path, channel_capacity: usize) -> (LoggerM
             path: log_path.to_path_buf(),
             ..Default::default()
         }),
-        console_sink: None,
+        console_sink: Some(inklog::config::ConsoleSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
         performance: PerformanceConfig {
             channel_capacity,
             ..Default::default()
@@ -66,9 +74,17 @@ async fn setup_file_logger(log_path: &Path, channel_capacity: usize) -> (LoggerM
 }
 
 /// Sets up a console-based logger for benchmarking
+///
+/// 只启用 console sink：`file_sink: None` 在 manager 语义下是"默认启用"
+/// （`is_none_or(|cfg| cfg.enabled)`），会让本基准同时写默认路径
+/// `logs/app.log`——测的就不再是 console 路径，且 file 通道背压会主导
+/// 实测值。显式 `enabled: false` 把 file 通道关掉。
 async fn setup_console_logger() -> (LoggerManager, impl Drop) {
     let config = InklogConfig {
-        file_sink: None,
+        file_sink: Some(FileSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
         console_sink: Some(inklog::config::ConsoleSinkConfig {
             enabled: true,
             colored: true,
@@ -97,10 +113,24 @@ async fn setup_console_logger() -> (LoggerManager, impl Drop) {
 }
 
 /// Sets up a no-op logger (no sinks) for benchmarking pure overhead
+///
+/// 两个 `None` 在 manager 语义下都是"默认启用"：console 取
+/// `ConsoleSinkConfig::default()`（enabled=true），file 取
+/// `is_none_or(|cfg| cfg.enabled)`=true。若不显式关闭，本基准会向 stdout 洪泛
+/// 输出（实测全量约 145 万行）并启用默认路径 `logs/app.log` 的 file 通道——
+/// "no-op 对照"名不副实：stdout 洪泛阻塞 console worker，teardown 需排水巨量
+/// 积压，实测单基准从秒级膨胀到 10 分钟级。显式关闭后无 sink 通道（哑 async 通道即刻断连），记录的
+/// 纯订阅开销才可测。
 async fn setup_noop_logger() -> (LoggerManager, impl Drop) {
     let config = InklogConfig {
-        file_sink: None,
-        console_sink: None,
+        file_sink: Some(FileSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
+        console_sink: Some(inklog::config::ConsoleSinkConfig {
+            enabled: false,
+            ..Default::default()
+        }),
         ..Default::default()
     };
 

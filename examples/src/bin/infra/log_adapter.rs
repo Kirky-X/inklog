@@ -35,7 +35,6 @@ fn show_install_and_log() {
     let (console_tx, console_rx) = bounded::<Arc<LogRecord>>(100);
     let (async_tx, async_rx) = bounded::<Arc<LogRecord>>(100);
 
-    // 创建 Metrics 指标收集器
     let metrics = Arc::new(Metrics::new());
 
     // 构建 LogAdapter 并安装为全局 logger

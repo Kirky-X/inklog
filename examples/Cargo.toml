@@ -33,7 +33,7 @@ anyhow = { workspace = true }
 # “Re-export underlying dependencies” 一节对 L2/L3 宏路径的说明）。
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { version = "1.26", default-features = false, features = ["v4"] }
+uuid = { version = "1.28", default-features = false, features = ["v4"] }
 chrono = { workspace = true }
 aes-gcm = { workspace = true }
 base64 = { workspace = true }
@@ -54,6 +54,9 @@ path = "src/bin/sinks/console.rs"
 [[bin]]
 name = "file"
 path = "src/bin/sinks/file.rs"
+# 示例3 演示 Zstd 压缩；未启用时 cargo 会拒绝运行，避免 compress = true
+# 因缺少压缩后端而静默不压缩、示例却仍打印“Zstd 压缩演示完成”
+required-features = ["compression"]
 
 [[bin]]
 name = "encryption"

@@ -1,5 +1,5 @@
 # lefthook 配置 — 7 仓库统一基线(见 base/CONFIG_BASELINE.md)
-# 启用: lefthook install(或 bash scripts/install-pre-commit.sh)
+# 启用: lefthook install（scripts/install-pre-commit.sh 安装的是 .pre-commit-config.yaml 的 Python pre-commit 框架，二者二选一）
 # 与 .pre-commit-config.yaml 功能等价,二选一即可。
 pre-commit:
   parallel: true

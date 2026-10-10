@@ -31,13 +31,10 @@ use std::collections::HashMap;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog 数据脱敏示例 ===\n");
 
-    // 创建 DataMasker 实例
     let masker = DataMasker::new();
 
-    // 1. 基础脱敏功能
     print_separator("1. 基础脱敏功能");
 
-    // 1.1 邮箱脱敏
     print_section("1.1 邮箱脱敏");
     let email = "user@example.com";
     let masked_email = masker.mask(email);
@@ -45,7 +42,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("脱敏后:    {}", masked_email);
     assert_eq!(masked_email, "**@**.***");
 
-    // 1.2 电话脱敏
     print_section("1.2 电话号码脱敏");
     let phone = "13812345678";
     let masked_phone = masker.mask(phone);
@@ -53,7 +49,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("脱敏后:    {}", masked_phone);
     assert_eq!(masked_phone, "***-****-****");
 
-    // 1.3 身份证号脱敏
     print_section("1.3 身份证号脱敏");
     let id_card = "110101199001011234";
     let masked_id = masker.mask(id_card);
@@ -61,7 +56,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("脱敏后:     {}", masked_id);
     assert_eq!(masked_id, "******1234");
 
-    // 1.4 银行卡号脱敏
     print_section("1.4 银行卡号脱敏");
     // 注意：此处为演示刻意打印原始卡号以对照脱敏效果，使用的是公开测试号。
     // 生产代码严禁将真实 PII 原文写入日志或 stdout。
@@ -70,7 +64,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("原始银行卡: {}", bank_card);
     println!("脱敏后:     {}", masked_card);
 
-    // 2. 多种敏感数据混合脱敏
     print_separator("2. 混合敏感数据脱敏");
 
     let mixed_text = "用户信息：邮箱=test@example.com，电话=13812345678，备注=联系客服";
@@ -80,7 +73,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(!masked_text.contains("test@example.com"));
     assert!(!masked_text.contains("13812345678"));
 
-    // 3. JSON 数据脱敏
     print_separator("3. JSON 数据脱敏");
 
     let mut user_data = json!({
@@ -103,7 +95,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(user_data["phone"], "***-****-****");
     assert_eq!(user_data["name"], "张三"); // 非敏感字段保持不变
 
-    // 4. 嵌套 JSON 结构脱敏
     print_separator("4. 嵌套 JSON 结构脱敏");
 
     let mut nested_data = json!({
@@ -130,7 +121,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n脱敏后嵌套 JSON:");
     println!("{}", serde_json::to_string_pretty(&nested_data)?);
 
-    // 5. 敏感字段检测
     print_separator("5. 敏感字段检测");
 
     print_section("5.1 敏感字段示例");
@@ -160,7 +150,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  ✓ {}", field);
     }
 
-    // 6. HashMap 脱敏
     print_separator("6. HashMap 数据脱敏");
 
     let mut user_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -194,10 +183,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(user_map["phone"], "***-****-****");
     assert_eq!(user_map["name"], "李四");
 
-    // 7. 高级敏感数据脱敏
     print_separator("7. 高级敏感数据脱敏");
 
-    // 7.1 JWT Token 脱敏
     print_section("7.1 JWT Token 脱敏");
     let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     let masked_jwt = masker.mask(jwt);
@@ -205,7 +192,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("脱敏后:   {}", masked_jwt);
     assert!(masked_jwt.contains("***REDACTED_JWT***"));
 
-    // 7.2 AWS Access Key 脱敏
     print_section("7.2 AWS Access Key 脱敏");
     let aws_key = "AKIAIOSFODNN7EXAMPLE";
     let masked_aws = masker.mask(aws_key);
@@ -213,7 +199,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("脱敏后:       {}", masked_aws);
     assert!(masked_aws.contains("***REDACTED***"));
 
-    // 7.4 信用卡脱敏 (Luhn 校验)
     print_section("7.4 信用卡脱敏 (Luhn 校验)");
     let visa = "4111111111111111";
     let masked_visa = masker.mask(visa);
@@ -225,14 +210,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("原始 Amex:  {}", amex);
     println!("脱敏后:     {}", masked_amex);
 
-    // 7.5 国际电话号码脱敏
     print_section("7.5 国际电话号码脱敏");
     let intl_phone = "+1-202-555-0123";
     let masked_intl = masker.mask(intl_phone);
     println!("原始国际电话: {}", intl_phone);
     println!("脱敏后:       {}", masked_intl);
 
-    // 7.6 IP 地址和 MAC 地址脱敏
     print_section("7.6 IP/MAC 地址脱敏");
     let ipv4 = "Server at 192.168.1.100 port 8080";
     let ipv6 = "IPv6 addr: 2001:0db8:85a3:0000:0000:8a2e:0370:7334";
@@ -241,7 +224,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("IPv6: {} → {}", ipv6, masker.mask(ipv6));
     println!("MAC:  {} → {}", mac, masker.mask(mac));
 
-    // 7.7 第三方令牌脱敏
     print_section("7.7 第三方令牌脱敏");
     let github_token = "ghp_1234567890abcdefghij1234567890abcdef";
     let slack_token = "xoxb-1234567890-1234567890-abcDEF123";
@@ -250,10 +232,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Slack:  {} → {}", slack_token, masker.mask(slack_token));
     println!("Stripe: {} → {}", stripe_key, masker.mask(stripe_key));
 
-    // 8. 实际应用场景
     print_separator("8. 实际应用场景");
 
-    // 8.1 日志消息脱敏
     print_section("8.1 日志消息脱敏");
 
     let log_message = r#"用户登录成功：
@@ -266,7 +246,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("原始日志:\n{}", log_message);
     println!("\n脱敏后日志:\n{}", masked_log);
 
-    // 8.2 API 响应数据脱敏
     print_section("8.2 API 响应数据脱敏");
 
     let mut api_response = json!({
@@ -289,10 +268,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n脱敏后 API 响应:");
     println!("{}", serde_json::to_string_pretty(&api_response)?);
 
-    // 9. 自定义规则
     print_separator("9. 自定义规则");
 
-    // 9.1 MaskRuleBuilder 创建自定义规则
     print_section("9.1 MaskRuleBuilder");
     let custom_rule = MaskRule::builder("employee_id")
         .pattern(r"\bEMP-\d{6}\b")
@@ -306,7 +283,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         custom_rule.priority()
     );
 
-    // 9.2 DataMaskerBuilder 组装脱敏器
     print_section("9.2 DataMaskerBuilder");
     let custom_masker = DataMasker::builder()
         .add_rule(
@@ -323,7 +299,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("原始: {}", emp_text);
     println!("脱敏: {}", custom_masker.mask(emp_text));
 
-    // 9.3 MaskRuleRegistry 规则注册中心
     print_section("9.3 MaskRuleRegistry");
     let mut registry = MaskRuleRegistry::with_builtins();
     println!("内置规则数: {}", registry.len());
@@ -340,7 +315,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("注册自定义规则后: {}", registry.len());
     println!("活跃规则数: {}", registry.active_rules().len());
 
-    // 9.4 TOML 配置加载
     print_section("9.4 MaskRuleRegistry::load_from_toml");
     let toml_config = r#"
 [[masking_rules]]
@@ -375,7 +349,6 @@ replacement = "***TRACE***"
     println!("原始: {}", order_text);
     println!("脱敏: {}", toml_masker.mask(order_text));
 
-    // 10. 性能提示
     print_separator("10. 性能提示");
 
     println!("DataMasker 性能优化要点:");
@@ -386,7 +359,6 @@ replacement = "***TRACE***"
     println!("  5. 规则按优先级排序执行");
     println!("  6. 支持通过 Registry 动态管理规则");
 
-    // 完成
     println!("\n✓ 所有示例演示完成");
     println!("\n按 Ctrl+C 退出...");
 

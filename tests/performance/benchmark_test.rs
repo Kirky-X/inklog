@@ -3,14 +3,11 @@
 // 性能基准测试
 // 测试高并发日志写入性能、内存使用和吞吐量
 //
-// 核正：统一改造为本仓测试口径（tests/integration/additional_tests.rs 范本）——
-// with_config 内部 set_global_default 为进程级单次语义，多用例下后装者的日志
-// 流向首个 logger（已 shutdown）导致测量失真（测得的是丢弃速率而非真实写盘
-// 吞吐）；改用 build_detached + 线程级 set_default + tracing::info!。
-// 测量口径变更（2026-09-26，commit a491563）：console sink 各用例统一
-// enabled=false——ConsoleSink::write 自该提交起落实禁用丢弃语义，console
-// 输出/格式化路径退出延迟与吞吐测量。与历史基线数据不可比，回归对比
-// 需以本提交之后重新采集的数据为准。
+// 测量口径（tests/integration/additional_tests.rs 范本）：build_detached + 线程级
+// set_default + tracing::info!——with_config 的 set_global_default 为进程级单次
+// 语义，多用例下后装者的日志流向首个 logger（已 shutdown），测得的是丢弃速率
+// 而非真实吞吐；console sink 各用例统一 enabled=false（禁用丢弃语义），
+// 与历史基线数据不可比，回归对比需以口径变更后重新采集的数据为准。
 
 #[cfg(test)]
 mod performance_test {

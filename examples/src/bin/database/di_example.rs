@@ -116,17 +116,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("6. 使用 MockCache 进行测试:");
     let mock_cache = Arc::new(MockCache::new());
 
-    // 设置和读取值
     mock_cache.set("test_key", "test_value".to_string()).await?;
     let value = mock_cache.get("test_key").await?;
     println!("   - MockCache 设置并读取: {:?}", value);
     assert_eq!(value, Some("test_value".to_string()));
 
-    // 检查 exists
     let exists = mock_cache.exists("test_key").await?;
     println!("   - test_key 存在: {}", exists);
 
-    // 删除键
     let deleted = mock_cache.delete("test_key").await?;
     println!("   - 删除 test_key: {}", deleted);
 
@@ -157,7 +154,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n8. 使用 MockDatabaseAdapter 进行测试:");
     let mock_db = Arc::new(MockDatabaseAdapter::new());
 
-    // 健康检查
     let healthy = mock_db.is_healthy().await;
     println!("   - 初始健康状态: {}", healthy);
 
@@ -169,7 +165,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     mock_db.set_healthy(true);
     println!("   - 恢复后健康状态: {}", mock_db.is_healthy().await);
 
-    // 查看存储的记录数
     println!("   - 存储的记录数: {}", mock_db.record_count());
 
     // 模式 9: 使用 Mock 类型创建 Logger（测试场景）

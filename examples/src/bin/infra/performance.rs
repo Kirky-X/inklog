@@ -38,19 +38,14 @@ use std::time::Instant;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog 性能测试示例 ===\n");
 
-    // 1. Console Sink 性能测试
     console_sink_performance().await?;
 
-    // 2. File Sink 性能测试
     file_sink_performance().await?;
 
-    // 3. 延迟分析
     latency_analysis().await?;
 
-    // 4. 背压测试
     backpressure_test().await?;
 
-    // 5. 并发测试
     concurrent_test().await?;
 
     println!("\n✓ 所有性能测试完成");
@@ -63,7 +58,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn console_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("1. Console Sink 性能测试");
 
-    // 创建 Console Sink 配置
     let config = InklogConfig {
         console_sink: Some(inklog::config::ConsoleSinkConfig {
             enabled: true,
@@ -106,7 +100,6 @@ async fn file_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
 
     let log_path = temp_file_path("performance");
 
-    // 创建 File Sink 配置
     let config = InklogConfig {
         file_sink: Some(inklog::config::FileSinkConfig {
             enabled: true,
@@ -127,7 +120,6 @@ async fn file_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!(iteration = i, "File perf test");
     }
 
-    // 等待所有日志写入完成
     manager.shutdown()?;
 
     let duration = start.elapsed();
@@ -143,7 +135,6 @@ async fn file_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
     println!("  注: File Sink 吞吐量受 Channel 容量和 Worker 线程数影响");
     println!("      当前吞吐量反映了异步写入的开销");
 
-    // 清理临时文件
     if let Err(e) = fs::remove_file(&log_path).await {
         eprintln!("  警告: 无法删除临时文件: {} ({})", log_path, e);
     } else {
@@ -161,7 +152,6 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
 
     let log_path = temp_file_path("latency");
 
-    // 创建 File Sink 配置
     let config = InklogConfig {
         file_sink: Some(inklog::config::FileSinkConfig {
             enabled: true,
@@ -199,10 +189,8 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
         .map(|produce_at| persist_done.duration_since(*produce_at))
         .collect();
 
-    // 排序以计算百分位
     latencies.sort();
 
-    // 计算 P50/P95/P99
     let p50 = latencies[count / 2];
     let p95 = latencies[(count as f64 * 0.95) as usize];
     let p99 = latencies[(count as f64 * 0.99) as usize];
@@ -216,7 +204,6 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
     println!("  注: 延迟口径为\"从产生到持久化\"（以 shutdown/flush 完成为终点，含队列等待）");
     println!("      实际数值受系统负载和 Channel 状态影响");
 
-    // 清理临时文件
     if let Err(e) = fs::remove_file(&log_path).await {
         eprintln!("  警告: 无法删除临时文件: {} ({})", log_path, e);
     } else {
@@ -268,7 +255,6 @@ async fn backpressure_test() -> Result<(), Box<dyn std::error::Error>> {
 
         let enqueue_duration = start.elapsed();
 
-        // 等待所有日志写入完成
         let flush_start = Instant::now();
         manager.shutdown()?;
         let flush_duration = flush_start.elapsed();
@@ -290,7 +276,6 @@ async fn backpressure_test() -> Result<(), Box<dyn std::error::Error>> {
             println!("  ✓  容量充足，无明显背压");
         }
 
-        // 清理临时文件
         let _ = fs::remove_file(&log_path).await;
     }
 
@@ -305,7 +290,6 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
 
     let log_path = temp_file_path("concurrent");
 
-    // 创建 File Sink 配置
     let config = InklogConfig {
         file_sink: Some(inklog::config::FileSinkConfig {
             enabled: true,
@@ -325,7 +309,6 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
 
-    // 启动多个并发任务
     let mut handles = vec![];
     for task_id in 0..task_count {
         let handle = tokio::spawn(async move {
@@ -336,12 +319,10 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
         handles.push(handle);
     }
 
-    // 等待所有任务完成
     for handle in handles {
         handle.await?;
     }
 
-    // 等待所有日志写入完成
     Arc::try_unwrap(manager)
         .map_err(|_| "Manager still has references")?
         .shutdown()?;
@@ -356,7 +337,6 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
     println!("  吞吐量:        {:.2} 条/秒", throughput);
     println!("  注: 吞吐量包含了日志处理和 flush 的总时间");
 
-    // 清理临时文件
     if let Err(e) = fs::remove_file(&log_path).await {
         eprintln!("  警告: 无法删除临时文件: {} ({})", log_path, e);
     } else {
@@ -364,30 +344,4 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
-}
-
-/// 性能对比摘要
-///
-/// 展示 Console Sink 和 File Sink 的性能对比
-#[expect(
-    dead_code,
-    reason = "演示用静态对比摘要，主流程未调用；若确认不再展示可整体删除"
-)]
-fn performance_summary() {
-    print_separator("6. 性能对比摘要");
-
-    println!("  Sink 类型    |  吞吐量       |  延迟      |  适用场景");
-    println!("  ------------|--------------|-----------|------------------");
-    println!("  Console     |  >1000 条/秒 |  <10μs    |  开发调试");
-    println!("  File        |  >5000 条/秒 |  <1ms     |  生产环境");
-    println!();
-    println!("  关键性能指标:");
-    println!("  - P50 延迟: 50% 的日志延迟低于此值（中位数）");
-    println!("  - P95 延迟: 95% 的日志延迟低于此值");
-    println!("  - P99 延迟: 99% 的日志延迟低于此值");
-    println!();
-    println!("  性能优化建议:");
-    println!("  1. Channel 容量建议 >= 10000，避免背压");
-    println!("  2. 文件轮转大小建议 100MB，平衡性能和存储");
-    println!("  3. 启用压缩可减少磁盘占用，对性能影响较小");
 }

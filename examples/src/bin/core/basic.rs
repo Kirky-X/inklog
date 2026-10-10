@@ -190,7 +190,6 @@ async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("应用启动");
     tracing::info!("处理业务逻辑...");
 
-    // 应用退出前优雅关闭
     logger.shutdown()?;
     // shutdown 已显式调用，用 mem::forget 阻止 Drop 再次关闭
     mem::forget(logger);

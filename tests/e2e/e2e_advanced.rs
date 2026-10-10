@@ -26,6 +26,8 @@ fn init_test_locale() {
     }
 }
 
+#[cfg(feature = "cache")]
+use inklog::ObjectPool;
 use inklog::sink::{
     CircuitBreaker, CompositeRotation, FileSink, FileSinkFactory, LogSink, RotationContext,
     RotationResult, RotationStrategy, SinkFactory, SinkMetadata, SinkRegistry, SizeBasedRotation,
@@ -34,10 +36,10 @@ use inklog::sink::{
 use inklog::support::observability::metrics::FallbackAction;
 use inklog::{
     DataMasker, FileSinkConfig, InklogConfig, InklogError, InklogResult, LogLevel,
-    LogLevelParseError, LogRecord, LogSanitizer, LogTemplate, Metrics, ObjectPool,
-    ObjectPoolConfig, PathValidator, PathValidatorConfig, PerformanceConfig, SanitizerConfig,
-    SinkHealthMonitor, SinkStatus, ValidationResult, get_log_record, get_string_buffer,
-    put_log_record, put_string_buffer,
+    LogLevelParseError, LogRecord, LogSanitizer, LogTemplate, Metrics, ObjectPoolConfig,
+    PathValidator, PathValidatorConfig, PerformanceConfig, SanitizerConfig, SinkHealthMonitor,
+    SinkStatus, ValidationResult, get_log_record, get_string_buffer, put_log_record,
+    put_string_buffer,
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -514,22 +516,18 @@ mod sink_registry_e2e {
         let temp = tempdir().expect("tempdir failed");
         let mut registry = SinkRegistry::new();
 
-        // 初始状态：空
         assert!(registry.list_sinks().is_empty());
         assert!(!registry.has_sink("file"));
 
-        // 注册
         let config = make_test_config(temp.path());
         registry.register(FileSinkFactory::new(config));
         assert!(registry.has_sink("file"));
         assert_eq!(registry.list_sinks().len(), 1);
         assert!(registry.list_sinks().contains(&"file"));
 
-        // 创建 sink
         let sink = registry.create("file").await;
         assert!(sink.is_ok(), "create should succeed");
 
-        // 获取元数据
         let metadata = registry.get_metadata("file");
         assert!(metadata.is_some());
         let metadata: SinkMetadata = metadata.unwrap();
@@ -1938,6 +1936,7 @@ mod object_pool_e2e {
         }
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_async_put_get_with_value() {
         let pool = ObjectPool::<String, i32>::new().await.expect("pool build");
@@ -1956,6 +1955,7 @@ mod object_pool_e2e {
         assert_eq!(v3, None);
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_with_config_custom() {
         let pool = ObjectPool::<String, String>::with_config(ObjectPoolConfig {

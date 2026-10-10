@@ -83,7 +83,9 @@ use crate::InklogError;
 use crate::integrations::Database;
 #[cfg(test)]
 use crate::integrations::MockCache;
-use crate::integrations::{Cache, Config, InklogConfigAdapter, OxCacheAdapter};
+#[cfg(feature = "cache")]
+use crate::integrations::OxCacheAdapter;
+use crate::integrations::{Cache, Config, InklogConfigAdapter};
 use crate::{LoggerDependencies, LoggerManager};
 
 /// 应用级依赖注入容器
@@ -165,7 +167,7 @@ impl InklogContainer {
     /// let container = InklogContainer::new()?;
     /// ```
     pub fn new() -> Result<Self, InklogError> {
-        let cache = Arc::new(OxCacheAdapter::new()?);
+        let cache = default_cache()?;
         let config = Arc::new(InklogConfigAdapter::new()?);
 
         Ok(Self {
@@ -200,7 +202,7 @@ impl InklogContainer {
         // NOTE: Cache is initialized with default settings since OxCacheAdapter
         // does not currently accept configuration parameters. If cache tuning
         // is needed, use the builder pattern to inject a custom cache.
-        let cache = Arc::new(OxCacheAdapter::new()?);
+        let cache = default_cache()?;
         let config = Arc::new(InklogConfigAdapter::from_config(config));
 
         Ok(Self {
@@ -342,6 +344,20 @@ impl InklogContainer {
 /// 仅在 `Default::default()` 的默认缓存初始化失败时兜底使用。
 struct NoopCache;
 
+/// 默认缓存实例：`cache` feature 启用时用 `OxCacheAdapter`（oxcache 内存后端），
+/// 关闭时（default-features=false 裁 icu/fluent 组合）无缓存后端可用，
+/// 回退空缓存——缓存操作全部成功但无效，显性可诊断，不 panic。
+fn default_cache() -> Result<Arc<dyn Cache>, InklogError> {
+    #[cfg(feature = "cache")]
+    {
+        Ok(Arc::new(OxCacheAdapter::new()?) as Arc<dyn Cache>)
+    }
+    #[cfg(not(feature = "cache"))]
+    {
+        Ok(Arc::new(NoopCache) as Arc<dyn Cache>)
+    }
+}
+
 #[async_trait]
 impl Cache for NoopCache {
     async fn get(&self, _key: &str) -> Result<Option<String>, InklogError> {
@@ -365,8 +381,8 @@ impl Default for InklogContainer {
     fn default() -> Self {
         // Default 无法返回 Result：cache/config 默认初始化失败时降级为
         // 空缓存 + 默认配置（不加载文件系统），仅记录警告，绝不 panic。
-        let cache = match OxCacheAdapter::new() {
-            Ok(cache) => Arc::new(cache) as Arc<dyn Cache>,
+        let cache = match default_cache() {
+            Ok(cache) => cache,
             Err(e) => {
                 tracing::warn!(
                     error = %e,
@@ -491,7 +507,7 @@ impl InklogContainerBuilder {
     pub fn build(self) -> Result<InklogContainer, InklogError> {
         let cache = match self.cache {
             Some(cache) => cache,
-            None => Arc::new(OxCacheAdapter::new()?),
+            None => default_cache()?,
         };
 
         let config = match self.config {
@@ -507,10 +523,6 @@ impl InklogContainerBuilder {
         })
     }
 }
-
-// ============================================================================
-// 测试
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -550,6 +562,7 @@ mod tests {
         assert!(container.is_ok());
     }
 
+    #[cfg(feature = "cache")]
     #[test]
     fn test_container_builder_with_adapters() {
         let container = InklogContainer::builder()
@@ -564,6 +577,7 @@ mod tests {
         assert!(container.is_ok());
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_container_cache_shared() {
         let container = InklogContainer::builder()
@@ -587,6 +601,7 @@ mod tests {
         assert_eq!(value, Some("value".to_string()));
     }
 
+    #[cfg(feature = "cache")]
     #[test]
     fn test_container_config_shared() {
         let config = InklogConfig::default();
@@ -614,6 +629,7 @@ mod tests {
     ///
     /// 注意：需要使用 multi_thread flavor 因为 LoggerManager 内部使用 blocking 操作。
     /// 使用 serial 宏确保测试顺序执行，避免全局状态冲突。
+    #[cfg(feature = "cache")]
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     #[allow(deprecated)] // 覆盖 deprecated 入口 create_logger 的既有行为测试
@@ -632,6 +648,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[cfg(feature = "cache")]
     #[test]
     fn test_container_debug() {
         let container = InklogContainer::builder()

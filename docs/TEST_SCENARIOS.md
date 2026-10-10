@@ -15,7 +15,7 @@
 
 CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`，与 ci.yml 一致）全量结果：**lib 1009 / unit_tests 63 / integration 95+1i / combinations 20 / performance 11+3i / integration_tests 34+1i / docker 25 / cli_integration 9 / e2e_advanced 228，0 failed**。
 
-> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见 [README](../README.md) 测试章节（HEAD 07b5366：src 内联 1,702 + tests 目录 564 + examples 41 = 2,307 个测试函数）。
+> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见 [README](../README.md) 测试章节（HEAD deab699：src 内联 1,712 + tests 目录 564 + examples 41 = 2,317 个测试函数）。
 
 ## 🗂️ 测试目标注册与功能域落点
 

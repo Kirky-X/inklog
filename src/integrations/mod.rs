@@ -23,9 +23,9 @@ pub use confers_config::{ConfersConfigWatcher, HotReloadValues, load_config_via_
 pub use confers_audit::ConfersAuditSink;
 
 // Re-export infra types at module level for two-level import paths
-pub use infra::{
-    Cache, Config, Database, InklogConfigAdapter, OxCacheAdapter, OxCacheAdapterBuilder,
-};
+pub use infra::{Cache, Config, Database, InklogConfigAdapter};
+#[cfg(feature = "cache")]
+pub use infra::{OxCacheAdapter, OxCacheAdapterBuilder};
 // mock 仅测试面可见（src 内联测试经 cfg(test)；外部消费者显式 test-utils）
 #[cfg(any(test, feature = "test-utils"))]
 pub use infra::{MockCache, MockConfig, MockDatabaseAdapter};

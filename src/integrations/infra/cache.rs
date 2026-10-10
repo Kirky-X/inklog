@@ -89,6 +89,7 @@ pub trait Cache: Send + Sync {
 // OxCacheAdapter - oxcache 适配器实现
 // ============================================================================
 
+#[cfg(feature = "cache")]
 use oxcache::Cache as OxCache;
 #[cfg(any(test, feature = "test-utils"))]
 use parking_lot::RwLock;
@@ -116,10 +117,12 @@ use std::collections::HashMap;
 ///     Ok(())
 /// }
 /// ```
+#[cfg(feature = "cache")]
 pub struct OxCacheAdapter {
     inner: OxCache<String, String>,
 }
 
+#[cfg(feature = "cache")]
 impl OxCacheAdapter {
     /// 创建新的 oxcache 适配器
     ///
@@ -161,6 +164,7 @@ impl OxCacheAdapter {
     }
 }
 
+#[cfg(feature = "cache")]
 #[async_trait]
 impl Cache for OxCacheAdapter {
     async fn get(&self, key: &str) -> Result<Option<String>, InklogError> {
@@ -207,12 +211,14 @@ impl Cache for OxCacheAdapter {
 /// OxCacheAdapter 构建器
 ///
 /// 提供链式配置 API。
+#[cfg(feature = "cache")]
 #[derive(Default)]
 pub struct OxCacheAdapterBuilder {
     ttl: Option<std::time::Duration>,
     capacity: Option<u64>,
 }
 
+#[cfg(feature = "cache")]
 impl OxCacheAdapterBuilder {
     /// 设置 TTL（生存时间）
     pub fn ttl(mut self, ttl: std::time::Duration) -> Self {
@@ -391,6 +397,7 @@ mod tests {
     // OxCacheAdapter 测试
     // ============================================================================
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_basic_operations() {
         let cache = OxCacheAdapter::new().expect("Failed to create cache");
@@ -403,11 +410,9 @@ mod tests {
         let value = cache.get("key1").await.expect("Failed to get");
         assert_eq!(value, Some("value1".to_string()));
 
-        // 测试 exists
         assert!(cache.exists("key1").await.expect("exists failed"));
         assert!(!cache.exists("nonexistent").await.expect("exists failed"));
 
-        // 测试 delete
         assert!(cache.delete("key1").await.expect("delete failed"));
         assert!(!cache.exists("key1").await.expect("exists failed"));
         assert!(
@@ -416,6 +421,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_get_nonexistent() {
         let cache = OxCacheAdapter::new().expect("Failed to create cache");
@@ -424,6 +430,7 @@ mod tests {
         assert_eq!(value, None);
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_overwrite() {
         let cache = OxCacheAdapter::new().expect("Failed to create cache");
@@ -441,6 +448,7 @@ mod tests {
         assert_eq!(value, Some("value2".to_string()));
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_builder_default() {
         // builder().build() 不带配置应等价于 new()
@@ -459,6 +467,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_builder_with_ttl_and_capacity() {
         // 验证 ttl 和容量配置被真正应用到后端
@@ -496,11 +505,9 @@ mod tests {
         let value = cache.get("key1").await.expect("Failed to get");
         assert_eq!(value, Some("value1".to_string()));
 
-        // 测试 exists
         assert!(cache.exists("key1").await.expect("exists failed"));
         assert!(!cache.exists("nonexistent").await.expect("exists failed"));
 
-        // 测试 delete
         assert!(cache.delete("key1").await.expect("delete failed"));
         assert!(!cache.exists("key1").await.expect("exists failed"));
         assert!(
@@ -687,6 +694,7 @@ mod tests {
     // OxCacheAdapter TTL 过期与边界场景测试
     // ============================================================================
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_ttl_expiration() {
         // 覆盖 TTL 过期路径：set 后等待 TTL 到期，get 应返回 None
@@ -718,6 +726,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_exists_after_ttl_expiration() {
         // 覆盖 exists 在 TTL 过期后返回 false 的路径
@@ -740,6 +749,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_delete_after_ttl_expiration() {
         // 覆盖 delete 在键已过期（exists 返回 false）时的 remove 语义路径：
@@ -765,6 +775,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_builder_ttl_only() {
         // 覆盖 builder 仅配置 TTL（不配置 capacity）的分支
@@ -785,6 +796,7 @@ mod tests {
         assert!(cache.exists("ttl_only_key").await.expect("exists failed"));
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_builder_capacity_only() {
         // 覆盖 builder 仅配置 capacity（不配置 TTL）的分支
@@ -805,6 +817,7 @@ mod tests {
         assert!(cache.exists("cap_only_key").await.expect("exists failed"));
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_empty_key() {
         // 边界场景：空键
@@ -823,6 +836,7 @@ mod tests {
         assert!(!cache.exists("").await.expect("exists failed"));
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_special_characters_in_key() {
         // 边界场景：键包含特殊字符
@@ -854,6 +868,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_large_value() {
         // 边界场景：大值
@@ -869,6 +884,7 @@ mod tests {
         assert_eq!(retrieved, Some(large_value));
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_concurrent_access() {
         // 覆盖 OxCacheAdapter 的并发安全性（与 MockCache 的并发测试对称）
@@ -903,6 +919,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_delete_nonexistent_after_set() {
         // 覆盖 delete 的 remove 语义路径（无 exists 预检，无 TOCTOU）：
@@ -927,6 +944,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_concurrent_delete_is_race_free() {
         // 并发删除同一键：无 exists 预检的 remove 语义下不应有任何删除
@@ -959,6 +977,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_overwrite_does_not_reset_ttl() {
         // 覆盖 TTL 场景下的 overwrite：新值覆盖旧值后应可读
@@ -985,6 +1004,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_builder_zero_ttl_warns() {
         // TTL=0 should trigger warning but still succeed (line 237)
@@ -995,6 +1015,7 @@ mod tests {
         assert!(cache.is_ok(), "zero TTL should warn but not error");
     }
 
+    #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_builder_zero_capacity_errors() {
         // capacity=0 should return error (lines 242-243)

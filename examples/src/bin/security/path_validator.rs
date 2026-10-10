@@ -178,7 +178,6 @@ fn show_base_dir_constraint() {
     assert!(!result.valid);
     assert!(result.error.as_ref().unwrap().contains("base directory"));
 
-    // 清理临时目录
     let _ = std::fs::remove_dir_all(&temp_dir);
     println!("\n已清理临时目录");
 }

@@ -8,17 +8,21 @@
 //!
 //! 1. 数据脱敏（DataMasker）：内置规则 + 自定义规则 + 验证
 //! 2. 日志模板（LogTemplate）：多种格式渲染 + 验证
-//! 3. 日志级别控制：不同级别的过滤行为
-//! 4. 结构化日志：带字段的日志记录
+//! 3. 日志级别控制：级别过滤 + `set_level()` 运行时热调
+//! 4. 结构化日志：带字段的日志记录（字段经 `{fields}` 占位符落屏）
 //! 5. 路径验证（PathValidator）：安全路径检查
 //! 6. 对象池（ObjectPool）：高性能对象复用
 //! 7. 功能组合：多模块协同工作流
 //! 8. 最佳实践与使用建议
 //!
+//! 全局 tracing subscriber 在首个 `LoggerManager` 构建时安装，进程内只安装一次；
+//! 因此本示例全程只保留一个 LoggerManager，级别切换用 `set_level()` 热调，
+//! 而不是重建 logger（重复构建的 logger 收不到 tracing 记录）。
+//!
 //! # 运行
 //!
 //! ```bash
-//! cargo run --bin all_features
+//! cargo run --package inklog-examples --bin all_features
 //! ```
 
 use inklog::LogRecord;
@@ -27,6 +31,7 @@ use inklog::{
     DataMasker, LogTemplate, LoggerManager, ObjectPool, PathValidator, PathValidatorConfig,
 };
 use std::path::Path;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,8 +39,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     show_data_masking();
     show_log_template();
-    show_log_levels_with_logger().await?;
-    show_structured_logging();
+
+    // 全局 tracing subscriber 只安装一次：这里构建唯一的 LoggerManager，并让它
+    // 存活到功能 3、4 演示结束。重复构建第二个 logger 不会接管全局订阅者，
+    // 其记录会静默丢失——切换级别请用 set_level() 热调。
+    let logger = LoggerManager::builder()
+        .level("debug")
+        .console(true)
+        // {fields} 占位符把结构化字段渲染为 key=value（无字段的记录渲染为空）
+        .format("{timestamp} [{level}] {target} - {message} {fields}")
+        .build()
+        .await?;
+
+    show_log_levels(&logger).await?;
+    show_structured_logging().await;
+
+    // shutdown() 会等待 channel 中的日志全部写出
+    logger.shutdown()?;
+
     show_path_validation();
     show_object_pool().await?;
     show_combined_workflow();
@@ -51,7 +72,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn show_data_masking() {
     println!("--- 功能 1：数据脱敏 (DataMasker) ---\n");
 
-    // 1.1 内置规则
     let masker = DataMasker::new();
     let input = "用户登录: email=test@example.com, phone=13812345678";
     let masked = masker.mask(input);
@@ -63,7 +83,6 @@ fn show_data_masking() {
     assert!(!masked.contains("13812345678"), "手机号应被脱敏");
     println!("  ✓ 邮箱和手机号已脱敏\n");
 
-    // 1.2 自定义规则
     let custom_rule = inklog::MaskRule::builder("order_id")
         .pattern(r"\bORD-\d{8}\b")
         .replacement("[ORDER_ID]")
@@ -80,10 +99,10 @@ fn show_data_masking() {
         "第一个订单号应被脱敏"
     );
     assert!(order_masked.contains("[ORDER_ID]"), "应包含替换标记");
-    // 注意: 默认 replace_count=1，仅替换第一个匹配
-    println!("  ✓ 自定义订单号规则生效（默认替换首个匹配）\n");
+    // 默认 apply_fn 为 regex.replace_all：替换全部匹配项
+    assert!(!order_masked.contains("ORD-"), "所有订单号都应被脱敏");
+    println!("  ✓ 自定义订单号规则生效（默认替换全部匹配）\n");
 
-    // 1.3 无敏感信息
     let clean = "这是一条普通日志，没有敏感信息";
     let clean_masked = masker.mask(clean);
     assert_eq!(clean, clean_masked, "无敏感信息时内容不变");
@@ -103,7 +122,6 @@ fn show_log_template() {
         "用户登录成功".to_string(),
     );
 
-    // 2.1 默认模板
     let default_tpl = LogTemplate::default();
     let rendered = default_tpl.render(&record);
     println!("默认模板渲染：");
@@ -113,7 +131,6 @@ fn show_log_template() {
     assert!(rendered.contains("用户登录成功"), "应包含消息内容");
     println!("  ✓ 渲染验证通过\n");
 
-    // 2.2 简洁模板
     let simple_tpl = LogTemplate::new("[{level}] {message}");
     let simple_rendered = simple_tpl.render(&record);
     println!("简洁模板渲染：");
@@ -122,96 +139,99 @@ fn show_log_template() {
     assert_eq!(simple_rendered, "[INFO] 用户登录成功");
     println!("  ✓ 精确匹配验证通过\n");
 
-    // 2.3 多格式对比
-    let formats = vec![
+    // 模板只支持 {name} 占位符：不支持宽度/对齐语法（{level:<5} 会原样输出），
+    // 字面花括号必须转义为 {{ }}，否则会被当作占位符起始
+    let formats = [
         (
             "JSON 风格",
-            r#"{"level":"{level}","msg":"{message}","target":"{target}"}"#,
+            r#"{{"level":"{level}","msg":"{message}","target":"{target}"}}"#,
         ),
         ("管道分隔", "{timestamp} | {level} | {target} | {message}"),
-        ("带边框", "│ {level:<5} │ {target} │ {message}"),
+        ("带边框", "│ {level} │ {target} │ {message}"),
     ];
     println!("多格式对比：");
     for (name, fmt) in formats {
         let tpl = LogTemplate::new(fmt);
-        println!("  {}: {}", name, tpl.render(&record));
+        let line = tpl.render(&record);
+        println!("  {}: {}", name, line);
+        if name == "JSON 风格" {
+            // 转义正确时输出为合法 JSON，可被下游日志管道直接解析
+            serde_json::from_str::<serde_json::Value>(&line)
+                .expect("JSON 风格模板渲染结果应为合法 JSON");
+        }
     }
-    println!();
+    println!("  ✓ JSON 风格输出可被 serde_json 解析\n");
 }
 
 /// 功能 3：日志级别控制
 ///
-/// 演示不同日志级别配置下的过滤行为。
-async fn show_log_levels_with_logger() -> Result<(), Box<dyn std::error::Error>> {
+/// 演示级别过滤与 `set_level()` 运行时热调。全局 tracing subscriber 在首个
+/// `LoggerManager` 构建时安装且进程内只安装一次，切换级别必须用 `set_level()`
+/// 热调同一实例；重建 LoggerManager 不会接管全局订阅者，其记录会静默丢失。
+async fn show_log_levels(logger: &LoggerManager) -> Result<(), Box<dyn std::error::Error>> {
     println!("--- 功能 3：日志级别控制 ---\n");
-
-    // 3.1 debug 级别
-    let logger = LoggerManager::builder()
-        .level("debug")
-        .console(true)
-        .build()
-        .await?;
 
     println!("日志级别 = debug：");
     tracing::trace!("TRACE - 不会输出（低于 debug）");
     tracing::debug!("DEBUG - 会输出");
     tracing::info!("INFO - 会输出");
+    // 控制台 sink 经 worker 异步写出，短暂等待让记录落屏；
+    // 生产代码无需 sleep，shutdown() 会等待队列排空
+    tokio::time::sleep(Duration::from_millis(100)).await;
     println!("  ✓ trace 被过滤，debug 及以上可见\n");
 
-    logger.shutdown()?;
-
-    // 3.2 warn 级别
-    let logger = LoggerManager::builder()
-        .level("warn")
-        .console(true)
-        .build()
-        .await?;
-
-    println!("日志级别 = warn：");
+    // 运行时热调：无需重启进程或重建 logger
+    logger.set_level(None, "warn")?;
+    println!("set_level(None, \"warn\") 热调后：");
     tracing::info!("INFO - 不会输出（低于 warn）");
     tracing::warn!("WARN - 会输出");
     tracing::error!("ERROR - 会输出");
+    tokio::time::sleep(Duration::from_millis(100)).await;
     println!("  ✓ info/debug/trace 被过滤，warn 及以上可见\n");
 
-    logger.shutdown()?;
+    // 恢复 info：功能 4 的 info 级结构化记录需要可见；热调本身会留下一条
+    // info 级审计记录（"log level changed at runtime"）
+    logger.set_level(None, "info")?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    println!("  ✓ 级别已恢复为 info（set_level 热调，logger 全程存活）\n");
+
     Ok(())
 }
 
 /// 功能 4：结构化日志
 ///
-/// 演示带结构化字段的日志记录。
-fn show_structured_logging() {
+/// 演示带结构化字段的日志记录。字段随记录进入 sink，由 main() 中配置的
+/// `{fields}` 占位符渲染为 `key=value`。
+async fn show_structured_logging() {
     println!("--- 功能 4：结构化日志 ---\n");
 
     // 按本文件声明的最佳实践（DataMasker 应在日志写入前调用，见功能 7 与最佳实践 1）：
-    // 敏感值（user_id/amount/request_id 等）必须先经 DataMasker 脱敏，再写入日志
+    // 敏感值必须先经 DataMasker 脱敏，再写入日志
     let masker = DataMasker::new();
 
-    // 用户操作：敏感字段先脱敏再记录
-    let user_id = masker.mask("12345");
-    let amount = masker.mask("99.99");
+    // 用户操作：敏感值（邮箱/手机号）先脱敏再记录
+    let email = masker.mask("alice@example.com");
+    let phone = masker.mask("13812345678");
     tracing::info!(
-        user_id = %user_id,
+        user_email = %email,
+        phone = %phone,
         action = "purchase",
-        amount = %amount,
+        amount = 99.99,
         currency = "USD",
         "用户购买商品"
     );
-    println!("✓ 用户操作日志（user_id, amount 先经 DataMasker 脱敏, action, currency）");
 
-    // 请求处理：request_id 同样走脱敏管道
-    let request_id = masker.mask("req-abc-123");
+    // 请求处理：非敏感字段直接记录（数值类型直接传，无需转字符串）
     tracing::info!(
-        request_id = %request_id,
+        request_id = "req-abc-123",
         method = "POST",
         path = "/api/orders",
         status = 201,
         latency_ms = 42,
         "API 请求完成"
     );
-    println!("✓ 请求日志（request_id 先经 DataMasker 脱敏, method, path, status, latency_ms）");
 
-    // 错误处理：仅含非敏感的运行指标，无需脱敏
+    // 错误处理：运行指标 + error_code
     tracing::error!(
         error_code = "PAYMENT_FAILED",
         component = "payment",
@@ -219,7 +239,15 @@ fn show_structured_logging() {
         max_retries = 5,
         "支付处理失败"
     );
-    println!("✓ 错误日志（error_code, component, retry_count）\n");
+
+    // 等待异步 worker 把记录写到控制台（生产代码由 shutdown() 排空队列）
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    println!("✓ 用户操作日志（user_email, phone 先经 DataMasker 脱敏, action, amount, currency）");
+    println!("✓ 请求日志（request_id, method, path, status, latency_ms）");
+    println!("✓ 错误日志（error_code, component, retry_count）");
+    println!("  字段以 key=value 追加在消息后（模板 {{fields}}）；需要整条 JSON");
+    println!("  记录时可用 LoggerManager::builder().console_json(true)\n");
 }
 
 /// 功能 5：路径验证
@@ -297,24 +325,19 @@ async fn show_object_pool() -> Result<(), Box<dyn std::error::Error>> {
 fn show_combined_workflow() {
     println!("--- 功能 7：多模块组合工作流 ---\n");
 
-    // 步骤 1：创建脱敏器
     let masker = DataMasker::new();
     println!("1. 创建 DataMasker");
 
-    // 步骤 2：创建模板
     let template = LogTemplate::new("{timestamp} [{level}] {message}");
     println!("2. 创建 LogTemplate");
 
-    // 步骤 3：模拟含敏感信息的日志
     let raw_message = "用户 test@example.com 登录成功，手机号 13812345678";
     println!("3. 原始日志: {}", raw_message);
 
-    // 步骤 4：脱敏
     let safe_message = masker.mask(raw_message);
     println!("4. 脱敏后:   {}", safe_message);
     assert!(!safe_message.contains("test@example.com"));
 
-    // 步骤 5：用模板渲染
     let record = LogRecord::new(Level::INFO, "app".to_string(), safe_message);
     let rendered = template.render(&record);
     println!("5. 模板渲染: {}", rendered);

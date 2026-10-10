@@ -22,9 +22,9 @@ repository = "https://github.com/Kirky-X/inklog"
 
 [workspace.dependencies]
 # Shared across workspace crates — all use default-features = false
-async-trait = { version = "0.1", default-features = false }
-tokio = { version = "1.53", default-features = false, features = ["full"] }
-tracing = { version = "0.1", default-features = false }
+async-trait = { version = "0.1", default-features = false, features = [] }
+tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "signal"] }
+tracing = { version = "0.1", default-features = false, features = [] }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
@@ -32,7 +32,7 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 base64 = { version = "0.23", default-features = false, features = ["std"] }
 rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
-tempfile = { version = "3.27", default-features = false }
+tempfile = { version = "3.27", default-features = false, features = [] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
@@ -57,14 +57,17 @@ unexpected_cfgs = { level = "warn" }
 workspace = true
 
 [features]
-# i18n 在 default 中：既有消费者（含隐式 default）的编译产物与 API 面不变；
+# i18n 与 cache 在 default 中：既有消费者（含隐式 default）的编译产物与 API 面不变；
 # 以 default-features=false 引入的组合（裁掉 icu/fluent 依赖树）改用
 # 内嵌英文文案表的 fallback 翻译路径。
-default = ["i18n"]
+default = ["i18n", "cache"]
 # 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + sys-locale 检测。
-# 关闭后 crate::i18n 入口保留（tr/tr_args 回退到内嵌 en 文案表），
-# 依赖树不含 icu/fluent-bundle。
+# 关闭后 crate::i18n 入口保留（tr/tr_args 回退到内嵌 en 文案表）。
 i18n = ["dep:icu", "dep:writeable", "dep:fluent-bundle", "dep:unic-langid", "dep:sys-locale"]
+# 缓存后端（oxcache 适配器 + ObjectPool）：oxcache 的 icu/fluent-bundle 依赖
+# 非可选，故要裁掉 icu/fluent 依赖树必须同时关闭 i18n 与 cache
+# （default-features=false 即两者皆关），此时 ObjectPool/OxCacheAdapter 不导出。
+cache = ["dep:oxcache"]
 # 测试面 mock 导出（MockCache/MockConfig/MockDatabaseAdapter）的门控 feature：
 # 不入 default 与任何生产组合；src 内联测试经 cfg(test) 直接可见，
 # 外部测试消费者需显式启用。
@@ -136,51 +139,49 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "registry", "env-filter"] }
 crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
-rayon = { version = "1.12", default-features = false }
-futures = { version = "0.3", default-features = false, features = ["executor"] }
 # supports-colors feature 不启用：inklog 自身经 is-terminal 检测 TTY，
 # 且 owo-colors 4.4 的该 feature 会同时拉入 supports-color 2 与 3 两个版本
-owo-colors = { version = "4.4", default-features = false }
+owo-colors = { version = "4.4", default-features = false, features = [] }
 regex = { workspace = true }
 fancy-regex = { workspace = true }
-opentelemetry = { version = "0.30", default-features = false, features = ["trace"], optional = true }
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 trait-kit = { version = "0.5.0-rc.7", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
 confers = { version = "0.6.0-rc.6", default-features = false, features = ["toml", "watch"], optional = true }
-thiserror = { version = "2.0", default-features = false }
+thiserror = { version = "2.0", default-features = false, features = [] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["json", "tokio", "http1"], optional = true }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
-is-terminal = { version = "0.4", default-features = false }
-dirs = { version = "7.0", default-features = false }
-parking_lot = { version = "0.12", default-features = false }
-oxcache = { version = "0.5.0-rc.6", default-features = false, features = ["memory", "serialization"] }
-zstd = { version = "0.14", default-features = false, optional = true }
+is-terminal = { version = "0.4", default-features = false, features = [] }
+dirs = { version = "7.0", default-features = false, features = [] }
+parking_lot = { version = "0.12", default-features = false, features = [] }
+oxcache = { version = "0.5.0-rc.6", default-features = false, features = ["memory", "serialization"], optional = true }
+zstd = { version = "0.14", default-features = false, features = [], optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
 parquet = { version = "60.0", default-features = false, features = ["async", "arrow"], optional = true }
-arrow-array = { version = "60.0", default-features = false, optional = true }
-arrow-schema = { version = "60.0", default-features = false, optional = true }
+arrow-array = { version = "60.0", default-features = false, features = [], optional = true }
+arrow-schema = { version = "60.0", default-features = false, features = [], optional = true }
 dbnexus = { workspace = true, optional = true }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
-sha2 = { version = "0.11", default-features = false }
+sha2 = { version = "0.11", default-features = false, features = [] }
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 clap = { version = "4.6", default-features = false, features = ["derive", "env", "std", "help", "usage", "error-context", "suggestions"], optional = true }
-glob = { version = "0.3", default-features = false, optional = true }
+glob = { version = "0.3", default-features = false, features = [], optional = true }
 ipnet = { version = "2.12", default-features = false, features = ["std"] }
-subtle = { version = "2.6", default-features = false }
+subtle = { version = "2.6", default-features = false, features = [] }
 icu = { version = "2.3", default-features = false, features = ["compiled_data"], optional = true }
-writeable = { version = "0.6", default-features = false, optional = true }
-fluent-bundle = { version = "0.16", default-features = false, optional = true }
-unic-langid = { version = "0.9", default-features = false, optional = true }
-sys-locale = { version = "0.3", default-features = false, optional = true }
+writeable = { version = "0.6", default-features = false, features = [], optional = true }
+fluent-bundle = { version = "0.16", default-features = false, features = [], optional = true }
+unic-langid = { version = "0.9", default-features = false, features = [], optional = true }
+sys-locale = { version = "0.3", default-features = false, features = [], optional = true }
 aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 
@@ -188,15 +189,19 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["async_tokio"] }
-serial_test = { version = "4.0", default-features = false }
-axum = { version = "0.8", default-features = false }
+serial_test = { version = "4.0", default-features = false, features = [] }
+axum = { version = "0.8", default-features = false, features = [] }
 log = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-filetime = { version = "0.2", default-features = false }
+filetime = { version = "0.2", default-features = false, features = [] }
 bytes = { version = "1", default-features = false, features = ["std"] }
-assert_cmd = { version = "2.2", default-features = false }
-predicates = { version = "3.1", default-features = false }
-ctor = "1.0.13"
+assert_cmd = { version = "2.2", default-features = false, features = [] }
+predicates = { version = "3.1", default-features = false, features = [] }
+# 仅测试/基准目标使用（src/ 零引用）：置于 dev-dependencies，
+# 不进入库消费者的依赖图。
+rayon = { version = "1.12", default-features = false, features = [] }
+futures = { version = "0.3", default-features = false, features = ["executor"] }
+ctor = { version = "1.0.13", default-features = false, features = ["std", "proc_macro"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["fs"] }

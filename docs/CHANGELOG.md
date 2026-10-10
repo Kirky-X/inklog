@@ -29,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **降级 sink 的 ops 事件自激循环**：file/db 通道工厂持续失败进入降级模式后，`handle_sink_unavailable` 对每条到达记录广播 `sink_degraded` ops 事件，而该事件经 ops hub 回流到同一 sink 通道 → 再次降级 → 再广播，形成自激循环（实测无用户日志时 `sink_errors`/`logs_dropped` 以约 2k/s 无界增长并持续刷 error sink）。现每轮降级只广播一次并跳过 ops 事件自身的回流，sink 重建（工厂重试/手动恢复/自动恢复）后复位。
+- **自定义 sink worker 写失败通知的自激放大**：失败路径逐次 `tracing::error!`，事件经 subscriber 回流到同一批 sink 通道，失败的 sink 收到自身通知后再失败，3 次尝试各自再产生通知——单条记录被放大到数十次尝试且持续增长。现改为直写 console sink（与内置 worker 的 error sink 直写路径同款隔离），尝试次数稳定为 3。
+- **DatabaseSink 配置未透传**：manager 的 db sink 工厂以 `DatabaseSink::new(db)` 构造，`config.database_sink` 的 `secret_scan_enabled`/`batch_size` 被静默忽略；现经 `new_with_config` 透传，`secret_scan_enabled = true` 的落库前出站脱敏门对 sk-/AKIA 等裸 secret 形态生效。
+- **CLI 错误输出丢失底层明细**：密钥格式非法时只打印外层 context（`Failed to get encryption key from env var: <VAR>`），`base64_wrong_length`/`password_too_short`/`key_wrong_length` 的长度诊断被吞。现沿 anyhow 因果链逐层本地化展开，且 decrypt 保留 `InklogError` 类型透传；文本与 `--json` 两种输出都给出长度信息。
+- **基准 logger helper 的 `None` 配置误启用 sink**：`benches/inklog_bench.rs` 的 `setup_noop_logger`/`setup_console_logger`/`setup_file_logger` 用 `file_sink: None` / `console_sink: None` 表达"不启用"，但 manager 语义下 `None` 均表示默认启用——"noop" 基准实际向 stdout 洪泛输出（实测全量约 145 万行）并启用默认路径 `logs/app.log` 的 file 通道（stdout 洪泛阻塞 console worker，每次采样 teardown 排水巨量积压），`noop_sink` 与 `console_sink_latency` 默认参数下各耗时 10 分 42 秒，合计占 `inklog_bench` 全量的 74%，并让 console 基准中位值被 file 通道背压主导（3.51 ms）。现三个 helper 显式 `enabled: false` 关闭非被测 sink：全量默认参数由 28 分 42 秒降到 9 分 01 秒（同机实测），console 中位值回到 4.30 µs（本征路径）；口径与数字修正见 `docs/PERFORMANCE.md` 复现章节续记。
+
+### Changed
+
+- **feature 拆分 `cache`（default 含）**：oxcache 的 icu/fluent-bundle 依赖非可选，此前 `default-features = false` 仍会经 oxcache 引入 icu/fluent，与「关闭 i18n 即裁剪 icu/fluent 依赖树」的文档承诺漂移。现 oxcache 改为可选依赖并新增 `cache` feature（`default = ["i18n", "cache"]`）：`default-features = false` 同时关闭两者，真正裁掉 icu/fluent；`ObjectPool`/`OxCacheAdapter` 随 `cache` 门控，default 组合 API 面不变，无缓存组合下容器回退空缓存。
+- **三方依赖升到最新稳定版**：`opentelemetry` 0.30 → 0.33（`otel` feature 的宿主对齐版本随之升到 0.33，配套 `tracing-opentelemetry` 0.34；对启用 `otel` 的宿主是破坏性对齐，见 README feature 表）；examples 的 `uuid` 1.26 → 1.28；锁文件另有 20 个三方包刷新到最新稳定版（`toml` 1.1.6 → 1.1.8、`zeroize` 1.9.0 → 1.9.1、`zstd` 0.14.0 → 0.14.1、`hyper` 1.11.1 → 1.12.0、`h2` 0.4.19 → 0.4.20、`syn` 3.0.6 → 3.0.7 等）。自研依赖（dbnexus/confers/trait-kit/oxcache）版本号不变，留给发布链统一定值。
+- **依赖图裁剪**：`tokio` 去掉 `full`，按实际用量显式声明 `rt-multi-thread`/`macros`/`sync`/`time`/`fs`/`io-util`/`net`/`signal`（io-std/process/parking_lot 路径不再进入产物，tokio 对 parking_lot 的依赖随之消失）；`rayon`、`futures` 在 src/ 零引用、仅测试与基准使用，从 `[dependencies]` 移入 `[dev-dependencies]`，不再进入库消费者依赖图；`ctor` 关闭隐式默认特性并显式声明 `std`/`proc_macro`（未使用的 `priority` 一并关闭，`link-section` 退出依赖图）；全部三方依赖统一 `default-features = false` + 显式特性声明。
+- **CI actions 升到最新**：`taiki-e/install-action` v2.87.27、`codecov/codecov-action` v7.1.1、`actions/upload-artifact` v7.0.2、`github/codeql-action` v4.38.3、`docker/setup-compose-action` v2.4.0；`actions/checkout` v7.0.1、`Swatinem/rust-cache` v2.9.2、`actions/cache` v6.1.0、`softprops/action-gh-release` v3.0.3 经解析提交 SHA 复核已是最新，注释精确到语义化版本。
+
 ## [0.3.0-rc.7] - 2026-10-07
 
 ### Fixed
@@ -440,7 +455,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.7...HEAD
+[0.3.0-rc.7]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.6...v0.3.0-rc.7
+[0.3.0-rc.6]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.5...v0.3.0-rc.6
+[0.3.0-rc.5]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.4...v0.3.0-rc.5
+[0.3.0-rc.4]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.2...v0.3.0-rc.4
+[0.3.0-rc.2]: https://github.com/Kirky-X/inklog/compare/v0.2.0...v0.3.0-rc.2
 [0.2.0]: https://github.com/Kirky-X/inklog/compare/v0.1.12...v0.2.0
 [0.1.12]: https://github.com/Kirky-X/inklog/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/Kirky-X/inklog/compare/v0.1.7...v0.1.11

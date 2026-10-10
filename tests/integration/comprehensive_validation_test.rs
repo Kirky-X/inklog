@@ -124,7 +124,6 @@ async fn test_comprehensive_real_data_writing() {
 
     let test_start = Instant::now();
 
-    // 阶段1：写入各种类型的日志数据
     println!("\n=== 阶段1：写入不同类型的日志数据 ===");
 
     // 1. 写入大量日志触发轮转
@@ -150,13 +149,10 @@ async fn test_comprehensive_real_data_writing() {
                 format!("db_batch_{}", i));
     }
 
-    // 等待一些时间让日志处理
     sleep(Duration::from_secs(5)).await;
 
-    // 阶段2：验证各种功能
     println!("\n=== 阶段2：验证各项功能 ===");
 
-    // 验证文件轮转
     let log_files = std::fs::read_dir(temp_dir.path())
         .unwrap()
         .filter_map(|entry| entry.ok())
@@ -170,10 +166,8 @@ async fn test_comprehensive_real_data_writing() {
     println!("当前日志文件数量: {}", log_files);
     assert!(log_files >= 1, "应该有日志文件存在");
 
-    // 验证数据库记录
     assert!(db_path.exists(), "数据库应该有数据");
 
-    // 验证日志文件大小（应该有数据）
     let metadata = std::fs::metadata(&log_path).unwrap();
     assert!(metadata.len() > 100000, "日志文件应该包含大量数据");
 
@@ -243,7 +237,6 @@ async fn test_comprehensive_real_data_writing() {
     println!("最终文件大小: {} bytes", concurrent_len);
     println!("轮转文件数量: {}", log_files);
 
-    // 验证数据掩码功能
     let content = std::fs::read_to_string(&log_path).unwrap();
     assert!(!content.contains("user@example.com"), "邮箱应该被掩码");
     assert!(!content.contains("13812345678"), "电话应该被掩码");
@@ -361,7 +354,6 @@ async fn test_dynamic_configuration_changes() {
             .with(filter1),
     );
 
-    // 写入一些初始日志
     for i in 0..100 {
         tracing::info!(target: "dynamic_test", "初始配置 - 消息 {}", i);
     }
@@ -424,6 +416,5 @@ async fn test_dynamic_configuration_changes() {
     println!("✅ 动态配置变更测试通过");
     println!("=== 动态配置变更测试完成 ===");
 
-    // 清理
     drop(logger2);
 }

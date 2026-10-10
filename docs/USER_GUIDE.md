@@ -77,7 +77,7 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ## 📦 安装
 
-将以下内容添加到 `Cargo.toml`（`default = ["i18n"]`，默认启用核心能力 + 国际化）：
+将以下内容添加到 `Cargo.toml`（`default = ["i18n", "cache"]`，默认启用核心能力 + 国际化 + 缓存后端）：
 
 ```toml
 [dependencies]
@@ -325,7 +325,7 @@ let config = InklogConfig {
 | `rotation_time` | `String` | `"daily"` | 时间轮转策略：`"hourly"`、`"daily"`、`"weekly"`。FileSink 为日历对齐（daily=次日零点等）；默认路径 CBFS 为滚动间隔近似（自上次轮转起算） |
 | `keep_files` | `u32` | `30` | 保留的轮转文件数量 |
 | `compress` | `bool` | `true` | 是否压缩轮转文件 |
-| `compression_level` | `i32` | `3` | 压缩级别（0-22，数值越高压缩率越高） |
+| `compression_level` | `i32` | `3` | 压缩级别（1-22，数值越高压缩率越高；越界值在配置校验期被拒绝） |
 | `encrypt` | `bool` | `false` | 是否加密轮转归档 |
 | `encryption_key_env` | `Option<String>` | `None` | 加密密钥的环境变量名（优先于 `encryption_key_file`） |
 | `encryption_key_file` | `Option<String>` | `None` | 加密密钥文件路径（unix 权限必须 0600；env 设置时被覆盖） |
@@ -404,7 +404,7 @@ inklog 支持自动脱敏敏感个人信息（PII）：内置 21 条正则规则
 
 | 数据类型 | 脱敏前 | 脱敏后 |
 |---------|---------|---------|
-| 邮箱地址 | `user@example.com` | `***@***.***` |
+| 邮箱地址 | `user@example.com` | `**@**.***` |
 | 中国手机号 | `13812345678` | `***-****-****` |
 | 信用卡号（Luhn 校验通过） | `4111111111111111` | `****-****-****-1111` |
 | 身份证号 | `110101199001011234` | `******1234` |
@@ -428,7 +428,7 @@ let _logger = LoggerManager::with_config(config).await?;
 
 // 敏感数据将自动脱敏
 log::info!("用户邮箱: user@example.com");
-// 输出: 用户邮箱: ***@***.***
+// 输出: 用户邮箱: **@**.***
 ```
 
 #### 自定义脱敏规则
@@ -669,7 +669,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         global: GlobalConfig {
             level: "debug".into(),
             // 自定义格式：含文件位置信息
-            format: "[{timestamp}] [{level:>5}] {target} - {message} | {file}:{line}".to_string(),
+            format: "[{timestamp}] [{level}] {target} - {message} | {file}:{line}".to_string(),
             masking_enabled: true,
             ..Default::default()
         },
@@ -683,6 +683,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+> 占位符仅支持无修饰的 `{name}` 形式（`timestamp`、`level`、`target`、`message`、`file`、`line`、`thread_id`、`trace_id`、`span_id`、`fields`）；宽度/对齐等格式修饰写法（如 `{level:>5}`）不被识别，会按字面量原样输出。
 
 ### 运行示例（cargo run --bin）
 
@@ -965,7 +967,7 @@ async fn test_isolated() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🌍 环境变量配置
 
-inklog 支持通过 `INKLOG_*` 环境变量覆盖配置（优先级高于配置文件）。
+inklog 支持通过 `INKLOG_*` 环境变量覆盖配置（优先级高于配置文件）。环境变量覆盖仅在经 `InklogConfig::load_with_env_overrides()` 加载时应用；`LoggerManager::new()` 与 `LoggerManager::load()` 只走 `load_sync()` 读取配置文件，不应用本节列出的环境变量覆盖。
 
 ### 全局配置
 

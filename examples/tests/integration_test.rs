@@ -34,16 +34,13 @@ async fn integration_file_ops_end_to_end() {
     let log_path = dir.path().join("integration.log");
     let path_str = log_path.to_str().unwrap();
 
-    // 1. 构造配置 + 创建 sink
     let config = create_file_config(path_str, "10MB", false);
     let sink = FileSink::new(config).expect("创建 FileSink 失败");
 
-    // 2. 写入多级别日志
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     let written = write_level_records(&sink, &levels).await.expect("写入失败");
     assert_eq!(written, 5);
 
-    // 3. 验证文件存在且包含所有级别
     assert!(log_path.exists());
     let content = std::fs::read_to_string(&log_path).expect("读取失败");
     for level in &levels {
@@ -105,7 +102,6 @@ async fn integration_file_then_crypto_roundtrip() {
 /// 端到端：template_ops 构造记录 → render_formats 渲染 → 验证输出。
 #[test]
 fn integration_template_render_pipeline() {
-    // 1. 构造带字段的记录
     let mut fields = HashMap::new();
     fields.insert(
         "request_id".to_string(),
@@ -114,14 +110,11 @@ fn integration_template_render_pipeline() {
     fields.insert("status".to_string(), Value::Number(200.into()));
     let record = create_record_with_fields(fields);
 
-    // 2. 渲染多种格式
     let results = render_formats(&record);
     assert_eq!(results.len(), 5);
 
-    // 3. 验证每种格式输出非空且不含未替换占位符
     for (name, output) in &results {
         assert!(!output.is_empty(), "格式 [{}] 输出不应为空", name);
-        // 检查常见占位符都被替换
         for placeholder in [
             "{level}",
             "{timestamp}",

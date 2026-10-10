@@ -1665,20 +1665,13 @@ level = "INFO"
         }
     }
 
-    // ==================== check_prerequisites 集成测试 (-485) ====================
+    // ==================== check_prerequisites 集成测试 ====================
 
     #[test]
     fn test_check_prerequisites_runs_without_panic() {
-        // 覆盖 check_prerequisites() 整个函数体（-485）
-        // - rustc/cargo 版本检查（-448）
-        // - openssl/zstd 可选依赖检查（-461）的 if 分支
-        // - 系统配置/本地配置/示例配置存在性检查（-483）的 if/else 分支
-        // - 完成输出
-        //
-        // 各项检查结果取决于运行环境（openssl/zstd/配置文件存在性）；
+        // 覆盖 check_prerequisites() 全部检查分支（rustc/cargo 版本、openssl/zstd
+        // 可选依赖、系统/本地/示例配置存在性）；各项结果取决于运行环境，
         // 验证其不 panic 即可。
-        // 注意：openssl/zstd/config 文件的存在性取决于运行环境，
-        // 两个分支（存在/不存在）都会被执行到其中之一。
         let _ = check_prerequisites();
     }
 

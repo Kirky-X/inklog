@@ -4616,7 +4616,6 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        // 构造 fallback sink
         let write_count = Arc::new(parking_lot::Mutex::new(0usize));
         let mock_sink = MockFallbackSink {
             write_count: write_count.clone(),
@@ -4670,7 +4669,6 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
 
-        // 构造 fallback sink
         let write_count = Arc::new(parking_lot::Mutex::new(0usize));
         let mock_sink = MockFallbackSink {
             write_count: write_count.clone(),
@@ -4707,7 +4705,6 @@ mod tests {
         // FileSink::new 会启动 rotation_timer 和 cleanup_timer 两个后台线程
         let sink = FileSink::new(config).unwrap();
 
-        // 写入一些数据
         for i in 0..3 {
             let record = create_test_record(&format!("Pre-shutdown message {}", i));
             sink.write(&record).await.unwrap();

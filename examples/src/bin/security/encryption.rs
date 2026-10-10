@@ -103,7 +103,6 @@ fn generate_temp_key() -> String {
 async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     print_separator("步骤 1: 写入明文日志");
 
-    // 手动创建配置
     let config = FileSinkConfig {
         enabled: true,
         path: PathBuf::from(file_path),
@@ -115,7 +114,6 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
         ..Default::default()
     };
 
-    // 创建 FileSink 实例
     let sink = inklog::sink::file::FileSink::new(config)?;
 
     // 创建测试日志内容
@@ -127,7 +125,6 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
 2026-03-19T10:30:00.005Z [INFO] encryption - 测试日志条目 3
 "#;
 
-    // 逐行写入
     for line in plaintext.lines() {
         let record = LogRecord::new(Level::INFO, "encryption".to_string(), line.to_string());
         sink.write(&record).await?;
@@ -162,7 +159,6 @@ fn encrypt_log_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     print_separator("步骤 2: 加密日志文件");
 
-    // 获取加密密钥
     let key = get_encryption_key(key_env)?;
     println!("✓ 密钥获取成功: {} 字节", key.len());
 
@@ -170,16 +166,13 @@ fn encrypt_log_file(
     let cipher =
         Aes256Gcm::new_from_slice(&*key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
-    // 生成随机 nonce
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = aes_gcm::Nonce::from(nonce_bytes);
 
-    // 读取明文
     let plaintext = std::fs::read(plaintext_path)?;
     println!("✓ 读取明文: {} bytes", plaintext.len());
 
-    // 加密
     let ciphertext = cipher
         .encrypt(&nonce, plaintext.as_slice())
         .map_err(|e| format!("Encryption failed: {}", e))?;
@@ -190,7 +183,6 @@ fn encrypt_log_file(
         ciphertext.len()
     );
 
-    // 写入加密文件
     let mut file = std::fs::File::create(encrypted_path)?;
     file.write_all(MAGIC_HEADER)?; // Magic Header
     file.write_all(&VERSION.to_le_bytes())?; // Version
@@ -224,7 +216,6 @@ fn parse_encrypted_format(file_path: &str) -> Result<(), Box<dyn std::error::Err
     let mut header = [0u8; 24];
     std::io::Read::read_exact(&mut file, &mut header)?;
 
-    // 获取文件大小
     let file_size = std::fs::metadata(&path)?.len();
 
     // 解析并展示各字段
@@ -307,28 +298,22 @@ fn decrypt_and_verify(
     let path = PathBuf::from(file_path);
     let mut file = std::fs::File::open(&path)?;
 
-    // 读取文件头
     let mut header = [0u8; 24];
     std::io::Read::read_exact(&mut file, &mut header)?;
 
-    // 验证 Magic Header
     if &header[..8] != MAGIC_HEADER {
         return Err("Invalid file header: not an encrypted inklog file".into());
     }
 
-    // 获取密钥
     let key = get_encryption_key(key_env)?;
     println!("✓ 密钥获取成功");
 
-    // 提取 nonce
     let nonce_bytes: [u8; 12] = header[12..24].try_into().unwrap();
     let nonce = aes_gcm::Nonce::from(nonce_bytes);
 
-    // 读取密文
     let mut ciphertext = Vec::new();
     std::io::Read::read_to_end(&mut file, &mut ciphertext)?;
 
-    // 创建密码器并解密
     let cipher =
         Aes256Gcm::new_from_slice(&*key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
@@ -400,43 +385,34 @@ fn cleanup(file_path: &str) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog 日志加密示例 ===\n");
 
-    // 1. 生成临时密钥
     print_separator("生成临时加密密钥");
 
     // 安全约束：密钥属于敏感凭据，不得以任何形式输出到 stdout
     //（可能被终端回显、CI 日志或日志系统采集），仅通过环境变量传递
     let key = generate_temp_key();
 
-    // 设置环境变量
     let key_env = "LOG_ENCRYPTION_KEY";
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var(key_env, &key) };
     println!("✓ 临时密钥已生成并写入环境变量: {}", key_env);
     println!("  （密钥内容不打印到 stdout，参见下方\"避免在日志中输出密钥\"）\n");
 
-    // 2. 生成临时文件路径
     let plain_path = temp_file_path("plaintext");
     let encrypted_path = format!("{}.enc", plain_path);
     println!("\n临时文件路径:");
     println!("  明文:   {}", plain_path);
     println!("  加密:   {}", encrypted_path);
 
-    // 3. 写入明文日志
     write_plaintext_log(&plain_path).await?;
 
-    // 4. 加密日志文件
     encrypt_log_file(&plain_path, &encrypted_path, key_env)?;
 
-    // 5. 解析加密文件格式
     parse_encrypted_format(&encrypted_path)?;
 
-    // 6. 解密验证
     let plaintext = decrypt_and_verify(&encrypted_path, key_env)?;
 
-    // 7. 展示对比
     show_comparison(&plaintext);
 
-    // 8. 清理
     cleanup(&plain_path);
     cleanup(&encrypted_path);
 
@@ -445,7 +421,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     unsafe { std::env::remove_var(key_env) };
     println!("✓ 已清除环境变量: {}", key_env);
 
-    // 展示密钥管理最佳实践
     print_separator("密钥管理最佳实践");
 
     println!("在生产环境中，应遵循以下最佳实践：\n");
@@ -470,7 +445,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - 避免在日志中输出密钥");
     println!("   - 使用安全的 CI/CD 管道\n");
 
-    // 展示加密性能特性
     print_separator("加密性能特性");
 
     println!("AES-256-GCM 加密性能优势：\n");
@@ -490,7 +464,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - 利用多核 CPU 提高性能");
     println!("   - 适合批量日志处理\n");
 
-    // 展示密钥格式支持
     print_separator("支持的密钥格式");
 
     println!("inklog 支持三种密钥格式：\n");
@@ -510,7 +483,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - 示例: my-secret-password");
     println!("   - 适用于用户提供的密码场景\n");
 
-    // 完成
     println!("\n✓ 所有示例演示完成");
 
     Ok(())

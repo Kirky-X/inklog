@@ -119,12 +119,22 @@ pub(crate) fn run_custom_sink_worker(
                             break;
                         }
                         Err(e) => {
-                            tracing::error!(
-                                error = %e,
-                                attempt,
-                                "custom sink '{}' write failed",
-                                entry.name
+                            // 失败通知直写 console sink，不经 tracing 事件：
+                            // tracing 事件会经 subscriber 回流到同一批 sink
+                            // 通道，失败的 sink 收到自身通知后再次失败，3 次
+                            // 尝试各自再产生通知 → 指数自激放大（实测单条记录
+                            // 放大到数十次尝试且持续增长）。内置 worker 的
+                            // error sink 直写路径采用同款隔离。
+                            let error_record = LogRecord::new(
+                                tracing::Level::ERROR,
+                                "inklog::custom_sink".to_string(),
+                                format!(
+                                    "custom sink '{}' write failed (attempt {attempt}/{CUSTOM_SINK_WRITE_ATTEMPTS}): {e}",
+                                    entry.name
+                                ),
                             );
+                            let _ = runtime_handle
+                                .block_on(async { console_sink.write(&error_record).await });
                             if attempt == CUSTOM_SINK_WRITE_ATTEMPTS {
                                 metrics.inc_sink_error();
                                 metrics.update_sink_health(&entry.name, false, Some(e.to_string()));
@@ -312,6 +322,13 @@ struct SinkWorkerState {
     /// 工厂重试退避（1s 起指数翻倍，上限 30s）
     factory_backoff: Duration,
     last_factory_attempt: Instant,
+    /// 本轮降级是否已广播 `sink_degraded` ops 事件。
+    ///
+    /// ops 事件会回流到同一组 sink 通道（manager 把 file/db/自定义通道注册
+    /// 进 ops hub）：逐条广播会在「降级 → ops 事件到达 → 再降级 → 再广播」
+    /// 间形成自激循环，把 sink_errors/logs_dropped 无界放大并持续刷 error
+    /// sink。故每次降级事件只广播一次，sink 重建后复位。
+    degraded_announced: bool,
 }
 
 /// sink worker 共享上下文：drain/主循环共用的重试、降级与恢复逻辑。
@@ -353,6 +370,7 @@ impl SinkWorker<'_> {
             failures: FailureState::default(),
             factory_backoff: factory_retry_initial_backoff(),
             last_factory_attempt: Instant::now(),
+            degraded_announced: false,
         }
     }
 
@@ -369,13 +387,16 @@ impl SinkWorker<'_> {
         // 降级模式（工厂持续失败）：无 sink 可写——保底到
         // error sink 并计为 failed，绝不无声丢弃
         let Some(sink) = state.sink.as_mut() else {
-            self.handle_sink_unavailable(&record);
+            self.handle_sink_unavailable(state, &record);
             return;
         };
 
         let write_succeeded = self.write_with_retry(sink, &record, &mut state.failures);
         if !write_succeeded {
-            self.maybe_auto_recover(&mut state.failures, sink, create_sink);
+            let recovered = self.maybe_auto_recover(&mut state.failures, sink, create_sink);
+            if recovered {
+                state.degraded_announced = false;
+            }
         }
 
         // 归还对象池：写路径完成后 Arc 引用归一（try_unwrap 成功）时回收
@@ -389,7 +410,11 @@ impl SinkWorker<'_> {
     /// 降级模式（工厂持续失败）下到达记录的降级处理：
     /// 尽力写入 error sink 保留内容，并递增 failed/dropped 指标与 sink 健康状态，
     /// 绝不无声丢弃。锁内仅取句柄，异步写在锁外执行（与热路径约定一致）。
-    fn handle_sink_unavailable(&self, record: &Arc<LogRecord>) {
+    ///
+    /// `sink_degraded` ops 事件只在本轮降级首次到达时广播；ops 事件自身回流
+    /// 到同一通道时不再次广播（否则形成自激循环，见
+    /// [`SinkWorkerState::degraded_announced`]）。
+    fn handle_sink_unavailable(&self, state: &mut SinkWorkerState, record: &Arc<LogRecord>) {
         self.metrics.inc_sink_error();
         self.metrics.inc_logs_dropped();
         self.metrics.update_sink_health(
@@ -397,11 +422,14 @@ impl SinkWorker<'_> {
             false,
             Some("sink unavailable: factory keeps failing".to_string()),
         );
-        crate::support::ops_event::publish_internal(
-            "sink_degraded",
-            Some(self.desc.name),
-            serde_json::json!({ "reason": "factory keeps failing" }),
-        );
+        if !state.degraded_announced && !crate::support::ops_event::is_ops_record(record) {
+            state.degraded_announced = true;
+            crate::support::ops_event::publish_internal(
+                "sink_degraded",
+                Some(self.desc.name),
+                serde_json::json!({ "reason": "factory keeps failing" }),
+            );
+        }
         let error_sink_handle = self.error_sink.lock().ok().and_then(|guard| guard.clone());
         if let Some(error_sink) = error_sink_handle {
             let _ = self
@@ -484,14 +512,15 @@ impl SinkWorker<'_> {
     }
 
     /// 写失败后的自动恢复触发（连续失败 > 5 且距上次失败 > 60s）。
+    /// 返回是否真的重建了 sink（调用方据此复位降级广播标记）。
     fn maybe_auto_recover(
         &self,
         failures: &mut FailureState,
         sink: &mut Box<dyn LogSink>,
         create_sink: SinkFactory<'_>,
-    ) {
+    ) -> bool {
         if !should_auto_recover(failures.consecutive_failures, failures.last_failure_time) {
-            return;
+            return false;
         }
         tracing::warn!("{}", crate::i18n::tr(self.desc.auto_recovery_key));
         if let Ok(new_sink) = create_sink() {
@@ -500,7 +529,9 @@ impl SinkWorker<'_> {
             failures.last_failure_time = None;
             self.metrics.update_sink_health(self.desc.name, true, None);
             tracing::info!("{}", crate::i18n::tr(self.desc.auto_recovery_ok_key));
+            return true;
         }
+        false
     }
 
     /// 处理一条控制消息（每次循环迭代最多一条，与主循环节奏一致）。
@@ -518,6 +549,7 @@ impl SinkWorker<'_> {
                     state.factory_backoff = factory_retry_initial_backoff();
                     state.failures.consecutive_failures = 0;
                     state.failures.last_failure_time = None;
+                    state.degraded_announced = false;
                     self.metrics.update_sink_health(self.desc.name, true, None);
                     tracing::info!("{}", crate::i18n::tr(self.desc.recovered_key));
                     crate::support::ops_event::publish_internal(
@@ -544,6 +576,7 @@ impl SinkWorker<'_> {
             Ok(new_sink) => {
                 state.sink = Some(new_sink);
                 state.factory_backoff = factory_retry_initial_backoff();
+                state.degraded_announced = false;
                 self.metrics.update_sink_health(self.desc.name, true, None);
                 tracing::info!(
                     "{} sink factory succeeded after retry; worker resumed normal writes",

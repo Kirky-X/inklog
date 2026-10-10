@@ -7,24 +7,36 @@ use std::path::PathBuf;
 use super::query::QueryArgs;
 use super::{Cli, Commands, decrypt, generate, query, validate};
 
+/// 展开 anyhow 因果链为单行错误信息：每层 `InklogError` 走本地化文案，
+/// 其余层按 Display 原样。避免 `to_string()` 只取最外层而吞掉底层明细
+/// （如密钥长度、密码长度诊断）。
+fn format_error_chain(e: &anyhow::Error) -> String {
+    e.chain()
+        .map(|cause| {
+            cause
+                .downcast_ref::<inklog::InklogError>()
+                .map(|err| err.localized_message())
+                .unwrap_or_else(|| cause.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
 pub fn run_cli() -> i32 {
     let args = Cli::parse();
     let json = args.json;
     match run_with_args(args) {
         Ok(code) => code,
         Err(e) => {
+            let msg = format_error_chain(&e);
             if json {
                 eprintln!(
                     "{}",
-                    serde_json::json!({ "status": "error", "message": e.to_string() })
+                    serde_json::json!({ "status": "error", "message": msg })
                 );
             } else {
                 // 本地化输出：InklogError 走 FTL 前缀（localized_message 路径）；
                 // 其余错误（CLI 层多为已本地化的 anyhow 消息）按 Display 原样输出
-                let msg = e
-                    .downcast_ref::<inklog::InklogError>()
-                    .map(|err| err.localized_message())
-                    .unwrap_or_else(|| e.to_string());
                 eprintln!("{}: {}", inklog::i18n::tr("cli-err-prefix"), msg);
             }
             1

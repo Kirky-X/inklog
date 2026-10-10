@@ -126,9 +126,9 @@ sequenceDiagram
 
 ### 配置系统（InklogConfig）
 
-集中式配置结构，支持 TOML 文件加载与环境变量覆盖。
+集中式配置结构，支持 TOML 文件加载；`INKLOG_*` 环境变量覆盖经 `InklogConfig::load_with_env_overrides()` 加载时生效（`LoggerManager::new()` / `LoggerManager::load()` 走 `load_sync()`，不应用 env 覆盖）。
 
-**配置优先级**（从高到低）：
+**配置优先级**（`InklogConfig::load_with_env_overrides()` 加载路径，从高到低）：
 
 1. 环境变量（`INKLOG_*`）；
 2. 配置文件（`inklog_config.toml`）；
@@ -248,7 +248,7 @@ LogRecord
   ↓ [开启]            [关闭]
 降级到 Console       继续处理
                       ↓
-检查磁盘空间（< 5% 或 < 100MB 警告，自动清理最旧的 20%）
+检查磁盘空间（保留量 50MB 与可用空间 10% 取大者；不足则降级 Console）
   ↓ [不足]            [充足]
 降级到 Console       继续处理
                       ↓
@@ -264,9 +264,9 @@ LogRecord
 
 数据库操作经 dbnexus 以**裸 SQL（无 ORM）**执行：
 
-- **表结构**：`id`（自增主键）、`timestamp`、`level`、`target`、`message`、`fields`（JSON 文本）、`file`、`line`、`thread_id`；DDL 按驱动生成（SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`、PostgreSQL `BIGSERIAL`、MySQL `BIGINT AUTO_INCREMENT`、DuckDB `BIGINT AUTOINCREMENT`）；
+- **表结构**：`timestamp`、`level`、`target`、`message`、`fields`（JSON 文本）、`file`、`line`、`thread_id`；`id` 自增主键仅 SQLite / PostgreSQL / MySQL 分支生成（DuckDB 分支不含 id 列，行标识由隐式 rowid 提供）；DDL 按驱动生成（SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`、PostgreSQL `BIGSERIAL`、MySQL `BIGINT AUTO_INCREMENT`；DuckDB 因 duckdb-rs 对 AUTOINCREMENT/IDENTITY 报 `Constraint not implemented` 而不含自增列）；
 - **批量写入**：缓冲至 `batch_size`（默认 100）或 `flush_interval_ms`（默认 500ms）即批量 INSERT；DuckDB 使用预编译语句参数绑定；
-- **动态批大小**：断路器半开状态下批大小减半；
+- **动态批大小**：按写入成功率与平均延迟自适应（成功率 ≥ 0.95 且平均延迟 < 50ms 时倍增、成功率 < 0.8 或平均延迟 > 200ms 时减半），与断路器状态无耦合；
 - **分区表**：按 `PartitionStrategy`（Monthly / Yearly）创建分区，表名与分区名经白名单校验后拼入 DDL（防 SQL 注入）；
 - **归档导出**：`archive_format` 支持 Json / Parquet（Arrow 列式，Zstd 压缩）/ Csv。
 
@@ -325,7 +325,7 @@ pub struct CircuitBreaker {
 }
 ```
 
-失败达到阈值进入 Open；冷却期满进入 HalfOpen（动态批大小减半试探）；成功则回到 Closed。
+失败达到阈值进入 Open；冷却期满进入 HalfOpen 试探；成功则回到 Closed。
 
 ### 故障降级与自愈
 
@@ -336,7 +336,7 @@ flowchart TD
     ERR --> CB["断路器记录失败"]
     CB --> THR{"失败次数达到阈值"}
     THR -->|"是"| DEG["降级输出<br/>DB → File → Console 三级回退"]
-    THR -->|"否"| RETRY["重试最多三次<br/>指数退避"]
+    THR -->|"否"| RETRY["重试最多三次<br/>线性退避（10ms × 次数）"]
     RETRY -->|"成功"| OK
     RETRY -->|"失败"| DEG
     DEG --> MET["记录失败指标并更新 Sink 健康"]
@@ -525,7 +525,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | feature | 依赖 | 用途 |
 |---------|------|------|
-| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6.0-rc.3 | 数据库连接池与裸 SQL 执行（后端互斥） |
+| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6.0-rc.6 | 数据库连接池与裸 SQL 执行（后端互斥） |
 | `http` | axum 0.8、axum-server 0.8 | HTTP 端点（TLS 走 rustls） |
 | `cli` | clap、glob | `inklog-cli` |
 | `compression` / `gzip` | zstd / flate2 | Zstd / Gzip 压缩 |

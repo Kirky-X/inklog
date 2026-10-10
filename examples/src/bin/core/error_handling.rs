@@ -192,7 +192,6 @@ fn show_localized_message() {
 fn show_convenience_constructors() {
     print_section("5. 便捷构造方法");
 
-    // database_error
     let err = InklogError::database_error("connection pool exhausted");
     println!("InklogError::database_error(\"connection pool exhausted\")：");
     println!("  Display: {}", err);
@@ -216,7 +215,6 @@ fn show_convenience_constructors() {
         _ => panic!("expected DatabaseError"),
     }
 
-    // encryption_error
     let err = InklogError::encryption_error("invalid key length: 16");
     println!("\nInklogError::encryption_error(\"invalid key length: 16\")：");
     println!("  Display: {}", err);

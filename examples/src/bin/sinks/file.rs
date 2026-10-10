@@ -11,8 +11,14 @@
 //! ## 运行
 //!
 //! ```bash
-//! cargo run --bin file
+//! cargo run --package inklog-examples --features compression --bin file
 //! ```
+//!
+//! 示例3（Zstd 压缩）需要 `compression` feature 提供 zstd 后端，故本 binary 声明了
+//! `required-features`；省略 `--features compression` 时 cargo 会直接报
+//! “target requires the features” 错误，而不是运行后才失败。
+//! 注意：在自身项目中 `compress = true` 但未启用任何压缩后端（`compression`/`zstd`
+//! 或 `gzip`）时，FileSink 只告警并保持文件未压缩——该功能必须显式启用。
 //!
 //! ## 核心特性
 //!
@@ -44,11 +50,9 @@ use std::path::PathBuf;
 async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例1: 基础文件写入");
 
-    // 生成临时文件路径
     let log_path = temp_file_path("basic");
     println!("日志文件路径: {}", log_path);
 
-    // 创建 FileSink 配置
     let config = FileSinkConfig {
         enabled: true,
         path: PathBuf::from(&log_path),
@@ -71,7 +75,6 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
         output_format: Default::default(),
     };
 
-    // 创建 FileSink
     let sink = FileSink::new(config)?;
 
     // 写入各级别日志
@@ -100,7 +103,6 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
     let content = tokio::fs::read_to_string(&log_path).await?;
     println!("{}", content);
 
-    // 清理临时文件
     cleanup_files(&log_path, "inklog_example_basic").await?;
     println!("\n✓ 基础文件写入完成\n");
 
@@ -116,7 +118,6 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
 async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例2: 文件轮转");
 
-    // 生成临时文件路径
     let log_path = temp_file_path("rotation");
     println!("日志文件路径: {}", log_path);
 
@@ -143,7 +144,6 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
         output_format: Default::default(),
     };
 
-    // 创建 FileSink
     let sink = FileSink::new(config)?;
 
     // 写入大量日志触发轮转
@@ -209,7 +209,6 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n轮转次数: {}", rotation_count);
 
-    // 清理临时文件
     cleanup_files(&log_path, "inklog_example_rotation").await?;
     println!("\n✓ 文件轮转演示完成\n");
 
@@ -225,7 +224,6 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例3: Zstd 压缩");
 
-    // 生成临时文件路径
     let log_path = temp_file_path("compression");
     println!("日志文件路径: {}", log_path);
 
@@ -252,7 +250,6 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
         output_format: Default::default(),
     };
 
-    // 创建 FileSink
     let sink = FileSink::new(config)?;
 
     // 写入大量日志触发轮转和压缩
@@ -321,7 +318,6 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n压缩文件数: {}", compression_count);
 
-    // 清理临时文件
     cleanup_files(&log_path, "inklog_example_compression").await?;
     println!("\n✓ Zstd 压缩演示完成\n");
 
@@ -368,13 +364,10 @@ async fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog File Sink 示例 ===\n");
 
-    // 示例1：基础文件写入
     basic_file().await?;
 
-    // 示例2：文件轮转
     file_rotation().await?;
 
-    // 示例3：Zstd 压缩
     file_compression().await?;
 
     println!("所有示例完成！");

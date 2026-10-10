@@ -58,7 +58,7 @@ cd inklog
 # 2. 添加上游仓库
 git remote add upstream https://github.com/Kirky-X/inklog.git
 
-# 3. 安装 Git 钩子（rustfmt/clippy/deny/私钥扫描等门禁）
+# 3. 安装 Git 钩子（Python pre-commit 框架：rustfmt/clippy/cargo check/私钥扫描等门禁）
 bash scripts/install-pre-commit.sh
 
 # 4. 创建功能分支
@@ -82,7 +82,7 @@ git push origin feature/your-feature
 |------|------|------|
 | Rust | 1.97.1 | 仓库经 `rust-toolchain.toml` 固定，rustup 会自动安装 |
 | protobuf 编译器 | 最新稳定版 | 含数据库 feature 的组合构建需要 `protoc` |
-| lefthook | 最新稳定版 | Git 钩子管理器（`bash scripts/install-pre-commit.sh`） |
+| pre-commit（或 lefthook） | 最新稳定版 | Git 钩子管理器：`bash scripts/install-pre-commit.sh` 安装 Python pre-commit（读 `.pre-commit-config.yaml`）；lefthook 用户执行 `lefthook install`（读 `lefthook.yml`） |
 | Docker | 可选 | PostgreSQL / MySQL 容器级集成测试 |
 
 ### Rust 工具链
@@ -255,25 +255,29 @@ git commit -m "feat(<模块>): <描述>"
 
 ## 🪝 Git 钩子
 
-本项目使用 [lefthook](https://github.com/evilmartians/lefthook) 管理 Git 钩子（配置见仓库根目录 `lefthook.yml`）。
+本项目提供两套可选的 Git 钩子配置，二选一即可：Python [pre-commit](https://pre-commit.com/)（`.pre-commit-config.yaml`）与 [lefthook](https://github.com/evilmartians/lefthook)（仓库根目录 `lefthook.yml`）。
 
 ### 安装
 
 ```bash
-bash scripts/install-pre-commit.sh   # 等价于 lefthook install
+bash scripts/install-pre-commit.sh   # 安装 Python pre-commit 框架（pip install pre-commit + pre-commit install）
+# 或
+lefthook install                     # 启用 lefthook.yml 中的钩子
 ```
 
 ### 钩子内容
 
+下表为 `lefthook.yml` 的钩子内容；Python pre-commit 在 pre-commit 阶段运行 `cargo fmt --all -- --check`、`cargo check`、`cargo clippy --all-targets ... -- -D warnings` 及 trailing-whitespace、detect-private-key、detect-secrets、typos 等通用钩子，不含 `cargo deny check`、commit-msg 与 pre-push 钩子。
+
 | 阶段 | 检查 | 说明 |
 |------|------|------|
 | **pre-commit** | `cargo fmt --all -- --check` | 代码格式一致 |
-| **pre-commit** | `cargo clippy --all-targets --features sqlite,http,cli,kit,compression,parquet,fast-masking -- -D warnings` | 所有警告视为错误 |
+| **pre-commit** | `cargo clippy --all-targets --no-default-features --features sqlite,http,cli,kit,compression,parquet,fast-masking -- -D warnings` | 所有警告视为错误（db 驱动互斥，不可用 `--all-features`） |
 | **pre-commit** | `cargo deny check` | 依赖漏洞 / 许可证 / 重复依赖 |
 | **pre-commit** | 私钥文件扫描 | 阻止 `BEGIN ... PRIVATE KEY` 等内容入库 |
 | **commit-msg** | Conventional Commits 校验 | `feat: ...` / `fix: ...` 等格式强制 |
 | **pre-push** | `cargo audit` | RustSec 安全公告 |
-| **pre-push** | `cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 95` | 行覆盖率 ≥ 95% 门禁 |
+| **pre-push** | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95` | 行覆盖率 ≥ 95% 门禁 |
 
 ### 禁止事项
 

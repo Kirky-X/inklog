@@ -169,7 +169,6 @@ impl LogSink for FailingSink {
 async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例 1: 多 Sink 配置（Console + File）");
 
-    // 生成临时文件路径
     let log_path = temp_file_path("multi_sink");
     println!("日志文件路径: {}", log_path);
 
@@ -185,7 +184,6 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
     let console_sink = ConsoleSink::new(console_config, LogTemplate::new("[{level}] {message}"));
     println!("Console Sink: 已配置");
 
-    // 2. 配置 File Sink
     let file_config = FileSinkConfig {
         enabled: true,
         path: PathBuf::from(&log_path),
@@ -210,7 +208,6 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
     let file_sink = FileSink::new(file_config)?;
     println!("File Sink: 已配置");
 
-    // 3. 创建日志记录
     let records = vec![
         LogRecord {
             timestamp: Utc::now(),
@@ -250,13 +247,10 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    // 4. 同时写入两个 Sink
     print_section("写入日志到多个 Sink");
 
     for record in &records {
-        // 写入 Console
         console_sink.write(record).await?;
-        // 写入 File
         file_sink.write(record).await?;
 
         let level_marker = match record.level.as_str() {
@@ -271,7 +265,6 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
     console_sink.flush().await?;
     file_sink.flush().await?;
 
-    // 5. 验证文件内容
     print_section("验证 File Sink");
     let content = fs::read_to_string(&log_path)?;
     println!("文件内容 ({} 字节):\n{}", content.len(), content);
@@ -294,11 +287,9 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
 async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例 2: 故障模拟与降级切换");
 
-    // 生成临时文件路径
     let backup_path = temp_file_path("fallback_backup");
     println!("备用日志文件: {}", backup_path);
 
-    // 1. 初始化状态追踪器
     let mut state = FallbackState::new("Console");
     println!("\n初始状态: 主 Sink = Console");
 
@@ -341,7 +332,6 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
     // 包装为会故障的 Sink（在第 5 次写入后故障）
     let primary_sink = FailingSink::new(Box::new(console_sink), 5, "Console");
 
-    // 4. 创建测试日志
     let test_records: Vec<LogRecord> = (1..=8)
         .map(|i| LogRecord {
             timestamp: Utc::now(),
@@ -357,14 +347,12 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    // 5. 写入日志并模拟故障
     print_section("写入日志（触发故障）");
 
     let mut success_count = 0;
     let mut fallback_triggered = false;
 
     for record in &test_records {
-        // 尝试写入主 Sink
         match primary_sink.write(record).await {
             Ok(()) => {
                 success_count += 1;
@@ -382,7 +370,6 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
                     fallback_triggered = true;
                 }
 
-                // 写入备用 Sink
                 println!(
                     "[{}] [备用 Sink] 接管写入",
                     Utc::now().format("%H:%M:%S%.3f")
@@ -393,7 +380,6 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 6. 展示降级统计
     print_section("降级事件统计");
     println!("降级次数: {}", state.fallback_count);
     println!(
@@ -405,7 +391,6 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("当前活跃 Sink: {}", state.active_sink);
 
-    // 7. 验证备用文件内容
     print_section("验证备用文件");
     let content = fs::read_to_string(&backup_path)?;
     println!("备用文件内容 ({} 字节):", content.len());
@@ -432,7 +417,6 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
 async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     print_separator("示例 3: 降级策略完整演示");
 
-    // 生成临时文件路径
     let primary_path = temp_file_path("primary");
     let fallback_path = temp_file_path("fallback");
     println!("主日志文件: {}", primary_path);
@@ -451,7 +435,6 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - status: SinkStatus - 详细状态");
     println!("  - last_error: Option<String> - 错误信息");
 
-    // 2. 创建模拟的健康检查结果
     let health_checks = vec![
         ("Console Sink", SinkHealth::healthy()),
         ("File Sink", SinkHealth::healthy()),
@@ -484,7 +467,6 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 3. 配置主和备用 Sink
     let primary_config = FileSinkConfig {
         enabled: true,
         path: PathBuf::from(&primary_path),
@@ -531,7 +513,6 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     };
     let fallback_sink = FileSink::new(fallback_config)?;
 
-    // 4. 模拟降级流程
     print_section("降级流程模拟");
 
     let records: Vec<LogRecord> = (1..=10)
@@ -566,7 +547,6 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         let log_num = i + 1;
 
         if log_num == failure_point {
-            // 模拟故障
             println!(
                 "\n[{}] *** 主 Sink 发生故障 ***",
                 Utc::now().format("%H:%M:%S%.3f")
@@ -611,7 +591,6 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // 5. 展示降级后的文件内容
     print_section("降级后文件内容");
 
     println!("\n--- 主文件 (前 {} 条日志) ---", failure_point - 1);
@@ -630,7 +609,6 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     cleanup_files(&primary_path, "inklog_example_primary")?;
     cleanup_files(&fallback_path, "inklog_example_fallback")?;
 
-    // 7. 展示降级策略总结
     print_section("降级策略总结");
 
     println!("\n三级降级保障:");
@@ -687,13 +665,10 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== inklog Sink 降级机制示例 ===\n");
 
-    // 示例 1: 多 Sink 配置
     multi_sink_config().await?;
 
-    // 示例 2: 故障模拟与降级切换
     simulate_failure().await?;
 
-    // 示例 3: 降级策略完整演示
     fallback_demo().await?;
 
     println!("\n=== 所有示例完成 ===");

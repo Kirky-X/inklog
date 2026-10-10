@@ -915,6 +915,10 @@ impl LoggerManager {
         };
         let channel_capacity = config.performance.channel_capacity;
         let global_format = config.global.format.clone();
+        // db sink 工厂的配置在 `config` 移入 WorkerParams 前取出（工厂闭包需要
+        // secret_scan_enabled/batch_size 等配置字段，见下方工厂构造）。
+        #[cfg(feature = "database")]
+        let db_sink_config_for_factory = config.database_sink.clone();
         let (handles, shutdown_txs) = Self::start_workers(WorkerParams {
             config,
             receiver,
@@ -951,8 +955,15 @@ impl LoggerManager {
                 // 与 file worker 同款做法：在 build_detached（async 上下文）clone
                 // runtime handle 进闭包使用
                 let runtime_handle = tokio::runtime::Handle::current();
+                // 配置随 sink 构造透传：secret_scan_enabled（落库前出站脱敏门）
+                // 与 batch_size 等字段经 DatabaseSinkConfig 生效——不传配置会
+                // 使 config.database_sink.secret_scan_enabled=true 被静默忽略。
+                let db_sink_config = db_sink_config_for_factory;
                 move |db: Arc<dyn crate::integrations::Database>, metrics: Arc<Metrics>| {
-                    let sink = crate::support::io::DatabaseSink::new(db)?;
+                    let sink = crate::support::io::DatabaseSink::new_with_config(
+                        db,
+                        db_sink_config.clone(),
+                    )?;
                     runtime_handle.block_on(async { sink.set_metrics(metrics).await });
                     Ok(Box::new(sink) as Box<dyn LogSink>)
                 }
@@ -1544,7 +1555,6 @@ mod tests {
         // 验证基本属性
         assert!(manager.effective_channel_capacity() > 0);
         assert_eq!(manager.channel_len(), 0);
-        // 清理
         let _ = manager.shutdown();
     }
 

@@ -360,19 +360,21 @@ inklog 内置全面的 **PII（个人身份信息）** 检测和脱敏功能，�
 
 | # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
 |---|---------|--------|---------|----------|
-| 1 | 国际电话号码 | 10 | E.164 格式 | `+1-202-555-0123` → `+1-***-***-23` |
+| 1 | 国际电话号码 | 10 | E.164 格式 | `+1-202-555-0123` → `+1-***-***-0123` |
 | 2 | 信用卡号 (Luhn) | 15 | Visa/MC/Amex/Discover + Luhn 校验 | `4111111111111111` → `****-****-****-1111` |
 | 3 | IPv4 地址 | 20 | `xxx.xxx.xxx.xxx` | `192.168.1.100` → `***.***.***.100` |
-| 4 | MAC 地址 | 20 | `XX:XX:XX:XX:XX:XX` 或 `XX-XX-XX-XX-XX-XX` | `00:1A:2B:3C:4D:5E` → `XX:**:**:**:**:5E` |
-| 5 | IPv6 地址 | 21 | `{hex}:{hex}:...:{hex}` | `2001:db8::1` → `****:****:****:XXXX` |
+| 4 | MAC 地址 | 19 | `XX:XX:XX:XX:XX:XX` 或 `XX-XX-XX-XX-XX-XX` | `00:1A:2B:3C:4D:5E` → `00:**:**:**:**:5E` |
+| 5 | IPv6 地址 | 21 | 完整分组形式 `(hex:){2,7}hex` | `2001:0db8:0000:0000:0000:0000:0000:0001` → `****:****:****:****:****:****:****:0001` |
+
+> IPv6 规则仅匹配完整分组形式，`2001:db8::1` 这类 `::` 压缩写法不命中；命中时末段分组保留真实值，其余分组以 `****` 替换。
 
 #### 中优先级规则（30-40）
 
 | # | 规则名称 | 优先级 | 匹配模式 | 脱敏示例 |
 |---|---------|--------|---------|----------|
-| 6 | 护照号 | 30 | `[A-Z]\d{6,9}` (G/E 开头) | `G12345678` → `******XX` |
+| 6 | 护照号 | 30 | `[EeGg]\d{8}`（E/G 开头 + 8 位数字） | `G12345678` → `G******78` |
 | 7 | SSN (美国社保号) | 35 | `XXX-XX-XXXX` | `123-45-6789` → `***-**-6789` |
-| 8 | DB 连接串 | 40 | `protocol://user:pass@host/db` | `postgres://admin:secret@...` → `postgres://***:***@***` |
+| 8 | DB 连接串 | 40 | `protocol://user:pass@host/db` | `postgres://admin:secret@localhost/db` → `postgres://admin:***@localhost/db`（仅密码段被替换） |
 
 #### 低优先级规则（50-100）
 
@@ -386,56 +388,59 @@ inklog 内置全面的 **PII（个人身份信息）** 检测和脱敏功能，�
 | 14 | 邮箱地址 | 100 | 标准邮箱格式 | `user@example.com` → `**@**.***` |
 | 15 | 电话号码 (中国) | 100 | `1[3-9]\d{9}` | `13812345678` → `***-****-****` |
 | 16 | 身份证号 (中国) | 100 | 18 位独立字符串 | `110101199001011234` → `******1234` |
-| 17 | 银行卡号 | 100 | 8+ 位连续数字 | `6222021234567890123` → `****-****-****-0123` |
-| 18 | API 密钥 | 100 | `api_key=...` 格式 | `api_key=xxx` → `api_key=***REDACTED***` |
+| 17 | 银行卡号 | 100 | 16-19 位连续数字（4+8..11+4） | `6222021234567890123` → `****-****-****-0123` |
+| 18 | API 密钥 | 100 | `api[_-]?key=...` 格式（值 ≥ 20 位） | `api_key=abcdefghijklmnopqrstuvwxyz` → `api_key=***REDACTED******REDACTED***` |
 | 19 | AWS 凭据 | 100 | `AKIA/ABIA/ACCA/ASIA` 前缀 | `AKIAIOSFODNN7EXAMPLE` → `***REDACTED***` |
 | 20 | JWT Token | 100 | `eyJ.eyJ.sig` 格式 | JWT → `***REDACTED_JWT***` |
-| 21 | 通用密钥 | 100 | token/secret/key/password 等 | `secret=xxx` → `***REDACTED***` |
+| 21 | 通用密钥 | 100 | token/secret/key/password 等（值 ≥ 16 位） | `secret=abcdefghijklmnop` → `secret=***REDACTED***` |
 
 > 信用卡规则使用 **Luhn 算法**验证校验和，仅脱敏通过校验的合法卡号，避免误判普通数字序列。
 
 ### 字段级敏感检测
 
-敏感字段名检测（29 种模式，字段名包含即命中）：
+敏感字段名检测（15 条词边界正则，大小写不敏感；启用 `secret-scan` 时追加 1 条中文键名族）：
 
 ```rust
-static SENSITIVE_FIELDS: &[&str] = &[
-    // 认证凭据
-    "password", "token", "secret", "key", "credential", "auth",
-
-    // API 密钥
-    "api_key", "api_key_id", "api_secret", "access_key", "access_key_id",
-    "secret_key", "private_key", "public_key", "encryption_key",
-    "decryption_key", "master_key", "session_key",
-
-    // OAuth 相关
-    "oauth", "oauth_token", "oauth_secret", "bearer", "bearer_token",
-    "jwt", "session_id", "session_token",
-
-    // AWS 凭据
-    "aws_secret", "aws_key", "aws_credentials",
-
-    // 数据库连接
-    "database_url", "db_password", "db_user", "connection_string",
-
-    // 支付和个人身份信息
-    "credit_card", "card_number", "cvv", "ssn", "social_security",
-
-    // 其他敏感信息
-    "client_secret", "client_id", "refresh_token", "pin", "pin_code",
-    "two_factor", "totp", "backup_code", "recovery_code",
-];
+static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+    vec![
+        // 认证凭据
+        regex::Regex::new(r"(?i)\b(password|passwd|pwd)\b").unwrap(),
+        // token/bearer/auth：前置字符须为分隔符或行首（避免 "cakey" 类误判）
+        regex::Regex::new(r"(?i)(?:[^a-zA-Z0-9_])?(token|bearer|auth)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(secret|credential)\b").unwrap(),
+        // API 密钥
+        regex::Regex::new(r"(?i)\b(api[_-]?key|apikey|api[_-]?secret)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(access[_-]?key|access[_-]?key[_-]?id)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(secret[_-]?key|private[_-]?key|public[_-]?key)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(encryption[_-]?key|decryption[_-]?key|master[_-]?key)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(session[_-]?key|session[_-]?id|session[_-]?token)\b").unwrap(),
+        // OAuth 相关
+        regex::Regex::new(r"(?i)\b(oauth|oauth[_-]?token|oauth[_-]?secret)\b").unwrap(),
+        regex::Regex::new(r"(?i)\b(jwt(_[a-zA-Z0-9]+)?|bearer[_-]?token)\b").unwrap(),
+        // AWS 凭据
+        regex::Regex::new(r"(?i)\b(aws[_-]?secret|aws[_-]?key|aws[_-]?token|aws[_-]?credentials)\b").unwrap(),
+        // 数据库连接
+        regex::Regex::new(r"(?i)\b(database[_-]?url|db[_-]?password|db[_-]?user|connection[_-]?string)\b").unwrap(),
+        // 支付和个人身份信息
+        regex::Regex::new(r"(?i)\b(credit[_-]?card|card[_-]?number|cvv|ssn|social[_-]?security)\b").unwrap(),
+        // 客户端凭据
+        regex::Regex::new(r"(?i)\b(client[_-]?secret|client[_-]?id)\b").unwrap(),
+        // 其他敏感信息
+        regex::Regex::new(r"(?i)\b(refresh[_-]?token|pin|pin[_-]?code|two[_-]?factor|totp|backup[_-]?code|recovery[_-]?code)\b").unwrap(),
+    ]
+});
 ```
+
+启用 `secret-scan` feature 时追加第 16 条：`(密钥|令牌|密码|口令|凭证|凭据|私钥)$`（键名以敏感词收尾即视为敏感字段）。
 
 快速检测函数：
 
 ```rust
 impl DataMasker {
     pub fn is_sensitive_field(field_name: &str) -> bool {
-        let lower_name = field_name.to_lowercase();
-        SENSITIVE_FIELDS
+        SENSITIVE_FIELD_PATTERNS
             .iter()
-            .any(|sensitive| lower_name.contains(*sensitive))
+            .any(|pattern| pattern.is_match(field_name))
     }
 }
 ```
@@ -518,7 +523,7 @@ let masker = DataMasker::new();
 
 // 字符串脱敏
 let masked = masker.mask("Contact admin@example.com at 13812345678");
-// 结果: "Contact ***@***.*** at 138****5678"
+// 结果: "Contact **@**.*** at ***-****-****"
 
 // JSON 结构递归脱敏
 use serde_json::json;
@@ -633,8 +638,8 @@ inklog 在文件、数据库和网络层面实施严格的访问控制。
 
 **磁盘空间管理**（FileSink）：
 
-- 可用空间不足（< 5% 或 < 100MB）时告警并降级；
-- 自动清理旧日志：大小清理与年龄清理独立执行——`max_total_size` 不可解析时过期清理仍然生效；
+- 可用空间不足判定：保留量为 50MB 与可用空间 10% 的较大者，可用空间不大于该保留量时判定空间不足并降级（检查带节流缓存，空间不足时不节流、恢复后立即重检）；
+- 自动清理旧日志：大小清理（删除最旧文件直至低于 `max_total_size`）与年龄清理（删除早于 `retention_days` 的文件）独立执行——`max_total_size` 不可解析时过期清理仍然生效；两个分支都始终保留最新的 `keep_files` 个轮转文件；
 - 等保场景：`encrypt=true` 且 `retention_days < 180` 时输出留存合规提示（等保 2.0 要求日志留存 ≥ 6 个月）。
 
 **文件权限（审计加固）**：
@@ -652,7 +657,7 @@ inklog 在文件、数据库和网络层面实施严格的访问控制。
 
 **SQL 注入防护**：
 
-- 表名白名单校验（`validate_table_name`）：仅允许字母、数字、下划线，必须以字母或下划线开头，长度 ≤ 128；
+- 表名白名单校验（`validate_table_name`）：仅允许字母、数字、下划线，必须以字母或下划线开头（`^[a-zA-Z_][a-zA-Z0-9_]*$`，无长度上限）；
 - 业务数据一律经参数化查询写入，禁止字符串拼接；
 - DDL（建表/分区）使用校验后的名称构建。
 

@@ -197,7 +197,6 @@ fn show_convert_logs_to_parquet() {
         }
     }
 
-    // 空记录测试
     println!("\n空记录测试：");
     let empty: Vec<LogRecord> = vec![];
     match convert_logs_to_parquet(&empty, &config) {

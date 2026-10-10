@@ -19,20 +19,20 @@
 //! ```bash
 //! # 核心用法
 //! cargo run --bin basic
-//! cargo run --bin builder
+//! cargo run --package inklog-examples --bin builder
 //! cargo run --bin template
 //! cargo run --bin i18n
 //! cargo run --bin production
-//! cargo run --bin all_features
+//! cargo run --package inklog-examples --bin all_features
 //!
 //! # 配置管理
 //! cargo run --bin config_file
-//! cargo run --bin config_inspect
+//! cargo run --package inklog-examples --bin config_inspect
 //! cargo run --bin env_overrides
 //!
 //! # 输出 Sink
 //! cargo run --bin console
-//! cargo run --bin file
+//! cargo run --package inklog-examples --features compression --bin file
 //! cargo run --bin rotation
 //! cargo run --bin compression --features compression
 //! cargo run --bin ring_buffered_file
@@ -46,7 +46,7 @@
 //!
 //! # 网络服务
 //! cargo run --bin http
-//! cargo run --bin http_auth
+//! cargo run --package inklog-examples --bin http_auth
 //! cargo run --bin tls_config
 //!
 //! # 基础设施

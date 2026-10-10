@@ -2,11 +2,6 @@
 // SPDX-License-Identifier: MIT
 // 加密文件功能测试
 // 测试加密日志文件写入、密钥管理，确保生产环境中的敏感日志数据安全。
-//
-// 核正：Encryptor/EncryptionKey（AES-256-GCM 原语）与 inklog::archive::SecretString
-// 已随 API 重构移除——现公开面为密钥派生（sink::encryption::{get_encryption_key,
-// derive_key_from_password}）与 FileSink 加密落盘（encrypt + encryption_key_env）。
-// 原 Encryptor 加解密原语用例裁撤，保留并强化文件 Sink 集成与密钥管理用例。
 
 #[cfg(test)]
 mod encryption_file {

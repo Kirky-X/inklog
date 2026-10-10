@@ -118,7 +118,7 @@ inklog is logging infrastructure built for production: application code keeps us
 cargo add inklog
 ```
 
-Or declare it explicitly in `Cargo.toml` (`default = ["i18n"]`; core capabilities plus internationalization are enabled by default):
+Or declare it explicitly in `Cargo.toml` (`default = ["i18n", "cache"]`; core capabilities plus internationalization and the cache backend are enabled by default):
 
 ```toml
 [dependencies]
@@ -152,18 +152,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 1. **Initialization**: `LoggerManager` installs the global tracing subscriber and the `log` crate frontend with process-wide singleton semantics (`init_inklog_logger()` is the convenience entry point).
 2. **Recording**: business code uses standard macros such as `tracing::info!` with zero intrusion.
 3. **Sinks**: the output abstraction (`LogSink` / `AsyncSink` traits) with built-in console / file / database / net / otlp implementations, extensible with your own.
-4. **Configuration**: `InklogConfig` supports TOML files and `INKLOG_*` environment variable overrides; precedence is environment > file > defaults.
+4. **Configuration**: `InklogConfig` supports TOML files; `INKLOG_*` environment variable overrides apply only when loading via `InklogConfig::load_with_env_overrides()` (precedence: environment > file > defaults). `LoggerManager::new()` / `LoggerManager::load()` go through `load_sync()` and do not apply env overrides.
 5. **Shutdown**: call `shutdown()` before exit so remaining records in the channel are flushed.
 
 ---
 
 ## 🎨 Feature Flags
 
-`default = ["i18n"]`: the default build contains core capabilities plus internationalization; every other feature below must be enabled explicitly (per the `Cargo.toml` `[features]` definition). Opting out via `default-features = false` prunes the whole icu/fluent dependency tree, with `tr`/`tr_args` falling back to the embedded English message table.
+`default = ["i18n", "cache"]`: the default build contains core capabilities plus internationalization and the cache backend; every other feature below must be enabled explicitly (per the `Cargo.toml` `[features]` definition). Opting out via `default-features = false` disables both i18n and cache, which prunes the whole icu/fluent dependency tree (oxcache's icu/fluent deps are not optional), with `tr`/`tr_args` falling back to the embedded English message table.
 
 | Flag | Default | Description |
 |------|:----:|------|
-| `i18n` | ✅ | Internationalization runtime: ICU4X locale formatting + fluent-bundle translation + `INKLOG_LOCALE` override; opting out removes icu/fluent from the dependency tree |
+| `i18n` | ✅ | Internationalization runtime: ICU4X locale formatting + fluent-bundle translation + `INKLOG_LOCALE` override |
+| `cache` | ✅ | Cache backend: oxcache adapter (`OxCacheAdapter`) and `ObjectPool`; oxcache's icu/fluent deps are not optional, so pruning icu/fluent requires disabling both `i18n` and `cache` (`default-features = false`) |
 | `sqlite` | ❌ | SQLite database backend (via dbnexus, rustls runtime) |
 | `postgres` | ❌ | PostgreSQL database backend (via dbnexus) |
 | `mysql` | ❌ | MySQL database backend (via dbnexus) |
@@ -183,7 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `kms` | ❌ | KMS key providers (`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP) |
 | `net-sink` | ❌ | Network forwarding sinks (TCP with optional TLS + UDP, buffered reconnection) |
 | `otlp` | ❌ | OTLP/HTTP JSON log export MVP (hand-written transport, zero new dependencies) |
-| `otel` | ❌ | Real OpenTelemetry trace context: reads the SpanContext from span extensions (written by the host's tracing-opentelemetry layer); the host otel version must match inklog's, otherwise it silently falls back to root-span derivation |
+| `otel` | ❌ | Real OpenTelemetry trace context: reads the SpanContext from span extensions (written by the host's tracing-opentelemetry layer); the host otel version must match inklog's (currently opentelemetry 0.33, paired with tracing-opentelemetry 0.34), otherwise it silently falls back to root-span derivation |
 | `metrics-registry` | ❌ | General-purpose business metrics registry (CounterVec / GaugeVec / HistogramVec + Prometheus text export) |
 | `test-utils` | ❌ | Test-facing mock exports (`MockCache` / `MockConfig` / `MockDatabaseAdapter`); excluded from default and all production combinations |
 
@@ -277,7 +278,7 @@ cargo run --package inklog-examples --bin <name>
 
 | Example | Description | Feature |
 |------|------|----------|
-| `http` | HTTP health and metrics endpoint demo | none |
+| `http` | HTTP health and metrics endpoint demo | `http` (enforced by required-features) |
 | `http_auth` | HTTP authentication and IP allowlist configuration | none |
 | `tls_config` | TLS configuration | none |
 
@@ -325,7 +326,7 @@ Sink write failures go through the circuit breaker (default failure threshold 5,
 | Docker database integration | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite lifecycle verification |
 | Performance tests | `tests/performance/` + `benches/` | Large-volume and long-running tests plus criterion benchmarks |
 
-**Test suite size** (measured before the v0.3.0-rc.7 release, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,710 inline in `src/` + 564 in `tests/` + 41 in `examples/` for a total of **2,315 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature).
+**Test suite size** (measured at HEAD, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,712 inline in `src/` + 564 in `tests/` + 41 in `examples/` for a total of **2,317 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature).
 
 ### Commands (matching CI)
 
@@ -371,7 +372,7 @@ The first official baseline (2026-09-11, criterion medians, covering the write /
 | Bounded-channel backpressure | `channel_capacity` default 10,000 | Prevents memory exhaustion; channel usage exposed via metrics |
 | Database batch writes | `batch_size` default 100, flush interval default 500 ms | docs/ARCHITECTURE.md reference: ~10,000 rows/s for batches of 100 vs ~100 rows/s for per-row inserts |
 | Masking on demand | `masking_enabled` | Regex masking is the most expensive security step on the main path; enable only on sinks that need it |
-| Zstd compression | levels 0-22, default 3 | ~3.5x ratio at the default level |
+| Zstd compression | levels 1-22, default 3 | ~3.5x ratio at the default level |
 
 Reproduction steps are documented in the "Reproduction" section of [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
@@ -421,7 +422,7 @@ Contributions are welcome! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for 
 |------|------|
 | Rust 1.97.1 | pinned by `rust-toolchain.toml` |
 | Protobuf compiler | `protoc` is required to build combinations with database features |
-| lefthook | install hooks with `bash scripts/install-pre-commit.sh` |
+| Git hooks | install Python pre-commit hooks with `bash scripts/install-pre-commit.sh` (reads `.pre-commit-config.yaml`); lefthook users run `lefthook install` (config in `lefthook.yml`) |
 
 ```bash
 git clone https://github.com/Kirky-X/inklog.git
@@ -435,7 +436,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 ### Commit Conventions
 
 - **Conventional Commits**: `feat: ...` / `fix: ...` / `docs: ...`, enforced by the commit-msg hook;
-- **pre-commit hooks**: rustfmt, clippy (`-D warnings`, zero warnings), `cargo deny check`, private-key scan;
+- **pre-commit hooks** (`.pre-commit-config.yaml`): rustfmt, clippy (`-D warnings`, zero warnings), `cargo check`, private-key/secret scans (detect-private-key, detect-secrets) and typos, etc.; `cargo deny check` lives in the lefthook config (`lefthook.yml`);
 - **pre-push hooks**: `cargo audit` and the coverage ≥95% gate (same scope as the CI coverage job: explicit features + `--lib`, see lefthook.yml).
 
 ### Pull Request Process
@@ -455,7 +456,7 @@ The full version history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md) (Keep a
 ### Recent Releases
 
 - **0.3.0-rc.7** (2026-10-07): fix `E0433` in `create_compressed_output` on non-unix targets when neither zstd nor gzip is enabled (hit by limiteron with `default-features = false`); the CI build matrix now also checks the zero-feature build to prevent regressions
-- **0.3.0-rc.6** (2026-09-28): full egress PII masking coverage with hardened regex rules (fancy-regex lookaround); ERROR/FATAL fallback re-emission, fsync crash consistency and 0600 file permissions; audit chain wired into rotation with `inklog-cli verify-chain`; service identity static fields; deferred-capabilities four items (Chinese name masking / FallbackJournal / CBFS promotion / real OTel trace context); masking detection-face and KV-redaction APIs; i18n feature-gating; CI database matrix extended with duckdb;
+- **0.3.0-rc.6** (2026-10-06): full egress PII masking coverage with hardened regex rules (fancy-regex lookaround); ERROR/FATAL fallback re-emission, fsync crash consistency and 0600 file permissions; audit chain wired into rotation with `inklog-cli verify-chain`; service identity static fields; deferred-capabilities four items (Chinese name masking / FallbackJournal / CBFS promotion / real OTel trace context); masking detection-face and KV-redaction APIs; i18n feature-gating; CI database matrix extended with duckdb;
 - **0.3.0-rc.4** (2026-09-14, including the original rc.3 batch): added `init_inklog_logger` singleton initialization, runtime level hot-reload (`set_level`), dynamic sink registration (`LoggerBuilder::add_sink`), `trace_id`/`span_id` correlation, `inklog-cli query` log search, network forwarding sinks (TCP/UDP), an OTLP export MVP, the tamper-evident archive chain, and the first performance baseline in `docs/PERFORMANCE.md` (version 0.3.0-rc.3 was skipped and never published; its content shipped with this release);
 - **0.3.0-rc.2** (2026-09-03): integrated trait-kit 0.5.0-rc.2 and the i18n refactor with a version bump; removed the three mocks from the default public API (BREAKING; external test consumers must enable `test-utils`);
 - **0.2.0** (2026-08-05): added the `compression` / `parquet` / `fast-masking` features and the i18n core module; added ChannelBufferedFileSink, circuit-breaker protection, and the ring-buffered file sink; edition 2024, MSRV 1.94.

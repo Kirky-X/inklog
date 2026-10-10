@@ -377,7 +377,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### InklogConfig
 
-根配置结构，支持 TOML 文件与 `INKLOG_*` 环境变量覆盖。
+根配置结构，支持 TOML 文件；`INKLOG_*` 环境变量覆盖经 `InklogConfig::load_with_env_overrides()` 生效（`load_sync()` 只读配置文件，不应用 env 覆盖）。
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -471,7 +471,7 @@ pub struct FileSinkConfig {
     pub rotation_time: String,                // 默认 "daily"（hourly / daily / weekly）
     pub keep_files: u32,                      // 默认 30
     pub compress: bool,                       // 默认 true
-    pub compression_level: i32,               // 默认 3（0-22）
+    pub compression_level: i32,               // 默认 3（1-22）
     pub encrypt: bool,                        // 默认 false
     pub encryption_key_env: Option<String>,   // 默认 None
     pub encryption_key_file: Option<String>,  // 默认 None；加密密钥文件路径（`encrypt` 开启时生效，env 设置时优先覆盖）——unix 权限必须 0600，组/其他可读在密钥解析期显性拒绝
@@ -570,7 +570,7 @@ pub enum DatabaseDriver {
 
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `compression_level` | `i32` | `3` | Zstd 压缩级别（0-22） |
+| `compression_level` | `i32` | `3` | Zstd 压缩级别（1-22） |
 | `encoding` | `String` | `"PLAIN"` | 编码方式：`PLAIN`、`DICTIONARY`、`RLE` |
 | `max_row_group_size` | `usize` | `10000` | Row Group 大小（行数） |
 | `max_page_size` | `usize` | `1048576` | 页面大小（字节） |
@@ -757,6 +757,8 @@ pub struct SinkHealth {
 pub struct MetricsSnapshot {
     pub logs_written: u64,
     pub logs_dropped: u64,
+    pub sampled_out: u64,
+    pub user_middleware_dropped: u64,
     pub channel_blocked: u64,
     pub sink_errors: u64,
     pub db_batch_size: i64,
@@ -782,11 +784,16 @@ pub struct MetricsSnapshot {
 | `inklog_logs_written_total` | counter | 成功写入总数 |
 | `inklog_logs_dropped_total` | counter | 丢弃总数 |
 | `inklog_sampled_out_total` | counter | 采样淘汰总数（`logs_dropped` 的采样细分） |
+| `inklog_user_middleware_dropped_total` | counter | 用户治理中间件丢弃总数 |
 | `inklog_sink_errors_total` | counter | Sink 错误总数 |
 | `inklog_channel_blocked_total` | counter | 通道阻塞次数 |
+| `inklog_active_workers` | gauge | 当前活跃工作线程数 |
+| `inklog_avg_latency_us` | gauge | 平均处理延迟（微秒） |
+| `inklog_latency_p50_us` / `inklog_latency_p95_us` / `inklog_latency_p99_us` | gauge | 处理延迟 P50/P95/P99（微秒） |
 | `inklog_write_latency_us` | histogram | 写入延迟（微秒，含 bucket/sum/count） |
 | `inklog_sink_healthy` | gauge | 各 Sink 健康状态 |
 | `inklog_uptime_seconds` | gauge | 运行时长 |
+| `inklog_pool_hit_rate` | gauge | 对象池命中率（0-100） |
 | `inklog_db_batch_size` | gauge | 数据库批量大小 |
 | `inklog_db_batch_records_total` | counter | 数据库批量写入记录总数 |
 | `inklog_db_pool_total` / `inklog_db_pool_active` / `inklog_db_pool_idle` | gauge | 连接池总量/活跃/空闲 |
@@ -956,7 +963,7 @@ impl<T: LogSink + ?Sized> AsyncSink for T {}
 
 | 类型 | 描述 |
 |------|------|
-| `CircuitBreaker` / `CircuitBreakerConfig` / `CircuitState` | 断路器（默认失败阈值 5 次、冷却 30 秒，半开动态批大小减半） |
+| `CircuitBreaker` / `CircuitBreakerConfig` / `CircuitState` | 断路器（默认失败阈值 5 次、冷却 30 秒，Closed/Open/HalfOpen 状态机） |
 | `SinkRegistry` | Sink 注册表与查找 |
 | `RotationStrategy` / `SizeBasedRotation` / `TimeBasedRotation` / `CompositeRotation` | 轮转策略组合 |
 | `Rotatable` / `RotationContext` / `RotationResult` | 轮转抽象 |
