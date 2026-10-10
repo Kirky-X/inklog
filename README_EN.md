@@ -454,6 +454,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 The full version history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md) (Keep a Changelog format, semantic versioning).
 
 ### Recent Releases
+- **0.3.0-rc.7** (2026-10-08): production API surface reduced — removed test-only public functions (`decrypt_file`, `reset_ops_hub_for_tests`); complexity hotspots converged via helper extraction, dead delegates removed with feature-gating replacing `allow` markers; governance records and the specmark directory moved out of git tracking; vulnerability reporting channels unified
 
 - **0.3.0-rc.7** (2026-10-07): fix `E0433` in `create_compressed_output` on non-unix targets when neither zstd nor gzip is enabled (hit by limiteron with `default-features = false`); the CI build matrix now also checks the zero-feature build to prevent regressions
 - **0.3.0-rc.6** (2026-10-06): full egress PII masking coverage with hardened regex rules (fancy-regex lookaround); ERROR/FATAL fallback re-emission, fsync crash consistency and 0600 file permissions; audit chain wired into rotation with `inklog-cli verify-chain`; service identity static fields; deferred-capabilities four items (Chinese name masking / FallbackJournal / CBFS promotion / real OTel trace context); masking detection-face and KV-redaction APIs; i18n feature-gating; CI database matrix extended with duckdb;

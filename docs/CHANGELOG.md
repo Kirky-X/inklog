@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <summary>📑 目录</summary>
 
 - [Unreleased](#unreleased)
+- [0.3.0-rc.8](#030-rc8---2026-10-08)
 - [0.3.0-rc.7](#030-rc7---2026-10-07)
 - [0.3.0-rc.6](#030-rc6---2026-10-06)
 - [0.3.0-rc.5](#030-rc5---2026-09-21)

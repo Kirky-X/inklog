@@ -452,6 +452,7 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 完整版本记录见 [docs/CHANGELOG.md](docs/CHANGELOG.md)（Keep a Changelog 格式，语义化版本）。
 
 ### 最近版本
+- **0.3.0-rc.7**（2026-10-08）：生产 API 收缩——删除测试专用公共函数（`decrypt_file`、`reset_ops_hub_for_tests`）；复杂热点抽辅助函数收敛，死委托删除并以特性隔离替代 `allow` 标记；治理记录与 specmark 目录移出跟踪；漏洞报告渠道统一
 
 - **0.3.0-rc.7**（2026-10-07）：修复 `create_compressed_output` 在非 unix 且 zstd/gzip 均未启用时的 `E0433` 编译失败（limiteron 以 `default-features = false` 依赖时踩中）；CI 构建腿补零特性检查防回归
 - **0.3.0-rc.6**（2026-10-06）：全出口 PII 掩码覆盖与脱敏正则加固（fancy-regex 环视）；ERROR/FATAL 兜底补发、fsync 崩溃一致性与文件权限 0600；审计链接入轮转管线与 `inklog-cli verify-chain`；服务身份静态字段注入；deferred-capabilities 四项（中文姓名掩码/FallbackJournal/CBFS 转正/真 OTel 链路上下文）；masking 检测面与 KV 脱敏 API；i18n feature 化；CI 数据库矩阵补齐 duckdb；
