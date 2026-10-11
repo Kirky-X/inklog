@@ -57,7 +57,11 @@ async fn test_database_sink_create_and_shutdown() {
 
     let sink = setup_sink(&url, 5, 1000).await;
     let result = sink.shutdown().await;
-    assert!(result.is_ok(), "shutdown 应成功: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "shutdown should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -166,7 +170,7 @@ async fn test_database_sink_double_shutdown_safe() {
     let sink = setup_sink(&url, 5, 1000).await;
 
     let first = sink.shutdown().await;
-    assert!(first.is_ok(), "第一次 shutdown 应成功");
+    assert!(first.is_ok(), "the first shutdown should succeed");
 
     let _ = sink.shutdown().await;
 }

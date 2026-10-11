@@ -60,16 +60,16 @@ mod tests {
         let mut log_count = 0u64;
         let mut cpu_samples = Vec::new();
 
-        println!("开始CPU占用测试 ({}秒)", test_duration);
+        println!("starting CPU usage test ({}s)", test_duration);
 
         while start_time.elapsed() < Duration::from_secs(test_duration) {
-            tracing::info!("CPU测试日志 #{}", log_count);
+            tracing::info!("CPU test log #{}", log_count);
             log_count += 1;
 
             if log_count.is_multiple_of(50) {
                 let cpu = get_cpu_usage_percent();
                 cpu_samples.push(cpu);
-                println!("CPU使用率: {:.2}%", cpu);
+                println!("CPU usage: {:.2}%", cpu);
             }
 
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -81,17 +81,17 @@ mod tests {
             0.0
         };
 
-        println!("测试完成");
-        println!("总日志数: {}", log_count);
-        println!("平均CPU使用率: {:.2}%", avg_cpu);
+        println!("test completed");
+        println!("total logs: {}", log_count);
+        println!("average CPU usage: {:.2}%", avg_cpu);
         println!(
-            "最大CPU使用率: {:.2}%",
+            "peak CPU usage: {:.2}%",
             cpu_samples.iter().cloned().fold(0.0, f64::max)
         );
 
         assert!(
             avg_cpu < max_cpu_percent,
-            "平均CPU使用率超过阈值: {:.2}% > {:.2}%",
+            "average CPU usage exceeds the threshold: {:.2}% > {:.2}%",
             avg_cpu,
             max_cpu_percent
         );
@@ -117,17 +117,17 @@ mod tests {
         let mut log_count = 0u64;
         let mut memory_samples = Vec::new();
 
-        println!("开始内存占用测试 ({}秒)", test_duration);
-        println!("初始内存: {:.2} MB", initial_memory);
+        println!("starting memory usage test ({}s)", test_duration);
+        println!("initial memory: {:.2} MB", initial_memory);
 
         while start_time.elapsed() < Duration::from_secs(test_duration) {
-            tracing::info!("内存测试日志 #{} - 数据: {}", log_count, "x".repeat(100));
+            tracing::info!("memory test log #{} - data: {}", log_count, "x".repeat(100));
             log_count += 1;
 
             if log_count.is_multiple_of(50) {
                 let mem = get_memory_usage_mb();
                 memory_samples.push(mem);
-                println!("内存使用: {:.2} MB", mem);
+                println!("memory usage: {:.2} MB", mem);
             }
 
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -141,16 +141,16 @@ mod tests {
             final_memory
         };
 
-        println!("测试完成");
-        println!("总日志数: {}", log_count);
-        println!("初始内存: {:.2} MB", initial_memory);
-        println!("最终内存: {:.2} MB", final_memory);
-        println!("平均内存: {:.2} MB", avg_memory);
-        println!("最大内存: {:.2} MB", max_memory);
+        println!("test completed");
+        println!("total logs: {}", log_count);
+        println!("initial memory: {:.2} MB", initial_memory);
+        println!("final memory: {:.2} MB", final_memory);
+        println!("average memory: {:.2} MB", avg_memory);
+        println!("peak memory: {:.2} MB", max_memory);
 
         assert!(
             avg_memory < max_memory_mb,
-            "平均内存使用超过阈值: {:.2} MB > {:.2} MB",
+            "average memory usage exceeds the threshold: {:.2} MB > {:.2} MB",
             avg_memory,
             max_memory_mb
         );
@@ -160,9 +160,15 @@ mod tests {
     fn test_resource_measurement_available() {
         let memory = get_memory_usage_mb();
         let cpu = get_cpu_usage_percent();
-        println!("当前内存使用: {:.2} MB", memory);
-        println!("当前CPU使用率: {:.2}%", cpu);
-        assert!(memory >= 0.0, "内存测量应该返回非负值");
-        assert!(cpu >= 0.0, "CPU测量应该返回非负值");
+        println!("current memory usage: {:.2} MB", memory);
+        println!("current CPU usage: {:.2}%", cpu);
+        assert!(
+            memory >= 0.0,
+            "memory measurement should return a non-negative value"
+        );
+        assert!(
+            cpu >= 0.0,
+            "CPU measurement should return a non-negative value"
+        );
     }
 }

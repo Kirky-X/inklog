@@ -165,7 +165,7 @@ mod tests {
             assert_eq!(
                 lim.evaluate("other::clean"),
                 TargetQuotaVerdict::Ungoverned,
-                "无规则 target 必须不受配额管辖"
+                "a target with no rule must stay outside the quota"
             );
         }
         // 管辖组的预算不被未管辖 target 消耗
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(
             lim.evaluate("app::noise"),
             TargetQuotaVerdict::Drop,
-            "组预算耗尽必须拒绝同组后续记录"
+            "once the group budget is exhausted, later records of the same group must be dropped"
         );
     }
 

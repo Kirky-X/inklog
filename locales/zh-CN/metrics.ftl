@@ -19,3 +19,13 @@ metrics-fallback_reason_encryption = 加密密钥错误: { $error }
 metrics-fallback_reason_plaintext = 明文写入（加密错误）: { $error }
 metrics-recovery_succeeded = 恢复成功
 metrics-unknown_error = 未知错误
+
+# 指标注册不变量（panic 面）
+metrics-registry-help-mismatch = 指标 `{ $name }` help 不一致
+metrics-registry-labels-mismatch = 指标 `{ $name }` 标签不一致
+metrics-registry-kind-conflict = 指标 `{ $name }` 类型冲突
+metrics-registry-histogram_buckets-missing = histogram 必带 buckets
+metrics-registry-buckets-mismatch = 指标 `{ $name }` buckets 不一致
+metrics-registry-counter-registered = counter 已注册且类型校验过
+metrics-registry-gauge-registered = gauge 已注册且类型校验过
+metrics-registry-histogram-registered = histogram 已注册且类型校验过

@@ -89,10 +89,7 @@ fn classify_key_value(value: &str) -> Result<KeyMaterial, InklogError> {
     // 语义歧义保留：32 字符密码与 32 字节随机密钥无法区分，直接用作原始
     // 密钥（解密既有按此格式加密的文件的兼容行为）。
     if raw_bytes.len() == 32 {
-        tracing::warn!(
-            "32-byte input used directly as a raw encryption key; \
-             prefer a Base64-encoded random key or a password whose length is not 32"
-        );
+        tracing::warn!("{}", crate::i18n::tr("log-encryption_raw_key_warning"));
         let mut result = [0u8; 32];
         result.copy_from_slice(raw_bytes);
         return Ok(KeyMaterial::Raw(Zeroizing::new(result)));
@@ -558,7 +555,7 @@ mod tests {
             "error must name the offending env var, got: {msg}"
         );
         assert!(
-            msg.contains("remove") || msg.contains("移除"),
+            msg.contains("remove"),
             "error must hint removal to fall back to the key file, got: {msg}"
         );
     }

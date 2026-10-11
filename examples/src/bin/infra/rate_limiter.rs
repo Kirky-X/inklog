@@ -4,10 +4,10 @@
 //!
 //! 演示 `inklog::RateLimiter` 令牌桶算法的使用：
 //!
-//! 1. 创建限流器（指定每秒令牌数）
+//! Example 1: creating the rate limiter（指定每秒令牌数）
 //! 2. `try_acquire()` 获取令牌（允许/拒绝）
 //! 3. `dropped_count()` 统计被限流的日志数
-//! 4. 令牌自动补充（等待后恢复）
+//! Example 4: automatic token refill（等待后恢复）
 //! 5. 与日志写入结合的限流模式
 //!
 //! # 运行
@@ -21,7 +21,7 @@ use std::thread;
 use std::time::Duration;
 
 fn main() {
-    print_separator("inklog 速率限制器示例");
+    print_separator("inklog rate limiter example");
 
     show_basic_creation();
     show_rate_limiting();
@@ -31,62 +31,62 @@ fn main() {
     show_zero_rate();
     show_best_practices();
 
-    println!("\n✓ 所有速率限制器示例演示完成");
+    println!("\n✓ All rate limiter examples completed");
 }
 
 /// 展示限流器创建与基础属性
 fn show_basic_creation() {
-    print_section("1. 创建限流器");
+    print_section("Example 1: creating the rate limiter");
 
     let limiter = RateLimiter::new(1000);
-    println!("RateLimiter::new(1000) — 每秒 1000 个令牌");
-    println!("  初始状态：桶已满（tokens = max_tokens = 1000）");
-    println!("  补充速率：1000 tokens/sec");
+    println!("RateLimiter::new(1000) — 1000 tokens per second");
+    println!("  Initial state: bucket full (tokens = max_tokens = 1000)");
+    println!("  Refill rate: 1000 tokens/sec");
 
     assert!(limiter.try_acquire());
-    println!("  ✓ try_acquire() → true（桶满，允许）");
+    println!("  ✓ try_acquire() → true (bucket full, allowed)");
 }
 
 /// 展示速率限制行为
 fn show_rate_limiting() {
-    print_section("2. 速率限制行为");
+    print_section("2. Rate limiting behavior");
 
     // 低速率便于演示：每秒 5 个令牌
     let limiter = RateLimiter::new(5);
-    println!("RateLimiter::new(5) — 每秒 5 个令牌\n");
+    println!("RateLimiter::new(5) — 5 tokens per second\n");
 
-    println!("快速连续 try_acquire()：");
+    println!("Rapid consecutive try_acquire():");
     let mut allowed = 0;
     let mut rejected = 0;
     for i in 1..=10 {
         let ok = limiter.try_acquire();
         let status = if ok {
             allowed += 1;
-            "✓ 允许"
+            "✓ allowed"
         } else {
             rejected += 1;
-            "✗ 拒绝"
+            "✗ rejected"
         };
         println!("  #{:<3} {}", i, status);
     }
 
-    println!("\n结果：允许 {} 次，拒绝 {} 次", allowed, rejected);
-    assert!(allowed > 0, "应至少允许几次");
-    assert!(rejected > 0, "桶耗尽后应拒绝");
-    println!("  ✓ 令牌桶算法正确限流");
+    println!("\nResult: {} allowed, {} rejected", allowed, rejected);
+    assert!(allowed > 0, "should allow a few through");
+    assert!(rejected > 0, "should reject once the bucket is drained");
+    println!("  ✓ Token bucket rate-limits correctly");
 }
 
 /// 展示 dropped_count 统计
 fn show_dropped_count() {
-    print_section("3. dropped_count() 统计");
+    print_section("Example 3: dropped_count() statistics");
 
     let limiter = RateLimiter::new(2);
-    println!("RateLimiter::new(2) — 每秒 2 个令牌\n");
+    println!("RateLimiter::new(2) — 2 tokens per second\n");
 
     assert!(limiter.try_acquire());
     assert!(limiter.try_acquire());
     println!(
-        "消耗 2 个令牌后：dropped_count = {}",
+        "After consuming 2 tokens: dropped_count = {}",
         limiter.dropped_count()
     );
     assert_eq!(limiter.dropped_count(), 0);
@@ -95,108 +95,111 @@ fn show_dropped_count() {
     assert!(!limiter.try_acquire());
     assert!(!limiter.try_acquire());
     assert!(!limiter.try_acquire());
-    println!("3 次被拒绝后：dropped_count = {}", limiter.dropped_count());
+    println!(
+        "After 3 rejections: dropped_count = {}",
+        limiter.dropped_count()
+    );
     assert_eq!(limiter.dropped_count(), 3);
 
-    println!("\n  ✓ dropped_count 正确统计被限流的日志数");
+    println!("\n  ✓ dropped_count correctly counts rate-limited logs");
 }
 
 /// 展示令牌自动补充
 fn show_token_refill() {
-    print_section("4. 令牌自动补充");
+    print_section("Example 4: automatic token refill");
 
     let limiter = RateLimiter::new(100);
-    println!("RateLimiter::new(100) — 每秒 100 个令牌\n");
+    println!("RateLimiter::new(100) — 100 tokens per second\n");
 
     for _ in 0..100 {
         limiter.try_acquire();
     }
-    println!("耗尽 100 个令牌后：");
+    println!("After draining 100 tokens:");
     assert!(!limiter.try_acquire());
-    println!("  try_acquire() → false（桶空）");
+    println!("  try_acquire() → false (bucket empty)");
 
     // 等待 50ms，应补充约 5 个令牌（100 tokens/sec × 0.05s）
     thread::sleep(Duration::from_millis(50));
-    println!("\n等待 50ms 后（补充约 5 个令牌）：");
+    println!("\nAfter waiting 50ms (~5 tokens refilled):");
     let mut refilled = 0;
     for _ in 0..10 {
         if limiter.try_acquire() {
             refilled += 1;
         }
     }
-    println!("  再次获取：{} 次允许（预期 ~5 次）", refilled);
-    assert!(refilled > 0, "等待后应有令牌可用");
-    println!("  ✓ 令牌按 refill_rate 自动补充");
+    println!("  Acquired again: {} allowed (expected ~5)", refilled);
+    assert!(refilled > 0, "tokens should be available after waiting");
+    println!("  ✓ Tokens refill automatically at refill_rate");
 }
 
 /// 展示日志限流的实际应用模式
 fn show_log_rate_limiting_pattern() {
-    print_section("5. 日志限流应用模式");
+    print_section("Example 5: log rate-limiting patterns");
 
     let limiter = RateLimiter::new(10);
-    println!("场景：限制日志输出速率为 10 条/秒\n");
+    println!("Scenario: cap log output at 10 logs/second\n");
 
-    println!("模拟突发日志（20 条）：");
+    println!("Simulating a burst of logs (20):");
     let mut written = 0;
     let mut dropped = 0;
     for i in 1..=20 {
         if limiter.try_acquire() {
-            println!("  [INFO] 日志 #{} — 已写入", i);
+            println!("  [INFO] log #{} — written", i);
             written += 1;
         } else {
             dropped += 1;
         }
     }
 
-    println!("\n统计：");
-    println!("  写入: {} 条", written);
-    println!("  丢弃: {} 条", dropped);
-    println!("  总计丢弃: {} 条", limiter.dropped_count());
+    println!("\nStatistics:");
+    println!("  Written: {}", written);
+    println!("  Dropped: {}", dropped);
+    println!("  Total dropped: {}", limiter.dropped_count());
     assert_eq!(written + dropped, 20);
     assert_eq!(limiter.dropped_count(), dropped as u64);
-    println!("\n  ✓ 限流模式正确：突发流量下保护下游系统");
+    println!("\n  ✓ Rate limiting works: protects downstream systems under bursts");
 }
 
 /// 展示零速率限流器
 fn show_zero_rate() {
-    print_section("6. 零速率限流器（rate=0）");
+    print_section("Example 6: zero-rate limiter (rate=0)");
 
     let limiter = RateLimiter::new(0);
-    println!("RateLimiter::new(0) — 不允许任何日志\n");
+    println!("RateLimiter::new(0) — allows no logs at all\n");
 
     assert!(!limiter.try_acquire());
     assert!(!limiter.try_acquire());
-    println!("  try_acquire() → 始终 false");
+    println!("  try_acquire() → always false");
     println!("  dropped_count = {}", limiter.dropped_count());
     assert_eq!(limiter.dropped_count(), 2);
-    println!("  ✓ rate=0 等效于完全静默");
+    println!("  ✓ rate=0 is equivalent to full silence");
 }
 
 /// 最佳实践建议
 fn show_best_practices() {
-    print_section("7. 最佳实践");
+    print_section("7. Best practices");
 
-    println!("RateLimiter 使用建议：\n");
+    println!("RateLimiter usage advice:\n");
 
-    println!("1. 速率选择：");
-    println!("   - 开发环境: 1000-5000 tokens/sec（宽松）");
-    println!("   - 生产环境: 100-1000 tokens/sec（根据下游能力）");
-    println!("   - 故障场景: 10-50 tokens/sec（防止日志风暴）");
+    println!("1. Rate selection:");
+    println!("   - Development: 1000-5000 tokens/sec (loose)");
+    println!("   - Production: 100-1000 tokens/sec (based on downstream capacity)");
+    println!("   - Failure scenarios: 10-50 tokens/sec (prevents log storms)");
 
-    println!("\n2. 与 LoggerManager 集成：");
+    println!("\n2. Integrating with LoggerManager:");
     println!("   let limiter = RateLimiter::new(1000);");
-    println!("   // 在日志写入前检查:");
+    println!("   // Check before writing logs:");
     println!("   if limiter.try_acquire() {{");
     println!("       sink.write(&record).await;");
     println!("   }}");
 
-    println!("\n3. 监控 dropped_count：");
-    println!("   - 定期上报 dropped_count 到 Metrics");
-    println!("   - dropped_count 持续增长说明限流过严");
-    println!("   - dropped_count = 0 说明限流过松或无压力");
+    println!("\n3. Monitoring dropped_count:");
+    println!("   - Report dropped_count to Metrics periodically");
+    println!("   - continuously growing dropped_count means the limit is too strict");
+    println!("   - dropped_count = 0 means the limit is loose or there is no pressure");
 
-    println!("\n4. 性能特点：");
-    println!("   - try_acquire() 为 O(1) 操作");
-    println!("   - 使用 parking_lot::Mutex（~20ns 锁开销）");
-    println!("   - 适合高频日志场景");
+    println!("\n4. Performance characteristics:");
+    println!("   - try_acquire() is O(1)");
+    println!("   - Uses parking_lot::Mutex (~20ns lock overhead)");
+    println!("   - Suits high-frequency logging");
 }

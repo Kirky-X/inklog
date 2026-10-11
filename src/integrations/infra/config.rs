@@ -210,7 +210,9 @@ impl std::convert::AsMut<InklogConfig> for InklogConfigAdapter {
 impl Default for InklogConfigAdapter {
     fn default() -> Self {
         Self::new().unwrap_or_else(|e| {
-            tracing::warn!("InklogConfigAdapter::new failed, falling back to default config: {e}");
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("err", e);
+            tracing::warn!("{}", crate::i18n::tr_args("config-adapter_fallback", args));
             Self::from_config(InklogConfig::default())
         })
     }

@@ -31,7 +31,7 @@ use inklog_examples::common::{print_section, print_separator};
 ///
 /// 演示最简单的控制台日志配置，输出到 stdout，不使用颜色。
 async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例1: 基础控制台输出（无颜色）");
+    print_separator("Example 1: basic console output (no color)");
 
     // 创建 ConsoleSink（禁用颜色）
     let config = ConsoleSinkConfig {
@@ -49,7 +49,7 @@ async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
         let record = LogRecord {
             timestamp: Utc::now(),
             level: level.to_string(),
-            message: format!("这是一条 {} 级别日志", level),
+            message: format!("this is a {} level log", level),
             target: "console_example::basic".to_string(),
             fields: Default::default(),
             file: None,
@@ -62,7 +62,7 @@ async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     sink.flush().await?;
-    println!("\n✓ 基础控制台输出完成（无颜色）\n");
+    println!("\n✓ basic console output complete (no color)\n");
     Ok(())
 }
 
@@ -80,7 +80,7 @@ async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
 /// - `CLICOLOR_FORCE=1`: 强制启用颜色
 /// - `TERM=dumb`: 禁用颜色
 async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例2: 彩色控制台输出");
+    print_separator("Example 2: colored console output");
 
     // 创建 ConsoleSink（启用颜色）
     let config = ConsoleSinkConfig {
@@ -93,13 +93,13 @@ async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
     };
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
-    print_section("彩色日志输出");
+    print_section("Colored log output");
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     for level in levels {
         let record = LogRecord {
             timestamp: Utc::now(),
             level: level.to_string(),
-            message: format!("这是一条 {} 级别日志（彩色）", level),
+            message: format!("this is a {} level log (colored)", level),
             target: "console_example::colored".to_string(),
             fields: Default::default(),
             file: None,
@@ -112,7 +112,7 @@ async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     sink.flush().await?;
-    println!("\n✓ 彩色控制台输出完成\n");
+    println!("\n✓ colored console output complete\n");
     Ok(())
 }
 
@@ -135,10 +135,10 @@ async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
 /// cargo run --bin console 2>&1 >/dev/null
 /// ```
 async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例3: stderr 日志分流");
+    print_separator("Example 3: stderr routing");
 
-    println!("配置：ERROR 和 WARN → stderr");
-    println!("      INFO、DEBUG、TRACE → stdout\n");
+    println!("Configuration: ERROR and WARN → stderr");
+    println!("            INFO, DEBUG, TRACE → stdout\n");
 
     // 创建带 stderr 分流的 Console Sink
     let config = ConsoleSinkConfig {
@@ -152,11 +152,11 @@ async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
     let sink = ConsoleSink::new(config, inklog::LogTemplate::default());
 
     let test_cases = [
-        ("INFO", "这是 INFO 日志（→ stdout）"),
-        ("DEBUG", "这是 DEBUG 日志（→ stdout）"),
-        ("TRACE", "这是 TRACE 日志（→ stdout）"),
-        ("WARN", "这是 WARN 日志（→ stderr）"),
-        ("ERROR", "这是 ERROR 日志（→ stderr）"),
+        ("INFO", "this is an INFO log (→ stdout)"),
+        ("DEBUG", "this is a DEBUG log (→ stdout)"),
+        ("TRACE", "this is a TRACE log (→ stdout)"),
+        ("WARN", "this is a WARN log (→ stderr)"),
+        ("ERROR", "this is an ERROR log (→ stderr)"),
     ];
 
     for (level, message) in test_cases {
@@ -176,13 +176,13 @@ async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     sink.flush().await?;
-    println!("\n✓ stderr 分流完成（检查输出流）\n");
+    println!("\n✓ stderr routing complete (check the output streams)\n");
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog Console Sink 示例 ===\n");
+    println!("=== inklog console sink examples ===\n");
 
     // 示例1：基础控制台输出（无颜色）
     basic_console().await?;
@@ -193,6 +193,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 示例3：stderr 日志分流
     stderr_levels().await?;
 
-    println!("所有示例完成！");
+    println!("All examples complete!");
     Ok(())
 }

@@ -19,3 +19,13 @@ metrics-fallback_reason_encryption = Encryption key error: { $error }
 metrics-fallback_reason_plaintext = Plaintext writes (encryption error): { $error }
 metrics-recovery_succeeded = Recovery succeeded
 metrics-unknown_error = Unknown error
+
+# Metrics registry registration invariants (panic surface)
+metrics-registry-help-mismatch = metrics `{ $name }` help mismatch
+metrics-registry-labels-mismatch = metrics `{ $name }` labels mismatch
+metrics-registry-kind-conflict = metrics `{ $name }` kind conflict
+metrics-registry-histogram_buckets-missing = histogram must carry buckets
+metrics-registry-buckets-mismatch = metrics `{ $name }` buckets mismatch
+metrics-registry-counter-registered = counter is already registered and kind-checked
+metrics-registry-gauge-registered = gauge is already registered and kind-checked
+metrics-registry-histogram-registered = histogram is already registered and kind-checked

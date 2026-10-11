@@ -9,8 +9,10 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 /// Pre-compiled regex for ANSI SGR (Select Graphic Rendition) escape sequences.
-static ANSI_SGR_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*m").expect("hardcoded ANSI SGR regex is valid"));
+static ANSI_SGR_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\x1b\[[0-9;]*m")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-ansi_sgr_invariant")))
+});
 
 /// Escape mode for log content sanitization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -64,37 +66,45 @@ pub struct LogSanitizer {
 static DEFAULT_SENSITIVE_PATTERNS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
     vec![
         (
-            Regex::new(r"\b\d{13,16}\b").expect("hardcoded card number regex is valid"),
+            Regex::new(r"\b\d{13,16}\b").unwrap_or_else(|_| {
+                panic!("{}", crate::i18n::tr("sanitize-card_number_invariant"))
+            }),
             "[CARD_NUM]".to_string(),
         ),
         (
             Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-                .expect("hardcoded email regex is valid"),
+                .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-email_invariant"))),
             "[EMAIL]".to_string(),
         ),
         (
-            Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("hardcoded SSN regex is valid"),
+            Regex::new(r"\b\d{3}-\d{2}-\d{4}\b")
+                .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-ssn_invariant"))),
             "[SSN]".to_string(),
         ),
         (
-            Regex::new(r"(?i)password\s*[=:]\s*\S+").expect("hardcoded password regex is valid"),
+            Regex::new(r"(?i)password\s*[=:]\s*\S+")
+                .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-password_invariant"))),
             "password=[REDACTED]".to_string(),
         ),
         (
-            Regex::new(r"(?i)token\s*[=:]\s*\S+").expect("hardcoded token regex is valid"),
+            Regex::new(r"(?i)token\s*[=:]\s*\S+")
+                .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-token_invariant"))),
             "token=[REDACTED]".to_string(),
         ),
         (
-            Regex::new(r"(?i)api[_-]?key\s*[=:]\s*\S+").expect("hardcoded api_key regex is valid"),
+            Regex::new(r"(?i)api[_-]?key\s*[=:]\s*\S+")
+                .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-api_key_invariant"))),
             "api_key=[REDACTED]".to_string(),
         ),
         (
-            Regex::new(r"Bearer\s+[A-Za-z0-9\-\.]+")
-                .expect("hardcoded Bearer token regex is valid"),
+            Regex::new(r"Bearer\s+[A-Za-z0-9\-\.]+").unwrap_or_else(|_| {
+                panic!("{}", crate::i18n::tr("sanitize-bearer_token_invariant"))
+            }),
             "Bearer [TOKEN]".to_string(),
         ),
         (
-            Regex::new(r"Basic\s+[A-Za-z0-9+/=]+").expect("hardcoded Basic auth regex is valid"),
+            Regex::new(r"Basic\s+[A-Za-z0-9+/=]+")
+                .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-basic_auth_invariant"))),
             "Basic [AUTH]".to_string(),
         ),
     ]

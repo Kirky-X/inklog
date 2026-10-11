@@ -281,8 +281,8 @@ INKLOG_FILE_ROTATION_TIME=daily
 INKLOG_FILE_KEEP_FILES=30
 INKLOG_FILE_COMPRESS=true
 INKLOG_FILE_ENCRYPT=false
-# 生成 32 字节密钥: openssl rand -base64 32
-# 将生成的 Base64 密钥写入下方变量，再启用 INKLOG_FILE_ENCRYPT
+# Generate a 32-byte key: openssl rand -base64 32
+# Put the generated Base64 key into the variable below, then enable INKLOG_FILE_ENCRYPT
 INKLOG_FILE_ENCRYPTION_KEY=<MUST_SET_BEFORE_USE>
 
 # Database sink
@@ -303,7 +303,7 @@ INKLOG_HTTP_ENABLED=false
 INKLOG_HTTP_PORT=9090
 
 # Decryption
-# 解密密钥须与加密时使用的密钥一致: openssl rand -base64 32
+# The decryption key must match the key used for encryption: openssl rand -base64 32
 INKLOG_DECRYPT_KEY=<MUST_SET_BEFORE_USE>
 "#;
 

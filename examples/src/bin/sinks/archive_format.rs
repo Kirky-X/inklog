@@ -22,7 +22,7 @@ use inklog_examples::common::{print_section, print_separator};
 use std::str::FromStr;
 
 fn main() {
-    print_separator("inklog 归档格式示例");
+    print_separator("inklog archive format examples");
 
     show_archive_format_variants();
     show_from_str_parsing();
@@ -32,12 +32,12 @@ fn main() {
     show_toml_config();
     show_selection_guide();
 
-    println!("\n✓ 所有归档格式示例演示完成");
+    println!("\n✓ all archive format examples completed");
 }
 
 /// 展示 ArchiveFormat 枚举变体
 fn show_archive_format_variants() {
-    print_section("1. ArchiveFormat 枚举变体");
+    print_section("1. ArchiveFormat enum variants");
 
     let json = ArchiveFormat::Json;
     let parquet = ArchiveFormat::Parquet;
@@ -50,14 +50,14 @@ fn show_archive_format_variants() {
     println!("ArchiveFormat::default() = {:?}", default);
 
     assert_eq!(default, ArchiveFormat::Json);
-    println!("\n默认格式: {:?}（JSON Lines）", default);
+    println!("\nDefault format: {:?} (JSON Lines)", default);
 }
 
 /// 展示 FromStr 解析
 fn show_from_str_parsing() {
-    print_section("2. FromStr 字符串解析");
+    print_section("2. FromStr string parsing");
 
-    println!("字符串 → ArchiveFormat 解析：\n");
+    println!("String → ArchiveFormat parsing:\n");
 
     let cases = [
         "json", "Json", "JSON", "parquet", "Parquet", "PARQUET", "csv", "Csv", "CSV",
@@ -65,7 +65,7 @@ fn show_from_str_parsing() {
     for s in &cases {
         match ArchiveFormat::from_str(s) {
             Ok(fmt) => println!("  {:?} → {:?} ✓", s, fmt),
-            Err(e) => println!("  {:?} → 错误: {}", s, e),
+            Err(e) => println!("  {:?} → error: {}", s, e),
         }
     }
 
@@ -81,14 +81,18 @@ fn show_from_str_parsing() {
 
     let invalid = ArchiveFormat::from_str("xml");
     assert!(invalid.is_err());
-    println!("\n  {:?} → 错误（无效值）: {}", "xml", invalid.unwrap_err());
+    println!(
+        "\n  {:?} → error (invalid value): {}",
+        "xml",
+        invalid.unwrap_err()
+    );
 }
 
 /// 展示 Display trait
 fn show_display_trait() {
-    print_section("3. Display trait 输出");
+    print_section("3. Display trait output");
 
-    println!("ArchiveFormat → 字符串：\n");
+    println!("ArchiveFormat → string:\n");
     println!("  ArchiveFormat::Json    → \"{}\"", ArchiveFormat::Json);
     println!("  ArchiveFormat::Parquet → \"{}\"", ArchiveFormat::Parquet);
     println!("  ArchiveFormat::Csv     → \"{}\"", ArchiveFormat::Csv);
@@ -100,7 +104,7 @@ fn show_display_trait() {
 
 /// 展示在 DatabaseSinkConfig 中使用归档格式
 fn show_database_config_with_archive() {
-    print_section("4. DatabaseSinkConfig 中的归档配置");
+    print_section("4. Archive configuration in DatabaseSinkConfig");
 
     // JSON 归档（默认）
     let json_archive = DatabaseSinkConfig {
@@ -114,73 +118,73 @@ fn show_database_config_with_archive() {
         archive_format: ArchiveFormat::Json,
         ..Default::default()
     };
-    println!("JSON 归档（默认）：");
+    println!("JSON archive (default):");
     println!("  archive_format = {:?}", json_archive.archive_format);
-    println!("  输出: .jsonl 文件（每行一个 JSON 对象）");
+    println!("  Output: .jsonl files (one JSON object per line)");
 
     // Parquet 归档
     let parquet_archive = DatabaseSinkConfig {
         archive_format: ArchiveFormat::Parquet,
         ..Default::default()
     };
-    println!("\nParquet 归档：");
+    println!("\nParquet archive:");
     println!("  archive_format = {:?}", parquet_archive.archive_format);
-    println!("  输出: .parquet 文件（列式存储，高压缩比）");
+    println!("  Output: .parquet files (columnar storage, high compression)");
 
     // CSV 归档
     let csv_archive = DatabaseSinkConfig {
         archive_format: ArchiveFormat::Csv,
         ..Default::default()
     };
-    println!("\nCSV 归档：");
+    println!("\nCSV archive:");
     println!("  archive_format = {:?}", csv_archive.archive_format);
-    println!("  输出: .csv 文件（逗号分隔，Excel 兼容）");
+    println!("  Output: .csv files (comma separated, Excel compatible)");
 }
 
 /// 对比三种归档格式
 fn show_archive_format_comparison() {
-    print_section("5. 归档格式对比");
+    print_section("5. Archive format comparison");
 
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "维度", "Json", "Parquet", "Csv"
+        "aspect", "Json", "Parquet", "Csv"
     );
     println!("{}", "-".repeat(75));
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "文件扩展名", ".jsonl", ".parquet", ".csv"
+        "file extension", ".jsonl", ".parquet", ".csv"
     );
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "存储类型", "行式（文本）", "列式（二进制）", "行式（文本）"
+        "storage type", "row (text)", "columnar (binary)", "row (text)"
     );
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "压缩比", "中（gzip 3-5x）", "高（5-10x）", "低（gzip 2-3x）"
+        "compression ratio", "medium (gzip 3-5x)", "high (5-10x)", "low (gzip 2-3x)"
     );
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "查询能力", "grep/jq", "DuckDB/Spark", "Excel/SQL"
+        "query tooling", "grep/jq", "DuckDB/Spark", "Excel/SQL"
     );
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "可读性", "人类可读", "二进制", "人类可读"
+        "readability", "human readable", "binary", "human readable"
     );
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "写入开销", "低", "中-高", "低"
+        "write cost", "low", "medium-high", "low"
     );
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
-        "适用场景", "日志采集", "分析/冷存储", "报表/Excel"
+        "use case", "log collection", "analytics / cold storage", "reports / Excel"
     );
 }
 
 /// 展示 TOML 配置文件格式
 fn show_toml_config() {
-    print_section("6. TOML 配置文件格式");
+    print_section("6. TOML configuration file format");
 
-    println!("JSON 归档（默认）：");
+    println!("JSON archive (default):");
     println!(
         r#"[database_sink]
 enabled = true
@@ -192,7 +196,7 @@ flush_interval_ms = 500
 archive_format = "json""#
     );
 
-    println!("\nParquet 归档（含 Parquet 配置）：");
+    println!("\nParquet archive (with the Parquet settings):");
     println!(
         r#"[database_sink]
 enabled = true
@@ -209,7 +213,7 @@ max_row_group_size = 100000
 max_page_size = 1048576"#
     );
 
-    println!("\nCSV 归档：");
+    println!("\nCSV archive:");
     println!(
         r#"[database_sink]
 enabled = true
@@ -224,29 +228,31 @@ archive_format = "csv""#
 
 /// 展示归档格式选择指南
 fn show_selection_guide() {
-    print_section("7. 归档格式选择指南");
+    print_section("7. How to choose an archive format");
 
-    println!("选择 Json 的场景：");
-    println!("  - 需要人类可读的归档文件");
-    println!("  - 使用 grep/jq 进行简单查询");
-    println!("  - 日志采集系统（Fluentd/Logstash）");
-    println!("  - 日均日志量 < 100 万条");
+    println!("When to choose Json:");
+    println!("  - You need human-readable archive files");
+    println!("  - You query them with grep/jq");
+    println!("  - A log shipper consumes them (Fluentd/Logstash)");
+    println!("  - Fewer than 1M log records per day");
 
-    println!("\n选择 Parquet 的场景：");
-    println!("  - 大数据分析平台（Spark/DuckDB/BigQuery）");
-    println!("  - 需要高压缩比节省存储成本");
-    println!("  - 列式查询（按字段聚合/过滤）");
-    println!("  - 日均日志量 > 100 万条");
-    println!("  - 合规留存（长期冷存储）");
+    println!("\nWhen to choose Parquet:");
+    println!("  - A big-data analytics platform (Spark/DuckDB/BigQuery)");
+    println!("  - You need a high ratio to save storage cost");
+    println!("  - You run columnar queries (aggregate/filter by field)");
+    println!("  - More than 1M log records per day");
+    println!("  - Compliance retention (long-term cold storage)");
 
-    println!("\n选择 Csv 的场景：");
-    println!("  - 需要导入 Excel 或 BI 工具");
-    println!("  - 简单报表和数据分享");
-    println!("  - 与旧系统集成（CSV 解析器广泛支持）");
+    println!("\nWhen to choose Csv:");
+    println!("  - You import it into Excel or a BI tool");
+    println!("  - Simple reports and data sharing");
+    println!("  - Integrating with legacy systems (CSV parsers are widely supported)");
 
-    println!("\n性能特点：");
-    println!("  - Json: 写入快，文件大，查询慢");
-    println!("  - Parquet: 写入慢（CPU密集），文件小，查询快");
-    println!("  - Csv: 写入快，文件大，无嵌套结构支持");
-    println!("  - 归档在后台异步执行，不影响主日志路径");
+    println!("\nPerformance characteristics:");
+    println!("  - Json: fast writes, large files, slow queries");
+    println!("  - Parquet: slow writes (CPU intensive), small files, fast queries");
+    println!("  - Csv: fast writes, large files, no nested structures");
+    println!(
+        "  - Archiving runs asynchronously in the background and does not affect the main log path"
+    );
 }

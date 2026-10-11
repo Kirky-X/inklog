@@ -99,7 +99,7 @@ impl AsyncLifecycle for InklogModule {
                 args.set("err", e.to_string());
                 InklogError::database_error(crate::i18n::tr_args("config-db_not_available", args))
             })?;
-            tracing::debug!("InklogModule: on_ready — database dependency verified");
+            tracing::debug!("{}", crate::i18n::tr("log-kit-module_ready"));
             Ok(())
         })
     }
@@ -110,7 +110,7 @@ impl AsyncLifecycle for InklogModule {
         Box::pin(async {
             // Connection pool lifecycle is managed by DbNexusModule.
             // InklogModule only releases its adapter wrapper here.
-            tracing::debug!("InklogModule: on_shutdown — releasing database adapter");
+            tracing::debug!("{}", crate::i18n::tr("log-kit-module_shutdown"));
         })
     }
 }

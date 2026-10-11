@@ -154,7 +154,8 @@ impl ConfersConfigWatcher {
                                 tracing::warn!(
                                     error = %e,
                                     path = %path.display(),
-                                    "config reload failed; keeping previous configuration"
+                                    "{}",
+                                    crate::i18n::tr("config-reload_failed_keep_previous")
                                 );
                                 continue;
                             }
@@ -168,7 +169,11 @@ impl ConfersConfigWatcher {
                             changed
                         };
                         if changed {
-                            tracing::info!(path = %path.display(), "configuration hot-reloaded");
+                            tracing::info!(
+                                path = %path.display(),
+                                "{}",
+                                crate::i18n::tr("log-config_hot_reloaded")
+                            );
                             callback(&values);
                         }
                     }

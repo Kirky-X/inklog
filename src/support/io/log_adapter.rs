@@ -133,7 +133,9 @@ impl log::Log for LogAdapter {
         }
         match self.level_state.as_ref() {
             Some(state) => {
-                let directives = state.lock().expect("level_state mutex poisoned");
+                let directives = state.lock().unwrap_or_else(|_| {
+                    panic!("{}", crate::i18n::tr("manager-level_state_mutex_poisoned"))
+                });
                 directives.allows(metadata.target(), metadata.level())
             }
             None => true,

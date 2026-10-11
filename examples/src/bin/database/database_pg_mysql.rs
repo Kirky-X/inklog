@@ -20,7 +20,7 @@ use inklog_examples::common::{print_section, print_separator};
 use std::str::FromStr;
 
 fn main() {
-    print_separator("inklog PostgreSQL/MySQL 数据库驱动示例");
+    print_separator("inklog PostgreSQL/MySQL database driver example");
 
     show_driver_variants();
     show_from_str_display();
@@ -29,23 +29,26 @@ fn main() {
     show_driver_comparison();
     show_env_overrides();
 
-    println!("\n所有 PostgreSQL/MySQL 驱动示例展示完毕。");
+    println!("\nAll PostgreSQL/MySQL driver examples completed.");
 }
 
 /// 演示 DatabaseDriver 三种变体
 fn show_driver_variants() {
-    print_section("示例 1：DatabaseDriver 三种变体");
+    print_section("Example 1: the three DatabaseDriver variants");
 
     let postgres = DatabaseDriver::PostgreSQL;
     let mysql = DatabaseDriver::MySQL;
     let sqlite = DatabaseDriver::SQLite;
 
-    println!("枚举变体：");
-    println!("  {:?} - 企业级首选，功能最全", postgres);
-    println!("  {:?} - 性能与简洁的平衡", mysql);
-    println!("  {:?} - 嵌入式，零配置", sqlite);
+    println!("Enum variants:");
+    println!(
+        "  {:?} - enterprise first choice, the most complete feature set",
+        postgres
+    );
+    println!("  {:?} - a balance of performance and simplicity", mysql);
+    println!("  {:?} - embedded, zero configuration", sqlite);
 
-    println!("\n默认驱动：");
+    println!("\nDefault driver:");
     println!(
         "  DatabaseDriver::default() = {:?}",
         DatabaseDriver::default()
@@ -54,9 +57,9 @@ fn show_driver_variants() {
 
 /// 演示 FromStr 和 Display trait
 fn show_from_str_display() {
-    print_section("示例 2：FromStr / Display trait");
+    print_section("Example 2: FromStr / Display traits");
 
-    println!("FromStr 解析（大小写不敏感）：");
+    println!("FromStr parsing (case-insensitive):");
     let inputs = [
         "postgres",
         "postgresql",
@@ -74,7 +77,7 @@ fn show_from_str_display() {
         }
     }
 
-    println!("\n无效输入：");
+    println!("\nInvalid input:");
     for input in ["", "oracle", "mongodb", "invalid"] {
         let result: Result<DatabaseDriver, String> = input.parse();
         match result {
@@ -83,7 +86,7 @@ fn show_from_str_display() {
         }
     }
 
-    println!("\nDisplay 输出：");
+    println!("\nDisplay output:");
     for driver in [
         DatabaseDriver::PostgreSQL,
         DatabaseDriver::MySQL,
@@ -95,7 +98,7 @@ fn show_from_str_display() {
 
 /// 演示 PostgreSQL 连接配置
 fn show_postgresql_config() {
-    print_section("示例 3：PostgreSQL 连接配置");
+    print_section("Example 3: PostgreSQL connection config");
 
     let pg_config = DatabaseSinkConfig {
         enabled: true,
@@ -108,7 +111,7 @@ fn show_postgresql_config() {
         ..Default::default()
     };
 
-    println!("PostgreSQL DatabaseSinkConfig：");
+    println!("PostgreSQL DatabaseSinkConfig:");
     println!("  driver            = {:?}", pg_config.driver);
     println!("  url               = \"{}\"", pg_config.url);
     println!("  table_name        = \"{}\"", pg_config.table_name);
@@ -116,15 +119,15 @@ fn show_postgresql_config() {
     println!("  flush_interval_ms = {}", pg_config.flush_interval_ms);
     println!("  pool_size         = {}", pg_config.pool_size);
 
-    println!("\n连接 URL 格式：");
+    println!("\nConnection URL format:");
     println!("  postgres://USER:PASSWORD@HOST:PORT/DATABASE");
     println!();
-    println!("  示例：");
+    println!("  Example:");
     println!("  postgres://inklog:secret@db.example.com:5432/logs");
     println!("  postgres://postgres@localhost/inklog");
     println!("  postgres://user:pass@10.0.0.1:5432/prod_logs?sslmode=require");
 
-    println!("\n对应 TOML 配置：");
+    println!("\nCorresponding TOML config:");
     println!(
         r#"[database_sink]
 enabled = true
@@ -136,25 +139,25 @@ flush_interval_ms = 5000
 pool_size = 10"#
     );
 
-    println!("\nPostgreSQL 优势：");
-    println!("  - 功能最全：支持分区表（PARTITION BY RANGE）");
-    println!("  - 性能优秀：高并发写入，MVCC 多版本并发控制");
-    println!("  - 扩展性：支持 JSONB、全文搜索、地理数据");
-    println!("  - 生产推荐：企业级日志存储首选");
+    println!("\nPostgreSQL strengths:");
+    println!("  - Richest features: partitioned tables (PARTITION BY RANGE)");
+    println!("  - Great performance: high-concurrency writes, MVCC");
+    println!("  - Extensibility: JSONB, full-text search, geospatial data");
+    println!("  - Production pick: the first choice for enterprise log storage");
 
-    println!("\n表分区配置（高日志量场景）：");
+    println!("\nTable partitioning (high log volume):");
     println!(
-        r#"# 按月分区
+        r#"# Partition by month
 [database_sink.partition]
 strategy = "monthly"
-# 或按年分区
+# Or partition by year
 # strategy = "yearly""#
     );
 }
 
 /// 演示 MySQL 连接配置
 fn show_mysql_config() {
-    print_section("示例 4：MySQL 连接配置");
+    print_section("Example 4: MySQL connection config");
 
     let mysql_config = DatabaseSinkConfig {
         enabled: true,
@@ -167,7 +170,7 @@ fn show_mysql_config() {
         ..Default::default()
     };
 
-    println!("MySQL DatabaseSinkConfig：");
+    println!("MySQL DatabaseSinkConfig:");
     println!("  driver            = {:?}", mysql_config.driver);
     println!("  url               = \"{}\"", mysql_config.url);
     println!("  table_name        = \"{}\"", mysql_config.table_name);
@@ -175,15 +178,15 @@ fn show_mysql_config() {
     println!("  flush_interval_ms = {}", mysql_config.flush_interval_ms);
     println!("  pool_size         = {}", mysql_config.pool_size);
 
-    println!("\n连接 URL 格式：");
+    println!("\nConnection URL format:");
     println!("  mysql://USER:PASSWORD@HOST:PORT/DATABASE");
     println!();
-    println!("  示例：");
+    println!("  Example:");
     println!("  mysql://root@localhost/inklog");
     println!("  mysql://inklog:secret@db.example.com:3306/logs");
     println!("  mysql://user:pass@10.0.0.1:3306/prod_logs?ssl-ca=/path/to/ca.pem");
 
-    println!("\n对应 TOML 配置：");
+    println!("\nCorresponding TOML config:");
     println!(
         r#"[database_sink]
 enabled = true
@@ -195,68 +198,68 @@ flush_interval_ms = 3000
 pool_size = 20"#
     );
 
-    println!("\nMySQL 优势：");
-    println!("  - 部署简单：默认配置即可使用");
-    println!("  - 生态成熟：LAMP/LEMP 栈天然集成");
-    println!("  - 性能平衡：读写性能均衡");
-    println!("  - 分区支持：PARTITION BY RANGE");
+    println!("\nMySQL strengths:");
+    println!("  - Easy deployment: works with default settings");
+    println!("  - Mature ecosystem: native fit with LAMP/LEMP stacks");
+    println!("  - Balanced performance: even read/write throughput");
+    println!("  - Partitioning: PARTITION BY RANGE");
 }
 
 /// 演示三种驱动对比
 fn show_driver_comparison() {
-    print_section("示例 5：三种驱动对比");
+    print_section("Example 5: three-driver comparison");
 
     println!(
         "{:<12} {:<15} {:<20} {:<15}",
-        "驱动", "默认端口", "适用场景", "推荐度"
+        "Driver", "Default port", "Use case", "Rating"
     );
     println!("{}", "-".repeat(65));
     println!(
         "{:<12} {:<15} {:<20} {:<15}",
-        "PostgreSQL", "5432", "企业级生产", "★★★★★"
+        "PostgreSQL", "5432", "Enterprise", "★★★★★"
     );
     println!(
         "{:<12} {:<15} {:<20} {:<15}",
-        "MySQL", "3306", "Web 应用", "★★★★"
+        "MySQL", "3306", "Web apps", "★★★★"
     );
     println!(
         "{:<12} {:<15} {:<20} {:<15}",
-        "SQLite", "无", "开发/测试/嵌入式", "★★★"
+        "SQLite", "none", "Dev/test/embedded", "★★★"
     );
 
-    println!("\n功能对比：");
+    println!("\nFeature comparison:");
     println!(
         "{:<20} {:<12} {:<12} {:<12}",
-        "特性", "PostgreSQL", "MySQL", "SQLite"
+        "Feature", "PostgreSQL", "MySQL", "SQLite"
     );
     println!("{}", "-".repeat(56));
-    println!("{:<20} {:<12} {:<12} {:<12}", "分区表", "✓", "✓", "✗");
+    println!("{:<20} {:<12} {:<12} {:<12}", "Partitioning", "✓", "✓", "✗");
     println!("{:<20} {:<12} {:<12} {:<12}", "JSONB", "✓", "✗ (JSON)", "✗");
     println!(
         "{:<20} {:<12} {:<12} {:<12}",
-        "并发写入", "高 (MVCC)", "中", "低 (锁)"
+        "Concurrent writes", "High (MVCC)", "Medium", "Low (locks)"
     );
     println!(
         "{:<20} {:<12} {:<12} {:<12}",
-        "连接池", "必需", "必需", "N/A"
+        "Connection pool", "Required", "Required", "N/A"
     );
-    println!("{:<20} {:<12} {:<12} {:<12}", "零配置", "✗", "✗", "✓");
+    println!("{:<20} {:<12} {:<12} {:<12}", "Zero-config", "✗", "✗", "✓");
 
-    println!("\n选型建议：");
-    println!("  - 开发/测试：SQLite（零配置，快速启动）");
-    println!("  - 中小规模生产：MySQL（部署简单，性能均衡）");
-    println!("  - 大规模/企业级：PostgreSQL（功能最全，性能最强）");
+    println!("\nSelection advice:");
+    println!("  - Dev/test: SQLite (zero-config, fast startup)");
+    println!("  - Small/medium production: MySQL (easy to deploy, balanced performance)");
+    println!("  - Large/enterprise: PostgreSQL (richest features, strongest performance)");
 }
 
 /// 演示环境变量覆盖
 fn show_env_overrides() {
-    print_section("示例 6：环境变量覆盖");
+    print_section("Example 6: env-var overrides");
 
-    println!("数据库驱动环境变量：");
-    println!("  INKLOG_DATABASE_SINK_DRIVER=postgres   # 或 mysql / sqlite");
+    println!("Database driver env vars:");
+    println!("  INKLOG_DATABASE_SINK_DRIVER=postgres   # or mysql / sqlite");
     println!("  INKLOG_DATABASE_SINK_URL=\"postgres://user:pass@host/db\"");
 
-    println!("\n通过 load_with_env_overrides() 加载：");
+    println!("\nLoading via load_with_env_overrides():");
     println!("  let config = InklogConfig::load_with_env_overrides()?;");
     println!("  if config.database_sink.enabled {{");
     println!("      println!(\"Driver: {{:?}}, URL: {{}}\",");
@@ -264,12 +267,12 @@ fn show_env_overrides() {
     println!("          config.database_sink.url);");
     println!("  }}");
 
-    println!("\nDocker 部署示例：");
+    println!("\nDocker deployment example:");
     println!("  docker run -e INKLOG_DATABASE_SINK_DRIVER=postgres \\");
     println!("             -e INKLOG_DATABASE_SINK_URL=\"postgres://...\" \\");
     println!("             my-app");
 
-    println!("\nKubernetes ConfigMap 示例：");
+    println!("\nKubernetes ConfigMap example:");
     println!("  env:");
     println!("    - name: INKLOG_DATABASE_SINK_DRIVER");
     println!("      valueFrom:");

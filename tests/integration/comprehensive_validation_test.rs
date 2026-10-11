@@ -27,7 +27,7 @@ async fn test_comprehensive_real_data_writing() {
     let log_path = temp_dir.path().join("comprehensive_test.log");
     let db_path = temp_dir.path().join("comprehensive_test.db");
 
-    println!("=== 开始综合真实数据写入和特性验证测试 ===");
+    println!("=== starting comprehensive real-data write and feature validation tests ===");
 
     // 设置加密密钥
     // 核正：FileSink::get_encryption_key 要求 base64 解码后恰好 32 字节且
@@ -120,38 +120,38 @@ async fn test_comprehensive_real_data_writing() {
         tracing_subscriber::registry().with(subscriber).with(filter),
     );
 
-    println!("配置完成，开始写入测试数据...");
+    println!("config done; writing test data...");
 
     let test_start = Instant::now();
 
-    println!("\n=== 阶段1：写入不同类型的日志数据 ===");
+    println!("\n=== Phase 1: writing different kinds of log data ===");
 
     // 1. 写入大量日志触发轮转
     for i in 0..2000 {
-        tracing::info!(target: "rotation_test", "轮转测试消息 {} - 大数据: {}", i, "x".repeat(200));
+        tracing::info!(target: "rotation_test", "rotation test message {} - large data: {}", i, "x".repeat(200));
     }
 
     // 2. 写入敏感数据测试掩码
     for i in 0..500 {
-        tracing::warn!(target: "masking_test", "敏感数据测试 - 用户邮箱: user{}@example.com, 电话: {}",
+        tracing::warn!(target: "masking_test", "sensitive data test - user email: user{}@example.com, phone: {}",
                 i, "13812345678");
     }
 
     // 3. 写入加密数据
     for i in 0..1000 {
-        tracing::error!(target: "encryption_test", "加密测试 - 秘密数据: {}",
+        tracing::error!(target: "encryption_test", "encryption test - secret data: {}",
                 format!("secret_data_{}", i));
     }
 
     // 4. 写入数据库数据
     for i in 0..500 {
-        tracing::debug!(target: "database_test", "数据库测试 - 批处理数据 {}",
+        tracing::debug!(target: "database_test", "database test - batch data {}",
                 format!("db_batch_{}", i));
     }
 
     sleep(Duration::from_secs(5)).await;
 
-    println!("\n=== 阶段2：验证各项功能 ===");
+    println!("\n=== Phase 2: verifying features ===");
 
     let log_files = std::fs::read_dir(temp_dir.path())
         .unwrap()
@@ -163,29 +163,35 @@ async fn test_comprehensive_real_data_writing() {
         })
         .count();
 
-    println!("当前日志文件数量: {}", log_files);
-    assert!(log_files >= 1, "应该有日志文件存在");
+    println!("current log file count: {}", log_files);
+    assert!(log_files >= 1, "log files should exist");
 
-    assert!(db_path.exists(), "数据库应该有数据");
+    assert!(db_path.exists(), "the database should contain data");
 
     let metadata = std::fs::metadata(&log_path).unwrap();
-    assert!(metadata.len() > 100000, "日志文件应该包含大量数据");
+    assert!(
+        metadata.len() > 100000,
+        "the log file should contain a large amount of data"
+    );
 
     // 验证健康监控状态
     let health = logger.get_health_status();
-    println!("健康状态: {:?}", health);
-    assert!(health.sinks.contains_key("file"), "文件sink应该在监控中");
+    println!("health status: {:?}", health);
+    assert!(
+        health.sinks.contains_key("file"),
+        "the file sink should be monitored"
+    );
     assert!(
         health.sinks.contains_key("database"),
-        "数据库sink应该在监控中"
+        "the database sink should be monitored"
     );
     assert!(
         health.sinks.contains_key("console"),
-        "控制台sink应该在监控中"
+        "the console sink should be monitored"
     );
 
     // 阶段3：性能和压力测试
-    println!("\n=== 阶段3：性能和压力测试 ===");
+    println!("\n=== Phase 3: performance and stress tests ===");
 
     // 高并发写入测试
     let concurrent_start = Instant::now();
@@ -197,7 +203,7 @@ async fn test_comprehensive_real_data_writing() {
                 for i in 0..messages_per_thread {
                     tracing::info!(
                         target: "concurrent_test",
-                        "线程 {} - 并发消息 {}",
+                        "thread {} - concurrent message {}",
                         thread_id, i
                     );
                 }
@@ -211,7 +217,10 @@ async fn test_comprehensive_real_data_writing() {
     }
 
     let concurrent_elapsed = concurrent_start.elapsed();
-    println!("并发测试完成，耗时: {:?}", concurrent_elapsed);
+    println!(
+        "concurrency test finished, elapsed: {:?}",
+        concurrent_elapsed
+    );
 
     // 验证并发写入后的状态：spawn 完成只保证记录进入异步通道，落盘由
     // file sink worker 按批次/间隔异步完成——轮询等待增长而非立即断言
@@ -224,22 +233,28 @@ async fn test_comprehensive_real_data_writing() {
         }
         assert!(
             Instant::now() < concurrent_deadline,
-            "并发写入应该增加了数据（等待落盘超时）"
+            "concurrent writes should have added data (timed out waiting for flush)"
         );
         sleep(Duration::from_millis(50)).await;
     };
 
     let total_elapsed = test_start.elapsed();
 
-    println!("\n=== 测试结果汇总 ===");
-    println!("总测试时间: {:?}", total_elapsed);
-    println!("写入的消息数量: {}", 2000 + 500 + 1000 + 500); // 约4500条
-    println!("最终文件大小: {} bytes", concurrent_len);
-    println!("轮转文件数量: {}", log_files);
+    println!("\n=== test result summary ===");
+    println!("total test time: {:?}", total_elapsed);
+    println!("messages written: {}", 2000 + 500 + 1000 + 500); // 约4500条
+    println!("final file size: {} bytes", concurrent_len);
+    println!("rotated file count: {}", log_files);
 
     let content = std::fs::read_to_string(&log_path).unwrap();
-    assert!(!content.contains("user@example.com"), "邮箱应该被掩码");
-    assert!(!content.contains("13812345678"), "电话应该被掩码");
+    assert!(
+        !content.contains("user@example.com"),
+        "the email should be masked"
+    );
+    assert!(
+        !content.contains("13812345678"),
+        "the phone number should be masked"
+    );
 
     // 核正：encrypt 仅作用于轮转归档（file.rs rotate_inner 的后台压缩/加密路径），
     // 活跃写入文件是明文——secret_data 以明文出现属设计语义；归档密文行为由
@@ -261,7 +276,7 @@ async fn test_comprehensive_real_data_writing() {
         }
         assert!(
             Instant::now() < plaintext_deadline,
-            "活跃文件应为明文且包含 secret_data_1（等待落盘超时，encrypt 仅作用于轮转归档）"
+            "the active file should be plaintext and contain secret_data_1 (timed out waiting for flush; encryption applies only to rotated archives)"
         );
         sleep(Duration::from_millis(50)).await;
     }
@@ -275,7 +290,7 @@ async fn test_comprehensive_real_data_writing() {
             let bytes = std::fs::read(entry.path()).unwrap();
             assert!(
                 !bytes.windows(13).any(|w| w == b"secret_data_1"),
-                "轮转归档应为密文: {}",
+                "the rotated archive should be ciphertext: {}",
                 name
             );
         }
@@ -288,26 +303,31 @@ async fn test_comprehensive_real_data_writing() {
 
     // 获取最终健康状态
     let final_health = logger.get_health_status();
-    println!("最终健康状态: {:?}", final_health);
+    println!("final health status: {:?}", final_health);
 
     // 测试关闭
-    logger.shutdown().expect("关闭日志服务失败");
+    logger
+        .shutdown()
+        .expect("failed to shut down the logging service");
 
-    println!("=== 综合真实数据写入测试完成 ===");
-    println!("✅ 所有基本功能正常工作");
-    println!("✅ 文件轮转功能正常");
-    println!("✅ 数据掩码功能正常");
-    println!("✅ 加密功能正常");
-    println!("✅ 数据库写入正常");
-    println!("✅ 并发安全性能正常");
-    println!("✅ 健康监控功能正常");
+    println!("=== comprehensive real-data write tests completed ===");
+    println!("✅ all basic features work");
+    println!("✅ file rotation works");
+    println!("✅ data masking works");
+    println!("✅ encryption works");
+    println!("✅ database writes work");
+    println!("✅ concurrency safety works");
+    println!("✅ health monitoring works");
 
-    assert!(final_health.sinks.len() >= 3, "所有sink应该都在监控中");
+    assert!(
+        final_health.sinks.len() >= 3,
+        "all sinks should be monitored"
+    );
 
     // 核正：原 25 秒下限为时序自检（快机器必失败），无验收价值——数据落盘
     // 有效性已由文件大小/数据库/健康状态断言承载
 
-    println!("=== 测试验证通过！inklog 在真实数据写入场景下表现完美 ===");
+    println!("=== validation passed! inklog performs flawlessly under real-data writes ===");
 }
 
 /// 验证配置变更的动态响应
@@ -333,7 +353,7 @@ async fn test_dynamic_configuration_changes() {
         ..Default::default()
     };
 
-    println!("=== 测试动态配置变更 ===");
+    println!("=== testing dynamic config changes ===");
 
     // 创建初始日志器（build_detached + 线程级 set_default，避免进程级全局竞争）
     let (logger1, subscriber1, filter1) = LoggerManager::build_detached(
@@ -355,7 +375,7 @@ async fn test_dynamic_configuration_changes() {
     );
 
     for i in 0..100 {
-        tracing::info!(target: "dynamic_test", "初始配置 - 消息 {}", i);
+        tracing::info!(target: "dynamic_test", "initial config - message {}", i);
     }
 
     // 修改配置并重新创建日志器（在实际应用中，这应该是无缝的）
@@ -400,7 +420,7 @@ async fn test_dynamic_configuration_changes() {
 
     // 写入新配置下的日志
     for i in 0..100 {
-        tracing::warn!(target: "dynamic_test", "更新后配置 - 證告消息 {}", i);
+        tracing::warn!(target: "dynamic_test", "updated config - warning message {}", i);
     }
 
     // shutdown 触发 flush_batch 确保落盘后再读（核正：原立即读文件依赖轮询时序）
@@ -411,10 +431,10 @@ async fn test_dynamic_configuration_changes() {
     let final_content = std::fs::read_to_string(&log_path).unwrap();
 
     // 应该包含debug级别的消息
-    assert!(final_content.contains("更新后配置 - 證告消息"));
+    assert!(final_content.contains("updated config - warning message"));
 
-    println!("✅ 动态配置变更测试通过");
-    println!("=== 动态配置变更测试完成 ===");
+    println!("✅ dynamic config change tests passed");
+    println!("=== dynamic config change tests completed ===");
 
     drop(logger2);
 }

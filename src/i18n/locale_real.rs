@@ -295,6 +295,10 @@ fn load_resources_with_fallback(
 /// Load Fluent resources from an on-disk locale directory laid out as
 /// `<dir>/<locale>/<name>.ftl`. Returns empty maps when the directory
 /// does not exist or cannot be read.
+///
+/// Failure warnings below stay in English on purpose: while the catalog
+/// itself is failing to load, the `tr` lookup chain is unavailable, so a
+/// translated message would degrade to a raw message ID (self-reference).
 fn load_resources_from_dir(
     dir: &std::path::Path,
 ) -> (
@@ -384,6 +388,9 @@ fn load_resources_from_dir(
 
 /// Build resources from [`EMBEDDED_LOCALES`] through the same
 /// `FluentResource` parse path as [`load_resources_from_dir`].
+///
+/// Same English-only rule for its failure warnings: the translation
+/// chain is exactly what is breaking at this point.
 fn load_embedded_resources() -> (
     HashMap<String, HashMap<String, FluentResource>>,
     HashMap<String, LanguageIdentifier>,

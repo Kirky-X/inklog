@@ -120,3 +120,47 @@ config-sampling_per_level_rate_invalid = sampling.per_level["{ $level }"] rate m
 config-sampling_prefix_empty = sampling.per_target_prefix key must not be empty
 config-sampling_sample_every_n_invalid = sampling.per_target_prefix["{ $prefix }"].sample_every_n must be >= 1, got 0
 config-sampling_keep_level_invalid = sampling.per_target_prefix["{ $prefix }"].keep_level "{ $level }" is not a valid level. Valid: { $valid }
+
+# HTTP monitoring server messages
+config-http_invalid_token = Invalid token
+config-http_missing_auth_header = Missing or invalid Authorization header
+config-http_ip_not_whitelisted = IP not in whitelist
+config-http_serialization_failed = serialization failed
+config-http_ip_whitelist_entry_invalid = ip_whitelist entry is not a valid IP or CIDR; it never matches (fail-closed)
+
+# Database pool sizing and runtime level reload warnings
+config-db_pool_size_capped = Database pool_size capped to min(configured, num_cpus, 4)
+config-injected_db_pool_above_limit = Injected Database configured with pool_size above effective_db_worker_limit; cap the pool at the adapter level
+config-set_level_no_live_filter = set_level: no live installed filter to swap (detached build?); directives updated anyway
+
+# Config repair / adapter warnings
+config-stderr_levels_entry_removed = Invalid stderr_levels entry, removing
+config-min_max_capacity_swapped = min_capacity > max_capacity, swapping
+config-adapter_fallback = InklogConfigAdapter::new failed, falling back to default config: { $err }
+config-reload_failed_keep_previous = config reload failed; keeping previous configuration
+
+# Schema serialization invariant
+config-json_schema_serialize_invariant = JsonSchema serialization cannot fail
+
+# Compression backend failure messages
+config-compression-create_failed = Failed to create compressed file: { $err }
+config-compression-finish_failed = Failed to finish compression: { $err }
+config-compression-open_failed = Failed to open file for compression: { $err }
+config-compression-zstd_encoder_failed = Failed to create zstd encoder: { $err }
+
+# Runtime log messages: HTTP server lifecycle and manager events
+log-https_server_started = HTTPS server started on { $addr } (auth: { $auth }, ip_whitelist: { $whitelist })
+log-http_server_started = HTTP server started on { $addr } (auth: { $auth }, ip_whitelist: { $whitelist })
+log-http_server_stopped = HTTP server stopped
+log-http_monitoring_configured = HTTP monitoring server configured on { $addr }
+log-http_shutdown_signal_sent = HTTP server shutdown signal sent
+log-manager_initialized = Logger manager initialized
+log-global_subscriber_already_set = global subscriber already set; skipping inklog registry
+log-log_logger_already_set = log crate logger already set; skipping inklog LogLogger
+log-level_changed = log level changed at runtime
+log-target_level_changed = target log level changed at runtime
+log-config_hot_reloaded = configuration hot-reloaded
+log-config_validation_failed = Configuration validation failed: { $err }
+log-console_secret_scan_feature_missing = console_sink.secret_scan_enabled=true requires the `secret-scan` feature; the flag is ignored in this build
+log-database_secret_scan_feature_missing = database_sink.secret_scan_enabled=true requires the `secret-scan` feature; the flag is ignored in this build
+log-console_stderr_levels_entries_removed = Removed invalid stderr_levels entries

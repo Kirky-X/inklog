@@ -176,7 +176,8 @@ impl MaskRuleRegistry {
             if rules.iter().any(|r| r.name() == name) {
                 tracing::warn!(
                     rule = name,
-                    "duplicate masking rule name in TOML config; keeping the first definition and skipping the later one"
+                    "{}",
+                    crate::i18n::tr("masking-duplicate_rule_name")
                 );
                 continue;
             }

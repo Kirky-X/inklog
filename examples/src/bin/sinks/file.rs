@@ -48,10 +48,10 @@ use std::path::PathBuf;
 /// - 写入多级别日志
 /// - 查看文件内容
 async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例1: 基础文件写入");
+    print_separator("Example 1: basic file writing");
 
     let log_path = temp_file_path("basic");
-    println!("日志文件路径: {}", log_path);
+    println!("Log file path: {}", log_path);
 
     let config = FileSinkConfig {
         enabled: true,
@@ -78,13 +78,13 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
     let sink = FileSink::new(config)?;
 
     // 写入各级别日志
-    print_section("写入日志");
+    print_section("Write logs");
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     for level in levels {
         let record = LogRecord {
             timestamp: Utc::now(),
             level: level.to_string(),
-            message: format!("这是一条 {} 级别日志", level),
+            message: format!("this is a {} level log", level),
             target: "file_example::basic".to_string(),
             fields: Default::default(),
             file: Some(file!().to_string()),
@@ -99,12 +99,12 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
     sink.flush().await?;
 
     // 读取并展示文件内容（tokio::fs 异步读取，避免阻塞 worker 线程）
-    print_section("文件内容");
+    print_section("File content");
     let content = tokio::fs::read_to_string(&log_path).await?;
     println!("{}", content);
 
     cleanup_files(&log_path, "inklog_example_basic").await?;
-    println!("\n✓ 基础文件写入完成\n");
+    println!("\n✓ basic file writing complete\n");
 
     Ok(())
 }
@@ -116,10 +116,10 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
 /// - 写入大量日志触发多次轮转
 /// - 展示轮转文件命名规则
 async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例2: 文件轮转");
+    print_separator("Example 2: file rotation");
 
     let log_path = temp_file_path("rotation");
-    println!("日志文件路径: {}", log_path);
+    println!("Log file path: {}", log_path);
 
     // 创建 FileSink 配置（小文件触发轮转）
     let config = FileSinkConfig {
@@ -147,13 +147,13 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     let sink = FileSink::new(config)?;
 
     // 写入大量日志触发轮转
-    print_section("写入日志（触发轮转）");
+    print_section("Write logs (trigger rotation)");
     for i in 1..=50 {
         let record = LogRecord {
             timestamp: Utc::now(),
             level: "INFO".to_string(),
             message: format!(
-                "日志消息 #{:03} - 这是一条较长的日志消息用于触发轮转功能测试",
+                "log message #{:03} - a longer log message that triggers rotation",
                 i
             ),
             target: "file_example::rotation".to_string(),
@@ -170,14 +170,14 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 展示轮转后的文件列表
-    print_section("轮转文件列表");
+    print_section("Rotated file list");
     let log_dir = PathBuf::from(&log_path)
         .parent()
-        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .ok_or_else(|| format!("the path has no parent directory: {}", log_path))?
         .to_path_buf();
 
-    println!("目录: {}", log_dir.display());
-    println!("\n文件列表:");
+    println!("Directory: {}", log_dir.display());
+    println!("\nFile list:");
 
     // 列出目录中所有文件（tokio::fs 异步遍历，避免阻塞 worker 线程）
     let mut dir_entries = tokio::fs::read_dir(&log_dir).await?;
@@ -199,18 +199,18 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
             let size = metadata.len();
             let marker = if file_name.contains(&year_tag) {
                 rotation_count += 1;
-                " [轮转]"
+                " [rotated]"
             } else {
-                " [当前]"
+                " [current]"
             };
             println!("  {} ({} bytes){}", file_name, size, marker);
         }
     }
 
-    println!("\n轮转次数: {}", rotation_count);
+    println!("\nRotation count: {}", rotation_count);
 
     cleanup_files(&log_path, "inklog_example_rotation").await?;
-    println!("\n✓ 文件轮转演示完成\n");
+    println!("\n✓ file rotation demo complete\n");
 
     Ok(())
 }
@@ -222,10 +222,10 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
 /// - 配置小文件触发轮转
 /// - 展示压缩后的 .zst 文件
 async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例3: Zstd 压缩");
+    print_separator("Example 3: Zstd compression");
 
     let log_path = temp_file_path("compression");
-    println!("日志文件路径: {}", log_path);
+    println!("Log file path: {}", log_path);
 
     // 创建 FileSink 配置（启用压缩）
     let config = FileSinkConfig {
@@ -253,13 +253,13 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
     let sink = FileSink::new(config)?;
 
     // 写入大量日志触发轮转和压缩
-    print_section("写入日志（触发轮转和压缩）");
+    print_section("Write logs (trigger rotation and compression)");
     for i in 1..=50 {
         let record = LogRecord {
             timestamp: Utc::now(),
             level: "INFO".to_string(),
             message: format!(
-                "日志消息 #{:03} - 重复内容可以更好地展示压缩效果（AAABBBCCCDDDEEEFFF）",
+                "log message #{:03} - repeated content shows compression well (AAABBBCCCDDDEEEFFF)",
                 i
             ),
             target: "file_example::compression".to_string(),
@@ -276,18 +276,18 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 等待压缩完成
-    print_section("等待压缩完成");
+    print_section("Wait for compression to finish");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // 展示压缩文件列表
-    print_section("压缩文件列表");
+    print_section("Compressed file list");
     let log_dir = PathBuf::from(&log_path)
         .parent()
-        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .ok_or_else(|| format!("the path has no parent directory: {}", log_path))?
         .to_path_buf();
 
-    println!("目录: {}", log_dir.display());
-    println!("\n文件列表:");
+    println!("Directory: {}", log_dir.display());
+    println!("\nFile list:");
 
     // 列出目录中所有文件（tokio::fs 异步遍历，避免阻塞 worker 线程）
     let mut dir_entries = tokio::fs::read_dir(&log_dir).await?;
@@ -307,19 +307,19 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 
             let marker = if file_name.ends_with(".zst") {
                 compression_count += 1;
-                " [压缩]"
+                " [compressed]"
             } else {
-                " [当前]"
+                " [current]"
             };
 
             println!("  {} ({} bytes){}", file_name, size, marker);
         }
     }
 
-    println!("\n压缩文件数: {}", compression_count);
+    println!("\nCompressed file count: {}", compression_count);
 
     cleanup_files(&log_path, "inklog_example_compression").await?;
-    println!("\n✓ Zstd 压缩演示完成\n");
+    println!("\n✓ Zstd compression demo complete\n");
 
     Ok(())
 }
@@ -330,11 +330,11 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
 /// 使用 `tokio::fs` 异步 API，避免在 async 上下文中
 /// 调用同步文件 IO 阻塞 tokio worker 线程。
 async fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
-    print_section("清理临时文件");
+    print_section("Clean up temporary files");
 
     let log_dir = PathBuf::from(log_path)
         .parent()
-        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .ok_or_else(|| format!("the path has no parent directory: {}", log_path))?
         .to_path_buf();
 
     let mut deleted_count = 0;
@@ -346,15 +346,15 @@ async fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::
         // 只删除当前示例相关的文件
         if file_name.contains(prefix) {
             tokio::fs::remove_file(entry.path()).await?;
-            println!("  删除: {}", file_name);
+            println!("  Deleting: {}", file_name);
             deleted_count += 1;
         }
     }
 
     if deleted_count == 0 {
-        println!("  没有找到需要清理的文件");
+        println!("  No files needed cleaning");
     } else {
-        println!("\n  共删除 {} 个文件", deleted_count);
+        println!("\n  Deleted {} files in total", deleted_count);
     }
 
     Ok(())
@@ -362,7 +362,7 @@ async fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog File Sink 示例 ===\n");
+    println!("=== inklog file sink examples ===\n");
 
     basic_file().await?;
 
@@ -370,6 +370,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     file_compression().await?;
 
-    println!("所有示例完成！");
+    println!("All examples complete!");
     Ok(())
 }

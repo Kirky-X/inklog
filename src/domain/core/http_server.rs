@@ -129,13 +129,17 @@ impl LoggerManager {
                             token.as_bytes(),
                             expected_token.as_bytes(),
                         ) {
-                            return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                            return (
+                                StatusCode::UNAUTHORIZED,
+                                crate::i18n::tr("config-http_invalid_token"),
+                            )
+                                .into_response();
                         }
                     }
                     _ => {
                         return (
                             StatusCode::UNAUTHORIZED,
-                            "Missing or invalid Authorization header",
+                            crate::i18n::tr("config-http_missing_auth_header"),
                         )
                             .into_response();
                     }
@@ -152,7 +156,11 @@ impl LoggerManager {
                         &INVALID_WHITELIST_WARNED,
                     )
                 }) {
-                    return (StatusCode::FORBIDDEN, "IP not in whitelist").into_response();
+                    return (
+                        StatusCode::FORBIDDEN,
+                        crate::i18n::tr("config-http_ip_not_whitelisted"),
+                    )
+                        .into_response();
                 }
             }
 
@@ -182,7 +190,9 @@ impl LoggerManager {
                                 "{}",
                                 crate::i18n::tr_args("config-http_serialize_failed", args)
                             );
-                            axum::Json(serde_json::json!({"error": "serialization failed"}))
+                            axum::Json(
+                                serde_json::json!({"error": crate::i18n::tr("config-http_serialization_failed")}),
+                            )
                         }
                     }
                 }),
@@ -247,10 +257,11 @@ impl LoggerManager {
                 Ok(s) => s,
                 Err(e) => return bind_failure_outcome(&error_mode, addr, &e, true),
             };
-            info!(
-                "HTTPS server started on {} (auth: {}, ip_whitelist: {:?})",
-                addr, auth_enabled, ip_whitelist
-            );
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("addr", addr);
+            args.set("auth", auth_enabled);
+            args.set("whitelist", format!("{:?}", ip_whitelist));
+            info!("{}", crate::i18n::tr_args("log-https_server_started", args));
             tokio::spawn(async move {
                 if let Err(e) = server.serve(make_svc).await {
                     let mut args = crate::i18n::MsgArgs::new();
@@ -266,13 +277,14 @@ impl LoggerManager {
                 Ok(l) => l,
                 Err(e) => return bind_failure_outcome(&error_mode, addr, &e, false),
             };
-            info!(
-                "HTTP server started on {} (auth: {}, ip_whitelist: {:?})",
-                addr, auth_enabled, ip_whitelist
-            );
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("addr", addr);
+            args.set("auth", auth_enabled);
+            args.set("whitelist", format!("{:?}", ip_whitelist));
+            info!("{}", crate::i18n::tr_args("log-http_server_started", args));
             tokio::spawn(async move {
                 match axum::serve(listener, make_svc).await {
-                    Ok(_) => info!("HTTP server stopped"),
+                    Ok(_) => info!("{}", crate::i18n::tr("log-http_server_stopped")),
                     Err(e) => {
                         let mut args = crate::i18n::MsgArgs::new();
                         args.set("err", e.to_string());
@@ -290,7 +302,12 @@ impl LoggerManager {
         let mut handle_guard = http_server_handle.lock().unwrap_or_else(|e| e.into_inner());
         *handle_guard = Some(handle);
 
-        info!("HTTP monitoring server configured on {}", addr);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("addr", addr);
+        info!(
+            "{}",
+            crate::i18n::tr_args("log-http_monitoring_configured", args)
+        );
         Ok(())
     }
 }
@@ -357,7 +374,8 @@ fn whitelist_entry_matches(
                 if !invalid_warned.swap(true, Ordering::Relaxed) {
                     tracing::warn!(
                         entry = %allowed,
-                        "ip_whitelist entry is not a valid IP or CIDR; it never matches (fail-closed)"
+                        "{}",
+                        crate::i18n::tr("config-http_ip_whitelist_entry_invalid")
                     );
                 }
                 false

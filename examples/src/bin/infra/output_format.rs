@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 fn main() {
-    print_separator("inklog 输出格式示例");
+    print_separator("inklog output format example");
 
     show_output_format_variants();
     show_from_str_parsing();
@@ -33,13 +33,13 @@ fn main() {
     show_sink_config_usage();
     show_best_practices();
 
-    println!("\n✓ 所有输出格式示例演示完成");
+    println!("\n✓ All output format examples completed");
 }
 
 /// 展示 OutputFormat 枚举变体
 #[allow(clippy::eq_op)] // 示例代码故意展示相同变体比较
 fn show_output_format_variants() {
-    print_section("1. OutputFormat 枚举变体");
+    print_section("Example 1: OutputFormat enum variants");
 
     let text = OutputFormat::Text;
     let json = OutputFormat::Json;
@@ -48,10 +48,10 @@ fn show_output_format_variants() {
     println!("OutputFormat::Text    = {:?}", text);
     println!("OutputFormat::Json    = {:?}", json);
     println!("OutputFormat::default() = {:?}", default);
-    println!("\n默认格式: {:?}（人类可读文本）", default);
+    println!("\nDefault format: {:?} (human-readable text)", default);
     assert_eq!(default, OutputFormat::Text);
 
-    println!("\n等价比较：");
+    println!("\nEquivalence check:");
     let is_text_equal = OutputFormat::Text == OutputFormat::Text;
     println!("  Text == Text → {}", is_text_equal);
     println!(
@@ -62,15 +62,15 @@ fn show_output_format_variants() {
 
 /// 展示 FromStr 解析
 fn show_from_str_parsing() {
-    print_section("2. FromStr 字符串解析");
+    print_section("Example 2: FromStr string parsing");
 
-    println!("字符串 → OutputFormat 解析：\n");
+    println!("String → OutputFormat parsing:\n");
 
     let cases = ["text", "Text", "TEXT", "json", "Json", "JSON"];
     for s in &cases {
         match OutputFormat::from_str(s) {
             Ok(fmt) => println!("  {:?} → {:?} ✓", s, fmt),
-            Err(e) => println!("  {:?} → 错误: {}", s, e),
+            Err(e) => println!("  {:?} → error: {}", s, e),
         }
     }
 
@@ -82,14 +82,18 @@ fn show_from_str_parsing() {
     // 无效值
     let invalid = OutputFormat::from_str("xml");
     assert!(invalid.is_err());
-    println!("\n  {:?} → 错误（无效值）: {}", "xml", invalid.unwrap_err());
+    println!(
+        "\n  {:?} → error (invalid value): {}",
+        "xml",
+        invalid.unwrap_err()
+    );
 }
 
 /// 展示 Display trait
 fn show_display_trait() {
-    print_section("3. Display trait 输出");
+    print_section("Example 3: Display trait output");
 
-    println!("OutputFormat → 字符串：\n");
+    println!("OutputFormat → string:\n");
     println!("  OutputFormat::Text → \"{}\"", OutputFormat::Text);
     println!("  OutputFormat::Json → \"{}\"", OutputFormat::Json);
 
@@ -99,23 +103,23 @@ fn show_display_trait() {
 
 /// 展示 Text 格式的日志渲染效果
 fn show_text_format_rendering() {
-    print_section("4. Text 格式渲染（默认）");
+    print_section("Example 4: Text rendering (default)");
 
     let template = LogTemplate::default();
     let record = create_sample_record();
 
     let rendered = template.render(&record);
-    println!("LogTemplate::default() 渲染：");
+    println!("LogTemplate::default() rendering:");
     println!("  {}", rendered);
-    println!("\n特点：");
-    println!("  - 人类可读，适合控制台和日志文件");
-    println!("  - 包含时间戳、级别、目标、消息");
-    println!("  - 结构化字段以 JSON 附加在末尾");
+    println!("\nCharacteristics:");
+    println!("  - Human-readable; suits consoles and log files");
+    println!("  - Contains timestamp, level, target, message");
+    println!("  - Structured fields appended as JSON at the end");
 }
 
 /// 展示 Json 格式的日志渲染效果
 fn show_json_format_rendering() {
-    print_section("5. Json 格式渲染（NDJSON）");
+    print_section("Example 5: Json rendering (NDJSON)");
 
     let record = create_sample_record();
 
@@ -129,24 +133,24 @@ fn show_json_format_rendering() {
     }))
     .unwrap();
 
-    println!("NDJSON 格式输出：");
+    println!("NDJSON output:");
     println!("  {}", json_line);
-    println!("\n特点：");
-    println!("  - 机器可解析，适合日志采集系统");
-    println!("  - 每行一个完整 JSON 对象");
-    println!("  - 可直接被 Fluentd/Logstash/Promtail 等采集");
-    println!("  - 支持嵌套结构化字段");
+    println!("\nCharacteristics:");
+    println!("  - Machine-parseable; suits log collection systems");
+    println!("  - One complete JSON object per line");
+    println!("  - Directly collectable by Fluentd/Logstash/Promtail");
+    println!("  - Supports nested structured fields");
 
     // 验证 JSON 合法性
     let parsed: Value = serde_json::from_str(&json_line).unwrap();
     assert_eq!(parsed["level"], "INFO");
-    assert_eq!(parsed["message"], "用户登录成功");
-    println!("\n  ✓ JSON 输出可被标准解析器正确解析");
+    assert_eq!(parsed["message"], "user logged in");
+    println!("\n  ✓ JSON output parses correctly with standard parsers");
 }
 
 /// 展示在 Sink 配置中使用 OutputFormat
 fn show_sink_config_usage() {
-    print_section("6. 在 Sink 配置中使用 OutputFormat");
+    print_section("Example 6: OutputFormat in sink configs");
 
     use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 
@@ -159,7 +163,7 @@ fn show_sink_config_usage() {
         output_format: OutputFormat::Json,
         secret_scan_enabled: false,
     };
-    println!("Console Sink 配置（JSON 格式）：");
+    println!("Console sink config (JSON format):");
     println!("  output_format = {:?}", console_cfg.output_format);
 
     // File Sink 使用 Text 格式
@@ -168,10 +172,10 @@ fn show_sink_config_usage() {
         output_format: OutputFormat::Text,
         ..Default::default()
     };
-    println!("\nFile Sink 配置（Text 格式）：");
+    println!("\nFile sink config (Text format):");
     println!("  output_format = {:?}", file_cfg.output_format);
 
-    println!("\nTOML 配置示例：");
+    println!("\nTOML config example:");
     println!(
         r#"
 [console_sink]
@@ -187,29 +191,29 @@ output_format = "text""#
 
 /// 最佳实践建议
 fn show_best_practices() {
-    print_section("7. 最佳实践");
+    print_section("7. Best practices");
 
-    println!("OutputFormat 选择指南：\n");
+    println!("OutputFormat selection guide:\n");
 
-    println!("1. Text 格式适用场景：");
-    println!("   - 开发环境控制台输出");
-    println!("   - 人类直接阅读的日志文件");
-    println!("   - 调试和故障排查");
+    println!("1. Text format use cases:");
+    println!("   - Development console output");
+    println!("   - Log files read directly by humans");
+    println!("   - Debugging and troubleshooting");
 
-    println!("\n2. Json 格式适用场景：");
-    println!("   - 生产环境结构化日志采集");
-    println!("   - 日志分析平台（ELK/Loki/Datadog）");
-    println!("   - 需要字段级查询和过滤的场景");
+    println!("\n2. Json format use cases:");
+    println!("   - Production structured log collection");
+    println!("   - Log analytics platforms (ELK/Loki/Datadog)");
+    println!("   - Suits field-level querying and filtering");
 
-    println!("\n3. 混合使用：");
-    println!("   - Console → Text（便于开发查看）");
-    println!("   - File → Json（便于采集分析）");
-    println!("   - Database → 结构化字段直接入库");
+    println!("\n3. Mixing formats:");
+    println!("   - Console → Text (easy for developers to read)");
+    println!("   - File → Json (easy to collect and analyze)");
+    println!("   - Database → structured fields stored directly");
 
-    println!("\n4. 性能考虑：");
-    println!("   - Text 格式渲染更快（简单字符串拼接）");
-    println!("   - Json 格式需序列化（约 2-3x 开销）");
-    println!("   - 高吞吐场景建议 File 用 Text，采集层转 Json");
+    println!("\n4. Performance considerations:");
+    println!("   - Text format renders faster (simple string concatenation)");
+    println!("   - Json format needs serialization (~2-3x overhead)");
+    println!("   - For high throughput, use Text for files and convert to Json at the collector");
 }
 
 /// 创建示例日志记录
@@ -217,7 +221,7 @@ fn create_sample_record() -> LogRecord {
     let mut record = LogRecord::new(
         Level::INFO,
         "my_app::auth".to_string(),
-        "用户登录成功".to_string(),
+        "user logged in".to_string(),
     );
     record.fields = HashMap::from([
         ("user_id".to_string(), Value::Number(12345.into())),

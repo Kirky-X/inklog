@@ -19,7 +19,7 @@ use inklog::config::{HttpServerConfig, TlsConfig};
 use inklog_examples::common::{print_section, print_separator};
 
 fn main() {
-    print_separator("inklog TLS 配置示例");
+    print_separator("inklog TLS configuration examples");
 
     show_tls_config_basic();
     show_http_with_tls();
@@ -27,18 +27,18 @@ fn main() {
     show_tls_toml_config();
     show_tls_best_practices();
 
-    println!("\n所有 TLS 配置示例展示完毕。");
+    println!("\nAll TLS configuration examples shown.");
 }
 
 /// 演示 TlsConfig 基础配置
 fn show_tls_config_basic() {
-    print_section("示例 1：TlsConfig 基础配置");
+    print_section("Example 1: TlsConfig basics");
 
-    println!("TlsConfig 字段说明：");
-    println!("  cert_path: PEM 编码证书文件路径");
-    println!("  key_path:  PEM 编码私钥文件路径");
+    println!("TlsConfig fields:");
+    println!("  cert_path: path to the PEM encoded certificate file");
+    println!("  key_path:  path to the PEM encoded private key file");
 
-    println!("\n基础 TlsConfig：");
+    println!("\nBasic TlsConfig:");
     let tls = TlsConfig {
         cert_path: "/etc/ssl/certs/inklog.crt".to_string(),
         key_path: "/etc/ssl/private/inklog.key".to_string(),
@@ -46,22 +46,22 @@ fn show_tls_config_basic() {
     println!("  cert_path = \"{}\"", tls.cert_path);
     println!("  key_path  = \"{}\"", tls.key_path);
 
-    println!("\n证书格式要求：");
-    println!("  - 证书: X.509 PEM 格式 (.crt / .pem)");
-    println!("  - 私钥: PKCS#8 PEM 格式 (.key / .pem)");
-    println!("  - 支持自签名证书（开发/测试环境）");
-    println!("  - 生产环境建议使用 Let's Encrypt 或商业 CA 签发的证书");
+    println!("\nCertificate format requirements:");
+    println!("  - Certificate: X.509 PEM format (.crt / .pem)");
+    println!("  - Private key: PKCS#8 PEM format (.key / .pem)");
+    println!("  - Self-signed certificates work (development/test)");
+    println!("  - In production use a certificate from Let's Encrypt or a commercial CA");
 }
 
 /// 演示启用 TLS 的 HTTP 服务器配置
 fn show_http_with_tls() {
-    print_section("示例 2：启用 TLS 的 HTTP 服务器");
+    print_section("Example 2: an HTTP server with TLS enabled");
 
-    println!("默认配置（无 TLS）：");
+    println!("Default configuration (no TLS):");
     let default_http = HttpServerConfig::default();
-    println!("  tls = {:?} (None = 不启用 TLS)", default_http.tls);
+    println!("  tls = {:?} (None = TLS disabled)", default_http.tls);
 
-    println!("\n启用 TLS 的 HTTP 服务器配置：");
+    println!("\nHTTP server configuration with TLS:");
     let tls_http = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -93,15 +93,15 @@ fn show_http_with_tls() {
             .unwrap_or("")
     );
 
-    println!("\n访问方式变化：");
-    println!("  无 TLS: http://localhost:9090/health");
-    println!("  有 TLS: https://localhost:9443/health");
+    println!("\nHow access changes:");
+    println!("  No TLS: http://localhost:9090/health");
+    println!("  With TLS: https://localhost:9443/health");
     println!("  curl -k https://localhost:9443/metrics");
 }
 
 /// 演示完整的生产级 TLS 安全配置
 fn show_full_secure_tls_config() {
-    print_section("示例 3：完整生产级 TLS 安全配置");
+    print_section("Example 3: full production-grade TLS config");
 
     use inklog::config::{HttpAuthConfig, HttpErrorMode};
 
@@ -123,7 +123,7 @@ fn show_full_secure_tls_config() {
         }),
     };
 
-    println!("生产级 HttpServerConfig（TLS + 认证 + 白名单）：");
+    println!("Production-grade HttpServerConfig (TLS + auth + whitelist):");
     println!("  enabled      = {}", secure_config.enabled);
     println!(
         "  host:port    = {}:{}",
@@ -152,18 +152,18 @@ fn show_full_secure_tls_config() {
             .unwrap_or("")
     );
 
-    println!("\n安全层次：");
-    println!("  1. TLS 加密传输 → 防止中间人攻击");
-    println!("  2. Bearer Token 认证 → 防止未授权访问");
-    println!("  3. IP 白名单 → 限制访问来源");
-    println!("  4. Strict 错误模式 → 失败即拒绝");
+    println!("\nSecurity layers:");
+    println!("  1. TLS transport encryption → stops man-in-the-middle attacks");
+    println!("  2. Bearer token auth → stops unauthorized access");
+    println!("  3. IP whitelist → restricts access sources");
+    println!("  4. Strict error mode → fail closed");
 }
 
 /// 演示 TOML 配置文件格式
 fn show_tls_toml_config() {
-    print_section("示例 4：TOML 配置文件格式");
+    print_section("Example 4: TOML configuration file format");
 
-    println!("inklog.toml 中的 TLS 配置：");
+    println!("The TLS configuration inside inklog.toml:");
     println!(
         r#"[http_server]
 enabled = true
@@ -183,38 +183,38 @@ cert_path = "/etc/ssl/certs/inklog.crt"
 key_path = "/etc/ssl/private/inklog.key""#
     );
 
-    println!("\n加载配置：");
-    println!("  // 从 TOML 文件加载（自动解析 tls 字段）");
+    println!("\nLoad the configuration:");
+    println!("  // Load from a TOML file (the tls field is parsed automatically)");
     println!("  let _logger = LoggerManager::from_file(\"inklog.toml\").await?;");
     println!();
-    println!("  // 或自动搜索配置文件");
+    println!("  // Or search for the configuration file automatically");
     println!("  let _logger = LoggerManager::load().await?;");
 }
 
 /// 演示 TLS 最佳实践
 fn show_tls_best_practices() {
-    print_section("示例 5：TLS 最佳实践");
+    print_section("Example 5: TLS best practices");
 
-    println!("证书管理：");
-    println!("  - 生产环境使用 Let's Encrypt 或商业 CA 证书");
-    println!("  - 开发环境可使用自签名证书：");
+    println!("Certificate management:");
+    println!("  - Use a Let's Encrypt or commercial CA certificate in production");
+    println!("  - A self-signed certificate is fine in development:");
     println!("    openssl req -x509 -newkey rsa:4096 -days 365 \\");
     println!("      -keyout inklog.key -out inklog.crt -nodes \\");
     println!("      -subj '/CN=localhost'");
-    println!("  - 定期轮换证书（建议 90 天）");
+    println!("  - Rotate certificates regularly (90 days is a good target)");
 
-    println!("\n私钥保护：");
-    println!("  - 私钥文件权限设置为 600（仅 owner 可读写）");
-    println!("  - 使用 chmod 600 /etc/ssl/private/inklog.key");
-    println!("  - 考虑使用 Kubernetes Secrets 或 Vault 管理密钥");
+    println!("\nPrivate key protection:");
+    println!("  - Set the private key file mode to 600 (owner only)");
+    println!("  - Use chmod 600 /etc/ssl/private/inklog.key");
+    println!("  - Consider managing keys with Kubernetes Secrets or Vault");
 
-    println!("\n端口选择：");
-    println!("  - 标准 HTTPS 端口: 443（需 root 权限）");
-    println!("  - 自定义 HTTPS 端口: 8443 / 9443（推荐）");
-    println!("  - 避免与 HTTP 端口共用（9090 vs 9443）");
+    println!("\nPort selection:");
+    println!("  - Standard HTTPS port: 443 (needs root)");
+    println!("  - Custom HTTPS port: 8443 / 9443 (recommended)");
+    println!("  - Do not share it with the HTTP port (9090 vs 9443)");
 
-    println!("\n监控与告警：");
-    println!("  - 监控证书过期时间（建议 30 天前告警）");
-    println!("  - 监控 TLS 握手失败率");
-    println!("  - 使用 /health 端点验证服务可用性");
+    println!("\nMonitoring and alerting:");
+    println!("  - Alert on certificate expiry (30 days ahead is recommended)");
+    println!("  - Watch the TLS handshake failure rate");
+    println!("  - Use the /health endpoint to verify availability");
 }

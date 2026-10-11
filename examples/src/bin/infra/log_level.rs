@@ -19,7 +19,7 @@ use inklog::LogLevel;
 use inklog_examples::common::{print_section, print_separator};
 
 fn main() {
-    print_separator("inklog LogLevel 类型示例");
+    print_separator("inklog LogLevel type example");
 
     show_from_str_parsing();
     show_trait_from_str();
@@ -28,14 +28,14 @@ fn main() {
     show_helper_methods();
     show_error_handling();
 
-    println!("\n所有 LogLevel 示例展示完毕。");
+    println!("\nAll LogLevel examples completed.");
 }
 
 /// 演示 `LogLevel::from_str` 静态方法（大小写不敏感）
 fn show_from_str_parsing() {
-    print_section("示例 1：LogLevel::from_str 静态方法");
+    print_section("Example 1: the LogLevel::from_str static method");
 
-    println!("大小写不敏感解析：");
+    println!("Case-insensitive parsing:");
     for input in [
         "trace", "DEBUG", "Info", "WARN", "warning", "ERROR", "fatal", "critical",
     ] {
@@ -45,7 +45,7 @@ fn show_from_str_parsing() {
         }
     }
 
-    println!("\n无效输入返回 None：");
+    println!("\nInvalid input returns None:");
     for input in ["", "invalid", "trace_level", "123"] {
         let result = LogLevel::from_str(input);
         println!("  {:>12} → {:?}", input, result);
@@ -54,9 +54,9 @@ fn show_from_str_parsing() {
 
 /// 演示 `FromStr` trait 实现（返回 `Result`，支持 `?` 运算符）
 fn show_trait_from_str() {
-    print_section("示例 2：FromStr trait（返回 Result）");
+    print_section("Example 2: the FromStr trait (returns Result)");
 
-    println!("使用 .parse::<LogLevel>()：");
+    println!("Using .parse::<LogLevel>():");
     let valid_inputs = [
         "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical",
     ];
@@ -65,7 +65,7 @@ fn show_trait_from_str() {
         println!("  {:>10}.parse() → Ok({:?})", input, level);
     }
 
-    println!("\n错误处理：");
+    println!("\nError handling:");
     let invalid_inputs = ["", "invalid", "trace_level"];
     for input in invalid_inputs {
         let result: Result<LogLevel, _> = input.parse();
@@ -78,9 +78,9 @@ fn show_trait_from_str() {
 
 /// 演示 `Ord` / `PartialOrd` 序比较（用于级别过滤）
 fn show_ordering_comparison() {
-    print_section("示例 3：序比较（Ord / PartialOrd）");
+    print_section("Example 3: ordering (Ord / PartialOrd)");
 
-    println!("级别从低到高（数值越大级别越高）：");
+    println!("Levels low to high (higher value = more severe):");
     let levels = [
         LogLevel::Trace,
         LogLevel::Debug,
@@ -93,7 +93,7 @@ fn show_ordering_comparison() {
         println!("  {:?} = {}", level, level as u8);
     }
 
-    println!("\n比较运算符：");
+    println!("\nComparison operators:");
     let l1 = LogLevel::Error;
     let l2 = LogLevel::Error;
     println!("  Error > Debug  → {}", LogLevel::Error > LogLevel::Debug);
@@ -101,7 +101,7 @@ fn show_ordering_comparison() {
     println!("  Trace < Fatal  → {}", LogLevel::Trace < LogLevel::Fatal);
     println!("  Error == Error → {}", l1 == l2);
 
-    println!("\n实际应用：级别过滤（只记录 >= WARN 的日志）");
+    println!("\nPractical use: level filtering (record only >= WARN)");
     let min_level = LogLevel::Warn;
     let incoming = [
         LogLevel::Trace,
@@ -117,16 +117,16 @@ fn show_ordering_comparison() {
             level,
             min_level,
             enabled,
-            if enabled { "记录" } else { "丢弃" }
+            if enabled { "recorded" } else { "dropped" }
         );
     }
 }
 
 /// 演示 `Display` trait 实现
 fn show_display_trait() {
-    print_section("示例 4：Display trait");
+    print_section("Example 4: the Display trait");
 
-    println!("format!(\"{{}}\", level)：");
+    println!("format!(\"{{}}\", level):");
     for level in [
         LogLevel::Trace,
         LogLevel::Debug,
@@ -138,7 +138,7 @@ fn show_display_trait() {
         println!("  format!(\"{{}}\", {:?}) → \"{}\"", level, level);
     }
 
-    println!("\n与 as_str() 一致性验证：");
+    println!("\nConsistency check against as_str():");
     for level in [
         LogLevel::Trace,
         LogLevel::Debug,
@@ -151,7 +151,7 @@ fn show_display_trait() {
         let as_str = level.as_str();
         let consistent = display == as_str;
         println!(
-            "  {:?}: Display=\"{}\", as_str=\"{}\", 一致={}",
+            "  {:?}: Display=\"{}\", as_str=\"{}\", match={}",
             level, display, as_str, consistent
         );
     }
@@ -159,7 +159,7 @@ fn show_display_trait() {
 
 /// 演示辅助方法 `as_str` 和 `as_short_str`
 fn show_helper_methods() {
-    print_section("示例 5：辅助方法 as_str / as_short_str");
+    print_section("Example 5: helper methods as_str / as_short_str");
 
     println!("{:<10} {:<8} {:<10}", "Variant", "as_str", "as_short_str");
     println!("{}", "-".repeat(30));
@@ -179,15 +179,15 @@ fn show_helper_methods() {
         );
     }
 
-    println!("\n短格式适用场景：紧凑控制台输出");
-    println!("  [INF] 2026-01-01 服务启动");
-    println!("  [WRN] 2026-01-01 配置项缺失，使用默认值");
-    println!("  [ERR] 2026-01-01 数据库连接失败");
+    println!("\nShort format use case: compact console output");
+    println!("  [INF] 2026-01-01 service started");
+    println!("  [WRN] 2026-01-01 missing config entry, using defaults");
+    println!("  [ERR] 2026-01-01 database connection failed");
 }
 
 /// 演示错误处理和 `LogLevelParseError`
 fn show_error_handling() {
-    print_section("示例 6：错误处理（LogLevelParseError）");
+    print_section("Example 6: error handling (LogLevelParseError)");
 
     use inklog::LogLevelParseError;
 
@@ -200,10 +200,10 @@ fn show_error_handling() {
                 let msg = format!("{}", e);
                 let contains_input =
                     msg.contains(input) || (input.is_empty() && msg.contains("Unknown"));
-                println!("  输入: {:>12}", format!("\"{}\"", input));
-                println!("    错误类型: {:?}", e);
-                println!("    错误消息: {}", msg);
-                println!("    包含原始输入: {}", contains_input);
+                println!("  input: {:>12}", format!("\"{}\"", input));
+                println!("    error type: {:?}", e);
+                println!("    error message: {}", msg);
+                println!("    input included: {}", contains_input);
             }
         }
     }

@@ -36,7 +36,7 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog 性能测试示例 ===\n");
+    println!("=== inklog performance test example ===\n");
 
     console_sink_performance().await?;
 
@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     concurrent_test().await?;
 
-    println!("\n✓ 所有性能测试完成");
+    println!("\n✓ All performance tests completed");
     Ok(())
 }
 
@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 测试同步 Console Sink 的吞吐量和延迟
 async fn console_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("1. Console Sink 性能测试");
+    print_separator("1. Console sink throughput test");
 
     let config = InklogConfig {
         console_sink: Some(inklog::config::ConsoleSinkConfig {
@@ -70,7 +70,7 @@ async fn console_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
 
     let _manager = LoggerManager::with_config(config).await?;
 
-    print_section("1.1 吞吐量测试（5,000 条日志）");
+    print_section("1.1 Throughput test (5,000 logs)");
     let count = 5_000;
     let start = Instant::now();
 
@@ -81,13 +81,16 @@ async fn console_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
     let duration = start.elapsed();
     let throughput = count as f64 / duration.as_secs_f64();
 
-    println!("  总日志数:    {}", count);
-    println!("  总耗时:      {}", format_duration(duration));
-    println!("  吞吐量:      {:.2} 条/秒", throughput);
-    println!("  平均延迟:    {}", format_duration(duration / count));
+    println!("  Total logs:   {}", count);
+    println!("  Total time:   {}", format_duration(duration));
+    println!("  Throughput:   {:.2} logs/s", throughput);
+    println!("  Avg latency:  {}", format_duration(duration / count));
 
     // Console Sink 是同步写入，延迟极低
-    assert!(throughput > 1000.0, "Console Sink 吞吐量应大于 1000 条/秒");
+    assert!(
+        throughput > 1000.0,
+        "console sink throughput should exceed 1000 logs/s"
+    );
 
     Ok(())
 }
@@ -96,7 +99,7 @@ async fn console_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 测试异步 File Sink 的吞吐量和延迟
 async fn file_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("2. File Sink 性能测试");
+    print_separator("2. File sink throughput test");
 
     let log_path = temp_file_path("performance");
 
@@ -112,7 +115,7 @@ async fn file_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
 
     let manager = LoggerManager::with_config(config).await?;
 
-    print_section("2.1 吞吐量测试（2,000 条日志）");
+    print_section("2.1 Throughput test (2,000 logs)");
     let count = 2_000;
     let start = Instant::now();
 
@@ -125,20 +128,23 @@ async fn file_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
     let duration = start.elapsed();
     let throughput = count as f64 / duration.as_secs_f64();
 
-    println!("  总日志数:    {}", count);
-    println!("  总耗时:      {}", format_duration(duration));
-    println!("  吞吐量:      {:.2} 条/秒", throughput);
-    println!("  平均延迟:    {}", format_duration(duration / count));
+    println!("  Total logs:   {}", count);
+    println!("  Total time:   {}", format_duration(duration));
+    println!("  Throughput:   {:.2} logs/s", throughput);
+    println!("  Avg latency:  {}", format_duration(duration / count));
 
     // File Sink 是异步写入，吞吐量受 Channel 和 Worker 影响
     // 实际吞吐量取决于系统配置，479-1000+ 条/秒 都是正常的
-    println!("  注: File Sink 吞吐量受 Channel 容量和 Worker 线程数影响");
-    println!("      当前吞吐量反映了异步写入的开销");
+    println!("  Note: file sink throughput depends on channel capacity and worker thread count");
+    println!("      Current throughput reflects async write overhead");
 
     if let Err(e) = fs::remove_file(&log_path).await {
-        eprintln!("  警告: 无法删除临时文件: {} ({})", log_path, e);
+        eprintln!(
+            "  Warning: failed to delete temp file: {} ({})",
+            log_path, e
+        );
     } else {
-        println!("  ✓ 已清理临时文件: {}", log_path);
+        println!("  ✓ Cleaned up temp file: {}", log_path);
     }
 
     Ok(())
@@ -148,7 +154,7 @@ async fn file_sink_performance() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 测量单条日志的延迟分布（P50/P95/P99）
 async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("3. 延迟分析（P50/P95/P99）");
+    print_separator("3. Latency analysis (P50/P95/P99)");
 
     let log_path = temp_file_path("latency");
 
@@ -164,7 +170,7 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
 
     let manager = LoggerManager::with_config(config).await?;
 
-    print_section("3.1 单条延迟测量（500 次）");
+    print_section("3.1 Single-log latency measurement (500 samples)");
     let count = 500;
     let mut produce_instants = Vec::with_capacity(count);
 
@@ -195,19 +201,24 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
     let p95 = latencies[(count as f64 * 0.95) as usize];
     let p99 = latencies[(count as f64 * 0.99) as usize];
 
-    println!("  总测量次数:  {}", count);
-    println!("  P50 延迟:    {}", format_duration(p50));
-    println!("  P95 延迟:    {}", format_duration(p95));
-    println!("  P99 延迟:    {}", format_duration(p99));
+    println!("  Total samples:  {}", count);
+    println!("  P50 latency:  {}", format_duration(p50));
+    println!("  P95 latency:  {}", format_duration(p95));
+    println!("  P99 latency:  {}", format_duration(p99));
 
     // 延迟性能通常很好，即使在异步场景下 P99 也应保持在合理范围内
-    println!("  注: 延迟口径为\"从产生到持久化\"（以 shutdown/flush 完成为终点，含队列等待）");
-    println!("      实际数值受系统负载和 Channel 状态影响");
+    println!(
+        "  Note: latency is measured \"from creation to persistence\" (ends when shutdown/flush completes, including queue wait)"
+    );
+    println!("      Actual numbers depend on system load and channel state");
 
     if let Err(e) = fs::remove_file(&log_path).await {
-        eprintln!("  警告: 无法删除临时文件: {} ({})", log_path, e);
+        eprintln!(
+            "  Warning: failed to delete temp file: {} ({})",
+            log_path, e
+        );
     } else {
-        println!("  ✓ 已清理临时文件: {}", log_path);
+        println!("  ✓ Cleaned up temp file: {}", log_path);
     }
 
     Ok(())
@@ -217,7 +228,7 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 测试 Channel 容量满时的阻塞行为
 async fn backpressure_test() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("4. 背压测试");
+    print_separator("4. Backpressure test");
 
     let log_path = temp_file_path("backpressure");
 
@@ -226,7 +237,7 @@ async fn backpressure_test() -> Result<(), Box<dyn std::error::Error>> {
     let capacities = [100, 1000, 10_000];
 
     for (idx, capacity) in capacities.iter().enumerate() {
-        print_section(&format!("4.{} Channel 容量: {}", idx + 1, capacity));
+        print_section(&format!("4.{} Channel capacity: {}", idx + 1, capacity));
 
         // 创建小容量 Channel 的配置
         let config = InklogConfig {
@@ -262,18 +273,18 @@ async fn backpressure_test() -> Result<(), Box<dyn std::error::Error>> {
         let total_duration = start.elapsed();
         let throughput = count as f64 / total_duration.as_secs_f64();
 
-        println!("  Channel 容量:    {}", capacity);
-        println!("  入队耗时:        {}", format_duration(enqueue_duration));
-        println!("  Flush 耗时:      {}", format_duration(flush_duration));
-        println!("  总耗时:          {}", format_duration(total_duration));
-        println!("  吞吐量:          {:.2} 条/秒", throughput);
-        println!("  注: 吞吐量包含了日志处理和 flush 的总时间");
+        println!("  Channel capacity: {}", capacity);
+        println!("  Enqueue time:     {}", format_duration(enqueue_duration));
+        println!("  Flush time:       {}", format_duration(flush_duration));
+        println!("  Total time:       {}", format_duration(total_duration));
+        println!("  Throughput:       {:.2} logs/s", throughput);
+        println!("  Note: throughput includes total log processing and flush time");
 
         // 小容量 Channel 会导致背压，入队耗时增加
         if *capacity < 1000 {
-            println!("  ⚠️  小容量 Channel 可能导致背压");
+            println!("  ⚠️  A small channel may cause backpressure");
         } else {
-            println!("  ✓  容量充足，无明显背压");
+            println!("  ✓  Capacity is sufficient; no obvious backpressure");
         }
 
         let _ = fs::remove_file(&log_path).await;
@@ -286,7 +297,7 @@ async fn backpressure_test() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 测试多任务并发写入性能
 async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("5. 并发测试");
+    print_separator("5. Concurrency test");
 
     let log_path = temp_file_path("concurrent");
 
@@ -302,7 +313,7 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
 
     let manager = Arc::new(LoggerManager::with_config(config).await?);
 
-    print_section("5.1 多任务并发写入（4 任务 × 100 条）");
+    print_section("5.1 Multi-task concurrent writes (4 tasks × 100 logs)");
     let task_count = 4;
     let logs_per_task = 100;
     let total_logs = task_count * logs_per_task;
@@ -330,17 +341,20 @@ async fn concurrent_test() -> Result<(), Box<dyn std::error::Error>> {
     let duration = start.elapsed();
     let throughput = total_logs as f64 / duration.as_secs_f64();
 
-    println!("  并发任务数:    {}", task_count);
-    println!("  每任务日志数:  {}", logs_per_task);
-    println!("  总日志数:      {}", total_logs);
-    println!("  总耗时:        {}", format_duration(duration));
-    println!("  吞吐量:        {:.2} 条/秒", throughput);
-    println!("  注: 吞吐量包含了日志处理和 flush 的总时间");
+    println!("  Concurrent tasks: {}", task_count);
+    println!("  Logs per task:  {}", logs_per_task);
+    println!("  Total logs:     {}", total_logs);
+    println!("  Total time:     {}", format_duration(duration));
+    println!("  Throughput:     {:.2} logs/s", throughput);
+    println!("  Note: throughput includes total log processing and flush time");
 
     if let Err(e) = fs::remove_file(&log_path).await {
-        eprintln!("  警告: 无法删除临时文件: {} ({})", log_path, e);
+        eprintln!(
+            "  Warning: failed to delete temp file: {} ({})",
+            log_path, e
+        );
     } else {
-        println!("  ✓ 已清理临时文件: {}", log_path);
+        println!("  ✓ Cleaned up temp file: {}", log_path);
     }
 
     Ok(())

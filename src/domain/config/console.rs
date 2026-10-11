@@ -125,14 +125,18 @@ impl ConsoleSinkConfig {
         #[cfg(not(feature = "secret-scan"))]
         if self.secret_scan_enabled {
             tracing::warn!(
-                "console_sink.secret_scan_enabled=true requires the `secret-scan` feature; \
-                 the flag is ignored in this build"
+                "{}",
+                crate::i18n::tr("log-console_secret_scan_feature_missing")
             );
         }
         let original_len = self.stderr_levels.len();
         self.stderr_levels.retain(|level| {
             if !crate::LogLevel::is_valid_level(level) {
-                tracing::warn!(level = %level, "Invalid stderr_levels entry, removing");
+                tracing::warn!(
+                    level = %level,
+                    "{}",
+                    crate::i18n::tr("config-stderr_levels_entry_removed")
+                );
                 false
             } else {
                 true
@@ -141,7 +145,8 @@ impl ConsoleSinkConfig {
         if self.stderr_levels.len() != original_len {
             tracing::info!(
                 remaining = self.stderr_levels.len(),
-                "Removed invalid stderr_levels entries"
+                "{}",
+                crate::i18n::tr("log-console_stderr_levels_entries_removed")
             );
         }
     }

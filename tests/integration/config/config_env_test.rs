@@ -54,12 +54,14 @@ fn test_config_from_env_overrides() {
         std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "50MB");
     }
 
-    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
+    let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
 
     // 验证环境变量覆盖生效
     assert_eq!(config.global.level, "debug");
 
-    let file = config.file_sink.expect("file_sink 应被环境变量启用");
+    let file = config
+        .file_sink
+        .expect("file_sink should be enabled by env vars");
     assert!(file.enabled);
     assert_eq!(file.max_size, "50MB");
 }
@@ -86,9 +88,11 @@ fn test_config_env_override_http_server() {
         std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
     }
 
-    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
+    let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
 
-    let http = config.http_server.expect("http_server 应被环境变量启用");
+    let http = config
+        .http_server
+        .expect("http_server should be enabled by env vars");
     assert!(http.enabled);
     assert_eq!(http.host, "127.0.0.1");
     assert_eq!(http.port, 9090);
@@ -109,7 +113,7 @@ fn test_config_env_override_performance() {
         std::env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "20000");
     }
 
-    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
+    let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
 
     assert_eq!(config.performance.worker_threads, 8);
     assert_eq!(config.performance.channel_capacity, 20000);

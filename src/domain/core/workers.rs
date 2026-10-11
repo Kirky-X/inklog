@@ -369,10 +369,12 @@ impl SinkWorker<'_> {
         let sink = match create_sink() {
             Ok(sink) => Some(sink),
             Err(e) => {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("sink", self.desc.label);
                 tracing::error!(
                     error = %e,
-                    "{} sink factory failed on startup; entering degraded retry mode (exponential backoff: 1s doubling up to 30s, retrying indefinitely); records arriving during retry are forwarded to the error sink and counted as failed",
-                    self.desc.label
+                    "{}",
+                    crate::i18n::tr_args("log-sink_factory_failed_on_startup", args)
                 );
                 self.metrics
                     .update_sink_health(self.desc.name, false, Some(e.to_string()));
@@ -596,18 +598,22 @@ impl SinkWorker<'_> {
                 state.factory_attempts = 1;
                 state.degraded_announced = false;
                 self.metrics.update_sink_health(self.desc.name, true, None);
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("sink", self.desc.label);
                 tracing::info!(
-                    "{} sink factory succeeded after retry; worker resumed normal writes",
-                    self.desc.label
+                    "{}",
+                    crate::i18n::tr_args("log-sink_factory_recovered", args)
                 );
             }
             Err(e) => {
                 state.factory_attempts += 1;
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("sink", self.desc.label);
                 tracing::error!(
                     error = %e,
                     next_retry_in_ms = factory_retry_delay(state.factory_attempts).as_millis() as u64,
-                    "{} sink factory retry failed; keeping the worker alive and retrying with exponential backoff",
-                    self.desc.label
+                    "{}",
+                    crate::i18n::tr_args("log-sink_factory_retry_failed", args)
                 );
             }
         }
@@ -985,19 +991,23 @@ impl LoggerManager {
                                 );
                             } else {
                                 last_recovery_attempt.insert(name.clone(), Instant::now());
+                                let mut args = crate::i18n::MsgArgs::new();
+                                args.set("name", name.clone());
                                 tracing::info!(
-                                    "Health Check: Recovery command sent for sink '{}'",
-                                    name
+                                    "{}",
+                                    crate::i18n::tr_args("log-sink_recovery_sent", args)
                                 );
                             }
                         }
 
                         // If error count is very high, trigger critical alert
                         if sink_status.consecutive_failures > 10 {
+                            let mut args = crate::i18n::MsgArgs::new();
+                            args.set("name", name.clone());
+                            args.set("failures", sink_status.consecutive_failures);
                             tracing::error!(
-                                "CRITICAL: Sink '{}' has high error count ({})",
-                                name,
-                                sink_status.consecutive_failures
+                                "{}",
+                                crate::i18n::tr_args("sink-high_error_count", args)
                             );
                         }
                     } else {

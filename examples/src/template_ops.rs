@@ -24,7 +24,7 @@ pub fn create_sample_record() -> LogRecord {
     let mut record = LogRecord::new(
         Level::INFO,
         "my_app::module".to_string(),
-        "用户登录成功".to_string(),
+        "user logged in successfully".to_string(),
     );
     record.file = Some("src/main.rs".to_string());
     record.line = Some(42);
@@ -45,17 +45,17 @@ pub fn create_record_with_fields(fields: HashMap<String, Value>) -> LogRecord {
 /// 用于对比不同模板的输出。包含 5 种代表性格式：简洁、标准、详细、JSON 风格、自定义分隔符。
 pub fn render_formats(record: &LogRecord) -> Vec<(String, String)> {
     let formats: Vec<(&str, &str)> = vec![
-        ("简洁格式", "[{level}] {message}"),
-        ("标准格式", "{timestamp} [{level}] {target} - {message}"),
+        ("simple", "[{level}] {message}"),
+        ("standard", "{timestamp} [{level}] {target} - {message}"),
         (
-            "详细格式",
+            "detailed",
             "[{timestamp}] [{level}] [{thread_id}] {file}:{line} - {message}",
         ),
         (
-            "JSON 风格",
+            "JSON style",
             "{{\"time\":\"{timestamp}\",\"level\":\"{level}\",\"msg\":\"{message}\"}}",
         ),
-        ("自定义分隔符", "{timestamp}>>>[{level}]>>> {message}"),
+        ("custom separator", "{timestamp}>>>[{level}]>>> {message}"),
     ];
 
     formats
@@ -77,11 +77,14 @@ mod tests {
         let record = create_sample_record();
         assert_eq!(record.level, "INFO");
         assert_eq!(record.target, "my_app::module");
-        assert_eq!(record.message, "用户登录成功");
+        assert_eq!(record.message, "user logged in successfully");
         assert_eq!(record.file.as_deref(), Some("src/main.rs"));
         assert_eq!(record.line, Some(42));
         assert!(record.fields.is_empty());
-        assert!(!record.thread_id.is_empty(), "thread_id 不应为空");
+        assert!(
+            !record.thread_id.is_empty(),
+            "thread_id should not be empty"
+        );
     }
 
     #[test]
@@ -99,7 +102,7 @@ mod tests {
         assert_eq!(record.fields["success"], Value::Bool(true));
         // 基础字段仍保留
         assert_eq!(record.level, "INFO");
-        assert_eq!(record.message, "用户登录成功");
+        assert_eq!(record.message, "user logged in successfully");
     }
 
     #[test]
@@ -107,13 +110,13 @@ mod tests {
         // 验证：render_formats 返回 5 种格式。
         let record = create_sample_record();
         let results = render_formats(&record);
-        assert_eq!(results.len(), 5, "应返回 5 种格式");
+        assert_eq!(results.len(), 5, "should return 5 formats");
         let names: Vec<&str> = results.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(names.contains(&"简洁格式"));
-        assert!(names.contains(&"标准格式"));
-        assert!(names.contains(&"详细格式"));
-        assert!(names.contains(&"JSON 风格"));
-        assert!(names.contains(&"自定义分隔符"));
+        assert!(names.contains(&"simple"));
+        assert!(names.contains(&"standard"));
+        assert!(names.contains(&"detailed"));
+        assert!(names.contains(&"JSON style"));
+        assert!(names.contains(&"custom separator"));
     }
 
     #[test]
@@ -135,7 +138,7 @@ mod tests {
             ] {
                 assert!(
                     !output.contains(placeholder),
-                    "格式 [{}] 输出仍包含未替换的占位符 {}: {}",
+                    "format [{}] output still contains unreplaced placeholder {}: {}",
                     name,
                     placeholder,
                     output
@@ -151,17 +154,17 @@ mod tests {
         let results = render_formats(&record);
         let simple = results
             .iter()
-            .find(|(n, _)| n == "简洁格式")
+            .find(|(n, _)| n == "simple")
             .map(|(_, v)| v.clone())
-            .expect("应包含简洁格式");
+            .expect("should contain simple format");
         assert!(
             simple.contains("[INFO]"),
-            "简洁格式应包含 [INFO]: {}",
+            "simple format should contain [INFO]: {}",
             simple
         );
         assert!(
-            simple.contains("用户登录成功"),
-            "简洁格式应包含消息: {}",
+            simple.contains("user logged in successfully"),
+            "simple format should contain the message: {}",
             simple
         );
     }
@@ -173,13 +176,29 @@ mod tests {
         let results = render_formats(&record);
         let json = results
             .iter()
-            .find(|(n, _)| n == "JSON 风格")
+            .find(|(n, _)| n == "JSON style")
             .map(|(_, v)| v.clone())
-            .expect("应包含 JSON 风格");
-        assert!(json.contains("\"time\""), "JSON 应包含 time 键: {}", json);
-        assert!(json.contains("\"level\""), "JSON 应包含 level 键: {}", json);
-        assert!(json.contains("\"msg\""), "JSON 应包含 msg 键: {}", json);
-        assert!(json.contains("INFO"), "JSON 应包含 INFO 值: {}", json);
+            .expect("should contain JSON style");
+        assert!(
+            json.contains("\"time\""),
+            "JSON output should contain the time key: {}",
+            json
+        );
+        assert!(
+            json.contains("\"level\""),
+            "JSON output should contain the level key: {}",
+            json
+        );
+        assert!(
+            json.contains("\"msg\""),
+            "JSON output should contain the msg key: {}",
+            json
+        );
+        assert!(
+            json.contains("INFO"),
+            "JSON output should contain the INFO value: {}",
+            json
+        );
     }
 
     #[test]
@@ -193,7 +212,7 @@ mod tests {
         let output = template.render(&record);
         assert!(
             output.contains("user_id=12345"),
-            "{{fields}} 应渲染为 key=value: {}",
+            "{{fields}} should render as key=value: {}",
             output
         );
     }

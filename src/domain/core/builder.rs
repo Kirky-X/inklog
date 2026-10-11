@@ -261,9 +261,7 @@ mod tests {
         match result {
             Err(e) => {
                 let msg = e.to_string();
-                assert!(
-                    msg.contains("Builder validation failed") || msg.contains("构建器验证失败")
-                );
+                assert!(msg.contains("Builder validation failed"));
             }
             Ok(_) => panic!("Expected build to fail with validation errors"),
         }

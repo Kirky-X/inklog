@@ -78,7 +78,7 @@ async fn test_http_server_error_mode_default_strict() {
     let config = HttpServerConfig::default();
     assert!(
         matches!(config.error_mode, HttpErrorMode::Strict),
-        "默认错误模式应为 Strict"
+        "the default error mode should be Strict"
     );
 }
 
@@ -143,9 +143,11 @@ async fn test_http_server_with_logger_manager() {
         std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
     }
 
-    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
+    let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
 
-    let http = config.http_server.expect("http_server 应被环境变量启用");
+    let http = config
+        .http_server
+        .expect("http_server should be enabled by env vars");
     assert!(http.enabled);
     assert_eq!(http.host, "127.0.0.1");
     assert_eq!(http.port, 18084);
@@ -171,7 +173,7 @@ async fn test_http_metrics_path_configuration() {
         std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
     }
 
-    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
+    let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
 
     let http = config
         .http_server
@@ -186,7 +188,7 @@ async fn test_http_server_disabled_by_default() {
     clear_inklog_env();
     isolate_config_paths();
 
-    let config = InklogConfig::load_with_env_overrides().expect("加载配置失败");
+    let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
 
     assert!(
         config.http_server.is_none(),

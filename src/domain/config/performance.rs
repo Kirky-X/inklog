@@ -142,7 +142,8 @@ impl PerformanceConfig {
             tracing::warn!(
                 min = self.min_capacity,
                 max = self.max_capacity,
-                "min_capacity > max_capacity, swapping"
+                "{}",
+                crate::i18n::tr("config-min_max_capacity_swapped")
             );
             std::mem::swap(&mut self.min_capacity, &mut self.max_capacity);
         }

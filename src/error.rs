@@ -123,18 +123,21 @@ fn compile_sensitive_patterns(
     patterns
         .iter()
         .enumerate()
-        .filter_map(|(index, (pattern, replacement))| match regex::Regex::new(pattern) {
-            Ok(re) => Some((re, *replacement)),
-            Err(e) => {
-                tracing::error!(
-                    index = index,
-                    pattern = pattern,
-                    error = %e,
-                    "failed to compile sensitive redaction pattern; it is disabled and messages will NOT be redacted for it"
-                );
-                None
-            }
-        })
+        .filter_map(
+            |(index, (pattern, replacement))| match regex::Regex::new(pattern) {
+                Ok(re) => Some((re, *replacement)),
+                Err(e) => {
+                    tracing::error!(
+                        index = index,
+                        pattern = pattern,
+                        error = %e,
+                        "{}",
+                        crate::i18n::tr("error-redaction_pattern_compile_failed")
+                    );
+                    None
+                }
+            },
+        )
         .collect()
 }
 

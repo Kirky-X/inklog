@@ -563,9 +563,12 @@ impl<'a> tracing::field::Visit for LogVisitor<'a> {
             // 此处处于事件 record() 访问回调内：再发 tracing 事件会对正在
             // 遍历的订阅者链重入（第三方层若在 on_event 中持锁处理事件，
             // 重入可能死锁），故用标准错误报告而非 tracing。
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("field", field.name());
+            args.set("sentinel", sentinel);
             eprintln!(
-                "inklog: field '{}' is non-finite ({sentinel}), stored as string sentinel",
-                field.name()
+                "{}",
+                crate::i18n::tr_args("log_record-non_finite_field", args)
             );
             self.fields.insert(
                 field.name().to_string(),

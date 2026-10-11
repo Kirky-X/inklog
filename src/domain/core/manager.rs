@@ -403,7 +403,8 @@ impl LoggerManager {
             event = "security_logger_initialized",
             sinks = ?config.sinks_enabled(),
             masking_enabled = config.global.masking_enabled,
-            "Logger manager initialized"
+            "{}",
+            crate::i18n::tr("log-manager_initialized")
         );
 
         let (manager, subscriber, _filter_compat, filter_layer) = Self::build_detached_full(
@@ -439,7 +440,11 @@ impl LoggerManager {
         // 应用已先行安装。属良性条件：tracing 事件会流向已安装的 subscriber，降级为
         // debug 与下方 log logger 处理保持一致，避免噪音。
         if let Err(ref e) = registry.try_init() {
-            tracing::debug!(error = %e, "global subscriber already set; skipping inklog registry");
+            tracing::debug!(
+                error = %e,
+                "{}",
+                crate::i18n::tr("log-global_subscriber_already_set")
+            );
         }
 
         // 2. 安装 log crate logger（原生支持，无需 tracing_log）
@@ -466,7 +471,11 @@ impl LoggerManager {
         // 应用（如 tracing-opentelemetry → tracing-log 桥接）已先行安装。属良性条件：
         // log 记录仍会流入已安装的 logger，不应视为故障，降级为 debug 避免噪音。
         if let Err(e) = log_logger.install() {
-            tracing::debug!(error = %e, "log crate logger already set; skipping inklog LogLogger");
+            tracing::debug!(
+                error = %e,
+                "{}",
+                crate::i18n::tr("log-log_logger_already_set")
+            );
         }
 
         // 3. 启动HTTP监控服务器（如果配置启用）
@@ -615,7 +624,11 @@ impl LoggerManager {
             ops_senders.push(sender.clone());
         }
         if db_enabled {
-            ops_senders.push(db_sender.clone().expect("db sender"));
+            ops_senders.push(
+                db_sender
+                    .clone()
+                    .unwrap_or_else(|| panic!("{}", crate::i18n::tr("sink-db_sender"))),
+            );
         }
         ops_senders.extend(custom_senders.iter().cloned());
         // 内部故障路径（file.rs 轮转/压缩/加密失败、workers.rs 降级/恢复）
@@ -635,9 +648,12 @@ impl LoggerManager {
         } else if let Some(first_custom) = custom_senders.first().cloned() {
             first_custom
         } else if db_enabled {
-            db_sender
-                .clone()
-                .expect("db sender present when db_enabled")
+            db_sender.clone().unwrap_or_else(|| {
+                panic!(
+                    "{}",
+                    crate::i18n::tr("sink-db_sender_present_when_db_enabled")
+                )
+            })
         } else {
             // file/db 全关且无自定义 sink（仅 console 的极简配置）：无 async
             // 通道可作主通道——以即刻断连的哑通道兜底，记录计入 logs_dropped
@@ -656,7 +672,11 @@ impl LoggerManager {
             subscriber = subscriber.with_extra_async_sender(extra.clone());
         }
         if file_enabled && db_enabled {
-            subscriber = subscriber.with_extra_async_sender(db_sender.clone().expect("db sender"));
+            subscriber = subscriber.with_extra_async_sender(
+                db_sender
+                    .clone()
+                    .unwrap_or_else(|| panic!("{}", crate::i18n::tr("sink-db_sender"))),
+            );
         }
 
         // Wire sanitizer when security features are enabled (CWE-117 prevention)
@@ -874,7 +894,8 @@ impl LoggerManager {
                         tracing::warn!(
                             configured_pool_size = cfg.pool_size,
                             limit = db_worker_limit,
-                            "Injected Database configured with pool_size above effective_db_worker_limit; cap the pool at the adapter level"
+                            "{}",
+                            crate::i18n::tr("config-injected_db_pool_above_limit")
                         );
                     }
                 }
@@ -892,7 +913,8 @@ impl LoggerManager {
                                 configured_pool_size = cfg.pool_size,
                                 effective_pool_size = effective_pool_size,
                                 limit = db_worker_limit,
-                                "Database pool_size capped to min(configured, num_cpus, 4)"
+                                "{}",
+                                crate::i18n::tr("config-db_pool_size_capped")
                             );
                         }
                         Some(Arc::new(
@@ -1120,7 +1142,9 @@ impl LoggerManager {
         }
         let normalized = level.to_ascii_lowercase();
         let new_filter = {
-            let mut state = self.level_state.lock().expect("level_state mutex poisoned");
+            let mut state = self.level_state.lock().unwrap_or_else(|_| {
+                panic!("{}", crate::i18n::tr("manager-level_state_mutex_poisoned"))
+            });
             state.upsert(target, &normalized);
             tracing_subscriber::filter::EnvFilter::new(state.to_filter_string())
         };
@@ -1130,7 +1154,8 @@ impl LoggerManager {
             if let Err(e) = reloader(new_filter) {
                 tracing::warn!(
                     error = %e,
-                    "set_level: no live installed filter to swap (detached build?); directives updated anyway"
+                    "{}",
+                    crate::i18n::tr("config-set_level_no_live_filter")
                 );
             }
         }
@@ -1149,9 +1174,14 @@ impl LoggerManager {
             log::set_max_level(filter);
         }
         match target {
-            None => tracing::info!(level = %normalized, "log level changed at runtime"),
+            None => tracing::info!(level = %normalized, "{}", crate::i18n::tr("log-level_changed")),
             Some(t) => {
-                tracing::info!(target = t, level = %normalized, "target log level changed at runtime")
+                tracing::info!(
+                    target = t,
+                    level = %normalized,
+                    "{}",
+                    crate::i18n::tr("log-target_level_changed")
+                )
             }
         }
         Ok(())
@@ -1180,7 +1210,7 @@ impl LoggerManager {
     pub fn current_level_filter_string(&self) -> String {
         self.level_state
             .lock()
-            .expect("level_state mutex poisoned")
+            .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("manager-level_state_mutex_poisoned")))
             .to_filter_string()
     }
 
@@ -1244,7 +1274,7 @@ impl LoggerManager {
                 && let Some(handle) = handle_guard.take()
             {
                 handle.abort();
-                info!("HTTP server shutdown signal sent");
+                info!("{}", crate::i18n::tr("log-http_shutdown_signal_sent"));
             }
         }
 
@@ -1252,7 +1282,12 @@ impl LoggerManager {
         let handles = match self.worker_handles.lock() {
             Ok(mut guard) => std::mem::take(&mut *guard),
             Err(e) => {
-                error!("Worker handles lock poisoned: {}", e);
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", e);
+                error!(
+                    "{}",
+                    crate::i18n::tr_args("sink-worker_handles_lock_poisoned", args)
+                );
                 Vec::new()
             }
         };
@@ -3604,7 +3639,7 @@ worker_threads = 1
 
         assert!(
             !base_dir.path().join("logs/error.log").exists(),
-            "构建 manager 不得立即创建 logs/error.log"
+            "constructing the manager must not create logs/error.log right away"
         );
 
         let _ = manager.shutdown();

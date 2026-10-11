@@ -769,16 +769,24 @@ impl InklogConfig {
     /// misconfigurations. Problems that cannot be auto-corrected are logged
     /// here and surface as errors from `validate()`.
     pub fn normalize(&mut self) {
+        fn warn_validation(err: String) {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("err", err);
+            tracing::warn!(
+                "{}",
+                crate::i18n::tr_args("log-config_validation_failed", args)
+            );
+        }
         if let Err(e) = self.global.validate() {
-            tracing::warn!("{e}");
+            warn_validation(e);
         }
         if let Err(e) = self.performance.validate() {
-            tracing::warn!("{e}");
+            warn_validation(e);
         }
         if let Some(ref mut db) = self.database_sink
             && let Err(e) = db.validate()
         {
-            tracing::warn!("{e}");
+            warn_validation(e);
         }
         if let Some(ref mut console) = self.console_sink {
             console.validate();
@@ -931,8 +939,12 @@ impl InklogConfig {
     /// expect 表达的是序列化不变量，不是可恢复的错误分支。
     #[must_use]
     pub fn json_schema() -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(InklogConfig))
-            .expect("JsonSchema serialization cannot fail")
+        serde_json::to_value(schemars::schema_for!(InklogConfig)).unwrap_or_else(|_| {
+            panic!(
+                "{}",
+                crate::i18n::tr("config-json_schema_serialize_invariant")
+            )
+        })
     }
 }
 

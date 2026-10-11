@@ -439,7 +439,10 @@ async fn test_manager_invalid_level() {
         .console(true)
         .build()
         .await;
-    assert!(manager.is_err(), "无效 level 应导致 build() 失败");
+    assert!(
+        manager.is_err(),
+        "an invalid level should make build() fail"
+    );
 }
 
 #[tokio::test]
@@ -701,7 +704,7 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
 
     assert!(
         peak_capacity >= initial_capacity,
-        "峰值容量不应低于初始值: peak={} initial={}",
+        "peak capacity must not be below the initial value: peak={} initial={}",
         peak_capacity,
         initial_capacity
     );
@@ -904,7 +907,10 @@ async fn test_fallback_trigger_recovery() {
 #[test]
 fn test_config_default_values() {
     let config = inklog::InklogConfig::default();
-    assert!(config.console_sink.is_some(), "默认应启用 console sink");
+    assert!(
+        config.console_sink.is_some(),
+        "the console sink should be enabled by default"
+    );
     assert!(config.file_sink.is_none());
     assert!(config.database_sink.is_none());
 }

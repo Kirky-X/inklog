@@ -417,7 +417,7 @@ mod tests {
         assert!(!cache.exists("key1").await.expect("exists failed"));
         assert!(
             cache.delete("key1").await.expect("delete failed"),
-            "remove 语义：删除不存在的键同样成功"
+            "remove semantics: deleting a key that does not exist still succeeds"
         );
     }
 
@@ -512,7 +512,7 @@ mod tests {
         assert!(!cache.exists("key1").await.expect("exists failed"));
         assert!(
             !cache.delete("key1").await.expect("delete failed"),
-            "再次删除返回 false"
+            "deleting it a second time returns false"
         );
     }
 

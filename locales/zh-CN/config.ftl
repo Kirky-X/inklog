@@ -120,3 +120,47 @@ config-sampling_per_level_rate_invalid = sampling.per_level["{ $level }"] 的速
 config-sampling_prefix_empty = sampling.per_target_prefix 的键不能为空
 config-sampling_sample_every_n_invalid = sampling.per_target_prefix["{ $prefix }"].sample_every_n 必须 >= 1，实际为 0
 config-sampling_keep_level_invalid = sampling.per_target_prefix["{ $prefix }"].keep_level "{ $level }" 不是有效级别。有效级别: { $valid }
+
+# HTTP 监控服务消息
+config-http_invalid_token = 无效令牌
+config-http_missing_auth_header = 缺少或非法的 Authorization 头
+config-http_ip_not_whitelisted = IP 不在白名单内
+config-http_serialization_failed = 序列化失败
+config-http_ip_whitelist_entry_invalid = ip_whitelist 条目不是合法 IP 或 CIDR；它永不匹配（失败关闭）
+
+# 数据库连接池限幅与运行时调级告警
+config-db_pool_size_capped = 数据库 pool_size 已收敛到 min(configured, num_cpus, 4)
+config-injected_db_pool_above_limit = 注入的 Database 配置的 pool_size 超过 effective_db_worker_limit；请在适配器层收敛连接池
+config-set_level_no_live_filter = set_level：没有可替换的已安装过滤器（detached build？）；指令集已更新
+
+# 配置修复与适配器告警
+config-stderr_levels_entry_removed = stderr_levels 条目非法，已移除
+config-min_max_capacity_swapped = min_capacity > max_capacity，已交换
+config-adapter_fallback = InklogConfigAdapter::new 失败，回退到默认配置：{ $err }
+config-reload_failed_keep_previous = 配置热更新失败；保留既有配置
+
+# Schema 序列化不变量
+config-json_schema_serialize_invariant = JsonSchema 序列化不会失败
+
+# 压缩后端失败消息
+config-compression-create_failed = 创建压缩文件失败：{ $err }
+config-compression-finish_failed = 完成压缩失败：{ $err }
+config-compression-open_failed = 打开待压缩文件失败：{ $err }
+config-compression-zstd_encoder_failed = 创建 zstd 编码器失败：{ $err }
+
+# 运行期日志消息：HTTP 服务生命周期与管理器事件
+log-https_server_started = HTTPS 服务已启动于 { $addr }（auth: { $auth }，ip_whitelist: { $whitelist }）
+log-http_server_started = HTTP 服务已启动于 { $addr }（auth: { $auth }，ip_whitelist: { $whitelist }）
+log-http_server_stopped = HTTP 服务已停止
+log-http_monitoring_configured = HTTP 监控服务已配置于 { $addr }
+log-http_shutdown_signal_sent = 已发送 HTTP 服务关闭信号
+log-manager_initialized = 日志管理器已初始化
+log-global_subscriber_already_set = 全局 subscriber 已被设置；跳过 inklog registry
+log-log_logger_already_set = log crate logger 已被设置；跳过 inklog LogLogger
+log-level_changed = 运行期日志级别已变更
+log-target_level_changed = 运行期目标日志级别已变更
+log-config_hot_reloaded = 配置已热更新
+log-config_validation_failed = 配置校验失败：{ $err }
+log-console_secret_scan_feature_missing = console_sink.secret_scan_enabled=true 需要 `secret-scan` 特性；当前构建忽略该开关
+log-database_secret_scan_feature_missing = database_sink.secret_scan_enabled=true 需要 `secret-scan` 特性；当前构建忽略该开关
+log-console_stderr_levels_entries_removed = 已移除非法的 stderr_levels 条目

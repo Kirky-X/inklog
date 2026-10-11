@@ -64,9 +64,17 @@ async fn test_database_batch_write() {
             .await
             .expect("Failed to write log record");
     }
-    assert_eq!(mock_db.record_count(), 0, "未 flush 时不应落库");
+    assert_eq!(
+        mock_db.record_count(),
+        0,
+        "records must not persist before flush"
+    );
     sink.flush().await.expect("Failed to flush");
-    assert_eq!(mock_db.record_count(), 3, "缓冲中的记录应随 flush 全部落库");
+    assert_eq!(
+        mock_db.record_count(),
+        3,
+        "all buffered records should persist with the flush"
+    );
 
     // 补满批次（共 5 条）再次 flush，不产生重复落库
     for i in 3..5 {
@@ -78,12 +86,12 @@ async fn test_database_batch_write() {
     assert_eq!(
         mock_db.record_count(),
         5,
-        "flush 后总记录数应为 5，实际: {}",
+        "total records after flush should be 5, got: {}",
         mock_db.record_count()
     );
 
     println!(
-        "批量写入测试通过！批次大小: 5, 实际写入: {}",
+        "batch write test passed! batch size: 5, actually written: {}",
         mock_db.record_count()
     );
 }
@@ -99,12 +107,16 @@ async fn test_database_manual_flush() {
     }
 
     // flush_interval 未到且未满批次：仅缓冲不落库，手动 flush 触发落库
-    assert_eq!(mock_db.record_count(), 0, "未 flush 时不应落库");
+    assert_eq!(
+        mock_db.record_count(),
+        0,
+        "records must not persist before flush"
+    );
     sink.flush().await.expect("Failed to flush");
     assert_eq!(
         mock_db.record_count(),
         2,
-        "手动刷新应该写入2条记录，当前记录数: {}",
+        "manual flush should write 2 records; current count: {}",
         mock_db.record_count()
     );
 }
@@ -114,6 +126,8 @@ async fn test_database_flush_empty_buffer() {
     let (_temp_dir, sink, mock_db) = create_test_database_sink(10, 10_000);
 
     // 没有写入任何记录，直接 flush 应该返回 Ok 且不落库
-    sink.flush().await.expect("空缓冲 flush 应返回 Ok");
+    sink.flush()
+        .await
+        .expect("flushing an empty buffer should return Ok");
     assert_eq!(mock_db.record_count(), 0);
 }

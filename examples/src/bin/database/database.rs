@@ -100,7 +100,7 @@ fn create_temp_permission_file() -> Result<tempfile::NamedTempFile, Box<dyn std:
 /// 需要使用共享连接模式或同一连接来保持数据。
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例1: SQLite 内存数据库连接");
+    print_separator("Example 1: SQLite in-memory database connection");
 
     let temp_perm_file = create_temp_permission_file()?;
     let perm_path = temp_perm_file.path().to_str().ok_or("Invalid temp path")?;
@@ -123,15 +123,15 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         secret_scan_enabled: false,
     };
 
-    println!("数据库配置:");
-    println!("  驱动: {:?}", config.driver);
+    println!("Database config:");
+    println!("  driver: {:?}", config.driver);
     println!("  URL: {}", config.url);
-    println!("  连接池: {}", config.pool_size);
-    println!("  批次大小: {}", config.batch_size);
-    println!("  刷新间隔: {}ms", config.flush_interval_ms);
+    println!("  connection pool: {}", config.pool_size);
+    println!("  batch size: {}", config.batch_size);
+    println!("  flush interval: {}ms", config.flush_interval_ms);
 
     // 使用 dbnexus 直接连接数据库
-    print_section("连接 SQLite 内存数据库");
+    print_section("connecting to SQLite in-memory database");
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -150,22 +150,22 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
 
         let pool = match dbnexus::DbPool::with_config(db_config).await {
             Ok(p) => {
-                println!("✓ 连接池创建成功");
+                println!("✓ connection pool created");
                 p
             }
             Err(e) => {
-                println!("✗ 连接池创建失败: {:?}", e);
+                println!("✗ failed to create connection pool: {:?}", e);
                 return;
             }
         };
 
         let session: dbnexus::database::pool::Session = match pool.get_session("admin").await {
             Ok(s) => {
-                println!("✓ 会话获取成功");
+                println!("✓ session acquired");
                 s
             }
             Err(e) => {
-                println!("✗ 会话获取失败: {:?}", e);
+                println!("✗ failed to acquire session: {:?}", e);
                 return;
             }
         };
@@ -187,16 +187,16 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
         ).await;
 
         match create_result {
-            Ok(_) => println!("✓ logs 表创建成功"),
-            Err(e) => println!("⚠ logs 表创建失败 (可能已存在): {:?}", e),
+            Ok(_) => println!("✓ logs table created"),
+            Err(e) => println!("⚠ failed to create logs table (may already exist): {:?}", e),
         }
 
-        print_section("写入测试日志");
+        print_section("write test log");
 
         let test_logs = vec![
-            ("INFO", "database_example::memory", "内存数据库连接测试"),
-            ("DEBUG", "database_example::memory", "配置参数验证完成"),
-            ("TRACE", "database_example::memory", "连接池初始化跟踪"),
+            ("INFO", "database_example::memory", "in-memory database connection test"),
+            ("DEBUG", "database_example::memory", "config parameters validated"),
+            ("TRACE", "database_example::memory", "connection pool init trace"),
         ];
 
         for (level, target, message) in test_logs {
@@ -211,24 +211,24 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             );
             match session.execute_raw(&sql).await {
                 Ok(_) => println!("  ✓ [{}] {}", level, message),
-                Err(e) => println!("  ✗ 写入失败: {:?}", e),
+                Err(e) => println!("  ✗ write failed: {:?}", e),
             }
         }
 
-        print_section("查询验证");
+        print_section("query verification");
         let result: dbnexus::foundation::error::DbResult<_> = session
             .execute_raw("SELECT COUNT(*) as count FROM logs")
             .await;
 
         match result {
-            Ok(_) => println!("✓ 查询成功，表中有数据"),
-            Err(e) => println!("✗ 查询失败: {:?}", e),
+            Ok(_) => println!("✓ query succeeded, table has data"),
+            Err(e) => println!("✗ query failed: {:?}", e),
         }
     });
 
-    println!("\n✓ 内存数据库连接示例完成\n");
-    println!("  注意: SQLite 内存数据库在连接关闭后数据丢失");
-    println!("  每个 DatabaseSink 实例会创建独立的连接\n");
+    println!("\n✓ In-memory database connection example completed\n");
+    println!("  Note: SQLite in-memory data is lost when the connection closes");
+    println!("  Each DatabaseSink instance creates its own connection\n");
 
     Ok(())
 }
@@ -241,7 +241,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
 /// - 展示批量写入的性能优势
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例2: 批量写入演示");
+    print_separator("Example 2: batch write demo");
 
     let temp_perm_file = create_temp_permission_file()?;
     let perm_path = temp_perm_file.path().to_str().ok_or("Invalid temp path")?;
@@ -263,9 +263,9 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         secret_scan_enabled: false,
     };
 
-    println!("批次配置:");
-    println!("  批次大小: {}", config.batch_size);
-    println!("  刷新间隔: {}ms", config.flush_interval_ms);
+    println!("Batch configuration:");
+    println!("  batch size: {}", config.batch_size);
+    println!("  flush interval: {}ms", config.flush_interval_ms);
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -285,7 +285,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         let pool = match dbnexus::DbPool::with_config(db_config).await {
             Ok(p) => p,
             Err(e) => {
-                println!("✗ 连接池创建失败: {:?}", e);
+                println!("✗ failed to create connection pool: {:?}", e);
                 return;
             }
         };
@@ -293,7 +293,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
         let session: dbnexus::database::pool::Session = match pool.get_session("admin").await {
             Ok(s) => s,
             Err(e) => {
-                println!("✗ 会话获取失败: {:?}", e);
+                println!("✗ failed to acquire session: {:?}", e);
                 return;
             }
         };
@@ -314,15 +314,15 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             )"
         ).await;
 
-        print_section("批量写入日志");
+        print_section("batch write log");
 
         let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
         let messages = [
-            "系统启动初始化",
-            "配置参数加载完成",
-            "数据库连接池创建成功",
-            "检测到配置变更",
-            "处理请求超时",
+            "system startup initialization",
+            "config parameters loaded",
+            "database connection pool created",
+            "config change detected",
+            "request processing timed out",
         ];
         let targets = [
             "batch_example::startup",
@@ -332,11 +332,11 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             "batch_example::handler",
         ];
 
-        println!("写入 {} 条日志记录...\n", levels.len() * 3);
+        println!("writing {} log records...\n", levels.len() * 3);
 
         // 写入 3 轮日志，演示批量效果
         for round in 1..=3 {
-            println!("--- 第 {} 轮写入 ---", round);
+            println!("--- write round {} ---", round);
 
             let mut success_count = 0;
             for i in 0..levels.len() {
@@ -358,11 +358,11 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
                         success_count += 1;
                         println!("  ✓ [{}] {}", levels[i], messages[i]);
                     }
-                    Err(e) => println!("  ✗ [{}] 写入失败: {:?}", levels[i], e),
+                    Err(e) => println!("  ✗ [{}] write failed: {:?}", levels[i], e),
                 }
             }
 
-            println!("  第 {} 轮完成: {} / {} 条成功\n", round, success_count, levels.len());
+            println!("  Round {} done: {} / {} succeeded\n", round, success_count, levels.len());
         }
 
         let result: dbnexus::foundation::error::DbResult<_> = session
@@ -370,12 +370,12 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
             .await;
 
         match result {
-            Ok(_) => println!("✓ 数据库中共有日志记录"),
-            Err(e) => println!("✗ 统计失败: {:?}", e),
+            Ok(_) => println!("✓ total log records in the database"),
+            Err(e) => println!("✗ count failed: {:?}", e),
         }
     });
 
-    println!("\n✓ 批量写入演示完成\n");
+    println!("\n✓ Batch write demo completed\n");
 
     Ok(())
 }
@@ -389,7 +389,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
 /// - 聚合统计
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例3: 查询功能演示");
+    print_separator("Example 3: query demo");
 
     let temp_perm_file = create_temp_permission_file()?;
     let perm_path = temp_perm_file.path().to_str().ok_or("Invalid temp path")?;
@@ -412,7 +412,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         let pool = match dbnexus::DbPool::with_config(db_config).await {
             Ok(p) => p,
             Err(e) => {
-                println!("✗ 连接池创建失败: {:?}", e);
+                println!("✗ failed to create connection pool: {:?}", e);
                 return;
             }
         };
@@ -420,7 +420,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         let session: dbnexus::database::pool::Session = match pool.get_session("admin").await {
             Ok(s) => s,
             Err(e) => {
-                println!("✗ 会话获取失败: {:?}", e);
+                println!("✗ failed to acquire session: {:?}", e);
                 return;
             }
         };
@@ -441,21 +441,21 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             )"
         ).await;
 
-        print_section("准备测试数据");
-        println!("写入不同级别的日志记录...\n");
+        print_section("prepare test data");
+        println!("writing log records at different levels...\n");
 
         let test_data = vec![
-            ("TRACE", "database_example::query", "追踪信息: 入口点检查"),
-            ("TRACE", "database_example::query", "追踪信息: 参数验证通过"),
-            ("DEBUG", "database_example::query", "调试信息: SQL 语句构建"),
-            ("DEBUG", "database_example::query", "调试信息: 获取数据库连接"),
-            ("INFO", "database_example::api", "API 请求开始处理"),
-            ("INFO", "database_example::api", "数据处理完成"),
-            ("INFO", "database_example::api", "响应发送成功"),
-            ("WARN", "database_example::auth", "认证令牌即将过期"),
-            ("WARN", "database_example::cache", "缓存命中率较低: 45%"),
-            ("ERROR", "database_example::database", "数据库连接超时"),
-            ("ERROR", "database_example::database", "查询执行失败"),
+            ("TRACE", "database_example::query", "trace: entry point check"),
+            ("TRACE", "database_example::query", "trace: parameter validation passed"),
+            ("DEBUG", "database_example::query", "debug: SQL statement construction"),
+            ("DEBUG", "database_example::query", "debug: acquiring database connection"),
+            ("INFO", "database_example::api", "API request processing started"),
+            ("INFO", "database_example::api", "data processing finished"),
+            ("INFO", "database_example::api", "response sent successfully"),
+            ("WARN", "database_example::auth", "auth token expiring soon"),
+            ("WARN", "database_example::cache", "cache hit rate low: 45%"),
+            ("ERROR", "database_example::database", "database connection timeout"),
+            ("ERROR", "database_example::database", "query execution failed"),
         ];
 
         for (level, target, message) in &test_data {
@@ -470,15 +470,15 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             );
             match session.execute_raw(&sql).await {
                 Ok(_) => {}
-                Err(e) => println!("  ⚠ INSERT 失败: {:?}", e),
+                Err(e) => println!("  ⚠ INSERT failed: {:?}", e),
             }
         }
-        println!("✓ 已写入 {} 条测试数据\n", test_data.len());
+        println!("✓ wrote {} test records\n", test_data.len());
 
-        print_section("查询1: 按级别统计");
+        print_section("Query 1: count by level");
         println!("SQL: SELECT level, COUNT(*) as count FROM logs GROUP BY level\n");
 
-        println!("预期结果:");
+        println!("Expected result:");
         println!("  ┌───────┬───────┐");
         println!("  │ Level │ Count │");
         println!("  ├───────┼───────┤");
@@ -488,12 +488,12 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("  │ WARN  │   2   │");
         println!("  │ ERROR │   2   │");
         println!("  └───────┴───────┘");
-        println!("  Total: 11 条\n");
+        println!("  Total: 11 records\n");
 
-        print_section("查询2: 按目标模块统计");
+        print_section("Query 2: count by target module");
         println!("SQL: SELECT target, COUNT(*) as count FROM logs GROUP BY target\n");
 
-        println!("预期结果:");
+        println!("Expected result:");
         println!("  ┌────────────────────────┬───────┐");
         println!("  │ Target                 │ Count │");
         println!("  ├────────────────────────┼───────┤");
@@ -505,58 +505,58 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("  └────────────────────────┴───────┘\n");
 
         // 查询 3: 按级别过滤 (ERROR/WARN)
-        print_section("查询3: 按级别过滤 (ERROR/WARN)");
+        print_section("Query 3: filter by level (ERROR/WARN)");
         println!("SQL: SELECT * FROM logs WHERE level IN ('ERROR', 'WARN')\n");
 
-        println!("预期结果:");
-        println!("  [WARN]  database_example::auth     - 认证令牌即将过期");
-        println!("  [WARN]  database_example::cache    - 缓存命中率较低: 45%");
-        println!("  [ERROR] database_example::database  - 数据库连接超时");
-        println!("  [ERROR] database_example::database  - 查询执行失败\n");
+        println!("Expected result:");
+        println!("  [WARN]  database_example::auth     - auth token expiring soon");
+        println!("  [WARN]  database_example::cache    - cache hit rate low: 45%");
+        println!("  [ERROR] database_example::database  - database connection timeout");
+        println!("  [ERROR] database_example::database  - query execution failed\n");
 
-        print_section("查询4: 搜索日志内容");
-        println!("SQL: SELECT * FROM logs WHERE message LIKE '%超时%' OR message LIKE '%失败%'\n");
+        print_section("Query 4: search log content");
+        println!("SQL: SELECT * FROM logs WHERE message LIKE '%timeout%' OR message LIKE '%failed%'\n");
 
-        println!("预期结果:");
-        println!("  [ERROR] database_example::database  - 数据库连接超时");
-        println!("  [ERROR] database_example::database  - 查询执行失败\n");
+        println!("Expected result:");
+        println!("  [ERROR] database_example::database  - database connection timeout");
+        println!("  [ERROR] database_example::database  - query execution failed\n");
 
-        print_section("查询5: 获取最近日志");
+        print_section("Query 5: fetch recent logs");
         println!("SQL: SELECT * FROM logs ORDER BY id DESC LIMIT 5\n");
 
-        println!("预期结果 (按 ID 倒序):");
-        println!("  11. [ERROR] database_example::database - 查询执行失败");
-        println!("  10. [ERROR] database_example::database - 数据库连接超时");
-        println!("   9. [WARN]  database_example::cache   - 缓存命中率较低: 45%");
-        println!("   8. [WARN]  database_example::auth    - 认证令牌即将过期");
-        println!("   7. [INFO]  database_example::api    - 响应发送成功\n");
+        println!("Expected result (IDs descending):");
+        println!("  11. [ERROR] database_example::database - query execution failed");
+        println!("  10. [ERROR] database_example::database - database connection timeout");
+        println!("   9. [WARN]  database_example::cache   - cache hit rate low: 45%");
+        println!("   8. [WARN]  database_example::auth    - auth token expiring soon");
+        println!("   7. [INFO]  database_example::api    - response sent successfully\n");
 
-        print_section("查询6: 时间范围查询");
+        print_section("Query 6: time-range query");
         println!("SQL: SELECT * FROM logs WHERE timestamp > '2024-01-01'\n");
 
-        println!("预期结果: 所有日志 (因为都是最近写入的)\n");
+        println!("Expected result: all logs (all were written recently)\n");
 
-        print_section("查询7: 多条件组合查询");
+        print_section("Query 7: combined multi-condition query");
         println!("SQL: SELECT level, target, message FROM logs");
         println!("       WHERE level IN ('WARN', 'ERROR') AND target LIKE '%database%'\n");
 
-        println!("预期结果:");
-        println!("  [ERROR] database_example::database  - 数据库连接超时");
-        println!("  [ERROR] database_example::database  - 查询执行失败\n");
+        println!("Expected result:");
+        println!("  [ERROR] database_example::database  - database connection timeout");
+        println!("  [ERROR] database_example::database  - query execution failed\n");
     });
 
-    println!("✓ 查询功能演示完成\n");
-    println!("  提示: 使用 WHERE、GROUP BY、ORDER BY 等 SQL 子句");
-    println!("        可以实现复杂的日志查询和分析\n");
+    println!("✓ Query demo completed\n");
+    println!("  Tip: use SQL clauses such as WHERE, GROUP BY, ORDER BY");
+    println!("        enabling complex log queries and analysis\n");
 
     Ok(())
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog Database Sink 示例 ===\n");
-    println!("本示例使用 SQLite 内存数据库 (:memory:)");
-    println!("无需文件清理，数据仅存在于内存中\n");
+    println!("=== inklog Database Sink example ===\n");
+    println!("This example uses an SQLite in-memory database (:memory:)");
+    println!("No file cleanup needed; data lives only in memory\n");
 
     // 示例1：内存数据库连接
     memory_database()?;
@@ -567,18 +567,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 示例3：查询演示
     query_demo()?;
 
-    println!("所有示例完成！");
-    println!("\n要点回顾:");
-    println!("  1. DatabaseSink 支持 SQLite、PostgreSQL、MySQL");
-    println!("  2. 内存数据库适合测试和演示，断电后数据丢失");
-    println!("  3. 批量写入提高性能，可配置批次大小和刷新间隔");
-    println!("  4. 支持按级别、时间、目标等多种查询方式");
-    println!("  5. 故障时自动降级到文件输出");
-    println!("\nSQL 查询技巧:");
-    println!("  - 按级别: WHERE level = 'ERROR'");
-    println!("  - 按模块: WHERE target LIKE '%api%'");
-    println!("  - 按时间: WHERE timestamp > '2024-01-01'");
-    println!("  - 聚合统计: GROUP BY level");
+    println!("All examples completed!");
+    println!("\nKey takeaways:");
+    println!("  1. DatabaseSink supports SQLite, PostgreSQL, and MySQL");
+    println!("  2. In-memory databases suit testing and demos; data is lost on shutdown");
+    println!(
+        "  3. Batched writes improve performance; batch size and flush interval are configurable"
+    );
+    println!("  4. Supports queries by level, time, target, and more");
+    println!("  5. Automatically falls back to file output on failure");
+    println!("\nSQL query tips:");
+    println!("  - by level: WHERE level = 'ERROR'");
+    println!("  - by module: WHERE target LIKE '%api%'");
+    println!("  - by time: WHERE timestamp > '2024-01-01'");
+    println!("  - aggregate stats: GROUP BY level");
 
     Ok(())
 }
@@ -586,11 +588,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // 当未启用 dbnexus 特性时显示友好提示
 #[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
 fn main() {
-    eprintln!("错误: 需要启用数据库特性（sqlite/postgres/mysql）来运行此示例");
+    eprintln!("error: enable a database feature (sqlite/postgres/mysql) to run this example");
     eprintln!();
-    eprintln!("请使用以下命令运行:");
+    eprintln!("Run with one of the following commands:");
     eprintln!("  cargo run --bin database --features sqlite");
     eprintln!();
-    eprintln!("或在 examples/Cargo.toml 中启用 sqlite 特性:");
+    eprintln!("or enable the sqlite feature in examples/Cargo.toml:");
     eprintln!("  inklog = {{ path = \"..\", features = [\"sqlite\"] }}");
 }

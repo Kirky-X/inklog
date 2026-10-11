@@ -20,7 +20,7 @@ use inklog::config::{HttpAuthConfig, HttpErrorMode, HttpServerConfig};
 use inklog_examples::common::{print_section, print_separator};
 
 fn main() {
-    print_separator("inklog HTTP 认证与 IP 白名单示例");
+    print_separator("inklog HTTP auth and IP whitelist examples");
 
     show_auth_config();
     show_ip_whitelist();
@@ -28,19 +28,25 @@ fn main() {
     show_full_secure_config();
     show_env_overrides();
 
-    println!("\n所有 HTTP 认证示例展示完毕。");
+    println!("\nAll HTTP auth examples shown.");
 }
 
 /// 演示 HttpAuthConfig Bearer Token 认证
 fn show_auth_config() {
-    print_section("示例 1：HttpAuthConfig Bearer Token 认证");
+    print_section("Example 1: HttpAuthConfig bearer token auth");
 
     let default_auth = HttpAuthConfig::default();
-    println!("默认 HttpAuthConfig：");
-    println!("  enabled   = {} (默认禁用)", default_auth.enabled);
-    println!("  token_env = \"{}\" (环境变量名)", default_auth.token_env);
+    println!("Default HttpAuthConfig:");
+    println!(
+        "  enabled   = {} (disabled by default)",
+        default_auth.enabled
+    );
+    println!(
+        "  token_env = \"{}\" (environment variable name)",
+        default_auth.token_env
+    );
 
-    println!("\n启用认证：");
+    println!("\nEnable auth:");
     let enabled_auth = HttpAuthConfig {
         enabled: true,
         token_env: "INKLOG_HTTP_AUTH_TOKEN".to_string(),
@@ -48,37 +54,41 @@ fn show_auth_config() {
     println!("  enabled   = {}", enabled_auth.enabled);
     println!("  token_env = \"{}\"", enabled_auth.token_env);
 
-    println!("\n工作流程：");
+    println!("\nHow it works:");
     println!(
-        "  1. 客户端发送请求：curl -H \"Authorization: Bearer $TOKEN\" http://localhost:9090/metrics"
+        "  1. The client sends: curl -H \"Authorization: Bearer $TOKEN\" http://localhost:9090/metrics"
     );
     println!(
-        "  2. 服务端从环境变量 {} 读取期望的 token",
+        "  2. The server reads the expected token from environment variable {}",
         enabled_auth.token_env
     );
-    println!("  3. 比对 Authorization header 中的 Bearer token");
-    println!("  4. 匹配则返回数据，不匹配则返回 401 Unauthorized");
+    println!("  3. It compares the bearer token in the Authorization header");
+    println!("  4. A match returns data, a mismatch returns 401 Unauthorized");
 
-    println!("\n自定义 token 环境变量：");
+    println!("\nCustom token environment variable:");
     let custom_auth = HttpAuthConfig {
         enabled: true,
         token_env: "MY_APP_AUTH_TOKEN".to_string(),
     };
     println!("  enabled   = {}", custom_auth.enabled);
-    println!("  token_env = \"{}\" (自定义)", custom_auth.token_env);
+    println!("  token_env = \"{}\" (custom)", custom_auth.token_env);
 }
 
 /// 演示 IP 白名单配置
 fn show_ip_whitelist() {
-    print_section("示例 2：IP 白名单（ip_whitelist）");
+    print_section("Example 2: IP whitelist (ip_whitelist)");
 
-    println!("支持的格式：");
-    println!("  1. 精确 IP:     \"192.168.1.100\"");
-    println!("  2. CIDR 网段:   \"10.0.0.0/8\"");
-    println!("  3. 前缀通配符:  \"192.168.*\"（仅末尾一段 .*，前缀为 1-3 段数字）");
-    println!("     注意：\"192.168.*.*\" 不合法——通配只允许出现在末尾一段");
+    println!("Supported formats:");
+    println!("  1. Exact IP:    \"192.168.1.100\"");
+    println!("  2. CIDR range:  \"10.0.0.0/8\"");
+    println!(
+        "  3. Prefix wildcard: \"192.168.*\" (a trailing .* only, with 1-3 numeric segments before it)"
+    );
+    println!(
+        "     Note: \"192.168.*.*\" is not valid — a wildcard is allowed only in the last segment"
+    );
 
-    println!("\n配置示例 1：仅允许内网访问");
+    println!("\nConfig example 1: internal network only");
     let internal_only = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -100,8 +110,8 @@ fn show_ip_whitelist() {
         ..Default::default()
     }
     .validate()
-    .expect("白名单条目应通过配置校验");
-    println!("  ✓ InklogConfig::validate() 通过");
+    .expect("the whitelist entries should pass config validation");
+    println!("  ✓ InklogConfig::validate() passed");
 
     // 反例：多段通配（"192.168.*.*"）不是受支持格式，配置期即被拒绝
     let invalid = HttpServerConfig {
@@ -114,10 +124,10 @@ fn show_ip_whitelist() {
         ..Default::default()
     }
     .validate()
-    .expect_err("多段通配应在配置期被拒绝");
-    println!("  ✓ 反例 \"192.168.*.*\" 被拒绝: {}", err);
+    .expect_err("a multi-segment wildcard should be rejected at config time");
+    println!("  ✓ the invalid \"192.168.*.*\" was rejected: {}", err);
 
-    println!("\n配置示例 2：仅允许特定监控主机");
+    println!("\nConfig example 2: specific monitoring hosts only");
     let monitoring_only = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -127,7 +137,7 @@ fn show_ip_whitelist() {
     };
     println!("  ip_whitelist = {:?}", monitoring_only.ip_whitelist);
 
-    println!("\n配置示例 3：禁用白名单（允许所有 IP）");
+    println!("\nConfig example 3: whitelist disabled (all IPs allowed)");
     let open = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -135,43 +145,53 @@ fn show_ip_whitelist() {
         ip_whitelist: None,
         ..Default::default()
     };
-    println!("  ip_whitelist = {:?} (None = 允许所有)", open.ip_whitelist);
+    println!(
+        "  ip_whitelist = {:?} (None = allow all)",
+        open.ip_whitelist
+    );
 }
 
 /// 演示 HttpErrorMode 错误处理模式
 fn show_error_modes() {
-    print_section("示例 3：HttpErrorMode 错误处理模式");
+    print_section("Example 3: HttpErrorMode error handling modes");
 
-    println!("两种模式对比（作用于 HTTP 服务器启动失败）：");
-    println!("{:<20} {:<24} {:<24}", "场景", "Warn", "Strict (默认)");
+    println!("A comparison of the two modes (they apply when the HTTP server fails to start):");
+    println!(
+        "{:<20} {:<24} {:<24}",
+        "scenario", "Warn", "Strict (default)"
+    );
     println!("{}", "-".repeat(70));
     println!(
         "{:<20} {:<24} {:<24}",
-        "端口被占用", "告警并跳过启动", "启动失败，返回错误"
+        "port in use", "warn and skip startup", "startup fails with an error"
     );
     println!(
         "{:<20} {:<24} {:<24}",
-        "TLS 证书/密钥错误", "告警并跳过启动", "启动失败，返回错误"
+        "bad TLS cert/key", "warn and skip startup", "startup fails with an error"
     );
 
-    println!("\n请求期的认证/白名单拒绝不受 error_mode 影响，始终拒绝：");
-    println!("  缺失或无效认证  → 401 Unauthorized");
-    println!("  IP 不在白名单    → 403 Forbidden");
+    println!(
+        "\nRequest-time auth/whitelist rejections are not affected by error_mode and are always rejected:"
+    );
+    println!("  missing or invalid auth → 401 Unauthorized");
+    println!("  IP not in the whitelist → 403 Forbidden");
 
-    println!("\n默认模式：");
+    println!("\nDefault mode:");
     println!(
         "  HttpErrorMode::default() = {:?}",
         HttpErrorMode::default()
     );
 
-    println!("\n推荐场景：");
-    println!("  开发/测试:    Warn  (端口占用/TLS 错误不阻断进程，仅告警)");
-    println!("  生产环境:     Strict (启动失败立即暴露，安全最佳实践)");
+    println!("\nRecommended usage:");
+    println!("  Dev/test:    Warn  (a busy port or TLS error only warns)");
+    println!(
+        "  Production:  Strict (startup failure surfaces immediately; security best practice)"
+    );
 }
 
 /// 演示完整的安全配置
 fn show_full_secure_config() {
-    print_section("示例 4：完整生产级安全配置");
+    print_section("Example 4: full production-grade security config");
 
     let secure_config = HttpServerConfig {
         enabled: true,
@@ -188,7 +208,7 @@ fn show_full_secure_config() {
         tls: None,
     };
 
-    println!("生产级 HttpServerConfig：");
+    println!("Production-grade HttpServerConfig:");
     println!("  enabled      = {}", secure_config.enabled);
     println!(
         "  host:port    = {}:{}",
@@ -215,7 +235,7 @@ fn show_full_secure_config() {
     );
     println!("  ip_whitelist = {:?}", secure_config.ip_whitelist);
 
-    println!("\n对应的 TOML 配置：");
+    println!("\nThe corresponding TOML configuration:");
     println!(
         r#"[http_server]
 enabled = true
@@ -231,25 +251,27 @@ enabled = true
 token_env = "INKLOG_HTTP_AUTH_TOKEN""#
     );
 
-    println!("\n启动前需设置环境变量：");
+    println!("\nEnvironment variables to set before starting:");
     println!("  export INKLOG_HTTP_AUTH_TOKEN=\"<your-secret-token>\"");
 }
 
 /// 演示环境变量覆盖
 fn show_env_overrides() {
-    print_section("示例 5：环境变量覆盖");
+    print_section("Example 5: environment variable overrides");
 
-    println!("HTTP server 支持的环境变量：");
+    println!("Environment variables supported by the HTTP server:");
     println!("  INKLOG_HTTP_SERVER_ENABLED=true");
     println!("  INKLOG_HTTP_SERVER_HOST=0.0.0.0");
     println!("  INKLOG_HTTP_SERVER_PORT=9090");
     println!("  INKLOG_HTTP_SERVER_METRICS_PATH=/metrics");
     println!("  INKLOG_HTTP_SERVER_HEALTH_PATH=/health");
-    println!("  INKLOG_HTTP_SERVER_ERROR_MODE=strict  # 或 warn");
+    println!("  INKLOG_HTTP_SERVER_ERROR_MODE=strict  # or warn");
 
-    println!("\n注意：auth.enabled / auth.token_env / ip_whitelist 没有环境变量覆盖，");
-    println!("请通过 TOML 或代码配置；认证 token 值由 token_env 指向的环境变量提供。");
+    println!("\nNote: auth.enabled / auth.token_env / ip_whitelist have no environment overrides;");
+    println!(
+        "configure them through TOML or code; the token value comes from the variable named by token_env."
+    );
 
-    println!("\n通过 load_with_env_overrides() 加载：");
+    println!("\nLoad with load_with_env_overrides():");
     println!("  let config = InklogConfig::load_with_env_overrides()?;");
 }

@@ -227,14 +227,24 @@ impl CompressionStrategy for GzipCompression {
         let compressed_path = path.with_extension("gz");
 
         let output_file = create_compressed_output(&compressed_path).map_err(|e| {
-            error!("Failed to create compressed file: {}", e);
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("err", &e);
+            error!(
+                "{}",
+                crate::i18n::tr_args("config-compression-create_failed", args)
+            );
             InklogError::IoError(e)
         })?;
         let mut encoder = GzEncoder::new(output_file, Compression::new(level.clamp(0, 9) as u32));
         gzip_copy_into(&mut encoder, path)?;
 
         encoder.finish().map_err(|e| {
-            error!("Failed to finish compression: {}", e);
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("err", &e);
+            error!(
+                "{}",
+                crate::i18n::tr_args("config-compression-finish_failed", args)
+            );
             InklogError::CompressionError(e.to_string())
         })?;
 
@@ -261,7 +271,12 @@ fn gzip_copy_into<W: std::io::Write>(
     input: &Path,
 ) -> Result<(), InklogError> {
     let input_file = File::open(input).map_err(|e| {
-        error!("Failed to open file for compression: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("config-compression-open_failed", args)
+        );
         InklogError::IoError(e)
     })?;
     let mut reader = BufReader::new(input_file);
@@ -292,13 +307,23 @@ pub(crate) fn gzip_compress_file_keeping_name(
 
     let compressed_path = append_ext(path, "gz");
     let output_file = create_compressed_output(&compressed_path).map_err(|e| {
-        error!("Failed to create compressed file: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("config-compression-create_failed", args)
+        );
         InklogError::IoError(e)
     })?;
     let mut encoder = GzEncoder::new(output_file, Compression::new(level.clamp(0, 9) as u32));
     gzip_copy_into(&mut encoder, path)?;
     encoder.finish().map_err(|e| {
-        error!("Failed to finish compression: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("config-compression-finish_failed", args)
+        );
         InklogError::CompressionError(e.to_string())
     })?;
     Ok(compressed_path)
@@ -333,17 +358,32 @@ pub(crate) fn zstd_encode_to(
     compression_level: i32,
 ) -> Result<(), InklogError> {
     let input_file = File::open(input).map_err(|e| {
-        error!("Failed to open file for compression: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("config-compression-open_failed", args)
+        );
         InklogError::IoError(e)
     })?;
 
     let output_file = create_compressed_output(output).map_err(|e| {
-        error!("Failed to create compressed file: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("config-compression-create_failed", args)
+        );
         InklogError::IoError(e)
     })?;
 
     let mut encoder = zstd::stream::Encoder::new(output_file, compression_level).map_err(|e| {
-        error!("Failed to create zstd encoder: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("config-compression-zstd_encoder_failed", args)
+        );
         InklogError::CompressionError(e.to_string())
     })?;
 
@@ -362,7 +402,12 @@ pub(crate) fn zstd_encode_to(
     }
 
     encoder.finish().map_err(|e| {
-        error!("Failed to finish compression: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("config-compression-finish_failed", args)
+        );
         InklogError::CompressionError(e.to_string())
     })?;
 

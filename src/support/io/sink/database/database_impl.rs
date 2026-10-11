@@ -181,7 +181,8 @@ impl DatabaseSink {
             dropped = overflow,
             dropped_total = inner.dropped_total,
             capacity = MAX_BUFFER_SIZE,
-            "database sink buffer overflow, dropped oldest buffered records"
+            "{}",
+            crate::i18n::tr("sink-database_buffer_overflow")
         );
     }
 }
@@ -458,7 +459,11 @@ pub fn convert_logs_to_parquet(
         .map(|l| {
             l.line.and_then(|line_num| {
                 line_num.try_into().ok().or_else(|| {
-                    tracing::warn!(line_num, "line_num exceeds i32 range, clamping");
+                    tracing::warn!(
+                        line_num,
+                        "{}",
+                        crate::i18n::tr("sink-database_line_num_clamp")
+                    );
                     Some(i32::MAX)
                 })
             })

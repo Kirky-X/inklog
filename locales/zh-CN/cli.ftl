@@ -137,6 +137,8 @@ cli-decrypt-err-output-symlink = 输出路径是符号链接: { $path }
 cli-decrypt-err-input-dir-symlink = 输入目录是符号链接: { $path }
 cli-decrypt-err-subdir-symlink = 子目录条目是符号链接（已跳过）: { $path }
 
+cli-decrypt-err-truncated-v2 = v2 头部被截断: 期望 40 字节（含 16 字节 PBKDF2 盐），实际 { $read_count }
+
 # CLI generate 路径验证
 
 cli-generate-err-path-traversal = 输出路径包含遍历模式: { $path }
@@ -172,6 +174,9 @@ cli-query-help-level = 最低级别: trace/debug/info/warn/error/fatal
 cli-query-help-grep = 对消息与 target 应用子串过滤
 cli-query-help-limit = 最大返回记录数（0 = 不限制）
 cli-query-help-key-env = 存放 .enc 文件解密密钥的环境变量名
+
+cli-query-err-invalid-rfc3339 = --{ $flag } '{ $raw }' 无效: 期望 RFC3339 时间戳 ({ $err })
+cli-query-err-no-path = query 至少需要一个 --path（文件或目录）
 
 cli-verify-chain-about = 校验归档审计链（HMAC-SHA256）manifest 是否被篡改
 cli-verify-chain-help-manifest = 审计链 manifest（<stem>.chain.jsonl）

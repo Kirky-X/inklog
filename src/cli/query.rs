@@ -32,13 +32,22 @@ pub struct QueryArgs {
 fn parse_time(raw: &str, flag: &str) -> Result<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(raw)
         .map(|t| t.with_timezone(&chrono::Utc))
-        .map_err(|e| anyhow::anyhow!("invalid --{flag} '{}': expected RFC3339 ({e})", raw))
+        .map_err(|e| {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("flag", flag);
+            args.set("raw", raw);
+            args.set("err", e.to_string());
+            anyhow::anyhow!(
+                "{}",
+                inklog::i18n::tr_args("cli-query-err-invalid-rfc3339", args)
+            )
+        })
 }
 
 /// 执行 query 子命令；返回进程退出码。
 pub fn run_query(args: &QueryArgs) -> Result<i32> {
     if args.path.is_empty() {
-        anyhow::bail!("query requires at least one --path (file or directory)");
+        anyhow::bail!("{}", inklog::i18n::tr("cli-query-err-no-path"));
     }
     let opts = QueryOptions {
         since: args
@@ -130,6 +139,12 @@ mod tests {
             ..Default::default()
         };
         let err = run_query(&args).unwrap_err().to_string();
+        // Fluent renders placeables wrapped in Unicode isolation marks; strip
+        // them so the flag name can be matched as a plain substring.
+        let err: String = err
+            .chars()
+            .filter(|c| *c != '\u{2068}' && *c != '\u{2069}')
+            .collect();
         assert!(
             err.contains("--since"),
             "error must name the offending flag"

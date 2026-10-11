@@ -48,12 +48,12 @@ mod tests {
         let start_time = Instant::now();
         let mut log_count = 0u64;
 
-        println!("开始长时间运行测试 ({}秒)", duration);
-        println!("初始内存: {:.2} MB", initial_memory);
+        println!("starting long-running test ({}s)", duration);
+        println!("initial memory: {:.2} MB", initial_memory);
 
         while start_time.elapsed() < Duration::from_secs(duration) {
             tracing::info!(
-                "长时间运行测试日志 #{} - 时间: {:?}",
+                "long-running test log #{} - time: {:?}",
                 log_count,
                 chrono::Utc::now()
             );
@@ -65,7 +65,7 @@ mod tests {
                 let current_memory = get_memory_usage_mb();
                 let growth = current_memory - initial_memory;
                 println!(
-                    "已写入 {} 条日志, 当前内存: {:.2} MB, 增长: {:.2} MB",
+                    "wrote {} logs, current memory: {:.2} MB, growth: {:.2} MB",
                     log_count, current_memory, growth
                 );
             }
@@ -74,15 +74,15 @@ mod tests {
         let final_memory = get_memory_usage_mb();
         let memory_growth = final_memory - initial_memory;
 
-        println!("测试完成");
-        println!("总日志数: {}", log_count);
-        println!("初始内存: {:.2} MB", initial_memory);
-        println!("最终内存: {:.2} MB", final_memory);
-        println!("内存增长: {:.2} MB", memory_growth);
+        println!("test completed");
+        println!("total logs: {}", log_count);
+        println!("initial memory: {:.2} MB", initial_memory);
+        println!("final memory: {:.2} MB", final_memory);
+        println!("memory growth: {:.2} MB", memory_growth);
 
         assert!(
             memory_growth < max_memory_growth_mb,
-            "内存增长超过阈值: {:.2} MB > {:.2} MB",
+            "memory growth exceeds the threshold: {:.2} MB > {:.2} MB",
             memory_growth,
             max_memory_growth_mb
         );
@@ -101,7 +101,7 @@ mod tests {
         let mut log_count = 0u64;
 
         while start_time.elapsed() < Duration::from_secs(duration) {
-            tracing::info!("短时测试日志 #{}", log_count);
+            tracing::info!("short test log #{}", log_count);
             log_count += 1;
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -110,13 +110,13 @@ mod tests {
         let memory_growth = final_memory - initial_memory;
 
         println!(
-            "短时测试: {} 条日志, 内存增长: {:.2} MB",
+            "short test: {} logs, memory growth: {:.2} MB",
             log_count, memory_growth
         );
 
         assert!(
             memory_growth < 10.0,
-            "短时测试内存增长过大: {:.2} MB",
+            "short-test memory growth too large: {:.2} MB",
             memory_growth
         );
     }
@@ -124,7 +124,10 @@ mod tests {
     #[test]
     fn test_memory_measurement_available() {
         let memory = get_memory_usage_mb();
-        println!("当前内存使用: {:.2} MB", memory);
-        assert!(memory >= 0.0, "内存测量应该返回非负值");
+        println!("current memory usage: {:.2} MB", memory);
+        assert!(
+            memory >= 0.0,
+            "memory measurement should return a non-negative value"
+        );
     }
 }

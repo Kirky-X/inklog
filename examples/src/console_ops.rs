@@ -87,13 +87,13 @@ mod tests {
         let config = create_console_config(false, vec![]);
         let sink = ConsoleSink::new(config, LogTemplate::default());
         let cases = [
-            ("INFO", "这是 INFO 日志"),
-            ("DEBUG", "这是 DEBUG 日志"),
-            ("TRACE", "这是 TRACE 日志"),
-            ("WARN", "这是 WARN 日志"),
-            ("ERROR", "这是 ERROR 日志"),
+            ("INFO", "This is an INFO log"),
+            ("DEBUG", "This is a DEBUG log"),
+            ("TRACE", "This is a TRACE log"),
+            ("WARN", "This is a WARN log"),
+            ("ERROR", "This is an ERROR log"),
         ];
-        let written = write_test_cases(&sink, &cases).await.expect("写入失败");
+        let written = write_test_cases(&sink, &cases).await.expect("write failed");
         assert_eq!(written, 5);
     }
 
@@ -104,7 +104,7 @@ mod tests {
         let sink = ConsoleSink::new(config, LogTemplate::default());
         let written = write_test_cases(&sink, &[])
             .await
-            .expect("写入空列表应成功");
+            .expect("writing an empty list should succeed");
         assert_eq!(written, 0);
     }
 }

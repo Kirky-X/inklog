@@ -136,7 +136,8 @@ impl ConfersAuditSink {
         let serialized = serde_json::to_string(event);
         debug_assert!(
             serialized.is_ok(),
-            "AuditEvent 序列化不应失败：变体载荷均为可序列化基本类型"
+            "{}",
+            crate::i18n::tr("audit-serialize-invariant")
         );
         let mut record = LogRecord::new(
             level,
@@ -223,9 +224,9 @@ impl ConfersAuditSink {
                 .inner
                 .rx
                 .lock()
-                .expect("writer 接收端锁不会中毒（临界区无 panic 点）")
+                .expect(&crate::i18n::tr("audit-writer-rx-lock-not-poisoned"))
                 .take()
-                .expect("writer 首次启动时接收端必然在位");
+                .expect(&crate::i18n::tr("audit-writer-rx-present-at-startup"));
             let sink = self.inner.sink.clone();
             let dropped = self.inner.dropped.clone();
             let write_failures = self.inner.write_failures.clone();
@@ -375,7 +376,7 @@ mod tests {
         assert_eq!(
             records.len(),
             5,
-            "批量事件的每一条都必须出现在结构化 sink 中"
+            "every one of the batch events must land in the structured sink"
         );
         assert!(records.iter().all(|r| r.target == "confers::audit"));
     }
@@ -434,7 +435,7 @@ mod tests {
             let expected = if durable { "WARN" } else { "INFO" };
             assert_eq!(
                 record.level, expected,
-                "级别映射必须循 confers AuditLevel 分类"
+                "level mapping must follow the confers AuditLevel classification"
             );
         }
     }
@@ -450,13 +451,17 @@ mod tests {
 
         let records = sink.snapshot();
         for (record, event) in records.iter().zip(&events) {
-            let json: serde_json::Value =
-                serde_json::from_str(&record.message).expect("message 必须是可解析的事件 JSON");
+            let json: serde_json::Value = serde_json::from_str(&record.message)
+                .expect("message must be parseable event JSON");
             assert!(
                 json.get(event_name(event)).is_some(),
-                "外部标签变体名在顶层"
+                "external tag variant name must sit at the top level"
             );
-            assert_eq!(record.timestamp, event.event_timestamp(), "时间戳透传");
+            assert_eq!(
+                record.timestamp,
+                event.event_timestamp(),
+                "timestamp passthrough"
+            );
         }
     }
 
@@ -476,7 +481,7 @@ mod tests {
         assert_eq!(
             bridge.write_failures(),
             5,
-            "sink 写入失败必须显性计入 write_failures"
+            "sink write failure must be counted explicitly in write_failures"
         );
         assert_eq!(bridge.accepted(), 0);
     }
@@ -505,14 +510,22 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("测试 runtime 构建不会失败");
+            .expect("test runtime construction must not fail");
         rt.block_on(async {
             let late: Vec<AuditEvent> = sample_events().into_iter().skip(2).collect();
             bridge.write(&late);
             wait_accepted(&bridge, 3).await;
         });
-        assert_eq!(bridge.accepted(), 3, "writer 只接受启动后入队的记录");
-        assert_eq!(bridge.dropped(), 2, "已计丢弃的记录不得双计");
+        assert_eq!(
+            bridge.accepted(),
+            3,
+            "writer only accepts records enqueued after startup"
+        );
+        assert_eq!(
+            bridge.dropped(),
+            2,
+            "already-counted dropped records must not be double-counted"
+        );
         assert_eq!(sink.snapshot().len(), 3);
     }
 
@@ -523,7 +536,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("测试 runtime 构建不会失败");
+            .expect("test runtime construction must not fail");
 
         // 时序一：runtime 内启动 writer
         rt.block_on(async {
@@ -540,7 +553,7 @@ mod tests {
         assert_eq!(
             bridge.dropped(),
             0,
-            "writer 存活时无 runtime 调用不得计丢弃"
+            "with a live writer, a runtime-less call must not count as dropped"
         );
 
         rt.block_on(async {
@@ -560,7 +573,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("测试 runtime 构建不会失败");
+            .expect("test runtime construction must not fail");
         let handle = rt.handle().clone();
         drop(rt);
         let _enter = handle.enter();
@@ -569,7 +582,7 @@ mod tests {
         assert_eq!(
             bridge.dropped(),
             5,
-            "关停 runtime 上启动 writer 后记录必须显性计入 dropped"
+            "after starting a writer on a runtime that is then shut down, records must be counted in dropped explicitly"
         );
         assert_eq!(bridge.accepted(), 0);
         assert!(sink.snapshot().is_empty());
@@ -603,7 +616,7 @@ mod tests {
         assert_eq!(
             bridge.dropped(),
             8,
-            "通道满必须立即丢弃计数，绝不阻塞 confers 审计路径"
+            "a full channel must drop and count immediately, never blocking the confers audit path"
         );
 
         sink.hold.store(false, Ordering::SeqCst);

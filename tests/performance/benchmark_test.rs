@@ -275,9 +275,12 @@ mod performance_test {
         // 核正：原断言 `log_path.exists() || burst_size > 0` 恒真无意义；
         // shutdown drain 确保 50000 条全部落盘后按真实行为固化断言
         let _ = _logger.shutdown();
-        assert!(log_path.exists(), "突发写入后日志文件应存在");
+        assert!(
+            log_path.exists(),
+            "the log file should exist after the burst write"
+        );
         let metadata = std::fs::metadata(&log_path).unwrap();
-        assert!(metadata.len() > 0, "日志文件应非空");
+        assert!(metadata.len() > 0, "the log file should not be empty");
 
         println!("Memory burst test completed successfully");
     }

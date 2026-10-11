@@ -31,52 +31,56 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog 健康监控与指标示例 ===\n");
+    println!("=== inklog health monitoring and metrics example ===\n");
 
-    // 1. Metrics 创建与基础计数器
+    // 1. Metrics creation and basic counters
     show_metrics_creation();
 
-    // 2. 延迟直方图与百分位数
+    // 2. Latency histogram and percentiles
     show_latency_histogram();
 
-    // 3. GaugeF64 浮点指标
+    // 3. GaugeF64 floating-point metric
     show_gauge_f64();
 
-    // 4. SinkStatus 状态转换
+    // 4. SinkStatus transitions
     show_sink_status_transitions();
 
     // 5. Sink 健康监控（Metrics.update_sink_health）
     show_sink_health_tracking();
 
-    // 6. HealthStatus 整体快照
+    // 6. HealthStatus overall snapshot
     show_health_status_snapshot();
 
-    // 7. SinkHealthMonitor 智能降级与恢复
+    // 7. SinkHealthMonitor smart fallback and recovery
     show_sink_health_monitor();
 
-    // 8. Prometheus 格式导出
+    // 8. Prometheus format export
     show_prometheus_export();
 
-    println!("\n✓ 所有健康监控与指标示例演示完成");
+    println!("\n✓ All health monitoring and metrics examples completed");
     Ok(())
 }
 
 /// 展示 Metrics 创建和基础计数器操作
 fn show_metrics_creation() {
-    print_separator("1. Metrics 创建与基础计数器");
+    print_separator("1. Metrics creation and basic counters");
 
-    print_section("1.1 Metrics::new() 创建实例");
+    print_section("1.1 Creating an instance with Metrics::new()");
     let metrics = Metrics::new();
-    println!("初始 logs_written = {}", metrics.logs_written());
-    println!("初始 logs_dropped = {}", metrics.logs_dropped());
-    println!("初始 sink_errors  = {}", metrics.sink_errors());
-    println!("初始 channel_blocked = {}", metrics.channel_blocked());
+    println!("initial logs_written = {}", metrics.logs_written());
+    println!("initial logs_dropped = {}", metrics.logs_dropped());
+    println!("initial sink_errors  = {}", metrics.sink_errors());
+    println!("initial channel_blocked = {}", metrics.channel_blocked());
     assert_eq!(metrics.logs_written(), 0);
 
-    print_section("1.2 inc_logs_written() 累加日志写入");
+    print_section("1.2 inc_logs_written() accumulates log writes");
     for i in 0..5 {
         metrics.inc_logs_written();
-        println!("  第 {} 次写入，累计 = {}", i + 1, metrics.logs_written());
+        println!(
+            "  write #{}, cumulative = {}",
+            i + 1,
+            metrics.logs_written()
+        );
     }
     assert_eq!(metrics.logs_written(), 5);
 
@@ -91,7 +95,7 @@ fn show_metrics_creation() {
     println!("sink_errors    = {}", metrics.sink_errors());
     println!("channel_blocked = {}", metrics.channel_blocked());
 
-    print_section("1.4 DB 批量指标 set_db_batch_size / add_db_batch_records_total");
+    print_section("1.4 DB batch metrics set_db_batch_size / add_db_batch_records_total");
     metrics.set_db_batch_size(64);
     metrics.add_db_batch_records_total(64);
     metrics.add_db_batch_records_total(32);
@@ -103,16 +107,16 @@ fn show_metrics_creation() {
     assert_eq!(metrics.db_batch_size(), 64);
     assert_eq!(metrics.db_batch_records_total(), 96);
 
-    print_section("1.5 锁竞争计数（active_workers 为内部字段，外部只读）");
+    print_section("1.5 Lock contention counter (active_workers is internal; read-only externally)");
     metrics.inc_lock_contention();
     metrics.inc_lock_contention();
     println!(
-        "active_workers   = {}（默认 0，由内部 worker 设置）",
+        "active_workers   = {} (default 0, set by internal workers)",
         metrics.active_workers()
     );
     println!("lock_contention  = {}", metrics.lock_contention());
 
-    print_section("1.6 uptime() 运行时长");
+    print_section("1.6 uptime() runtime duration");
     let uptime = metrics.uptime();
     println!("uptime = {:?}", uptime);
     assert!(uptime.as_secs() < 60);
@@ -120,18 +124,18 @@ fn show_metrics_creation() {
 
 /// 展示延迟直方图与百分位统计
 fn show_latency_histogram() {
-    print_separator("2. 延迟直方图与百分位数");
+    print_separator("2. Latency histogram and percentiles");
 
-    print_section("2.1 record_latency() 记录多条延迟");
+    print_section("2.1 record_latency() records several latencies");
     let metrics = Metrics::new();
     // 模拟 10 条延迟：50μs ~ 5000μs
     let samples = [50u64, 120, 300, 800, 1500, 2200, 3500, 5000, 7500, 12000];
     for &us in &samples {
         metrics.record_latency(Duration::from_micros(us));
     }
-    println!("已记录 {} 条延迟样本", samples.len());
+    println!("recorded {} latency samples", samples.len());
 
-    print_section("2.2 延迟聚合统计（avg / p50 / p95 / p99）");
+    print_section("2.2 Latency aggregates (avg / p50 / p95 / p99)");
     let status = metrics.get_status(0, 100);
     let snap = &status.metrics;
     println!("avg_latency_us = {}", snap.avg_latency_us);
@@ -144,25 +148,28 @@ fn show_latency_histogram() {
 
 /// 展示 GaugeF64 浮点指标
 fn show_gauge_f64() {
-    print_separator("3. GaugeF64 浮点指标");
+    print_separator("3. GaugeF64 floating-point metric");
 
     print_section("3.1 GaugeF64::new() / set() / get()");
     let gauge = GaugeF64::new(0.0);
-    println!("初始值 = {}", gauge.get());
+    println!("initial value = {}", gauge.get());
     gauge.set(87.5);
-    println!("set(87.5) 后 = {}", gauge.get());
+    println!("after set(87.5) = {}", gauge.get());
     gauge.set(99.9);
-    println!("set(99.9) 后 = {}", gauge.get());
+    println!("after set(99.9) = {}", gauge.get());
 
-    print_section("3.2 Metrics 暴露的 pool_hit_rate 指标");
+    print_section("3.2 The pool_hit_rate metric exposed by Metrics");
     let metrics = Metrics::new();
     metrics.set_pool_hit_rate(85.5);
     println!("pool_hit_rate = {:.2}%", metrics.pool_hit_rate());
     metrics.set_pool_hit_rate(0.0);
-    println!("重置后 pool_hit_rate = {:.2}%", metrics.pool_hit_rate());
+    println!(
+        "pool_hit_rate after reset = {:.2}%",
+        metrics.pool_hit_rate()
+    );
     assert!((metrics.pool_hit_rate() - 0.0).abs() < f64::EPSILON);
 
-    print_section("3.3 SinkHealth::healthy() / unhealthy() 构造");
+    print_section("3.3 SinkHealth::healthy() / unhealthy() constructors");
     let healthy = SinkHealth::healthy();
     assert!(matches!(healthy.status, SinkStatus::Healthy));
     assert_eq!(healthy.consecutive_failures, 0);
@@ -176,9 +183,9 @@ fn show_gauge_f64() {
 
 /// 展示 SinkStatus 状态转换
 fn show_sink_status_transitions() {
-    print_separator("4. SinkStatus 状态转换");
+    print_separator("4. SinkStatus transitions");
 
-    print_section("4.1 默认状态 NotStarted");
+    print_section("4.1 Default state NotStarted");
     let mut status = SinkStatus::default();
     println!("status = {:?}", status);
     assert_eq!(status, SinkStatus::NotStarted);
@@ -191,24 +198,24 @@ fn show_sink_status_transitions() {
 
     print_section("4.3 Healthy → Degraded { reason }");
     status = SinkStatus::Degraded {
-        reason: "磁盘 IO 缓慢".to_string(),
+        reason: "slow disk IO".to_string(),
     };
     println!("status = {:?}", status);
-    assert!(status.is_operational(), "Degraded 仍可运行");
+    assert!(status.is_operational(), "Degraded still runs");
 
     print_section("4.4 Degraded → Unhealthy { error }");
     status = SinkStatus::Unhealthy {
-        error: "磁盘空间不足".to_string(),
+        error: "disk space low".to_string(),
     };
     println!("status = {:?}", status);
     assert!(!status.is_operational());
 
-    print_section("4.5 Unhealthy → Healthy（恢复）");
+    print_section("4.5 Unhealthy → Healthy (recovery)");
     status = SinkStatus::Healthy;
     println!("status = {:?}", status);
     assert!(status.is_operational());
 
-    print_section("4.6 状态机汇总");
+    print_section("4.6 State machine summary");
     println!(
         "NotStarted.is_operational()  = {}",
         SinkStatus::NotStarted.is_operational()
@@ -229,16 +236,16 @@ fn show_sink_status_transitions() {
 
 /// 展示 Metrics 的 Sink 健康跟踪
 fn show_sink_health_tracking() {
-    print_separator("5. Metrics Sink 健康跟踪");
+    print_separator("5. Metrics sink health tracking");
 
-    print_section("5.1 sink_started() 标记 Sink 启动");
+    print_section("5.1 sink_started() marks a sink as started");
     let metrics = Metrics::new();
     metrics.sink_started("console");
     metrics.sink_started("file");
     metrics.sink_started("database");
     let health = metrics.sink_health();
     for name in ["console", "file", "database"] {
-        let h = health.get(name).expect("sink 应存在");
+        let h = health.get(name).expect("sink should exist");
         println!(
             "  {} -> {:?}, failures = {}",
             name, h.status, h.consecutive_failures
@@ -246,55 +253,55 @@ fn show_sink_health_tracking() {
         assert!(matches!(h.status, SinkStatus::Healthy));
     }
 
-    print_section("5.2 sink_degraded() 标记降级");
-    metrics.sink_degraded("file", "磁盘 IO 延迟升高".to_string());
+    print_section("5.2 sink_degraded() marks degradation");
+    metrics.sink_degraded("file", "disk IO latency increased".to_string());
     let health = metrics.sink_health();
-    let h = health.get("file").expect("file 应存在");
+    let h = health.get("file").expect("file should exist");
     println!("file.status = {:?}", h.status);
     println!("file.last_error = {:?}", h.last_error);
     assert!(matches!(h.status, SinkStatus::Degraded { .. }));
 
-    print_section("5.3 update_sink_health() 累积失败计数");
+    print_section("5.3 update_sink_health() accumulates the failure count");
     // 多次失败，consecutive_failures 应累加
     metrics.update_sink_health("database", false, Some("Connection refused".into()));
     metrics.update_sink_health("database", false, Some("Timeout".into()));
     let health = metrics.sink_health();
-    let h = health.get("database").expect("database 应存在");
+    let h = health.get("database").expect("database should exist");
     println!("database.status = {:?}", h.status);
     println!("database.consecutive_failures = {}", h.consecutive_failures);
     assert_eq!(h.consecutive_failures, 2);
 
-    print_section("5.4 update_sink_health() 恢复健康重置计数");
+    print_section("5.4 update_sink_health() resets the count on recovery");
     metrics.update_sink_health("database", true, None);
     let health = metrics.sink_health();
-    let h = health.get("database").expect("database 应存在");
+    let h = health.get("database").expect("database should exist");
     println!("database.status = {:?}", h.status);
     println!("database.consecutive_failures = {}", h.consecutive_failures);
     assert_eq!(h.consecutive_failures, 0);
 
-    print_section("5.5 update_sink_health() 无错误信息时使用默认消息");
+    print_section("5.5 update_sink_health() uses a default message when no error info exists");
     metrics.update_sink_health("file", false, None);
     let health = metrics.sink_health();
-    let h = health.get("file").expect("file 应存在");
+    let h = health.get("file").expect("file should exist");
     if let SinkStatus::Unhealthy { error } = &h.status {
         println!("file.status.error = {:?}", error);
         assert_eq!(error, "Unknown error");
     } else {
-        panic!("file 应处于 Unhealthy 状态");
+        panic!("file should be Unhealthy");
     }
 }
 
 /// 展示 HealthStatus 整体快照
 fn show_health_status_snapshot() {
-    print_separator("6. HealthStatus 整体快照");
+    print_separator("6. HealthStatus overall snapshot");
 
-    print_section("6.1 空 sinks → NotStarted");
+    print_section("6.1 Empty sinks → NotStarted");
     let metrics = Metrics::new();
     let status: HealthStatus = metrics.get_status(0, 100);
     println!("overall_status = {:?}", status.overall_status);
     assert!(matches!(status.overall_status, SinkStatus::NotStarted));
 
-    print_section("6.2 全部 Healthy");
+    print_section("6.2 All Healthy");
     metrics.sink_started("console");
     metrics.sink_started("file");
     let status = metrics.get_status(50, 1000);
@@ -304,13 +311,13 @@ fn show_health_status_snapshot() {
     println!("encryption_key_valid = {}", status.encryption_key_valid);
     assert!(matches!(status.overall_status, SinkStatus::Healthy));
 
-    print_section("6.3 存在 Degraded（无 Unhealthy）");
-    metrics.sink_degraded("file", "IO 缓慢".to_string());
+    print_section("6.3 Degraded present (no Unhealthy)");
+    metrics.sink_degraded("file", "slow IO".to_string());
     let status = metrics.get_status(0, 100);
     println!("overall_status = {:?}", status.overall_status);
     assert!(matches!(status.overall_status, SinkStatus::Degraded { .. }));
 
-    print_section("6.4 存在 Unhealthy");
+    print_section("6.4 Unhealthy present");
     metrics.update_sink_health("database", false, Some("Connection refused".into()));
     let status = metrics.get_status(0, 100);
     println!("overall_status = {:?}", status.overall_status);
@@ -319,11 +326,11 @@ fn show_health_status_snapshot() {
             println!("error = {}", error);
             assert!(error.contains("Connection refused"));
         }
-        _ => panic!("应为 Unhealthy"),
+        _ => panic!("should be Unhealthy"),
     }
 
-    print_section("6.5 HealthStatus 字段一览");
-    println!("sinks 数量 = {}", status.sinks.len());
+    print_section("6.5 HealthStatus fields at a glance");
+    println!("sinks count = {}", status.sinks.len());
     println!("metrics.logs_written     = {}", status.metrics.logs_written);
     println!("metrics.sink_errors      = {}", status.metrics.sink_errors);
     println!(
@@ -339,12 +346,12 @@ fn show_health_status_snapshot() {
 
 /// 展示 SinkHealthMonitor 智能降级与恢复
 fn show_sink_health_monitor() {
-    print_separator("7. SinkHealthMonitor 智能降级与恢复");
+    print_separator("7. SinkHealthMonitor smart fallback and recovery");
 
-    print_section("7.1 SinkHealthMonitor::default() 初始状态");
+    print_section("7.1 SinkHealthMonitor::default() initial state");
     let monitor = SinkHealthMonitor::default();
     println!(
-        "database 初始状态 = {:?}",
+        "database initial state = {:?}",
         monitor.get_fallback_state("database")
     );
     assert_eq!(
@@ -353,14 +360,14 @@ fn show_sink_health_monitor() {
     );
     assert!(!monitor.is_any_in_fallback());
 
-    print_section("7.2 故障未达阈值 → Retry");
+    print_section("7.2 Failures below threshold → Retry");
     let action = monitor.check_and_fallback("database", false, Some("Connection refused"));
     println!("action = {:?}", action);
     assert!(matches!(action, FallbackAction::Retry { .. }));
     println!("requires_action = {}", action.requires_action());
     println!("sink_name = {:?}", action.sink_name());
 
-    print_section("7.3 达到阈值 → Fallback 到 file");
+    print_section("7.3 Threshold reached → Fallback to file");
     // 默认 failure_threshold = 3，前面已失败 1 次
     for _ in 0..3 {
         let _ = monitor.check_and_fallback("database", false, Some("Connection refused"));
@@ -373,26 +380,26 @@ fn show_sink_health_monitor() {
             println!("reason = {}", reason);
             assert_eq!(target, "file");
         }
-        _ => panic!("应处于 Fallback 状态"),
+        _ => panic!("should be Fallback"),
     }
     assert!(monitor.is_any_in_fallback());
 
-    print_section("7.4 恢复健康 → AttemptRecovery（指数退避）");
+    print_section("7.4 Healthy again → AttemptRecovery (exponential backoff)");
     let action = monitor.check_and_fallback("database", true, None);
     println!("action = {:?}", action);
     match &action {
         FallbackAction::AttemptRecovery { delay_ms, .. } => {
             println!("delay_ms = {}", delay_ms);
         }
-        _ => panic!("应为 AttemptRecovery"),
+        _ => panic!("should be AttemptRecovery"),
     }
 
-    print_section("7.5 恢复中再次健康 → Wait");
+    print_section("7.5 Healthy again during recovery → Wait");
     let action = monitor.check_and_fallback("database", true, None);
     println!("action = {:?}", action);
     assert!(matches!(action, FallbackAction::Wait { .. }));
 
-    print_section("7.6 confirm_recovery() 确认恢复");
+    print_section("7.6 confirm_recovery() confirms recovery");
     monitor.confirm_recovery("database");
     println!(
         "database state = {:?}",
@@ -403,7 +410,7 @@ fn show_sink_health_monitor() {
         FallbackState::Active
     );
 
-    print_section("7.7 FileSink 磁盘满 → 降级到 console");
+    print_section("7.7 FileSink disk full → fallback to console");
     let monitor2 = SinkHealthMonitor::with_defaults();
     for _ in 0..3 {
         let _ = monitor2.check_and_fallback("file", false, Some("No space left on device"));
@@ -412,19 +419,19 @@ fn show_sink_health_monitor() {
     println!("file state = {:?}", state);
     match &state {
         FallbackState::Fallback { target, .. } => assert_eq!(target, "console"),
-        _ => panic!("应处于 Fallback 状态"),
+        _ => panic!("should be Fallback"),
     }
 
-    print_section("7.8 加密错误 → 降级到 plaintext");
+    print_section("7.8 Encryption error → fallback to plaintext");
     let monitor3 = SinkHealthMonitor::with_defaults();
     let action = monitor3.handle_encryption_error("file", "Invalid key");
     println!("action = {:?}", action);
     match &action {
         FallbackAction::Fallback { target, .. } => assert_eq!(target, "plaintext"),
-        _ => panic!("应为 Fallback"),
+        _ => panic!("should be Fallback"),
     }
 
-    print_section("7.9 FallbackConfig 自定义 + FallbackStats 统计");
+    print_section("7.9 Custom FallbackConfig + FallbackStats");
     let config = FallbackConfig {
         enabled: true,
         initial_delay_ms: 500,
@@ -439,7 +446,7 @@ fn show_sink_health_monitor() {
     println!("stats = {:?}", stats);
     assert_eq!(stats.active_fallbacks, 0);
 
-    print_section("7.10 reset() 重置监控器");
+    print_section("7.10 reset() resets the monitor");
     for _ in 0..3 {
         let _ = monitor4.check_and_fallback("database", false, Some("err"));
     }
@@ -447,28 +454,28 @@ fn show_sink_health_monitor() {
     monitor4.reset();
     assert!(!monitor4.is_any_in_fallback());
     println!(
-        "reset 后 is_any_in_fallback = {}",
+        "is_any_in_fallback after reset = {}",
         monitor4.is_any_in_fallback()
     );
 
-    print_section("7.11 get_fallback_events() 事件历史");
+    print_section("7.11 get_fallback_events() event history");
     let monitor5 = SinkHealthMonitor::with_defaults();
     for _ in 0..3 {
         let _ = monitor5.check_and_fallback("database", false, Some("err"));
     }
     let events = monitor5.get_fallback_events(10);
-    println!("事件数 = {}", events.len());
+    println!("event count = {}", events.len());
     assert!(!events.is_empty());
-    println!("首条事件 sink = {}", events[0].sink_name);
-    println!("首条事件 from = {:?}", events[0].from_state);
-    println!("首条事件 to   = {:?}", events[0].to_state);
+    println!("first event sink = {}", events[0].sink_name);
+    println!("first event from = {:?}", events[0].from_state);
+    println!("first event to   = {:?}", events[0].to_state);
 }
 
 /// 展示 Prometheus 格式导出
 fn show_prometheus_export() {
-    print_separator("8. Prometheus 格式导出");
+    print_separator("8. Prometheus format export");
 
-    print_section("8.1 模拟指标采集");
+    print_section("8.1 Simulated metric collection");
     let metrics = Metrics::new();
     // 模拟日志写入
     for _ in 0..1000 {
@@ -495,7 +502,7 @@ fn show_prometheus_export() {
     metrics.sink_started("database");
     metrics.update_sink_health("database", false, Some("Connection refused".into()));
 
-    print_section("8.2 export_prometheus() 输出（截取关键行）");
+    print_section("8.2 export_prometheus() output (key lines excerpted)");
     let output = metrics.export_prometheus();
     // 验证关键 Prometheus 行存在
     assert!(output.contains("# TYPE inklog_logs_written_total counter"));
@@ -526,20 +533,20 @@ fn show_prometheus_export() {
         }
     }
 
-    print_section("8.3 HealthStatus 序列化预览（serde_json）");
+    print_section("8.3 HealthStatus serialization preview (serde_json)");
     let status = metrics.get_status(128, 1024);
     let json = serde_json::to_string_pretty(&status.metrics).unwrap_or_default();
     // 仅打印前若干行避免刷屏
     for (i, line) in json.lines().enumerate() {
         if i >= 12 {
-            println!("  ...（已截断）");
+            println!("  ... (truncated)");
             break;
         }
         println!("  {}", line);
     }
 
     println!(
-        "\n✓ Prometheus 导出包含 {} 个字符，{} 行",
+        "\n✓ Prometheus export has {} characters, {} lines",
         output.len(),
         output.lines().count()
     );

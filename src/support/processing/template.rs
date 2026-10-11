@@ -260,7 +260,8 @@ impl LogTemplate {
         if in_placeholder {
             tracing::warn!(
                 fragment = format!("{{{current}"),
-                "template contains an unclosed placeholder; it is rendered as literal text"
+                "{}",
+                crate::i18n::tr("template-unclosed_placeholder")
             );
         }
 

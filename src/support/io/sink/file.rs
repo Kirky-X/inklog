@@ -221,7 +221,9 @@ impl FileSink {
         {
             let mut inner = sink.inner.write();
             if let Err(e) = sink.open_file_inner(&mut inner) {
-                error!("Failed to open log file: {}", e);
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", &e);
+                error!("{}", crate::i18n::tr_args("sink-file_open_failed", args));
                 return Err(e);
             }
         }
@@ -329,15 +331,18 @@ impl FileSink {
             Ok(file) => {
                 inner.current_file = Some(std::io::BufWriter::with_capacity(64 * 1024, file));
                 inner.current_size = self.config.path.metadata().map(|m| m.len()).unwrap_or(0);
-                debug!(
-                    "Opened log file: {} (size: {} bytes)",
-                    self.config.path.display(),
-                    inner.current_size
-                );
+                debug!("{}", {
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("path", self.config.path.display());
+                    args.set("size", inner.current_size);
+                    crate::i18n::tr_args("log-file_opened", args)
+                });
                 Ok(())
             }
             Err(e) => {
-                error!("Failed to open log file: {}", e);
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", &e);
+                error!("{}", crate::i18n::tr_args("sink-file_open_failed", args));
                 Err(InklogError::IoError(e))
             }
         }
@@ -390,7 +395,9 @@ impl FileSink {
                     if last_cleanup.is_none_or(|t| now.duration_since(t) >= cleanup_interval) {
                         // 执行清理
                         if let Err(e) = Self::perform_cleanup(&config, &path) {
-                            error!("Cleanup failed: {}", e);
+                            let mut args = crate::i18n::MsgArgs::new();
+                            args.set("err", &e);
+                            error!("{}", crate::i18n::tr_args("sink-cleanup_failed", args));
                         } else {
                             *last_cleanup = Some(now);
                         }
@@ -465,10 +472,12 @@ impl FileSink {
                 }
             }
             Err(e) => {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("dir", parent.display().to_string());
+                args.set("err", &e);
                 warn!(
-                    "Failed to read directory '{}' for cleanup: {}",
-                    parent.display(),
-                    e
+                    "{}",
+                    crate::i18n::tr_args("sink-cleanup_dir_read_failed", args)
                 );
                 return Ok(());
             }
@@ -510,10 +519,12 @@ impl FileSink {
                 }
 
                 if let Err(e) = fs::remove_file(path) {
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("path", path.display().to_string());
+                    args.set("err", &e);
                     warn!(
-                        "Failed to remove {} during size cleanup: {}",
-                        path.display(),
-                        e
+                        "{}",
+                        crate::i18n::tr_args("sink-size_cleanup_remove_failed", args)
                     );
                 }
             }
@@ -526,10 +537,12 @@ impl FileSink {
             if modified_utc < cutoff_date
                 && let Err(e) = fs::remove_file(path)
             {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("path", path.display().to_string());
+                args.set("err", &e);
                 warn!(
-                    "Failed to remove {} during expiry cleanup: {}",
-                    path.display(),
-                    e
+                    "{}",
+                    crate::i18n::tr_args("sink-expiry_cleanup_remove_failed", args)
                 );
             }
         }
@@ -616,19 +629,23 @@ impl FileSink {
     fn mark_write_lost(&self, record: &LogRecord, reason: &str) {
         self.lost_records.fetch_add(1, Ordering::Relaxed);
         self.write_unhealthy.store(true, Ordering::Relaxed);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("reason", reason);
         error!(
             path = %self.config.path.display(),
             target = %record.target,
             level = %record.level,
-            "Log record lost: {}",
-            reason
+            "{}",
+            crate::i18n::tr_args("sink-record_lost", args)
         );
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("path", self.config.path.display());
+        args.set("target", record.target.clone());
+        args.set("level", record.level.to_string());
+        args.set("reason", reason);
         eprintln!(
-            "[inklog] LOST log record (sink: {}, target: {}, level: {}): {}",
-            self.config.path.display(),
-            record.target,
-            record.level,
-            reason
+            "[inklog] {}",
+            crate::i18n::tr_args("log-record_lost_stderr", args)
         );
     }
 
@@ -868,15 +885,19 @@ impl FileSink {
                         // Sync estimated size with actual file position to prevent drift
                     }
                     Err(e) => {
-                        error!("Batch write error: {}", e);
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("err", &e);
+                        error!("{}", crate::i18n::tr_args("sink-batch_write_failed", args));
                         inner.circuit_breaker.record_failure();
                         let _ = self.open_file_inner(inner);
                         // 失败记录及其后的记录回填缓冲区，等待下次 flush 重试
                         let unsent = records.len() - index;
                         inner.batch_buffer.extend_from_slice(&records[index..]);
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("unsent", unsent);
                         warn!(
-                            "Batch write failed: {} unsent records re-queued for retry",
-                            unsent
+                            "{}",
+                            crate::i18n::tr_args("sink-batch_write_requeued", args)
                         );
                         write_failed = true;
                         break;
@@ -950,7 +971,11 @@ impl FileSink {
 
     /// 执行文件轮转
     fn rotate_inner(&self, inner: &mut FileSinkInner) -> Result<(), InklogError> {
-        debug!("Rotating log file: {}", self.config.path.display());
+        debug!("{}", {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", self.config.path.display());
+            crate::i18n::tr_args("log-file_rotating", args)
+        });
 
         // 关闭当前文件
         let _ = inner.current_file.take();
@@ -965,13 +990,19 @@ impl FileSink {
         if self.config.path.exists()
             && let Err(e) = fs::rename(&self.config.path, &new_path)
         {
-            error!("Failed to rename log file: {}", e);
+            error!("{}", {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", &e);
+                crate::i18n::tr_args("sink-file-rename_failed", args)
+            });
             // 尝试复制后删除
             if fs::copy(&self.config.path, &new_path).is_ok() {
                 if let Err(e) = fs::remove_file(&self.config.path) {
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("err", &e);
                     warn!(
-                        "Failed to remove original file after copy during rotation: {}",
-                        e
+                        "{}",
+                        crate::i18n::tr_args("sink-rotate_copy_then_remove_failed", args)
                     );
                 }
             } else {
@@ -992,7 +1023,11 @@ impl FileSink {
         // carry over failure state from the previous file.
         inner.circuit_breaker.reset();
 
-        info!("Log rotated to: {}", new_path.display());
+        info!("{}", {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", new_path.display());
+            crate::i18n::tr_args("log-file_rotated_to", args)
+        });
 
         // 归档审计链：轮转成功即登记（path + SHA-256 + 时间戳），写穿 manifest
         // （共享单一事实源 register_rotated_archive，与 CBFS 同一实现）
@@ -1202,13 +1237,20 @@ pub(crate) fn encrypt_file_v2(
 
     // 读取输入文件
     let input_data = fs::read(input_path).map_err(|e| {
-        error!("Failed to read file for encryption: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("sink-encrypt_read_input_failed", args)
+        );
         InklogError::IoError(e)
     })?;
 
     // 加密
     let ciphertext = cipher.encrypt(&nonce, input_data.as_slice()).map_err(|e| {
-        error!("Encryption failed: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", e.to_string());
+        error!("{}", crate::i18n::tr_args("sink-encryption_failed", args));
         InklogError::EncryptionError {
             message: e.to_string(),
             source: Some(Box::new(e)),
@@ -1226,13 +1268,23 @@ pub(crate) fn encrypt_file_v2(
             .mode(0o600)
             .open(output_path)
             .map_err(|e| {
-                error!("Failed to create encrypted file: {}", e);
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", &e);
+                error!(
+                    "{}",
+                    crate::i18n::tr_args("sink-encrypted_file_create_failed", args)
+                );
                 InklogError::IoError(e)
             })?
     };
     #[cfg(not(unix))]
     let mut output = fs::File::create(output_path).map_err(|e| {
-        error!("Failed to create encrypted file: {}", e);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("sink-encrypted_file_create_failed", args)
+        );
         InklogError::IoError(e)
     })?;
 
@@ -1243,7 +1295,11 @@ pub(crate) fn encrypt_file_v2(
     output.write_all(&nonce_bytes)?;
     output.write_all(&ciphertext)?;
 
-    debug!("Encrypted log file: {}", output_path.display());
+    debug!("{}", {
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("path", output_path.display());
+        crate::i18n::tr_args("log-file_encrypted", args)
+    });
     Ok(())
 }
 
@@ -1257,10 +1313,12 @@ pub(crate) fn encrypt_file_v2(
 /// 加密后明文残留（remove_file 失败）：warn + `sink_degraded` ops 事件
 /// 显性上报——加密产物虽已生成，但明文源仍在盘上，属安全相关降级状态。
 fn report_plaintext_residue(path: &Path, err: &std::io::Error) {
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("path", path.display().to_string());
+    args.set("err", err);
     warn!(
-        "Failed to remove plaintext source after encryption {}: {}",
-        path.display(),
-        err
+        "{}",
+        crate::i18n::tr_args("sink-plaintext_residue_remove_failed", args)
     );
     crate::support::ops_event::publish_internal(
         "sink_degraded",
@@ -1314,7 +1372,11 @@ fn compress_rotated(
             let encrypted_path = super::compression::append_ext(&compressed_path, "enc");
             if let Err(e) = encrypt_file_v2(config, &compressed_path, &encrypted_path, key_override)
             {
-                error!("Encryption failed: {}", e);
+                error!("{}", {
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("err", &e);
+                    crate::i18n::tr_args("sink-encryption_failed", args)
+                });
                 // 加密失败，保留压缩文件
                 let _ = fs::rename(
                     &compressed_path,
@@ -1329,10 +1391,12 @@ fn compress_rotated(
         }
         // 删除原始文件
         if let Err(e) = fs::remove_file(path) {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", path.display().to_string());
+            args.set("err", &e);
             warn!(
-                "Failed to remove original file after compression {}: {}",
-                path.display(),
-                e
+                "{}",
+                crate::i18n::tr_args("sink-original_after_compression_remove_failed", args)
             );
         }
         Ok(compressed_path)
@@ -1350,7 +1414,11 @@ fn compress_rotated(
             let encrypted_path = super::compression::append_ext(&compressed_path, "enc");
             if let Err(e) = encrypt_file_v2(config, &compressed_path, &encrypted_path, key_override)
             {
-                error!("Encryption failed: {}", e);
+                error!("{}", {
+                    let mut args = crate::i18n::MsgArgs::new();
+                    args.set("err", &e);
+                    crate::i18n::tr_args("sink-encryption_failed", args)
+                });
                 // 加密失败，保留压缩文件
                 let _ = fs::rename(
                     &compressed_path,
@@ -1364,10 +1432,12 @@ fn compress_rotated(
             return Ok(encrypted_path);
         }
         if let Err(e) = fs::remove_file(path) {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", path.display().to_string());
+            args.set("err", &e);
             warn!(
-                "Failed to remove original file after compression {}: {}",
-                path.display(),
-                e
+                "{}",
+                crate::i18n::tr_args("sink-original_after_compression_remove_failed", args)
             );
         }
         Ok(compressed_path)
@@ -1377,17 +1447,19 @@ fn compress_rotated(
     {
         warn!(
             path = %path.display(),
-            "Compression requested but no compression backend feature is enabled \
-             (enable \"gzip\" or \"compression\"); leaving the file uncompressed"
+            "{}",
+            crate::i18n::tr("sink-no_compression_backend")
         );
         if config.encrypt {
             let encrypted_path = super::compression::append_ext(path, "enc");
             encrypt_file_v2(config, path, &encrypted_path, key_override)?;
             if let Err(e) = fs::remove_file(path) {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("path", path.display().to_string());
+                args.set("err", &e);
                 warn!(
-                    "Failed to remove original file after encryption {}: {}",
-                    path.display(),
-                    e
+                    "{}",
+                    crate::i18n::tr_args("sink-original_after_encryption_remove_failed", args)
                 );
             }
             return Ok(encrypted_path);
@@ -1435,7 +1507,7 @@ pub(crate) fn register_rotated_archive(
     if let Err(e) = fs::write(&manifest, body) {
         let mut args = crate::i18n::MsgArgs::new();
         args.set("path", manifest.display().to_string());
-        args.set("err", e);
+        args.set("err", &e);
         error!(
             "{}",
             crate::i18n::tr_args("sink-audit_manifest_write_failed", args)
@@ -1534,7 +1606,7 @@ impl LogSink for FileSink {
         // 检查磁盘空间（sync，不持有锁）
         if !self.check_disk_space()? {
             // 修复：磁盘不足且无法降级时记录不能静默吞掉
-            warn!("Low disk space - checking before write");
+            warn!("{}", crate::i18n::tr("sink-low_disk_space_check"));
             let fallback = self.inner.read().fallback_sink.clone();
             match fallback {
                 Some(sink) => {
@@ -1588,7 +1660,11 @@ impl LogSink for FileSink {
 
             if should_rotate {
                 if let Err(e) = self.rotate_inner(&mut inner) {
-                    error!("Rotation failed: {}", e);
+                    error!("{}", {
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("err", &e);
+                        crate::i18n::tr_args("sink-rotation_failed", args)
+                    });
                     inner.fallback_sink.clone()
                 } else {
                     // 轮转成功，继续 batch flush
@@ -1721,9 +1797,11 @@ impl Drop for FileSink {
                 let start = std::time::Instant::now();
                 while !handle.is_finished() {
                     if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("timeout_ms", SHUTDOWN_TIMEOUT_MS);
                         tracing::warn!(
-                            "Warning: rotation timer shutdown timeout after {}ms",
-                            SHUTDOWN_TIMEOUT_MS
+                            "{}",
+                            crate::i18n::tr_args("sink-rotation_timer_shutdown_timeout", args)
                         );
                         break;
                     }
@@ -1739,9 +1817,11 @@ impl Drop for FileSink {
                 let start = std::time::Instant::now();
                 while !handle.is_finished() {
                     if start.elapsed().as_millis() > SHUTDOWN_TIMEOUT_MS as u128 {
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("timeout_ms", SHUTDOWN_TIMEOUT_MS);
                         tracing::warn!(
-                            "Warning: cleanup timer shutdown timeout after {}ms",
-                            SHUTDOWN_TIMEOUT_MS
+                            "{}",
+                            crate::i18n::tr_args("sink-cleanup_timer_shutdown_timeout", args)
                         );
                         break;
                     }
@@ -3724,7 +3804,7 @@ mod tests {
         });
         assert!(
             !log_path.exists(),
-            "构建 LazyFileSink 不得创建目标文件（含父目录）"
+            "constructing a LazyFileSink must not create the target file (or its parent directory)"
         );
 
         let record = LogRecord {
@@ -3741,7 +3821,10 @@ mod tests {
         };
         sink.write(&record).await.unwrap();
         sink.flush().await.unwrap();
-        assert!(log_path.exists(), "首次写入后目标文件必须出现");
+        assert!(
+            log_path.exists(),
+            "the target file must exist after the first write"
+        );
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("first error event"));
         sink.shutdown().await.unwrap();

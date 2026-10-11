@@ -299,8 +299,8 @@ impl DatabaseSinkConfig {
         #[cfg(not(feature = "secret-scan"))]
         if self.secret_scan_enabled {
             tracing::warn!(
-                "database_sink.secret_scan_enabled=true requires the `secret-scan` feature; \
-                 the flag is ignored in this build"
+                "{}",
+                crate::i18n::tr("log-database_secret_scan_feature_missing")
             );
         }
         if self.driver == DatabaseDriver::SQLite {

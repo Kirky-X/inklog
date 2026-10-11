@@ -26,7 +26,7 @@ use tempfile::TempDir;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog ChannelBufferedFileSink 示例 ===\n");
+    println!("=== inklog ChannelBufferedFileSink examples ===\n");
 
     show_config_default();
     show_block_strategy().await?;
@@ -34,13 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     show_drop_oldest_strategy().await?;
     show_metrics_tracking().await?;
 
-    println!("\n✓ 所有 ChannelBufferedFileSink 示例演示完成");
+    println!("\n✓ all ChannelBufferedFileSink examples completed");
     Ok(())
 }
 
 /// 展示 ChannelBufferedConfig 默认配置
 fn show_config_default() {
-    print_separator("1. ChannelBufferedConfig 默认配置");
+    print_separator("1. ChannelBufferedConfig defaults");
 
     print_section("1.1 Default::default()");
     let cfg = ChannelBufferedConfig::default();
@@ -53,12 +53,12 @@ fn show_config_default() {
     assert_eq!(cfg.flush_interval_ms, 100);
     assert_eq!(cfg.backpressure_strategy, BackpressureStrategy::Block);
 
-    print_section("1.2 BackpressureStrategy 枚举值");
+    print_section("1.2 BackpressureStrategy enum values");
     println!("Block       = {:?}", BackpressureStrategy::Block);
     println!("DropOldest  = {:?}", BackpressureStrategy::DropOldest);
     println!("DropNewest  = {:?}", BackpressureStrategy::DropNewest);
 
-    print_section("1.3 自定义配置（小容量 + DropNewest）");
+    print_section("1.3 custom configuration (small capacity + DropNewest)");
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             fsync: false,
@@ -78,12 +78,12 @@ fn show_config_default() {
 
 /// 展示 Block 背压策略：channel 满时阻塞发送端，直到消费者取走数据
 async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("2. Block 背压策略（channel 满时阻塞）");
+    print_separator("2. Block backpressure strategy (block when the channel is full)");
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("block.log");
 
-    print_section("2.1 构造 ChannelBufferedFileSink");
+    print_section("2.1 construct a ChannelBufferedFileSink");
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -99,11 +99,11 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
     println!(
-        "sink 已创建，channel_capacity = {}",
+        "sink created, channel_capacity = {}",
         sink.metrics().channel_capacity
     );
 
-    print_section("2.2 写入 20 条日志");
+    print_section("2.2 write 20 log records");
     for i in 0..20 {
         let record = LogRecord::new(
             Level::INFO,
@@ -113,33 +113,38 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
         sink.write(&record).await?;
     }
 
-    print_section("2.3 flush + shutdown 确保数据落盘");
+    print_section("2.3 flush + shutdown to ensure data reaches disk");
     sink.flush().await?;
     sink.shutdown().await?;
 
     let data = std::fs::read_to_string(&log_path)?;
     assert!(data.contains("block-message-00"));
     assert!(data.contains("block-message-19"));
-    println!("文件大小: {} 字节", data.len());
-    println!("✓ 20 条日志全部写入（Block 策略无消息丢失）");
+    println!("File size: {} bytes", data.len());
+    println!("✓ all 20 log records written (the Block strategy loses nothing)");
 
     let m = sink.metrics();
-    println!("shutdown 后 metrics: dropped_count = {}", m.dropped_count);
-    println!("说明: Block 策略下 dropped_count 可能为非零值，");
-    println!("      这是 IO 线程对不完整批次（recv_count < batch_size）的统计，");
-    println!("      并非真正丢弃消息——文件内容已验证包含全部 20 条日志。");
+    println!(
+        "metrics after shutdown: dropped_count = {}",
+        m.dropped_count
+    );
+    println!("Note: with the Block strategy dropped_count can be non-zero;");
+    println!("      it counts incomplete batches (recv_count < batch_size) on the IO thread,");
+    println!(
+        "      not real message drops — the file content was verified to contain all 20 records."
+    );
 
     Ok(())
 }
 
 /// 展示 DropNewest 背压策略：channel 满时丢弃新到达的日志
 async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("3. DropNewest 背压策略（满时丢弃最新）");
+    print_separator("3. DropNewest backpressure strategy (drop the newest when full)");
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("drop_newest.log");
 
-    print_section("3.1 小容量 channel + DropNewest");
+    print_section("3.1 small channel + DropNewest");
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -157,9 +162,11 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
-    println!("channel_capacity = 4, flush_batch_size = 0（不自动排空）, flush_interval = 1000ms");
+    println!(
+        "channel_capacity = 4, flush_batch_size = 0 (no automatic drain), flush_interval = 1000ms"
+    );
 
-    print_section("3.2 快速写入 64 条日志（超出容量）");
+    print_section("3.2 write 64 records quickly (over capacity)");
     for i in 0..64 {
         let record = LogRecord::new(
             Level::INFO,
@@ -173,23 +180,23 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
 
     let m = sink.metrics();
     println!("metrics.dropped_count = {}", m.dropped_count);
-    assert!(m.dropped_count > 0, "DropNewest 应丢弃部分日志");
+    assert!(m.dropped_count > 0, "DropNewest should drop some records");
 
     sink.flush().await?;
     sink.shutdown().await?;
-    println!("✓ DropNewest 在 channel 满时丢弃新日志，dropped_count > 0");
+    println!("✓ DropNewest drops new records when the channel is full, dropped_count > 0");
 
     Ok(())
 }
 
 /// 展示 DropOldest 背压策略：channel 满时驱逐最旧的日志
 async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("4. DropOldest 背压策略（满时驱逐最旧）");
+    print_separator("4. DropOldest backpressure strategy (evict the oldest when full)");
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("drop_oldest.log");
 
-    print_section("4.1 小容量 channel + DropOldest");
+    print_section("4.1 small channel + DropOldest");
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -206,9 +213,11 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
     };
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
-    println!("channel_capacity = 4, flush_batch_size = 0（不自动排空）, flush_interval = 1000ms");
+    println!(
+        "channel_capacity = 4, flush_batch_size = 0 (no automatic drain), flush_interval = 1000ms"
+    );
 
-    print_section("4.2 快速写入 64 条日志（超出容量）");
+    print_section("4.2 write 64 records quickly (over capacity)");
     for i in 0..64 {
         let record = LogRecord::new(
             Level::INFO,
@@ -222,23 +231,26 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
 
     let m = sink.metrics();
     println!("metrics.dropped_count = {}", m.dropped_count);
-    assert!(m.dropped_count > 0, "DropOldest 应驱逐部分旧日志");
+    assert!(
+        m.dropped_count > 0,
+        "DropOldest should evict some old records"
+    );
 
     sink.flush().await?;
     sink.shutdown().await?;
-    println!("✓ DropOldest 在 channel 满时驱逐最旧日志，dropped_count > 0");
+    println!("✓ DropOldest evicts old records when the channel is full, dropped_count > 0");
 
     Ok(())
 }
 
 /// 展示 metrics 统计：channel_len / bytes_written / flush_count / dropped_count
 async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("5. ChannelBufferedMetrics 运行时统计");
+    print_separator("5. ChannelBufferedMetrics runtime statistics");
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("metrics.log");
 
-    print_section("5.1 构造 sink（channel_capacity=16, flush_interval=10ms）");
+    print_section("5.1 construct the sink (channel_capacity=16, flush_interval=10ms)");
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -254,7 +266,7 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
 
-    print_section("5.2 写入 10 条日志");
+    print_section("5.2 write 10 log records");
     for i in 0..10 {
         let record = LogRecord::new(
             Level::INFO,
@@ -264,7 +276,7 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
         sink.write(&record).await?;
     }
 
-    print_section("5.3 等待 IO 线程处理并读取 metrics");
+    print_section("5.3 wait for the IO thread and read metrics");
     // 轮询 metrics 直到 bytes_written > 0 且 flush_count >= 1，或超时 500ms
     // 注意：async 上下文中必须用 tokio::time::sleep 让出执行权，
     // std::thread::sleep 会阻塞 tokio worker 线程
@@ -282,8 +294,8 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
     println!("bytes_written    = {}", m.bytes_written);
     println!("flush_count      = {}", m.flush_count);
     println!("dropped_count    = {}", m.dropped_count);
-    assert!(m.bytes_written > 0, "应有字节写入");
-    assert!(m.flush_count >= 1, "应至少 flush 一次");
+    assert!(m.bytes_written > 0, "some bytes should be written");
+    assert!(m.flush_count >= 1, "should flush at least once");
 
     sink.flush().await?;
     sink.shutdown().await?;
@@ -291,7 +303,7 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read_to_string(&log_path)?;
     assert!(data.contains("metrics-message-00"));
     assert!(data.contains("metrics-message-09"));
-    println!("\n✓ 文件包含全部 10 条日志，metrics 统计正确");
+    println!("\n✓ the file contains all 10 records and the metrics are correct");
 
     Ok(())
 }

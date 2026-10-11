@@ -70,7 +70,7 @@ mod large_volume {
         let metadata = std::fs::metadata(&log_path).unwrap();
         assert!(
             metadata.len() > 50000,
-            "写入量应超过 50KB，实际 {} 字节",
+            "written volume should exceed 50KB, got {} bytes",
             metadata.len()
         );
     }

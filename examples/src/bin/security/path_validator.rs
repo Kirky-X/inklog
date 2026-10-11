@@ -15,7 +15,7 @@ use inklog_examples::common::{print_section, print_separator};
 use std::path::{Path, PathBuf};
 
 fn main() {
-    println!("=== inklog 路径验证器示例 ===\n");
+    println!("=== inklog path validator examples ===\n");
 
     show_path_traversal_detection();
     show_dangerous_components();
@@ -25,12 +25,12 @@ fn main() {
     show_sanitize_method();
     show_validation_result_constructors();
 
-    println!("\n✓ 所有路径验证器示例演示完成");
+    println!("\n✓ all path validator examples completed");
 }
 
 /// 展示路径遍历检测（".." 组件）
 fn show_path_traversal_detection() {
-    print_separator("1. 路径遍历检测（\"..\" 组件）");
+    print_separator("1. Path traversal detection (\"..\" components)");
     let validator = PathValidator::new();
 
     print_section("1.1 \"../etc/passwd\"");
@@ -44,7 +44,7 @@ fn show_path_traversal_detection() {
     println!("valid = {}, error = {:?}", result.valid, result.error);
     assert!(!result.valid);
 
-    print_section("1.3 安全相对路径 \"logs/app.log\"");
+    print_section("1.3 The safe relative path \"logs/app.log\"");
     let result = validator.validate(Path::new("logs/app.log"));
     println!("valid = {}", result.valid);
     assert!(result.valid);
@@ -52,7 +52,7 @@ fn show_path_traversal_detection() {
 
 /// 展示危险组件检测（/etc/passwd、.ssh、.env、.git 等）
 fn show_dangerous_components() {
-    print_separator("2. 危险组件检测（deny_components）");
+    print_separator("2. Dangerous component detection (deny_components)");
     let validator = PathValidator::new();
 
     print_section("2.1 \"/etc/passwd\"");
@@ -82,7 +82,7 @@ fn show_dangerous_components() {
     println!("valid = {}, error = {:?}", result.valid, result.error);
     assert!(!result.valid);
 
-    print_section("2.5 自定义空 deny_components 后 \"etc/passwd\" 通过");
+    print_section("2.5 \"etc/passwd\" passes with an empty deny_components");
     let config = PathValidatorConfig {
         allow_absolute: true,
         base_dir: None,
@@ -97,20 +97,20 @@ fn show_dangerous_components() {
 
 /// 展示绝对路径限制
 fn show_absolute_path_restriction() {
-    print_separator("3. 绝对路径限制（allow_absolute）");
+    print_separator("3. Absolute path restriction (allow_absolute)");
     let config = PathValidatorConfig {
         allow_absolute: false,
         ..Default::default()
     };
     let validator = PathValidator::with_config(config);
 
-    print_section("3.1 禁用绝对路径后验证 \"/absolute/path\"");
+    print_section("3.1 Validating \"/absolute/path\" after disabling absolute paths");
     let result = validator.validate(Path::new("/absolute/path"));
     println!("valid = {}, error = {:?}", result.valid, result.error);
     assert!(!result.valid);
     assert!(result.error.as_ref().unwrap().contains("Absolute"));
 
-    print_section("3.2 相对路径 \"relative/path\" 仍可用");
+    print_section("3.2 The relative path \"relative/path\" still works");
     let result = validator.validate(Path::new("relative/path"));
     println!("valid = {}", result.valid);
     assert!(result.valid);
@@ -118,8 +118,8 @@ fn show_absolute_path_restriction() {
 
 /// 展示符号链接检测
 fn show_symlink_detection() {
-    print_separator("4. 符号链接检测（allow_symlinks）");
-    print_section("4.1 不存在的路径（无 symlink，验证通过）");
+    print_separator("4. Symlink detection (allow_symlinks)");
+    print_section("4.1 A nonexistent path (no symlink, validation passes)");
     let config = PathValidatorConfig {
         allow_symlinks: false,
         ..Default::default()
@@ -129,20 +129,23 @@ fn show_symlink_detection() {
     println!("valid = {}", result.valid);
     assert!(result.valid);
 
-    print_section("4.2 allow_symlinks = true 配置");
+    print_section("4.2 The allow_symlinks = true configuration");
     let config = PathValidatorConfig {
         allow_symlinks: true,
         ..Default::default()
     };
     let validator = PathValidator::with_config(config);
     let result = validator.validate(Path::new("/nonexistent/path"));
-    println!("valid = {}（allow_symlinks=true 不拒绝）", result.valid);
+    println!(
+        "valid = {} (allow_symlinks=true does not reject)",
+        result.valid
+    );
     assert!(result.valid);
 }
 
 /// 展示 base_dir 约束
 fn show_base_dir_constraint() {
-    print_separator("5. base_dir 约束");
+    print_separator("5. base_dir constraint");
 
     // 创建临时基目录与子文件（Layer 0 仅使用本地文件系统）
     let temp_dir = std::env::temp_dir().join(format!(
@@ -154,9 +157,9 @@ fn show_base_dir_constraint() {
             .as_nanos()
     ));
     let nested = temp_dir.join("logs");
-    std::fs::create_dir_all(&nested).expect("创建临时目录失败");
+    std::fs::create_dir_all(&nested).expect("failed to create the temp dir");
     let log_file = nested.join("app.log");
-    std::fs::write(&log_file, "test").expect("写入临时文件失败");
+    std::fs::write(&log_file, "test").expect("failed to write the temp file");
 
     let config = PathValidatorConfig {
         allow_absolute: true,
@@ -166,12 +169,12 @@ fn show_base_dir_constraint() {
     };
     let validator = PathValidator::with_config(config);
 
-    print_section("5.1 base_dir 内的路径（通过）");
+    print_section("5.1 A path inside base_dir (passes)");
     let result = validator.validate(&log_file);
     println!("valid = {}, error = {:?}", result.valid, result.error);
     assert!(result.valid);
 
-    print_section("5.2 base_dir 外的路径（拒绝）");
+    print_section("5.2 A path outside base_dir (rejected)");
     let outside = std::env::temp_dir().join("inklog_outside_file.log");
     let result = validator.validate(&outside);
     println!("valid = {}, error = {:?}", result.valid, result.error);
@@ -179,39 +182,39 @@ fn show_base_dir_constraint() {
     assert!(result.error.as_ref().unwrap().contains("base directory"));
 
     let _ = std::fs::remove_dir_all(&temp_dir);
-    println!("\n已清理临时目录");
+    println!("\nTemporary directory cleaned");
 }
 
 /// 展示 sanitize 方法
 fn show_sanitize_method() {
-    print_separator("6. sanitize 方法");
+    print_separator("6. The sanitize method");
     let validator = PathValidator::new();
 
-    print_section("6.1 \"foo/../bar\" → 移除 ParentDir");
+    print_section("6.1 \"foo/../bar\" → remove ParentDir");
     let sanitized: PathBuf = validator
         .sanitize(Path::new("foo/../bar"))
-        .expect("非纯穿越路径应成功");
+        .expect("a path that is not pure traversal should succeed");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "bar");
 
-    print_section("6.2 \"foo/./bar\" → 移除 CurDir");
+    print_section("6.2 \"foo/./bar\" → remove CurDir");
     let sanitized = validator
         .sanitize(Path::new("foo/./bar"))
-        .expect("非纯穿越路径应成功");
+        .expect("a path that is not pure traversal should succeed");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "foo/bar");
 
-    print_section("6.3 \"foo/../bar/../baz\" → 多级移除");
+    print_section("6.3 \"foo/../bar/../baz\" → multi-level removal");
     let sanitized = validator
         .sanitize(Path::new("foo/../bar/../baz"))
-        .expect("非纯穿越路径应成功");
+        .expect("a path that is not pure traversal should succeed");
     println!("sanitized = {}", sanitized.display());
     assert_eq!(sanitized.to_string_lossy(), "baz");
 
-    print_section("6.3.1 \"../../etc/passwd\" → 纯穿越被拒绝");
+    print_section("6.3.1 \"../../etc/passwd\" → pure traversal is rejected");
     assert!(validator.sanitize(Path::new("../../etc/passwd")).is_err());
 
-    print_section("6.4 validate_and_sanitize() 组合方法");
+    print_section("6.4 The validate_and_sanitize() combination");
     let result = validator.validate_and_sanitize(Path::new("logs/app.log"));
     println!(
         "valid = {}, sanitized = {:?}",
@@ -223,7 +226,7 @@ fn show_sanitize_method() {
 
 /// 展示 ValidationResult 构造器
 fn show_validation_result_constructors() {
-    print_separator("7. ValidationResult 构造器");
+    print_separator("7. ValidationResult constructors");
 
     print_section("7.1 ValidationResult::valid()");
     let result = ValidationResult::valid();
@@ -235,10 +238,10 @@ fn show_validation_result_constructors() {
     assert!(result.error.is_none());
 
     print_section("7.2 ValidationResult::invalid(msg)");
-    let result = ValidationResult::invalid("自定义错误信息");
+    let result = ValidationResult::invalid("custom error message");
     println!("valid = {}, error = {:?}", result.valid, result.error);
     assert!(!result.valid);
-    assert_eq!(result.error.as_ref().unwrap(), "自定义错误信息");
+    assert_eq!(result.error.as_ref().unwrap(), "custom error message");
 
     print_section("7.3 ValidationResult::sanitized(path)");
     let result = ValidationResult::sanitized(PathBuf::from("/safe/path/file.log"));

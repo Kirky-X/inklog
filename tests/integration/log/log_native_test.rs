@@ -182,6 +182,6 @@ async fn test_log_to_file() {
     let contents = std::fs::read_to_string(&log_file).unwrap();
     assert!(
         contents.contains("This should go to file"),
-        "tracing 路径日志应落盘"
+        "logs written via the tracing path should persist"
     );
 }

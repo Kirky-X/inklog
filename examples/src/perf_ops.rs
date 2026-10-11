@@ -114,26 +114,30 @@ mod tests {
     fn test_format_throughput_normal() {
         // 验证：正常输入的格式化输出包含 count、秒数、ops/sec。
         let s = format_throughput(Duration::from_secs(2), 1000);
-        assert!(s.contains("1000 ops"), "应包含 count: {}", s);
-        assert!(s.contains("2.000s"), "应包含 2.000s: {}", s);
-        assert!(s.contains("500.00 ops/sec"), "应包含 500.00 ops/sec: {}", s);
+        assert!(s.contains("1000 ops"), "should contain count: {}", s);
+        assert!(s.contains("2.000s"), "should contain 2.000s: {}", s);
+        assert!(
+            s.contains("500.00 ops/sec"),
+            "should contain 500.00 ops/sec: {}",
+            s
+        );
     }
 
     #[test]
     fn test_format_throughput_zero_duration() {
         // 验证：零时长返回 N/A，避免除零。
         let s = format_throughput(Duration::ZERO, 100);
-        assert!(s.contains("N/A"), "零时长应返回 N/A: {}", s);
+        assert!(s.contains("N/A"), "zero duration should return N/A: {}", s);
     }
 
     #[test]
     fn test_format_throughput_subsecond() {
         // 验证：亚秒级时长的格式化（500ms = 0.5s，1000 ops → 2000 ops/sec）。
         let s = format_throughput(Duration::from_millis(500), 1000);
-        assert!(s.contains("0.500s"), "应包含 0.500s: {}", s);
+        assert!(s.contains("0.500s"), "should contain 0.500s: {}", s);
         assert!(
             s.contains("2000.00 ops/sec"),
-            "应包含 2000.00 ops/sec: {}",
+            "should contain 2000.00 ops/sec: {}",
             s
         );
     }

@@ -120,25 +120,49 @@ impl RegistryInner {
         let mut families = self.families.lock().unwrap();
         match families.get(name) {
             Some(existing) => {
-                assert_eq!(existing.help(), help, "metrics `{name}` help 不一致");
+                let mut help_args = crate::i18n::MsgArgs::new();
+                help_args.set("name", name);
+                assert_eq!(
+                    existing.help(),
+                    help,
+                    "{}",
+                    crate::i18n::tr_args("metrics-registry-help-mismatch", help_args)
+                );
+                let mut labels_args = crate::i18n::MsgArgs::new();
+                labels_args.set("name", name);
                 assert_eq!(
                     existing.label_names(),
                     label_names.as_slice(),
-                    "metrics `{name}` 标签不一致"
+                    "{}",
+                    crate::i18n::tr_args("metrics-registry-labels-mismatch", labels_args)
                 );
                 let existing_kind = match existing {
                     MetricFamily::Counter { .. } => MetricKind::Counter,
                     MetricFamily::Gauge { .. } => MetricKind::Gauge,
                     MetricFamily::Histogram { .. } => MetricKind::Histogram,
                 };
-                assert_eq!(existing_kind, kind, "metrics `{name}` 类型冲突");
+                let mut kind_args = crate::i18n::MsgArgs::new();
+                kind_args.set("name", name);
+                assert_eq!(
+                    existing_kind,
+                    kind,
+                    "{}",
+                    crate::i18n::tr_args("metrics-registry-kind-conflict", kind_args)
+                );
                 if let (MetricKind::Histogram, MetricFamily::Histogram { buckets: b0, .. }) =
                     (kind, existing)
                 {
                     assert_eq!(
                         b0,
-                        buckets.as_ref().expect("histogram 必带 buckets"),
-                        "metrics `{name}` buckets 不一致"
+                        buckets.as_ref().expect(&crate::i18n::tr(
+                            "metrics-registry-histogram_buckets-missing"
+                        )),
+                        "{}",
+                        {
+                            let mut args = crate::i18n::MsgArgs::new();
+                            args.set("name", name);
+                            crate::i18n::tr_args("metrics-registry-buckets-mismatch", args)
+                        }
                     );
                 }
             }
@@ -157,7 +181,9 @@ impl RegistryInner {
                     MetricKind::Histogram => MetricFamily::Histogram {
                         help: help.to_string(),
                         label_names,
-                        buckets: buckets.expect("histogram 必带 buckets"),
+                        buckets: buckets.expect(&crate::i18n::tr(
+                            "metrics-registry-histogram_buckets-missing",
+                        )),
                         series: BTreeMap::new(),
                     },
                 };
@@ -170,7 +196,7 @@ impl RegistryInner {
     fn counter_series(&self, name: &str, values: &[String]) -> Arc<AtomicU64> {
         let mut families = self.families.lock().unwrap();
         let Some(MetricFamily::Counter { series, .. }) = families.get_mut(name) else {
-            unreachable!("counter 已注册且类型校验过");
+            unreachable!("{}", crate::i18n::tr("metrics-registry-counter-registered"));
         };
         series
             .entry(values.to_vec())
@@ -182,7 +208,7 @@ impl RegistryInner {
     fn gauge_series(&self, name: &str, values: &[String]) -> Arc<AtomicU64> {
         let mut families = self.families.lock().unwrap();
         let Some(MetricFamily::Gauge { series, .. }) = families.get_mut(name) else {
-            unreachable!("gauge 已注册且类型校验过");
+            unreachable!("{}", crate::i18n::tr("metrics-registry-gauge-registered"));
         };
         series
             .entry(values.to_vec())
@@ -197,7 +223,10 @@ impl RegistryInner {
             buckets, series, ..
         }) = families.get_mut(name)
         else {
-            unreachable!("histogram 已注册且类型校验过");
+            unreachable!(
+                "{}",
+                crate::i18n::tr("metrics-registry-histogram-registered")
+            );
         };
         let buckets = buckets.clone();
         series
@@ -576,7 +605,7 @@ mod tests {
             .find(|l| l.starts_with("business_latency_seconds_sum"))
             .unwrap();
         let sum: f64 = sum_line.split_whitespace().last().unwrap().parse().unwrap();
-        assert!((sum - 5.55).abs() < 1e-9, "sum 应为 5.55，实际 {sum}");
+        assert!((sum - 5.55).abs() < 1e-9, "sum should be 5.55, got {sum}");
         assert!(text.contains("business_latency_seconds_count 3"));
     }
 
@@ -589,7 +618,10 @@ mod tests {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = registry.register_gauge_vec("m_total", "help", &["a"]);
         }));
-        assert!(result.is_err(), "同名不同类型应 panic");
+        assert!(
+            result.is_err(),
+            "the same name with a different type must panic"
+        );
     }
 
     /// 无标签指标：导出行不带 `{}`。

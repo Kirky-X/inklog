@@ -55,7 +55,10 @@ mod multi_sink_fallback {
 
         // 故障触发降级：database 故障 → 降级到 file（determine_fallback_target）
         let action = monitor.check_and_fallback("database", false, Some("connection refused"));
-        assert!(action.requires_action(), "故障应产生降级动作");
+        assert!(
+            action.requires_action(),
+            "the failure should produce a fallback action"
+        );
         assert!(monitor.is_any_in_fallback());
         assert_eq!(
             monitor.get_fallback_state("database"),
@@ -85,7 +88,7 @@ mod multi_sink_fallback {
 
         monitor.check_and_fallback("file", false, Some("disk full"));
         let events = monitor.get_fallback_events(10);
-        assert!(!events.is_empty(), "降级事件应被记录");
+        assert!(!events.is_empty(), "the fallback event should be recorded");
         assert_eq!(events[0].sink_name, "file");
     }
 
@@ -98,7 +101,7 @@ mod multi_sink_fallback {
         let action = monitor.check_and_fallback("database", false, Some("connection refused"));
         assert!(
             matches!(action, FallbackAction::Retry { ref attempt, .. } if *attempt == 1),
-            "未达阈值应返回 Retry(attempt=1)，实际: {:?}",
+            "below threshold should return Retry(attempt=1), got: {:?}",
             action
         );
         assert!(!monitor.is_any_in_fallback());
@@ -290,7 +293,10 @@ mod multi_sink_fallback {
             None,
         )
         .await;
-        assert!(result.is_err(), "无效数据库 URL 应导致初始化快速失败");
+        assert!(
+            result.is_err(),
+            "an invalid database URL should fail initialization fast"
+        );
     }
 
     // === 所有 Sink 不可用时的处理 ===
@@ -346,7 +352,10 @@ mod multi_sink_fallback {
             None,
         )
         .await;
-        assert!(result.is_err(), "文件与数据库均不可用应导致初始化快速失败");
+        assert!(
+            result.is_err(),
+            "both file and database unavailable should fail initialization fast"
+        );
     }
 
     // === 并发降级场景测试 ===

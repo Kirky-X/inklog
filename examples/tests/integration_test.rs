@@ -30,34 +30,38 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 /// 端到端：file_ops 创建文件 → 写入多级别 → 读取验证 → 清理。
 #[tokio::test]
 async fn integration_file_ops_end_to_end() {
-    let dir = tempfile::tempdir().expect("创建临时目录失败");
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
     let log_path = dir.path().join("integration.log");
     let path_str = log_path.to_str().unwrap();
 
     let config = create_file_config(path_str, "10MB", false);
-    let sink = FileSink::new(config).expect("创建 FileSink 失败");
+    let sink = FileSink::new(config).expect("failed to create FileSink");
 
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
-    let written = write_level_records(&sink, &levels).await.expect("写入失败");
+    let written = write_level_records(&sink, &levels)
+        .await
+        .expect("write failed");
     assert_eq!(written, 5);
 
     assert!(log_path.exists());
-    let content = std::fs::read_to_string(&log_path).expect("读取失败");
+    let content = std::fs::read_to_string(&log_path).expect("read failed");
     for level in &levels {
-        assert!(content.contains(level), "应包含 {}", level);
+        assert!(content.contains(level), "should contain {}", level);
     }
 
     // 4. 用 cleanup_files 清理（按 prefix）
     let prefix = "integration";
-    let deleted = cleanup_files(path_str, prefix).await.expect("cleanup 失败");
-    assert!(deleted >= 1, "至少应删除 1 个文件");
-    assert!(!log_path.exists(), "清理后文件应不存在");
+    let deleted = cleanup_files(path_str, prefix)
+        .await
+        .expect("cleanup failed");
+    assert!(deleted >= 1, "at least 1 file should be deleted");
+    assert!(!log_path.exists(), "file should not exist after cleanup");
 }
 
 /// 端到端：file_ops 写入明文 → crypto_ops 加密 → crypto_ops 解密 → 内容一致。
 #[tokio::test]
 async fn integration_file_then_crypto_roundtrip() {
-    let dir = tempfile::tempdir().expect("创建临时目录失败");
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
     let plain_path = dir.path().join("plain.log");
     let enc_path = dir.path().join("plain.log.enc");
     let plain_str = plain_path.to_str().unwrap();
@@ -65,31 +69,33 @@ async fn integration_file_then_crypto_roundtrip() {
 
     // 1. 用 file_ops 写入明文日志
     let config = create_file_config(plain_str, "10MB", false);
-    let sink = FileSink::new(config).expect("创建 FileSink 失败");
+    let sink = FileSink::new(config).expect("failed to create FileSink");
     let levels = ["INFO", "WARN", "ERROR"];
-    write_level_records(&sink, &levels).await.expect("写入失败");
+    write_level_records(&sink, &levels)
+        .await
+        .expect("write failed");
 
     // 2. 用 crypto_ops 加密（持有锁以保护环境变量）
     let _guard = ENV_LOCK.lock().unwrap();
     let key = generate_temp_key();
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
-    encrypt_log_file(plain_str, enc_str, "LOG_ENCRYPTION_KEY").expect("加密失败");
+    encrypt_log_file(plain_str, enc_str, "LOG_ENCRYPTION_KEY").expect("encryption failed");
 
     // 3. 验证加密文件存在且文件头正确
     assert!(enc_path.exists());
-    let header = parse_encrypted_format(enc_str).expect("解析失败");
+    let header = parse_encrypted_format(enc_str).expect("parse failed");
     assert!(header.is_valid_magic());
     assert!(header.is_aes_gcm());
 
     // 4. 用 crypto_ops 解密
-    let decrypted = decrypt_file(enc_str, "LOG_ENCRYPTION_KEY").expect("解密失败");
+    let decrypted = decrypt_file(enc_str, "LOG_ENCRYPTION_KEY").expect("decryption failed");
 
     // 5. 验证解密内容包含原日志信息（注意：FileSink 写入会附加模板格式）
     for level in &levels {
         assert!(
             decrypted.contains(level),
-            "解密内容应包含级别 {}，实际: {}",
+            "decrypted content should contain level {}, got: {}",
             level,
             decrypted
         );
@@ -114,7 +120,11 @@ fn integration_template_render_pipeline() {
     assert_eq!(results.len(), 5);
 
     for (name, output) in &results {
-        assert!(!output.is_empty(), "格式 [{}] 输出不应为空", name);
+        assert!(
+            !output.is_empty(),
+            "format [{}] output should not be empty",
+            name
+        );
         for placeholder in [
             "{level}",
             "{timestamp}",
@@ -125,21 +135,21 @@ fn integration_template_render_pipeline() {
         ] {
             assert!(
                 !output.contains(placeholder),
-                "格式 [{}] 仍含未替换占位符 {}",
+                "format [{}] still contains an unreplaced placeholder {}",
                 name,
                 placeholder
             );
         }
     }
 
-    // 4. 验证简洁格式包含级别 INFO 和消息
+    // 4. 验证compact format包含级别 INFO 和消息
     let simple = results
         .iter()
-        .find(|(n, _)| n == "简洁格式")
+        .find(|(n, _)| n == "compact format")
         .map(|(_, v)| v.as_str())
         .unwrap();
     assert!(simple.contains("INFO"));
-    assert!(simple.contains("用户登录成功"));
+    assert!(simple.contains("user logged in"));
 }
 
 /// 端到端：console_ops 写入测试用例 + perf_ops 计算延迟百分位。
@@ -161,15 +171,17 @@ async fn integration_console_write_with_perf_stats() {
     for (level, msg) in cases {
         let start = std::time::Instant::now();
         let single = [(level, msg)];
-        write_test_cases(&sink, &single).await.expect("写入失败");
+        write_test_cases(&sink, &single)
+            .await
+            .expect("write failed");
         latencies.push(start.elapsed());
     }
 
     // 2. 用 perf_ops 计算百分位
     let (p50, p95, p99) = calculate_percentiles(latencies);
     // 5 个元素，p50 = sorted[2], p95_idx = 4, p99_idx = 4
-    assert!(p50 <= p95, "P50 应 <= P95");
-    assert!(p95 <= p99, "P95 应 <= P99");
+    assert!(p50 <= p95, "P50 should be <= P95");
+    assert!(p95 <= p99, "P95 should be <= P99");
 
     // 3. 用 perf_ops 格式化吞吐量
     let total = std::time::Instant::now() - std::time::Instant::now() + Duration::from_millis(10);
@@ -189,18 +201,18 @@ fn integration_record_construction_and_template() {
     let template = LogTemplate::new("[{level}] {message}");
     let rendered = template.render(&sample);
     assert!(rendered.contains("[INFO]"));
-    assert!(rendered.contains("用户登录成功"));
+    assert!(rendered.contains("user logged in"));
 }
 
 /// 端到端：crypto_ops 加密 → 修改密文 1 字节 → 解密应失败（GCM 完整性）。
 #[test]
 fn integration_crypto_tamper_detection() {
     let _guard = ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().expect("创建临时目录失败");
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
     let plain = dir.path().join("plain.log");
     let enc = dir.path().join("plain.log.enc");
 
-    std::fs::write(&plain, "敏感内容：用户密码 = hunter2").unwrap();
+    std::fs::write(&plain, "sensitive content: user password = hunter2").unwrap();
     let key = generate_temp_key();
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
@@ -209,17 +221,20 @@ fn integration_crypto_tamper_detection() {
         enc.to_str().unwrap(),
         "LOG_ENCRYPTION_KEY",
     )
-    .expect("加密失败");
+    .expect("encryption failed");
 
     // 篡改密文（翻转第 30 字节，位于 ciphertext 区域）
     let mut bytes = std::fs::read(&enc).unwrap();
-    assert!(bytes.len() > 30, "加密文件应足够长");
+    assert!(bytes.len() > 30, "encrypted file should be long enough");
     bytes[30] ^= 0xFF;
     std::fs::write(&enc, &bytes).unwrap();
 
     // 解密应失败（GCM 认证标签不匹配）
     let result = decrypt_file(enc.to_str().unwrap(), "LOG_ENCRYPTION_KEY");
-    assert!(result.is_err(), "篡改密文后解密应失败");
+    assert!(
+        result.is_err(),
+        "decryption should fail after ciphertext tampering"
+    );
 
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };

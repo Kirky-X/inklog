@@ -542,7 +542,9 @@ impl DataMasker {
     /// 非纯汉字 / 长度不符返回 None（调用方保持原值）。
     fn mask_cjk_name(value: &str) -> Option<String> {
         static CJK_NAME_SHAPE: LazyLock<fancy_regex::Regex> = LazyLock::new(|| {
-            fancy_regex::Regex::new(r"^[\p{Han}]{2,4}$").expect("Invalid CJK name shape regex")
+            fancy_regex::Regex::new(r"^[\p{Han}]{2,4}$").unwrap_or_else(|_| {
+                panic!("{}", crate::i18n::tr("masking-cjk_name_shape_invariant"))
+            })
         });
         if !CJK_NAME_SHAPE.is_match(value).unwrap_or(false) {
             return None;
@@ -724,69 +726,79 @@ impl DataMaskerBuilder {
 }
 
 /// Pre-compiled regex patterns for better performance
-static EMAIL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+").expect("Invalid email regex"));
+static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-email_invariant")))
+});
 
 static PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     // 负向断言而非 \b：regex 的 \b 是 Unicode 词边界，CJK 汉字属词字符，
     // "电话13812345678" 这类数字紧贴汉字的文本在 \b 语义下无边界、会漏报。
-    Regex::new(r"(?<![0-9A-Za-z])1[3-9]\d{9}(?![0-9A-Za-z])").expect("Invalid phone regex")
+    Regex::new(r"(?<![0-9A-Za-z])1[3-9]\d{9}(?![0-9A-Za-z])")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-phone_invariant")))
 });
 
 static ID_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     // [\dXx]：身份证校验位小写 x 同样合法；两侧负向断言理由同 PHONE_REGEX。
     Regex::new(r"(?<![0-9A-Za-z])(\d{6})(\d{8})(\d{3}[\dXx])(?![0-9A-Za-z])")
-        .expect("Invalid ID card regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-id_card_invariant")))
 });
 
 static BANK_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     // 收紧为 16-19 位（4 + 8..11 + 4）：13 位毫秒时间戳曾被 5,11 中段误掩。
     Regex::new(r"(?<![0-9A-Za-z])(\d{4})(\d{8,11})(\d{4})(?![0-9A-Za-z])")
-        .expect("Invalid bank card regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-bank_card_invariant")))
 });
 
 /// API Key 模式 - 匹配常见的 API key 格式（组 1 = 键名与分隔符，组 2 = 值；
 /// 值不放组 1，否则替换会把键名连同值一起展开、再被 generic_secret 二次命中）
 static API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(api[_-]?key[^\s:=]*\s*[=:]\s*)([a-zA-Z0-9_-]{20,})")
-        .expect("Invalid API key regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-api_key_invariant")))
 });
 
 /// AWS Access Key 模式 - 匹配 AKIA 开头的 AWS 密钥
 static AWS_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}").expect("Invalid AWS key regex")
+    Regex::new(r"(?i)(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-aws_key_invariant")))
 });
 
 /// JWT Token 模式 - 匹配 JWT 格式
 static JWT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*")
-        .expect("Invalid JWT regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-jwt_invariant")))
 });
 
 /// 通用密钥/密码模式 - 匹配 key=value 或 "key": "value" 中的敏感值
 static GENERIC_SECRET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)([^\s:=]*(?:token|secret|key|password|passwd|pwd|credential)s?[^\s:=]*\s*[=:]\s*)([a-zA-Z0-9_\-\+]{16,})")
-        .expect("Invalid generic secret regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-generic_secret_invariant")))
 });
 
 // === High-priority rules (compliance) ===
 
 /// International phone (E.164 format)
 static INTERNATIONAL_PHONE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\+(\d{1,3})[\s.-]?(\(?\d{1,4}\)?[\s.-]?\d{2,4}[\s.-]?)(\d{2,4})")
-        .expect("Invalid international phone regex")
+    Regex::new(r"\+(\d{1,3})[\s.-]?(\(?\d{1,4}\)?[\s.-]?\d{2,4}[\s.-]?)(\d{2,4})").unwrap_or_else(
+        |_| {
+            panic!(
+                "{}",
+                crate::i18n::tr("masking-international_phone_invariant")
+            )
+        },
+    )
 });
 
 /// Credit card (major card networks)
 static CREDIT_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?<![0-9])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|35[0-9]{14})(?![0-9])")
-        .expect("Invalid credit card regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-credit_card_invariant")))
 });
 
 /// IPv4 address
 static IPV4_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b")
-        .expect("Invalid IPv4 regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-ipv4_invariant")))
 });
 
 /// IPv6 地址 - 完整 8 组形式与 `::` 压缩形式（RFC 5952 规范写法，日志中最常见）。
@@ -796,12 +808,13 @@ static IPV6_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?<![0-9A-Za-z])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?|:(?::[0-9a-fA-F]{1,4})+|::)(?![0-9A-Za-z])",
     )
-    .expect("Invalid IPv6 regex")
+    .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-ipv6_invariant")))
 });
 
 /// MAC address
 static MAC_ADDRESS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b").expect("Invalid MAC address regex")
+    Regex::new(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-mac_address_invariant")))
 });
 
 // === Medium-priority rules (regional identity) ===
@@ -812,45 +825,52 @@ static MAC_ADDRESS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 /// 结果 e/g 开头的 9 字母英文单词（如 execution）被整体误掩；纯数字
 /// 后缀下不存在"混合 hex"误伤形态，无需额外排除前瞻。
 static PASSPORT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?<![0-9A-Za-z])[EeGg]\d{8}(?![0-9A-Za-z])").expect("Invalid passport regex")
+    Regex::new(r"(?<![0-9A-Za-z])[EeGg]\d{8}(?![0-9A-Za-z])")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-passport_invariant")))
 });
 
 /// US Social Security Number
 static SSN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?<![0-9A-Za-z])\d{3}-\d{2}-\d{4}(?![0-9A-Za-z])").expect("Invalid SSN regex")
+    Regex::new(r"(?<![0-9A-Za-z])\d{3}-\d{2}-\d{4}(?![0-9A-Za-z])")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-ssn_invariant")))
 });
 
 /// Database connection string (password in URI)
 static DB_CONNECTION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)((?:postgres|mysql|mongodb|redis|amqp)://[^:\s]+:)([^@]+)(@\S+)")
-        .expect("Invalid DB connection regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-db_connection_invariant")))
 });
 
 // === Low-priority rules (third-party tokens) ===
 
 /// GitHub personal access token
 static GITHUB_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{36,}\b").expect("Invalid GitHub token regex")
+    Regex::new(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{36,}\b")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-github_token_invariant")))
 });
 
 /// Slack token
 static SLACK_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"xox[bpas]-[0-9]{10,13}-[0-9a-zA-Z-]+").expect("Invalid Slack token regex")
+    Regex::new(r"xox[bpas]-[0-9]{10,13}-[0-9a-zA-Z-]+")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-slack_token_invariant")))
 });
 
 /// Stripe API key
 static STRIPE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:sk|pk)_(?:live|test)_[0-9a-zA-Z]{24,}").expect("Invalid Stripe key regex")
+    Regex::new(r"(?:sk|pk)_(?:live|test)_[0-9a-zA-Z]{24,}")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-stripe_key_invariant")))
 });
 
 /// Google API key
-static GOOGLE_API_KEY_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"AIza[0-9A-Za-z_-]{35}").expect("Invalid Google API key regex"));
+static GOOGLE_API_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"AIza[0-9A-Za-z_-]{35}")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-google_api_key_invariant")))
+});
 
 /// Private key PEM block
 static PRIVATE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----")
-        .expect("Invalid private key regex")
+        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-private_key_invariant")))
 });
 
 /// 引擎级匹配错误统一留痕/广播出口：apply 闭包无 self，以规则名直呼；
@@ -2056,7 +2076,7 @@ mod tests {
         );
         assert!(
             result.contains("****:****:****:****:****:****:****:1"),
-            "末段分组保留真实值，got: {result}"
+            "the last group keeps the real value, got: {result}"
         );
     }
 
@@ -2376,9 +2396,18 @@ mod tests {
             "legal_name": "达尔文进化论研究小组"
         });
         masker.mask_value(&mut fields);
-        assert_eq!(fields["real_name"], "John Smith", "非纯汉字不动");
-        assert_eq!(fields["contact_name"], "张三123", "含非汉字字符不动");
-        assert_eq!(fields["legal_name"], "达尔文进化论研究小组", "超长不动");
+        assert_eq!(
+            fields["real_name"], "John Smith",
+            "a value that is not purely Han characters must be left untouched"
+        );
+        assert_eq!(
+            fields["contact_name"], "张三123",
+            "a value containing non-Han characters must be left untouched"
+        );
+        assert_eq!(
+            fields["legal_name"], "达尔文进化论研究小组",
+            "an over-long value must be left untouched"
+        );
     }
 
     #[test]

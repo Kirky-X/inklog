@@ -137,6 +137,8 @@ cli-decrypt-err-output-symlink = Output path is a symbolic link: { $path }
 cli-decrypt-err-input-dir-symlink = Input directory is a symbolic link: { $path }
 cli-decrypt-err-subdir-symlink = Subdirectory entry is a symbolic link (skipping): { $path }
 
+cli-decrypt-err-truncated-v2 = truncated v2 header: expected 40 bytes (including the 16-byte PBKDF2 salt), got { $read_count }
+
 # CLI generate path validation
 
 cli-generate-err-path-traversal = Output path contains traversal pattern: { $path }
@@ -172,6 +174,9 @@ cli-query-help-level = Minimum level: trace/debug/info/warn/error/fatal
 cli-query-help-grep = Substring filter applied to message and target
 cli-query-help-limit = Maximum number of records to return (0 = unlimited)
 cli-query-help-key-env = Environment variable name holding the decryption key for .enc files
+
+cli-query-err-invalid-rfc3339 = invalid --{ $flag } '{ $raw }': expected RFC3339 ({ $err })
+cli-query-err-no-path = query requires at least one --path (file or directory)
 
 cli-verify-chain-about = Verify the archive audit chain (HMAC-SHA256) manifest for tampering
 cli-verify-chain-help-manifest = Audit chain manifest (<stem>.chain.jsonl)

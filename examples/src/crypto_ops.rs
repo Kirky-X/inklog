@@ -201,20 +201,20 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn write_plaintext(path: &str, content: &str) {
-        std::fs::write(path, content).expect("写入明文文件失败");
+        std::fs::write(path, content).expect("failed to write plaintext file");
     }
 
     #[test]
     fn test_generate_temp_key_length() {
         // 验证：Base64 编码的 32 字节 → 44 字符（无 padding 也是 44，因 32 字节正好整除 3）。
         let key = generate_temp_key();
-        assert_eq!(key.len(), 44, "Base64(32 bytes) 应为 44 字符");
+        assert_eq!(key.len(), 44, "Base64(32 bytes) should be 44 chars");
         // 解码后必须是 32 字节
         use base64::{Engine as _, engine::general_purpose};
         let decoded = general_purpose::STANDARD
             .decode(&key)
-            .expect("Base64 解码失败");
-        assert_eq!(decoded.len(), 32, "解码后必须是 32 字节密钥");
+            .expect("Base64 decode failed");
+        assert_eq!(decoded.len(), 32, "decoded key must be 32 bytes");
     }
 
     #[test]
@@ -222,31 +222,33 @@ mod tests {
         // 验证：两次生成应不同（极小概率相同，视为不同）。
         let a = generate_temp_key();
         let b = generate_temp_key();
-        assert_ne!(a, b, "两次生成的密钥应不同");
+        assert_ne!(a, b, "two generated keys should differ");
     }
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
         // 验证：加密后能解密还原为原文。
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
         let plain = dir.path().join("plain.log");
         let enc = dir.path().join("plain.log.enc");
         let plain_path = plain.to_str().unwrap();
         let enc_path = enc.to_str().unwrap();
 
-        let content =
-            "2026-03-19 [INFO] encryption - 这是一条加密的日志消息\n敏感数据会被自动加密保护\n";
+        let content = "2026-03-19 [INFO] encryption - this is an encrypted log message\nsensitive data is automatically encrypted\n";
         write_plaintext(plain_path, content);
 
         let key = generate_temp_key();
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
 
-        encrypt_log_file(plain_path, enc_path, "LOG_ENCRYPTION_KEY").expect("加密失败");
-        let decrypted = decrypt_file(enc_path, "LOG_ENCRYPTION_KEY").expect("解密失败");
+        encrypt_log_file(plain_path, enc_path, "LOG_ENCRYPTION_KEY").expect("encryption failed");
+        let decrypted = decrypt_file(enc_path, "LOG_ENCRYPTION_KEY").expect("decryption failed");
 
-        assert_eq!(decrypted, content, "解密结果应与原文一致");
+        assert_eq!(
+            decrypted, content,
+            "decrypted result should match the original"
+        );
 
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
@@ -256,7 +258,7 @@ mod tests {
     fn test_parse_encrypted_format() {
         // 验证：解析文件头返回正确的 magic/version/algo/nonce。
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
         let plain = dir.path().join("plain.log");
         let enc = dir.path().join("plain.log.enc");
 
@@ -269,14 +271,17 @@ mod tests {
             enc.to_str().unwrap(),
             "LOG_ENCRYPTION_KEY",
         )
-        .expect("加密失败");
+        .expect("encryption failed");
 
-        let header = parse_encrypted_format(enc.to_str().unwrap()).expect("解析失败");
-        assert!(header.is_valid_magic(), "magic 应匹配 ENCLOG1\\0");
+        let header = parse_encrypted_format(enc.to_str().unwrap()).expect("failed to parse header");
+        assert!(header.is_valid_magic(), "magic should match ENCLOG1\\0");
         assert_eq!(header.version, VERSION);
-        assert!(header.is_aes_gcm(), "算法应为 AES-256-GCM");
+        assert!(header.is_aes_gcm(), "algorithm should be AES-256-GCM");
         // nonce 不应全零（极小概率）
-        assert!(header.nonce.iter().any(|&b| b != 0), "nonce 不应全零");
+        assert!(
+            header.nonce.iter().any(|&b| b != 0),
+            "nonce should not be all zero"
+        );
 
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
@@ -286,7 +291,7 @@ mod tests {
     fn test_decrypt_wrong_key_fails() {
         // 验证：用错误密钥解密应失败（GCM 认证标签不匹配）。
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
         let plain = dir.path().join("plain.log");
         let enc = dir.path().join("plain.log.enc");
 
@@ -299,19 +304,19 @@ mod tests {
             enc.to_str().unwrap(),
             "LOG_ENCRYPTION_KEY",
         )
-        .expect("加密失败");
+        .expect("encryption failed");
 
         // 用另一个密钥解密
         let key2 = generate_temp_key();
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key2) };
         let result = decrypt_file(enc.to_str().unwrap(), "LOG_ENCRYPTION_KEY");
-        assert!(result.is_err(), "用错误密钥解密应失败");
+        assert!(result.is_err(), "decryption with the wrong key should fail");
         // 错误信息应包含 "Decryption failed"
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("Decryption failed"),
-            "错误信息应说明解密失败，实际: {}",
+            "error message should indicate decryption failure, got: {}",
             err_msg
         );
 
@@ -323,7 +328,7 @@ mod tests {
     fn test_decrypt_invalid_header_fails() {
         // 验证：无效文件头（魔数错误）应失败。
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
         let bad = dir.path().join("bad.log.enc");
         // 写入 24 字节但魔数错误
         let mut content = vec![0u8; 24];
@@ -331,13 +336,13 @@ mod tests {
         std::fs::write(&bad, &content).unwrap();
 
         let result = decrypt_file(bad.to_str().unwrap(), "LOG_ENCRYPTION_KEY");
-        assert!(result.is_err(), "无效文件头应导致失败");
+        assert!(result.is_err(), "invalid file header should cause failure");
         assert!(
             result
                 .unwrap_err()
                 .to_string()
                 .contains("Invalid file header"),
-            "错误信息应说明文件头无效"
+            "error message should indicate an invalid file header"
         );
     }
 
@@ -345,23 +350,26 @@ mod tests {
     fn test_decrypt_short_file_fails() {
         // 验证：文件小于 24 字节（文件头长度）应失败。
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
         let short = dir.path().join("short.log.enc");
         std::fs::write(&short, b"too short").unwrap();
 
         let result = parse_encrypted_format(short.to_str().unwrap());
-        assert!(result.is_err(), "过短文件应解析失败");
+        assert!(
+            result.is_err(),
+            "a file shorter than the header should fail to parse"
+        );
     }
 
     #[test]
     fn test_decrypt_and_verify_keywords() {
         // 验证：decrypt_and_verify 在关键字缺失时失败，全部命中时成功。
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
         let plain = dir.path().join("plain.log");
         let enc = dir.path().join("plain.log.enc");
 
-        let content = "包含 keyword1 和 keyword2 的明文";
+        let content = "plaintext containing keyword1 and keyword2";
         write_plaintext(plain.to_str().unwrap(), content);
         let key = generate_temp_key();
         // FIXME: Audit that the environment access only happens in single-threaded code.
@@ -371,7 +379,7 @@ mod tests {
             enc.to_str().unwrap(),
             "LOG_ENCRYPTION_KEY",
         )
-        .expect("加密失败");
+        .expect("encryption failed");
 
         // 全部命中 → 成功
         let ok = decrypt_and_verify(
@@ -379,7 +387,7 @@ mod tests {
             "LOG_ENCRYPTION_KEY",
             &["keyword1", "keyword2"],
         );
-        assert!(ok.is_ok(), "关键字全部命中应成功");
+        assert!(ok.is_ok(), "all keywords present should succeed");
 
         // 缺失 → 失败
         let missing = decrypt_and_verify(
@@ -387,7 +395,7 @@ mod tests {
             "LOG_ENCRYPTION_KEY",
             &["nonexistent"],
         );
-        assert!(missing.is_err(), "关键字缺失应失败");
+        assert!(missing.is_err(), "missing keywords should fail");
 
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };

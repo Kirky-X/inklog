@@ -48,7 +48,7 @@ fn main() {
     // convert_logs_to_parquet 的实际实现按 inklog feature = "parquet" 门控，
     // 仅启用数据库 feature 时调用必然失败，因此本示例要求同时启用两者
     eprintln!(
-        "本示例需要 parquet + 数据库 feature: cargo run --bin parquet_archive --features sqlite,parquet"
+        "this example needs the parquet + database features: cargo run --bin parquet_archive --features sqlite,parquet"
     );
 }
 
@@ -57,14 +57,14 @@ fn main() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn main() {
-    print_separator("inklog Parquet 归档示例");
+    print_separator("inklog Parquet archive examples");
 
     show_parquet_config();
     show_convert_logs_to_parquet();
     show_database_sink_with_parquet();
     show_archive_workflow();
 
-    println!("\n所有 Parquet 归档示例展示完毕。");
+    println!("\nAll Parquet archive examples shown.");
 }
 
 /// 演示 ParquetConfig 配置字段
@@ -73,30 +73,33 @@ fn main() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_parquet_config() {
-    print_section("示例 1：ParquetConfig 配置字段");
+    print_section("Example 1: ParquetConfig fields");
 
     let default = ParquetConfig::default();
-    println!("默认 ParquetConfig：");
+    println!("Default ParquetConfig:");
     println!(
         "  compression_level  = {} (Zstandard 0-10)",
         default.compression_level
     );
     println!("  encoding           = \"{}\"", default.encoding);
     println!(
-        "  max_row_group_size = {} (行/行组)",
+        "  max_row_group_size = {} (rows per row group)",
         default.max_row_group_size
     );
-    println!("  max_page_size      = {} (字节/页)", default.max_page_size);
+    println!(
+        "  max_page_size      = {} (bytes per page)",
+        default.max_page_size
+    );
 
-    println!("\n字段语义：");
-    println!("  compression_level: Zstandard 压缩级别");
-    println!("    0 = 无压缩, 3 = 平衡(推荐), 10 = 最大压缩(较慢)");
-    println!("  max_row_group_size: 每个行组的最大行数");
-    println!("    较小值: 利于选择性查询");
-    println!("    较大值: 更好压缩比");
-    println!("  max_page_size: 每页最大字节数，控制读取时内存使用");
+    println!("\nField semantics:");
+    println!("  compression_level: the Zstandard compression level");
+    println!("    0 = none, 3 = balanced (recommended), 10 = maximum (slower)");
+    println!("  max_row_group_size: the maximum rows per row group");
+    println!("    a smaller value helps selective queries");
+    println!("    a larger value gives a better ratio");
+    println!("  max_page_size: the maximum bytes per page; controls read memory use");
 
-    println!("\n自定义配置（高压缩）：");
+    println!("\nCustom configuration (high compression):");
     let high_compression = ParquetConfig {
         compression_level: 10,
         encoding: "DELTA_BINARY_PACKED".to_string(),
@@ -105,12 +108,12 @@ fn show_parquet_config() {
         ..Default::default()
     };
     println!(
-        "  compression_level  = {} (最大压缩)",
+        "  compression_level  = {} (maximum compression)",
         high_compression.compression_level
     );
     println!("  encoding           = \"{}\"", high_compression.encoding);
     println!(
-        "  max_row_group_size = {} (更大行组)",
+        "  max_row_group_size = {} (larger row groups)",
         high_compression.max_row_group_size
     );
     println!(
@@ -118,7 +121,7 @@ fn show_parquet_config() {
         high_compression.max_page_size
     );
 
-    println!("\n自定义配置（低延迟查询）：");
+    println!("\nCustom configuration (low-latency queries):");
     let low_latency = ParquetConfig {
         compression_level: 1,
         encoding: "PLAIN".to_string(),
@@ -127,12 +130,12 @@ fn show_parquet_config() {
         ..Default::default()
     };
     println!(
-        "  compression_level  = {} (快速)",
+        "  compression_level  = {} (fast)",
         low_latency.compression_level
     );
     println!("  encoding           = \"{}\"", low_latency.encoding);
     println!(
-        "  max_row_group_size = {} (更小行组)",
+        "  max_row_group_size = {} (smaller row groups)",
         low_latency.max_row_group_size
     );
     println!(
@@ -147,39 +150,43 @@ fn show_parquet_config() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_convert_logs_to_parquet() {
-    print_section("示例 2：convert_logs_to_parquet() 实际调用");
+    print_section("Example 2: calling convert_logs_to_parquet() for real");
 
-    println!("创建测试 LogRecord...");
+    println!("Create test LogRecord values...");
 
     let records = vec![
-        LogRecord::new(Level::INFO, "module_a".to_string(), "服务启动".to_string()),
+        LogRecord::new(
+            Level::INFO,
+            "module_a".to_string(),
+            "service started".to_string(),
+        ),
         LogRecord::new(
             Level::WARN,
             "module_a".to_string(),
-            "配置项缺失，使用默认值".to_string(),
+            "a config item is missing; using the default".to_string(),
         ),
         LogRecord::new(
             Level::ERROR,
             "module_b".to_string(),
-            "数据库连接失败".to_string(),
+            "database connection failed".to_string(),
         ),
         LogRecord::new(
             Level::INFO,
             "module_c".to_string(),
-            "请求处理完成".to_string(),
+            "request completed".to_string(),
         ),
     ];
-    println!("  ✓ 创建 {} 条 LogRecord", records.len());
+    println!("  ✓ created {} LogRecord values", records.len());
 
     let config = ParquetConfig::default();
-    println!("\n调用 convert_logs_to_parquet()...");
+    println!("\nCall convert_logs_to_parquet()...");
     match convert_logs_to_parquet(&records, &config) {
         Ok(parquet_bytes) => {
-            println!("  ✓ Parquet 转换成功");
-            println!("  输入: {} 条 LogRecord", records.len());
-            println!("  输出: {} 字节 Parquet 数据", parquet_bytes.len());
+            println!("  ✓ Parquet conversion succeeded");
+            println!("  Input: {} LogRecord values", records.len());
+            println!("  Output: {} bytes of Parquet data", parquet_bytes.len());
             println!(
-                "  压缩比: {:.2} bytes/record",
+                "  Ratio: {:.2} bytes/record",
                 parquet_bytes.len() as f64 / records.len() as f64
             );
 
@@ -187,21 +194,24 @@ fn show_convert_logs_to_parquet() {
             if parquet_bytes.len() >= 4 {
                 let magic = &parquet_bytes[..4];
                 println!(
-                    "  Parquet magic: {:?} (期望: [80, 65, 82, 49] = \"PAR1\")",
+                    "  Parquet magic: {:?} (expected: [80, 65, 82, 49] = \"PAR1\")",
                     magic
                 );
             }
         }
         Err(e) => {
-            println!("  ✗ 转换失败: {}", e);
+            println!("  ✗ conversion failed: {}", e);
         }
     }
 
-    println!("\n空记录测试：");
+    println!("\nEmpty record test:");
     let empty: Vec<LogRecord> = vec![];
     match convert_logs_to_parquet(&empty, &config) {
-        Ok(bytes) => println!("  ✓ 空记录转换成功: {} 字节", bytes.len()),
-        Err(e) => println!("  ✗ 空记录转换失败: {}", e),
+        Ok(bytes) => println!(
+            "  ✓ empty record conversion succeeded: {} bytes",
+            bytes.len()
+        ),
+        Err(e) => println!("  ✗ empty record conversion failed: {}", e),
     }
 }
 
@@ -211,7 +221,7 @@ fn show_convert_logs_to_parquet() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_database_sink_with_parquet() {
-    print_section("示例 3：DatabaseSinkConfig 集成 Parquet");
+    print_section("Example 3: DatabaseSinkConfig Parquet integration");
 
     let config = DatabaseSinkConfig {
         enabled: true,
@@ -229,7 +239,7 @@ fn show_database_sink_with_parquet() {
         ..Default::default()
     };
 
-    println!("启用 Parquet 归档的 DatabaseSinkConfig：");
+    println!("A DatabaseSinkConfig with Parquet archiving enabled:");
     println!("  enabled          = {}", config.enabled);
     println!("  driver           = {:?}", config.driver);
     println!("  url              = \"{}\"", config.url);
@@ -237,7 +247,7 @@ fn show_database_sink_with_parquet() {
     println!("  batch_size       = {}", config.batch_size);
     println!("  flush_interval_ms= {}", config.flush_interval_ms);
     println!(
-        "  archive_format   = \"{}\" ← 启用 Parquet 归档",
+        "  archive_format   = \"{}\" ← enables the Parquet archive",
         config.archive_format
     );
     println!(
@@ -249,7 +259,7 @@ fn show_database_sink_with_parquet() {
         config.parquet_config.max_row_group_size
     );
 
-    println!("\n对应 TOML 配置：");
+    println!("\nThe corresponding TOML configuration:");
     println!(
         r#"[database_sink]
 enabled = true
@@ -272,37 +282,37 @@ max_row_group_size = 20000"#
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_archive_workflow() {
-    print_section("示例 4：Parquet 归档工作流");
+    print_section("Example 4: the Parquet archive workflow");
 
-    println!("Parquet 归档工作流：\n");
+    println!("The Parquet archive workflow:\n");
 
-    println!("1. 日志写入数据库");
-    println!("   tracing::info!(\"服务启动\");");
+    println!("1. Logs are written into the database");
+    println!("   tracing::info!(\"service started\");");
     println!("   → LogRecord → DatabaseSink → INSERT INTO logs");
 
-    println!("\n2. 定期导出为 Parquet（后台异步）");
-    println!("   flush_interval_ms 触发 → convert_logs_to_parquet()");
-    println!("   → 生成 Parquet 字节流");
+    println!("\n2. Periodically export to Parquet (in the background)");
+    println!("   flush_interval_ms triggers → convert_logs_to_parquet()");
+    println!("   → produce the Parquet byte stream");
 
-    println!("\n3. Parquet 文件存储");
-    println!("   → 写入本地文件 /tmp/inklog_archive_20260101.parquet");
-    println!("   → 或上传到对象存储/冷存储（由用户自行集成）");
+    println!("\n3. Parquet file storage");
+    println!("   → write the local file /tmp/inklog_archive_20260101.parquet");
+    println!("   → or upload to object/cold storage (integration is up to you)");
 
-    println!("\n4. 分析查询（外部工具）");
-    println!("   # 使用 DuckDB 查询 Parquet");
+    println!("\n4. Analytical queries (external tools)");
+    println!("   # query Parquet with DuckDB");
     println!("   duckdb -c \"SELECT level, COUNT(*) FROM 'archive.parquet' GROUP BY level\"");
     println!();
-    println!("   # 使用 Apache Arrow Python");
+    println!("   # use Apache Arrow from Python");
     println!("   import pyarrow.parquet as pq");
     println!("   table = pq.read_table('archive.parquet')");
 
-    println!("\n适用场景：");
-    println!("  - 分析：加载到 Snowflake/BigQuery/Redshift");
-    println!("  - 归档：对象存储冷存储（由用户集成）");
-    println!("  - 合规：高效存储满足监管留存要求");
+    println!("\nUse cases:");
+    println!("  - Analytics: load into Snowflake/BigQuery/Redshift");
+    println!("  - Archive: object storage cold tier (integration is up to you)");
+    println!("  - Compliance: efficient storage that meets regulatory retention");
 
-    println!("\n性能特点：");
-    println!("  - 异步后台导出，不影响主日志路径");
-    println!("  - 列式存储，高压缩比（典型 5-10x）");
-    println!("  - 支持谓词下推，查询效率高");
+    println!("\nPerformance characteristics:");
+    println!("  - Asynchronous background export that does not affect the main log path");
+    println!("  - Columnar storage with a high ratio (typically 5-10x)");
+    println!("  - Predicate pushdown keeps queries efficient");
 }

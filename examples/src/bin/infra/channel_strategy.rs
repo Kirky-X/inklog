@@ -7,7 +7,7 @@
 //! 1. `ChannelStrategy::Fixed` vs `ChannelStrategy::Adaptive` 对比
 //! 2. FromStr / Display trait 实现
 //! 3. 自适应阈值参数（expand/shrink threshold、min/max capacity）
-//! 4. 不同负载场景下的配置推荐
+//! 4. 不同负载Scenario下的配置推荐
 //!
 //! # 运行
 //!
@@ -20,7 +20,7 @@ use inklog_examples::common::{print_section, print_separator};
 use std::str::FromStr;
 
 fn main() {
-    print_separator("inklog 自适应 Channel 策略示例");
+    print_separator("inklog adaptive channel strategy example");
 
     show_strategy_variants();
     show_from_str_display();
@@ -28,52 +28,52 @@ fn main() {
     show_performance_profiles();
     show_config_compatibility();
 
-    println!("\n所有 ChannelStrategy 示例展示完毕。");
+    println!("\nAll ChannelStrategy examples completed.");
 }
 
 /// 演示 ChannelStrategy 两个变体
 fn show_strategy_variants() {
-    print_section("示例 1：ChannelStrategy 变体");
+    print_section("Example 1: ChannelStrategy variants");
 
     let fixed = ChannelStrategy::Fixed;
     let adaptive = ChannelStrategy::Adaptive;
 
-    println!("枚举变体：");
-    println!("  {:?} - 静态容量，可预测内存使用", fixed);
-    println!("  {:?} - 动态调整，更好的突发流量处理", adaptive);
+    println!("Enum variants:");
+    println!("  {:?} - static capacity, predictable memory use", fixed);
+    println!("  {:?} - dynamic sizing, better burst handling", adaptive);
 
-    println!("\n默认策略：");
+    println!("\nDefault strategy:");
     println!(
         "  ChannelStrategy::default() = {:?}",
         ChannelStrategy::default()
     );
 
-    println!("\n行为对比：");
-    println!("{:<15} {:<25} {:<25}", "场景", "Fixed", "Adaptive");
+    println!("\nBehavior comparison:");
+    println!("{:<15} {:<25} {:<25}", "Scenario", "Fixed", "Adaptive");
     println!("{}", "-".repeat(65));
     println!(
         "{:<15} {:<25} {:<25}",
-        "正常负载", "稳定", "稳定（动态变化）"
+        "Normal load", "Stable", "Stable (changes dynamically)"
     );
     println!(
         "{:<15} {:<25} {:<25}",
-        "流量突增", "可能丢弃日志", "扩容以处理"
+        "Traffic spike", "May drop logs", "expand to handle"
     );
     println!(
         "{:<15} {:<25} {:<25}",
-        "低流量", "容量恒定", "缩容以节省内存"
+        "Low traffic", "Constant capacity", "shrink to save memory"
     );
     println!(
         "{:<15} {:<25} {:<25}",
-        "内存使用", "可预测", "可变（通常更低）"
+        "Memory use", "Predictable", "Variable (usually lower)"
     );
 }
 
 /// 演示 FromStr 和 Display trait
 fn show_from_str_display() {
-    print_section("示例 2：FromStr / Display trait");
+    print_section("Example 2: FromStr / Display traits");
 
-    println!("FromStr 解析：");
+    println!("FromStr parsing:");
     for input in ["fixed", "adaptive", "FIXED", "Adaptive"] {
         match ChannelStrategy::from_str(input) {
             Ok(strategy) => println!("  {:>10}.parse() → Ok({:?})", input, strategy),
@@ -81,7 +81,7 @@ fn show_from_str_display() {
         }
     }
 
-    println!("\n无效输入：");
+    println!("\nInvalid input:");
     for input in ["dynamic", "flexible", "", "invalid"] {
         let result: Result<ChannelStrategy, String> = input.parse();
         match result {
@@ -90,7 +90,7 @@ fn show_from_str_display() {
         }
     }
 
-    println!("\nDisplay 输出：");
+    println!("\nDisplay output:");
     for strategy in [ChannelStrategy::Fixed, ChannelStrategy::Adaptive] {
         println!("  format!(\"{{}}\", {:?}) → \"{}\"", strategy, strategy);
     }
@@ -98,10 +98,10 @@ fn show_from_str_display() {
 
 /// 演示自适应阈值参数（PerformanceConfig）
 fn show_adaptive_thresholds() {
-    print_section("示例 3：自适应阈值参数");
+    print_section("Example 3: adaptive threshold parameters");
 
     let default = PerformanceConfig::default();
-    println!("默认 PerformanceConfig：");
+    println!("Default PerformanceConfig:");
     println!("  channel_capacity        = {}", default.channel_capacity);
     println!("  worker_threads          = {}", default.worker_threads);
     println!("  channel_strategy        = {:?}", default.channel_strategy);
@@ -120,16 +120,18 @@ fn show_adaptive_thresholds() {
     println!("  min_capacity            = {}", default.min_capacity);
     println!("  max_capacity            = {}", default.max_capacity);
 
-    println!("\n阈值参数语义（仅 Adaptive 策略生效）：");
-    println!("  expand_threshold_percent: 容量使用率达到此百分比时触发扩容");
-    println!("    默认 80% → 8000/10000 时扩容");
-    println!("  shrink_threshold_percent: 容量使用率降至此百分比时考虑缩容");
-    println!("    默认 20% → 2000/10000 时缩容");
-    println!("  shrink_wait_seconds: 低负载持续此秒数后才缩容（防抖动）");
-    println!("    默认 30 秒");
-    println!("  min_capacity / max_capacity: 缩容/扩容的上下限");
+    println!("\nThreshold parameter semantics (only effective for the Adaptive strategy):");
+    println!("  expand_threshold_percent: expand when capacity usage reaches this percent");
+    println!("    default 80% → expand at 8000/10000");
+    println!("  shrink_threshold_percent: consider shrinking when usage drops to this percent");
+    println!("    default 20% → shrink at 2000/10000");
+    println!(
+        "  shrink_wait_seconds: shrink only after low load persists this many seconds (debounce)"
+    );
+    println!("    default 30 seconds");
+    println!("  min_capacity / max_capacity: lower/upper bounds for shrink/expand");
 
-    println!("\n自定义自适应配置（激进扩容，保守缩容）：");
+    println!("\nCustom adaptive config (aggressive expansion, conservative shrinking):");
     let aggressive = PerformanceConfig {
         channel_capacity: 20000,
         worker_threads: 4,
@@ -150,28 +152,28 @@ fn show_adaptive_thresholds() {
         aggressive.channel_strategy
     );
     println!(
-        "  expand_threshold_percent= {} (更早扩容)",
+        "  expand_threshold_percent= {} (expands earlier)",
         aggressive.expand_threshold_percent
     );
     println!(
-        "  shrink_threshold_percent= {} (更晚缩容)",
+        "  shrink_threshold_percent= {} (shrinks later)",
         aggressive.shrink_threshold_percent
     );
     println!(
-        "  shrink_wait_seconds     = {} (更长防抖)",
+        "  shrink_wait_seconds     = {} (longer debounce)",
         aggressive.shrink_wait_seconds
     );
     println!("  min_capacity            = {}", aggressive.min_capacity);
     println!("  max_capacity            = {}", aggressive.max_capacity);
 }
 
-/// 演示不同负载场景的配置推荐
+/// 演示不同负载Scenario的配置推荐
 fn show_performance_profiles() {
-    print_section("示例 4：性能配置推荐");
+    print_section("Example 4: performance config recommendations");
 
     let profiles = [
         (
-            "高吞吐量 (>10k logs/s)",
+            "High throughput (>10k logs/s)",
             PerformanceConfig {
                 channel_capacity: 50000,
                 worker_threads: 8,
@@ -185,7 +187,7 @@ fn show_performance_profiles() {
             },
         ),
         (
-            "低延迟 (<1ms p99)",
+            "Low latency (<1ms p99)",
             PerformanceConfig {
                 channel_capacity: 5000,
                 worker_threads: 4,
@@ -199,7 +201,7 @@ fn show_performance_profiles() {
             },
         ),
         (
-            "资源受限 (有限 RAM/CPU)",
+            "Resource-constrained (limited RAM/CPU)",
             PerformanceConfig {
                 channel_capacity: 2000,
                 worker_threads: 2,
@@ -213,7 +215,7 @@ fn show_performance_profiles() {
             },
         ),
         (
-            "突发流量 (Adaptive 推荐)",
+            "Bursty traffic (Adaptive recommended)",
             PerformanceConfig {
                 channel_capacity: 10000,
                 worker_threads: 4,
@@ -250,7 +252,7 @@ fn show_performance_profiles() {
 
 /// 演示配置兼容性和序列化
 fn show_config_compatibility() {
-    print_section("示例 5：配置格式化展示");
+    print_section("Example 5: formatted config display");
 
     let config = PerformanceConfig {
         channel_strategy: ChannelStrategy::Adaptive,
@@ -278,10 +280,10 @@ max_capacity = {}"#,
         config.min_capacity,
         config.max_capacity,
     );
-    println!("序列化为 TOML：");
+    println!("Serialized to TOML:");
     println!("{}", toml_str);
 
-    println!("\n环境变量覆盖：");
+    println!("\nEnv-var overrides:");
     println!("  export INKLOG_PERFORMANCE_CHANNEL_STRATEGY=adaptive");
     println!("  export INKLOG_PERFORMANCE_CHANNEL_CAPACITY=20000");
     println!("  export INKLOG_PERFORMANCE_WORKER_THREADS=4");

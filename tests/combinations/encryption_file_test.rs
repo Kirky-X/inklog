@@ -38,7 +38,7 @@ mod encryption_file {
         }
 
         let key = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_ENCRYPTION_KEY")
-            .expect("Base64 32 字节密钥应能解析");
+            .expect("a 32-byte Base64 key should parse");
         assert_eq!(key.len(), 32);
 
         unsafe {
@@ -50,7 +50,7 @@ mod encryption_file {
     #[serial]
     fn test_encryption_key_missing_env() {
         let result = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_MISSING_KEY_XYZ");
-        assert!(result.is_err(), "环境变量未设置应返回错误");
+        assert!(result.is_err(), "missing env var should return an error");
     }
 
     #[test]
@@ -65,14 +65,20 @@ mod encryption_file {
 
         // 非 Base64 且长度 < 12 字节 → 密码派生下限校验失败
         let result = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_BAD_KEY");
-        assert!(result.is_err(), "过短密码应被 PBKDF2 下限校验拒绝");
+        assert!(
+            result.is_err(),
+            "a too-short password should be rejected by the PBKDF2 minimum"
+        );
 
         // 非 Base64 但长度在密码范围内（12-127 字节）→ 按密码派生成功
         unsafe {
             std::env::set_var("INKLOG_TEST_BAD_KEY", "!!!invalid-base64!!!");
         }
         let result = inklog::sink::encryption::get_encryption_key("INKLOG_TEST_BAD_KEY");
-        assert!(result.is_ok(), "12-127 字节非 Base64 内容应按密码派生处理");
+        assert!(
+            result.is_ok(),
+            "12-127 byte non-Base64 content should be treated as password-derived"
+        );
 
         unsafe {
             std::env::remove_var("INKLOG_TEST_BAD_KEY");
@@ -137,7 +143,9 @@ mod encryption_file {
 
         // 核正：FileSink 异步 worker 按批缓冲落盘，固定 sleep 不保证 flush——
         // 显式关闭以触发 worker 排空缓冲后再断言文件内容
-        logger.shutdown().expect("关闭日志服务失败");
+        logger
+            .shutdown()
+            .expect("failed to shut down the logging service");
 
         // 验证文件存在且非空
         assert!(log_path.exists());
@@ -150,7 +158,7 @@ mod encryption_file {
         let content = fs::read_to_string(&log_path).unwrap();
         assert!(
             content.contains("test message"),
-            "记录应写入活跃文件，实际内容（{} 字节）：{content:?}",
+            "records should be written to the active file; actual content ({} bytes): {content:?}",
             content.len()
         );
 
@@ -216,7 +224,9 @@ mod encryption_file {
         tracing::info!("Rotated secret payload: rot_secret_98765");
 
         // 核正：固定 sleep 不保证 worker 排空与归档——显式关闭触发 flush
-        logger.shutdown().expect("关闭日志服务失败");
+        logger
+            .shutdown()
+            .expect("failed to shut down the logging service");
 
         // 归档密文（*.zst.enc / *.gz.enc）不应包含任何明文片段
         let parent = log_path.parent().unwrap();
@@ -228,14 +238,14 @@ mod encryption_file {
                 let bytes = fs::read(entry.path()).unwrap();
                 assert!(
                     !bytes.windows(17).any(|w| w == b"rot_secret_98765"),
-                    "加密归档 {} 不应包含明文片段",
+                    "encrypted archive {} must not contain plaintext fragments",
                     name
                 );
             }
         }
         assert!(
             encrypted_archives > 0,
-            "写入量已跨越轮转阈值，应产生加密归档"
+            "written volume has crossed the rotation threshold; an encrypted archive should exist"
         );
 
         unsafe {

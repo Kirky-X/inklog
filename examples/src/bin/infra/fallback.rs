@@ -1,16 +1,16 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-//! Sink 降级机制示例
+//! Sink degraded机制示例
 //!
-//! 演示 inklog 的故障检测和自动降级策略：
+//! 演示 inklog 的故障检测和自动degraded策略：
 //!
-//! ## 降级策略（三级保障）
+//! ## degraded策略（三级保障）
 //!
-//! | 故障场景 | 降级策略 |
+//! | 故障场景 | degraded策略 |
 //! |----------|----------|
-//! | Database 不可用 | 降级到 File Sink |
-//! | File 不可用（磁盘满）| 降级到 Console Sink |
-//! | Console 不可用 | 最终降级（丢弃日志并告警）|
+//! | Database 不可用 | degraded到 File Sink |
+//! | File 不可用（磁盘满）| degraded到 Console Sink |
+//! | Console 不可用 | 最终degraded（丢弃日志并告警）|
 //!
 //! ## 运行
 //!
@@ -21,8 +21,8 @@
 //! ## 示例内容
 //!
 //! 1. **multi_sink_config()**: 配置多个 Sink（Console + File）
-//! 2. **simulate_failure()**: 模拟主 Sink 故障场景
-//! 3. **fallback_demo()**: 演示降级到 File Sink
+//! 2. **simulate_failure()**: 模拟primary sink 故障场景
+//! 3. **fallback_demo()**: 演示degraded到 File Sink
 
 use async_trait::async_trait;
 use inklog::LogTemplate;
@@ -39,16 +39,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// 降级状态追踪器
+/// degraded状态追踪器
 ///
-/// 用于模拟 Sink 降级过程中的状态变化
+/// 用于模拟 Sink degraded过程中的状态变化
 #[derive(Debug, Clone)]
 struct FallbackState {
     /// 当前激活的 Sink 类型
     active_sink: String,
-    /// 降级事件计数
+    /// degraded事件计数
     fallback_count: u32,
-    /// 最后降级时间
+    /// 最后degraded时间
     last_fallback_time: Option<chrono::DateTime<Utc>>,
 }
 
@@ -63,7 +63,7 @@ impl FallbackState {
 
     fn trigger_fallback(&mut self, new_sink: &str) {
         println!(
-            "[{}] 触发降级: {} -> {}",
+            "[{}] degrading: {} -> {}",
             Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
             self.active_sink,
             new_sink
@@ -76,7 +76,7 @@ impl FallbackState {
 
 /// 模拟故障的 Sink（包装器）
 ///
-/// 用于演示当主 Sink 发生故障时如何切换到备用 Sink
+/// 用于演示当primary sink 发生故障时如何切换到fallback sink
 ///
 /// 使用 `tokio::sync::Mutex` 实现内部可变性，以满足 `LogSink: &self` 的 trait 约束。
 /// 内部 sink 以 `Arc` 持有，便于在 flush/shutdown 中先 clone 出句柄、
@@ -144,7 +144,7 @@ impl LogSink for FailingSink {
 
     fn is_healthy(&self) -> bool {
         // try_lock 避免在 sync 方法中 await；锁被占用说明写入正在进行，
-        // 视为健康（竞争 ≠ 故障），仅 inner 为 None（已故障/关闭）时不健康
+        // 视为healthy（竞争 ≠ 故障），仅 inner 为 None（已故障/关闭）时unhealthy
         self.inner.try_lock().map(|g| g.is_some()).unwrap_or(true)
     }
 
@@ -167,10 +167,10 @@ impl LogSink for FailingSink {
 /// 展示如何同时配置 Console 和 File Sink，实现日志的双重输出。
 /// 这是在生产环境中推荐的配置方式，确保日志不会因单一 Sink 故障而丢失。
 async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例 1: 多 Sink 配置（Console + File）");
+    print_separator("Example 1: multi-sink setup (console + file)");
 
     let log_path = temp_file_path("multi_sink");
-    println!("日志文件路径: {}", log_path);
+    println!("Log file path: {}", log_path);
 
     // 1. 配置 Console Sink
     let console_config = ConsoleSinkConfig {
@@ -182,7 +182,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         secret_scan_enabled: false,
     };
     let console_sink = ConsoleSink::new(console_config, LogTemplate::new("[{level}] {message}"));
-    println!("Console Sink: 已配置");
+    println!("Console sink: configured");
 
     let file_config = FileSinkConfig {
         enabled: true,
@@ -206,13 +206,13 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         output_format: Default::default(),
     };
     let file_sink = FileSink::new(file_config)?;
-    println!("File Sink: 已配置");
+    println!("File sink: configured");
 
     let records = vec![
         LogRecord {
             timestamp: Utc::now(),
             level: "INFO".to_string(),
-            message: "应用启动成功".to_string(),
+            message: "application started successfully".to_string(),
             target: "fallback::multi_sink".to_string(),
             fields: Default::default(),
             file: Some(file!().to_string()),
@@ -224,7 +224,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         LogRecord {
             timestamp: Utc::now(),
             level: "INFO".to_string(),
-            message: "数据库连接已建立".to_string(),
+            message: "database connection established".to_string(),
             target: "fallback::multi_sink".to_string(),
             fields: Default::default(),
             file: Some(file!().to_string()),
@@ -236,7 +236,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         LogRecord {
             timestamp: Utc::now(),
             level: "WARN".to_string(),
-            message: "配置参数使用默认值".to_string(),
+            message: "config parameters use defaults".to_string(),
             target: "fallback::multi_sink".to_string(),
             fields: Default::default(),
             file: Some(file!().to_string()),
@@ -247,7 +247,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    print_section("写入日志到多个 Sink");
+    print_section("writing logs to multiple sinks");
 
     for record in &records {
         console_sink.write(record).await?;
@@ -265,33 +265,33 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
     console_sink.flush().await?;
     file_sink.flush().await?;
 
-    print_section("验证 File Sink");
+    print_section("verifying the file sink");
     let content = fs::read_to_string(&log_path)?;
-    println!("文件内容 ({} 字节):\n{}", content.len(), content);
+    println!("File content ({} bytes):\n{}", content.len(), content);
 
     // 6. 清理
     cleanup_files(&log_path, "inklog_example_multi_sink")?;
 
-    println!("\n✓ 多 Sink 配置完成");
-    println!("  - Console Sink: 实时输出到控制台");
-    println!("  - File Sink: 持久化到文件");
-    println!("  - 两者同时工作，互不影响");
+    println!("\n✓ Multi-sink setup completed");
+    println!("  - Console sink: real-time output to the console");
+    println!("  - File sink: persist to a file");
+    println!("  - Both work simultaneously without interfering");
 
     Ok(())
 }
 
-/// 示例 2: 模拟故障与降级切换
+/// 示例 2: 模拟故障与degraded切换
 ///
-/// 演示当主 Sink 发生故障时，系统如何检测故障并切换到备用 Sink。
+/// 演示当primary sink 发生故障时，系统如何检测故障并切换到fallback sink。
 /// 这是 inklog 高可用性的核心机制。
 async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例 2: 故障模拟与降级切换");
+    print_separator("Example 2: failure simulation and fallback switch");
 
     let backup_path = temp_file_path("fallback_backup");
-    println!("备用日志文件: {}", backup_path);
+    println!("Fallback log file: {}", backup_path);
 
     let mut state = FallbackState::new("Console");
-    println!("\n初始状态: 主 Sink = Console");
+    println!("\nInitial state: primary sink = console");
 
     // 2. 配置备用 File Sink
     let backup_config = FileSinkConfig {
@@ -316,7 +316,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         output_format: Default::default(),
     };
     let backup_sink = FileSink::new(backup_config)?;
-    println!("备用 File Sink: 已就绪");
+    println!("Fallback file sink: ready");
 
     // 3. 配置主 Console Sink（包装为会故障的 Sink）
     let primary_config = ConsoleSinkConfig {
@@ -336,7 +336,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         .map(|i| LogRecord {
             timestamp: Utc::now(),
             level: "INFO".to_string(),
-            message: format!("测试日志消息 #{}", i),
+            message: format!("test log message #{}", i),
             target: "fallback::simulate".to_string(),
             fields: Default::default(),
             file: Some(file!().to_string()),
@@ -347,7 +347,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    print_section("写入日志（触发故障）");
+    print_section("writing logs (triggering failure)");
 
     let mut success_count = 0;
     let mut fallback_triggered = false;
@@ -357,21 +357,21 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
             Ok(()) => {
                 success_count += 1;
                 println!(
-                    "[{}] [主 Sink] 写入成功 #{}",
+                    "[{}] [primary sink] write succeeded #{}",
                     Utc::now().format("%H:%M:%S%.3f"),
                     success_count
                 );
             }
             Err(e) => {
-                // 主 Sink 故障，触发降级
+                // primary sink 故障，触发degraded
                 if !fallback_triggered {
-                    println!("\n*** 主 Sink 故障: {} ***", e);
+                    println!("\n*** Primary sink failure: {} ***", e);
                     state.trigger_fallback("File");
                     fallback_triggered = true;
                 }
 
                 println!(
-                    "[{}] [备用 Sink] 接管写入",
+                    "[{}] [fallback sink] took over writing",
                     Utc::now().format("%H:%M:%S%.3f")
                 );
                 backup_sink.write(record).await?;
@@ -380,20 +380,20 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    print_section("降级事件统计");
-    println!("降级次数: {}", state.fallback_count);
+    print_section("degradation event statistics");
+    println!("degradation count: {}", state.fallback_count);
     println!(
-        "最后降级时间: {}",
+        "last degradation time: {}",
         state
             .last_fallback_time
             .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_else(|| "无".to_string())
+            .unwrap_or_else(|| "none".to_string())
     );
-    println!("当前活跃 Sink: {}", state.active_sink);
+    println!("active sinks: {}", state.active_sink);
 
-    print_section("验证备用文件");
+    print_section("verifying the fallback file");
     let content = fs::read_to_string(&backup_path)?;
-    println!("备用文件内容 ({} 字节):", content.len());
+    println!("Fallback file content ({} bytes):", content.len());
     for line in content.lines() {
         println!("  {}", line);
     }
@@ -401,39 +401,39 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
     // 8. 清理
     cleanup_files(&backup_path, "inklog_example_fallback_backup")?;
 
-    println!("\n✓ 故障模拟与降级切换完成");
-    println!("  - 主 Sink 在第 {} 次写入后故障", 5);
-    println!("  - 备用 Sink 成功接管后续 {} 条日志", 8 - 5);
+    println!("\n✓ Failure simulation and fallback switch completed");
+    println!("  - Primary sink fails after write #{}", 5);
+    println!("  - Fallback sink took over the next {} logs", 8 - 5);
 
     Ok(())
 }
 
-/// 示例 3: 降级策略完整演示
+/// Example 3: full fallback strategy demo
 ///
-/// 展示完整的降级策略流程，包括：
-/// - 健康状态检测
-/// - 降级条件判断
-/// - 降级执行和日志记录
+/// 展示完整的degraded策略流程，包括：
+/// - healthy状态检测
+/// - degraded条件判断
+/// - degraded执行和日志记录
 async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("示例 3: 降级策略完整演示");
+    print_separator("Example 3: full fallback strategy demo");
 
     let primary_path = temp_file_path("primary");
     let fallback_path = temp_file_path("fallback");
-    println!("主日志文件: {}", primary_path);
-    println!("备用日志文件: {}", fallback_path);
+    println!("Primary log file: {}", primary_path);
+    println!("Fallback log file: {}", fallback_path);
 
-    // 1. 展示 Sink 健康状态枚举
-    print_section("Sink 健康状态类型");
+    // 1. 展示 Sink healthy状态枚举
+    print_section("Sink health status types");
 
-    println!("\nSinkStatus 枚举:");
-    println!("  - Healthy: Sink 完全健康");
-    println!("  - Degraded: Sink 性能下降，可能需要降级");
-    println!("  - Unhealthy: Sink 不可用，需要降级");
+    println!("\nSinkStatus enum:");
+    println!("  - Healthy: sink fully healthy");
+    println!("  - Degraded: sink degraded, may need fallback");
+    println!("  - Unhealthy: sink unavailable, fallback required");
 
-    println!("\nSinkHealth 结构:");
-    println!("  - is_healthy: bool - 是否健康");
-    println!("  - status: SinkStatus - 详细状态");
-    println!("  - last_error: Option<String> - 错误信息");
+    println!("\nSinkHealth struct:");
+    println!("  - is_healthy: bool - whether healthy");
+    println!("  - status: SinkStatus - detailed status");
+    println!("  - last_error: Option<String> - error info");
 
     let health_checks = vec![
         ("Console Sink", SinkHealth::healthy()),
@@ -444,26 +444,26 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         ),
     ];
 
-    print_section("模拟健康检查结果");
+    print_section("simulated health check result");
     for (name, health) in &health_checks {
         let is_healthy = matches!(health.status, SinkStatus::Healthy);
         let status_icon = if is_healthy { "✓" } else { "✗" };
         let status_text = match &health.status {
-            SinkStatus::Healthy => "健康",
-            SinkStatus::Degraded { .. } => "降级",
-            SinkStatus::Unhealthy { .. } => "不健康",
-            SinkStatus::NotStarted => "未启动",
+            SinkStatus::Healthy => "healthy",
+            SinkStatus::Degraded { .. } => "degraded",
+            SinkStatus::Unhealthy { .. } => "unhealthy",
+            SinkStatus::NotStarted => "not started",
         };
         println!(
             "  {} {}: {} ({})",
             status_icon,
             name,
             status_text,
-            health.last_error.as_deref().unwrap_or("无错误")
+            health.last_error.as_deref().unwrap_or("no error")
         );
 
         if !is_healthy {
-            println!("     -> 建议: 降级到备用 Sink");
+            println!("     -> Advice: degrade to the fallback sink");
         }
     }
 
@@ -513,7 +513,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     };
     let fallback_sink = FileSink::new(fallback_config)?;
 
-    print_section("降级流程模拟");
+    print_section("degradation flow simulation");
 
     let records: Vec<LogRecord> = (1..=10)
         .map(|i| {
@@ -527,7 +527,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
             LogRecord {
                 timestamp: Utc::now(),
                 level: level.to_string(),
-                message: format!("日志消息 #{} [{}]", i, level),
+                message: format!("log message #{} [{}]", i, level),
                 target: "fallback::demo".to_string(),
                 fields: Default::default(),
                 file: Some(file!().to_string()),
@@ -539,7 +539,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    // 模拟在第 6 条日志时主 Sink 故障
+    // 模拟在第 6 条日志时primary sink 故障
     let failure_point = 6;
     let mut current_sink = "primary";
 
@@ -548,28 +548,28 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
 
         if log_num == failure_point {
             println!(
-                "\n[{}] *** 主 Sink 发生故障 ***",
+                "\n[{}] *** Primary sink failed ***",
                 Utc::now().format("%H:%M:%S%.3f")
             );
-            println!("     触发降级: File(primary) -> File(fallback)");
+            println!("     Degrading: File(primary) -> File(fallback)");
             current_sink = "fallback";
         }
 
         let sink_name = if current_sink == "primary" {
-            "主 Sink"
+            "primary sink"
         } else {
-            "备用 Sink"
+            "fallback sink"
         };
 
         if current_sink == "primary" {
             primary_sink.write(record).await?;
             primary_sink.flush().await?;
         } else {
-            // 写入时标记这是降级后的日志
+            // 写入时标记这是degraded后的日志
             let fallback_record = LogRecord {
                 timestamp: record.timestamp,
                 level: record.level.clone(),
-                message: format!("[降级接管] {}", record.message),
+                message: format!("[fallback takeover] {}", record.message),
                 target: record.target.clone(),
                 fields: record.fields.clone(),
                 file: record.file.clone(),
@@ -591,15 +591,15 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    print_section("降级后文件内容");
+    print_section("file content after degradation");
 
-    println!("\n--- 主文件 (前 {} 条日志) ---", failure_point - 1);
+    println!("\n--- Primary file (first {} logs) ---", failure_point - 1);
     let primary_content = fs::read_to_string(&primary_path)?;
     for line in primary_content.lines().take(10) {
         println!("  {}", line);
     }
 
-    println!("\n--- 备用文件 (接管后的日志) ---");
+    println!("\n--- Fallback file (logs after takeover) ---");
     let fallback_content = fs::read_to_string(&fallback_path)?;
     for line in fallback_content.lines().take(10) {
         println!("  {}", line);
@@ -609,27 +609,27 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     cleanup_files(&primary_path, "inklog_example_primary")?;
     cleanup_files(&fallback_path, "inklog_example_fallback")?;
 
-    print_section("降级策略总结");
+    print_section("fallback strategy summary");
 
-    println!("\n三级降级保障:");
-    println!("  1. Database -> File (数据库不可用时)");
-    println!("     - 触发条件: 连接超时、SQL 错误");
-    println!("     - 降级动作: 写入本地文件");
+    println!("\nThree-tier fallback:");
+    println!("  1. Database -> File (when the database is unavailable)");
+    println!("     - Trigger: connection timeout, SQL errors");
+    println!("     - Degradation action: write to a local file");
     println!();
-    println!("  2. File -> Console (文件不可用时)");
-    println!("     - 触发条件: 磁盘满、权限错误");
-    println!("     - 降级动作: 输出到控制台");
+    println!("  2. File -> Console (when the file is unavailable)");
+    println!("     - Trigger: disk full, permission errors");
+    println!("     - Degradation action: output to the console");
     println!();
-    println!("  3. Console (最终降级)");
-    println!("     - 触发条件: 所有 Sink 都不可用");
-    println!("     - 降级动作: 记录到系统日志 + 告警");
+    println!("  3. Console (final fallback)");
+    println!("     - Trigger: all sinks unavailable");
+    println!("     - Degradation action: log to syslog + alert");
 
-    println!("\n降级事件记录:");
-    println!("  - 所有降级事件都会记录到日志");
-    println!("  - 包括降级原因、时间和恢复状态");
-    println!("  - 可通过 HTTP 端点查询降级状态");
+    println!("\nDegradation event log:");
+    println!("  - All degradation events are logged");
+    println!("  - Includes degradation reason, time, and recovery state");
+    println!("  - Degradation state queryable via the HTTP endpoint");
 
-    println!("\n✓ 降级策略完整演示完成");
+    println!("\n✓ Full fallback strategy demo completed");
 
     Ok(())
 }
@@ -640,7 +640,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
 fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
     let log_dir = PathBuf::from(log_path)
         .parent()
-        .ok_or_else(|| format!("路径无父目录: {}", log_path))?
+        .ok_or_else(|| format!("path has no parent directory: {}", log_path))?
         .to_path_buf();
     let mut deleted_count = 0;
 
@@ -655,7 +655,7 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
     }
 
     if deleted_count > 0 {
-        println!("  已清理 {} 个临时文件", deleted_count);
+        println!("  Cleaned up {} temp files", deleted_count);
     }
 
     Ok(())
@@ -663,7 +663,7 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog Sink 降级机制示例 ===\n");
+    println!("=== inklog sink fallback mechanism example ===\n");
 
     multi_sink_config().await?;
 
@@ -671,6 +671,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     fallback_demo().await?;
 
-    println!("\n=== 所有示例完成 ===");
+    println!("\n=== All examples completed ===");
     Ok(())
 }

@@ -33,7 +33,7 @@ async fn test_dbnexus_adapter_new_and_healthy() {
     assert_eq!(adapter.table_name(), "logs");
     assert!(
         adapter.is_healthy().await,
-        "新建的适配器应健康（数据库可达）"
+        "a fresh adapter should be healthy (database reachable)"
     );
 }
 
@@ -66,7 +66,7 @@ async fn test_dbnexus_adapter_insert_batch_empty() {
         .insert_batch(&[])
         .await
         .expect("insert_batch(empty) should succeed");
-    assert_eq!(count, 0, "空批次应返回 0");
+    assert_eq!(count, 0, "an empty batch should return 0");
 }
 
 #[tokio::test]
@@ -85,7 +85,7 @@ async fn test_dbnexus_adapter_insert_batch_single() {
         .insert_batch(&[record])
         .await
         .expect("insert_batch(single) should succeed");
-    assert_eq!(count, 1, "应成功写入 1 条记录");
+    assert_eq!(count, 1, "should write 1 record successfully");
 }
 
 #[tokio::test]
@@ -108,7 +108,7 @@ async fn test_dbnexus_adapter_insert_batch_multiple() {
         .insert_batch(&records)
         .await
         .expect("insert_batch(multiple) should succeed");
-    assert_eq!(count, 3, "应成功写入 3 条记录");
+    assert_eq!(count, 3, "should write 3 records successfully");
 }
 
 #[tokio::test]
@@ -132,7 +132,10 @@ async fn test_dbnexus_adapter_insert_batch_special_chars() {
         .insert_batch(&records)
         .await
         .expect("insert_batch(special chars) should succeed");
-    assert_eq!(count, 3, "特殊字符记录应全部写入");
+    assert_eq!(
+        count, 3,
+        "records with special characters should all be written"
+    );
 }
 
 #[tokio::test]
@@ -160,7 +163,7 @@ async fn test_dbnexus_adapter_insert_batch_nonexistent_table() {
                 || err_msg.contains("table")
                 || err_msg.contains("ensure")
                 || err_msg.contains("session"),
-            "错误信息应包含相关上下文，实际: {}",
+            "the error message should include relevant context, got: {}",
             err_msg
         );
     }
@@ -173,13 +176,13 @@ async fn test_dbnexus_adapter_connection_failure_invalid_url() {
     // 无效 URL 应在 new() 阶段失败
     let result = DbNexusAdapter::new("invalid://not-a-real-db", 1).await;
     let err = match result {
-        Ok(_) => panic!("无效 URL 应导致 new() 失败，但成功了"),
+        Ok(_) => panic!("an invalid URL should make new() fail, but it succeeded"),
         Err(e) => e,
     };
     let err_str = err_to_string(&err);
     assert!(
         err_str.contains("Database") || err_str.contains("pool"),
-        "错误信息应包含 Database 或 pool，实际: {}",
+        "the error message should mention Database or pool, got: {}",
         err_str
     );
 }
@@ -201,7 +204,10 @@ async fn test_dbnexus_adapter_from_pool_reuses_connection() {
     let adapter2 = DbNexusAdapter::from_connection_pool(pool, "shared_pool_logs")
         .expect("from_connection_pool should succeed");
     assert_eq!(adapter2.table_name(), "shared_pool_logs");
-    assert!(adapter2.is_healthy().await, "共享连接池的适配器应健康");
+    assert!(
+        adapter2.is_healthy().await,
+        "adapters sharing a pool should be healthy"
+    );
 }
 
 #[tokio::test]

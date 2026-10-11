@@ -389,10 +389,12 @@ impl ChannelBufferedFileSink {
                 if let Some(writer) = file_guard.as_mut() {
                     for entry in &batch {
                         if let Err(e) = writer.write_all(entry.as_bytes()) {
+                            let mut args = crate::i18n::MsgArgs::new();
+                            args.set("err", &e);
                             tracing::error!(
                                 kind = %e.kind(),
-                                "ChannelBufferedFileSink: Write error: {}",
-                                e
+                                "{}",
+                                crate::i18n::tr_args("sink-channel_write_failed", args)
                             );
                             write_error_count.fetch_add(1, Ordering::Relaxed);
                         } else {
@@ -401,10 +403,12 @@ impl ChannelBufferedFileSink {
                         }
                     }
                     if let Err(e) = writer.flush() {
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("err", &e);
                         tracing::error!(
                             kind = %e.kind(),
-                            "ChannelBufferedFileSink: Flush error: {}",
-                            e
+                            "{}",
+                            crate::i18n::tr_args("sink-channel_flush_failed", args)
                         );
                         write_error_count.fetch_add(1, Ordering::Relaxed);
                     }
@@ -458,10 +462,12 @@ impl ChannelBufferedFileSink {
                                 current_file_bytes.fetch_add(entry.len() as u64, Ordering::Relaxed);
                             }
                             Err(e) => {
+                                let mut args = crate::i18n::MsgArgs::new();
+                                args.set("err", &e);
                                 tracing::error!(
                                     kind = %e.kind(),
-                                    "ChannelBufferedFileSink: Write error during drain: {}",
-                                    e
+                                    "{}",
+                                    crate::i18n::tr_args("sink-channel_drain_write_failed", args)
                                 );
                                 write_error_count.fetch_add(1, Ordering::Relaxed);
                             }
@@ -496,10 +502,12 @@ impl ChannelBufferedFileSink {
             if let Some(writer) = file_guard.as_mut()
                 && let Err(e) = writer.flush()
             {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", &e);
                 tracing::error!(
                     kind = %e.kind(),
-                    "ChannelBufferedFileSink: Final flush error: {}",
-                    e
+                    "{}",
+                    crate::i18n::tr_args("sink-channel_final_flush_failed", args)
                 );
                 write_error_count.fetch_add(1, Ordering::Relaxed);
             }
@@ -527,10 +535,12 @@ impl ChannelBufferedFileSink {
                 let mut file_guard = file.lock();
                 if let Some(writer) = file_guard.as_mut() {
                     if let Err(e) = writer.flush() {
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("err", &e);
                         tracing::error!(
                             kind = %e.kind(),
-                            "ChannelBufferedFileSink: Periodic flush error: {}",
-                            e
+                            "{}",
+                            crate::i18n::tr_args("sink-channel_periodic_flush_failed", args)
                         );
                         write_error_count.fetch_add(1, Ordering::Relaxed);
                     }
@@ -664,11 +674,15 @@ impl ChannelBufferedFileSink {
             Ok(new_file) => {
                 *file = Some(BufWriter::new(new_file));
             }
-            Err(e) => tracing::error!(
-                path = %base_path.display(),
-                "ChannelBufferedFileSink: reopen after rotation failed: {}",
-                e
-            ),
+            Err(e) => {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("err", &e);
+                tracing::error!(
+                    path = %base_path.display(),
+                    "{}",
+                    crate::i18n::tr_args("sink-channel_reopen_after_rotation_failed", args)
+                )
+            }
         }
         current_file_bytes.store(0, Ordering::Relaxed);
         *last_rotation.lock() = Instant::now();

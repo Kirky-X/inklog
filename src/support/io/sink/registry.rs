@@ -65,7 +65,11 @@ impl SinkRegistry {
     /// Register a sink factory.
     pub fn register<F: SinkFactory + 'static>(&mut self, factory: F) {
         let sink_type = factory.sink_type().to_string();
-        info!("Registering sink factory: {}", sink_type);
+        info!("{}", {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("type", &sink_type);
+            crate::i18n::tr_args("log-sink_factory_registered", args)
+        });
         self.factories.insert(sink_type, Box::new(factory));
     }
 

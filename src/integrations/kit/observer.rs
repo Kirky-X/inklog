@@ -34,7 +34,8 @@ impl BuildObserver for InklogBuildObserver {
     fn on_module_start(&self, module_name: &'static str) {
         tracing::debug!(
             module = module_name,
-            "inklog build observer: module build started"
+            "{}",
+            crate::i18n::tr("log-kit_observer_module_build_started")
         );
     }
 
@@ -42,7 +43,8 @@ impl BuildObserver for InklogBuildObserver {
         tracing::debug!(
             module = module_name,
             elapsed_ms = elapsed.as_millis() as u64,
-            "inklog build observer: module built successfully"
+            "{}",
+            crate::i18n::tr("log-kit_observer_module_built")
         );
     }
 
@@ -50,7 +52,8 @@ impl BuildObserver for InklogBuildObserver {
         tracing::error!(
             module = module_name,
             error = %error,
-            "inklog build observer: module build failed"
+            "{}",
+            crate::i18n::tr("kit-observer-module_build_failed")
         );
     }
 }

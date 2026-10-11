@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog 日志轮转示例 ===\n");
+    println!("=== inklog log rotation examples ===\n");
 
     show_size_based_rotation();
     show_time_based_rotation();
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     show_composite_rotation();
     show_file_sink_config_rotation();
 
-    println!("\n✓ 所有轮转示例演示完成");
+    println!("\n✓ all rotation examples completed");
     Ok(())
 }
 
@@ -54,34 +54,34 @@ fn make_context(current_size: u64, elapsed_secs: u64, sequence: u32) -> Rotation
 
 /// 展示按大小轮转
 fn show_size_based_rotation() {
-    print_separator("1. 按大小轮转（SizeBasedRotation）");
+    print_separator("1. Size-based rotation (SizeBasedRotation)");
 
-    print_section("1.1 from_size_string(\"100MB\") 构造");
-    let strategy = SizeBasedRotation::from_size_string("100MB").expect("解析失败");
+    print_section("1.1 from_size_string(\"100MB\") construction");
+    let strategy = SizeBasedRotation::from_size_string("100MB").expect("failed to parse");
     println!(
-        "max_size = {} 字节 ({} MB)",
+        "max_size = {} bytes ({} MB)",
         strategy.max_size(),
         strategy.max_size() / 1024 / 1024
     );
     assert_eq!(strategy.max_size(), 100 * 1024 * 1024);
     assert_eq!(strategy.name(), "size_based");
 
-    print_section("1.2 文件大小未超限 → 不轮转");
+    print_section("1.2 file size within the limit → no rotation");
     let ctx = make_context(50 * 1024 * 1024, 0, 0);
     let result = strategy.should_rotate(&ctx);
     println!(
-        "current_size = {} MB, 限制 = 100 MB",
+        "current_size = {} MB, limit = 100 MB",
         ctx.current_size / 1024 / 1024
     );
     println!("should_rotate = {}", result.should_rotate);
     assert!(!result.should_rotate);
     assert!(result.reason.is_none());
 
-    print_section("1.3 文件大小超限 → 触发轮转");
+    print_section("1.3 file size over the limit → rotation triggers");
     let ctx = make_context(150 * 1024 * 1024, 0, 0);
     let result = strategy.should_rotate(&ctx);
     println!(
-        "current_size = {} MB, 限制 = 100 MB",
+        "current_size = {} MB, limit = 100 MB",
         ctx.current_size / 1024 / 1024
     );
     println!("should_rotate = {}", result.should_rotate);
@@ -92,13 +92,13 @@ fn show_size_based_rotation() {
 
 /// 展示按时间轮转
 fn show_time_based_rotation() {
-    print_separator("2. 按时间轮转（TimeBasedRotation）");
+    print_separator("2. Time-based rotation (TimeBasedRotation)");
 
-    print_section("2.1 四种内置间隔");
+    print_section("2.1 the four built-in intervals");
     for interval in ["hourly", "daily", "weekly", "monthly"] {
-        let s = TimeBasedRotation::from_interval_string(interval).expect("解析失败");
+        let s = TimeBasedRotation::from_interval_string(interval).expect("failed to parse");
         println!(
-            "{:<10} interval_secs = {} 秒 ({} 小时)",
+            "{:<10} interval_secs = {} sec ({} hours)",
             interval,
             s.interval_secs(),
             s.interval_secs() / 3600
@@ -117,23 +117,31 @@ fn show_time_based_rotation() {
         86400
     );
 
-    print_section("2.2 未知间隔返回错误");
+    print_section("2.2 an unknown interval returns an error");
     let err = TimeBasedRotation::from_interval_string("yearly").unwrap_err();
-    println!("错误信息: {}", err);
+    println!("Error message: {}", err);
     assert!(err.contains("Unknown rotation interval"));
 
-    print_section("2.3 未到间隔 → 不轮转（daily，已过 1 小时）");
+    print_section("2.3 interval not reached → no rotation (daily, 1 hour elapsed)");
     let strategy = TimeBasedRotation::from_interval_string("daily").unwrap();
     let ctx = make_context(100, 3600, 0); // 距上次轮转 1 小时
     let result = strategy.should_rotate(&ctx);
-    println!("已过 {} 秒, 间隔 {} 秒", 3600, strategy.interval_secs());
+    println!(
+        "elapsed {} sec, interval {} sec",
+        3600,
+        strategy.interval_secs()
+    );
     println!("should_rotate = {}", result.should_rotate);
     assert!(!result.should_rotate);
 
-    print_section("2.4 到达间隔 → 触发轮转（daily，已过 24 小时）");
+    print_section("2.4 interval reached → rotation triggers (daily, 24 hours elapsed)");
     let ctx = make_context(100, 86400, 0); // 距上次轮转 24 小时
     let result = strategy.should_rotate(&ctx);
-    println!("已过 {} 秒, 间隔 {} 秒", 86400, strategy.interval_secs());
+    println!(
+        "elapsed {} sec, interval {} sec",
+        86400,
+        strategy.interval_secs()
+    );
     println!("should_rotate = {}", result.should_rotate);
     println!("reason        = {:?}", result.reason);
     assert!(result.should_rotate);
@@ -142,9 +150,9 @@ fn show_time_based_rotation() {
 
 /// 展示轮转后的文件命名规则
 fn show_rotation_file_naming() {
-    print_separator("3. 轮转后的文件命名规则");
+    print_separator("3. Rotated file naming rules");
 
-    print_section("3.1 generate_next_path 默认格式");
+    print_section("3.1 generate_next_path default format");
     let strategy = SizeBasedRotation::new(1024);
     let ctx = make_context(2048, 0, 1);
     let base = PathBuf::from("/var/log/app.log");
@@ -155,7 +163,7 @@ fn show_rotation_file_naming() {
     assert!(next.to_string_lossy().contains("app_"));
     assert!(next.to_string_lossy().ends_with(".log"));
 
-    print_section("3.2 不同 sequence 生成不同文件名");
+    print_section("3.2 different sequence values produce different file names");
     let mut paths = Vec::new();
     for seq in 0..3u32 {
         let ctx = make_context(2048, 0, seq);
@@ -169,7 +177,7 @@ fn show_rotation_file_naming() {
     assert_ne!(paths[0], paths[1]);
     assert_ne!(paths[1], paths[2]);
 
-    print_section("3.3 无扩展名路径回退为 .log");
+    print_section("3.3 a path without an extension falls back to .log");
     let base_no_ext = PathBuf::from("/var/log/app");
     let next = strategy.generate_next_path(&base_no_ext, &ctx);
     println!("base path : {}", base_no_ext.display());
@@ -179,9 +187,9 @@ fn show_rotation_file_naming() {
 
 /// 展示组合轮转策略
 fn show_composite_rotation() {
-    print_separator("4. 组合轮转策略（CompositeRotation）");
+    print_separator("4. Composite rotation strategy (CompositeRotation)");
 
-    print_section("4.1 组合 size + time，两个条件均不满足");
+    print_section("4.1 composite size + time, neither condition met");
     let mut composite = CompositeRotation::new(vec![]);
     composite.add(SizeBasedRotation::new(1024));
     composite.add(TimeBasedRotation::from_interval_string("daily").unwrap());
@@ -196,7 +204,7 @@ fn show_composite_rotation() {
     );
     assert!(!result.should_rotate);
 
-    print_section("4.2 size 条件满足 → 触发轮转");
+    print_section("4.2 the size condition is met → rotation triggers");
     let ctx = make_context(2048, 3600, 0); // 2048 字节 > 1024
     let result = composite.should_rotate(&ctx);
     println!(
@@ -205,7 +213,7 @@ fn show_composite_rotation() {
     );
     assert!(result.should_rotate);
 
-    print_section("4.3 time 条件满足 → 触发轮转");
+    print_section("4.3 the time condition is met → rotation triggers");
     let ctx = make_context(100, 86400, 0); // 100 字节，24 小时
     let result = composite.should_rotate(&ctx);
     println!(
@@ -217,9 +225,9 @@ fn show_composite_rotation() {
 
 /// 展示 FileSinkConfig 中的轮转配置字段
 fn show_file_sink_config_rotation() {
-    print_separator("5. FileSinkConfig 轮转配置字段");
+    print_separator("5. FileSinkConfig rotation fields");
 
-    print_section("5.1 默认配置");
+    print_section("5.1 default configuration");
     let default_cfg = FileSinkConfig::default();
     println!("max_size      = {:?}", default_cfg.max_size);
     println!("rotation_time = {:?}", default_cfg.rotation_time);
@@ -228,7 +236,7 @@ fn show_file_sink_config_rotation() {
     assert_eq!(default_cfg.max_size, "100MB");
     assert_eq!(default_cfg.rotation_time, "daily");
 
-    print_section("5.2 自定义轮转配置（小文件 + 每小时轮转）");
+    print_section("5.2 custom rotation configuration (small file + hourly)");
     let cfg = FileSinkConfig {
         enabled: true,
         path: PathBuf::from("/tmp/inklog_rotation_demo/app.log"),
@@ -248,8 +256,8 @@ fn show_file_sink_config_rotation() {
     assert_eq!(cfg.max_size, "10KB");
     assert_eq!(cfg.rotation_time, "hourly");
 
-    println!("\n说明: FileSink 内部使用 CompositeRotation 同时检查 size 和 time，");
+    println!("\nNote: FileSink uses CompositeRotation internally to check size and time;");
     println!(
-        "      任一条件满足即触发轮转，轮转后文件按 {{stem}}_{{timestamp}}_{{seq}}.{{ext}} 命名。"
+        "      when either condition is met it rotates, and the file is named {{stem}}_{{timestamp}}_{{seq}}.{{ext}}."
     );
 }

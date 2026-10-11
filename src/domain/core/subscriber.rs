@@ -646,7 +646,7 @@ mod tests {
         assert_eq!(
             metrics.logs_dropped(),
             1,
-            "quota drop must count as logs_dropped (限流丢弃而非采样)"
+            "quota drop must count as logs_dropped (rate limiting, not sampling)"
         );
     }
 

@@ -68,19 +68,19 @@ mod tests {
         let log_data = generate_log_data(10000, "standard text log pattern");
         let original_size = log_data.len() as u64;
 
-        let compressed_data = compress_with_zstd(&log_data).expect("压缩失败");
+        let compressed_data = compress_with_zstd(&log_data).expect("compression failed");
         let compressed_size = compressed_data.len() as u64;
 
         let ratio = calculate_compression_ratio(original_size, compressed_size);
 
-        println!("文本日志压缩测试:");
-        println!("原始大小: {} bytes", original_size);
-        println!("压缩后大小: {} bytes", compressed_size);
-        println!("压缩比: {:.2}%", ratio);
+        println!("text log compression test:");
+        println!("original size: {} bytes", original_size);
+        println!("compressed size: {} bytes", compressed_size);
+        println!("compression ratio: {:.2}%", ratio);
 
         assert!(
             ratio >= min_ratio,
-            "压缩比低于阈值: {:.2}% < {:.2}%",
+            "compression ratio below threshold: {:.2}% < {:.2}%",
             ratio,
             min_ratio
         );
@@ -93,19 +93,19 @@ mod tests {
         let log_data = generate_json_log_data(5000);
         let original_size = log_data.len() as u64;
 
-        let compressed_data = compress_with_zstd(&log_data).expect("压缩失败");
+        let compressed_data = compress_with_zstd(&log_data).expect("compression failed");
         let compressed_size = compressed_data.len() as u64;
 
         let ratio = calculate_compression_ratio(original_size, compressed_size);
 
-        println!("JSON日志压缩测试:");
-        println!("原始大小: {} bytes", original_size);
-        println!("压缩后大小: {} bytes", compressed_size);
-        println!("压缩比: {:.2}%", ratio);
+        println!("JSON log compression test:");
+        println!("original size: {} bytes", original_size);
+        println!("compressed size: {} bytes", compressed_size);
+        println!("compression ratio: {:.2}%", ratio);
 
         assert!(
             ratio >= min_ratio,
-            "JSON日志压缩比低于阈值: {:.2}% < {:.2}%",
+            "JSON log compression ratio below threshold: {:.2}% < {:.2}%",
             ratio,
             min_ratio
         );
@@ -118,19 +118,19 @@ mod tests {
         let log_data = generate_repetitive_data(10000);
         let original_size = log_data.len() as u64;
 
-        let compressed_data = compress_with_zstd(&log_data).expect("压缩失败");
+        let compressed_data = compress_with_zstd(&log_data).expect("compression failed");
         let compressed_size = compressed_data.len() as u64;
 
         let ratio = calculate_compression_ratio(original_size, compressed_size);
 
-        println!("重复数据压缩测试:");
-        println!("原始大小: {} bytes", original_size);
-        println!("压缩后大小: {} bytes", compressed_size);
-        println!("压缩比: {:.2}%", ratio);
+        println!("repetitive-data compression test:");
+        println!("original size: {} bytes", original_size);
+        println!("compressed size: {} bytes", compressed_size);
+        println!("compression ratio: {:.2}%", ratio);
 
         assert!(
             ratio >= min_ratio,
-            "重复数据压缩比低于阈值: {:.2}% < {:.2}%",
+            "repetitive-data compression ratio below threshold: {:.2}% < {:.2}%",
             ratio,
             min_ratio
         );
@@ -147,19 +147,19 @@ mod tests {
 
         let original_size = log_data.len() as u64;
 
-        let compressed_data = compress_with_zstd(&log_data).expect("压缩失败");
+        let compressed_data = compress_with_zstd(&log_data).expect("compression failed");
         let compressed_size = compressed_data.len() as u64;
 
         let ratio = calculate_compression_ratio(original_size, compressed_size);
 
-        println!("混合内容压缩测试:");
-        println!("原始大小: {} bytes", original_size);
-        println!("压缩后大小: {} bytes", compressed_size);
-        println!("压缩比: {:.2}%", ratio);
+        println!("mixed-content compression test:");
+        println!("original size: {} bytes", original_size);
+        println!("compressed size: {} bytes", compressed_size);
+        println!("compression ratio: {:.2}%", ratio);
 
         assert!(
             ratio >= min_ratio,
-            "混合内容压缩比低于阈值: {:.2}% < {:.2}%",
+            "mixed-content compression ratio below threshold: {:.2}% < {:.2}%",
             ratio,
             min_ratio
         );
@@ -169,7 +169,7 @@ mod tests {
     fn test_zstd_compression_levels() {
         let log_data = generate_log_data(5000, "compression level test");
 
-        println!("压缩级别对比测试:");
+        println!("compression level comparison test:");
 
         for level in [1, 3, 9, 19] {
             let mut encoder = zstd::Encoder::new(Vec::new(), level).unwrap();
@@ -178,7 +178,7 @@ mod tests {
 
             let ratio = calculate_compression_ratio(log_data.len() as u64, compressed.len() as u64);
             println!(
-                "级别 {}: {} bytes -> {} bytes, 压缩比: {:.2}%",
+                "level {}: {} bytes -> {} bytes, ratio: {:.2}%",
                 level,
                 log_data.len(),
                 compressed.len(),

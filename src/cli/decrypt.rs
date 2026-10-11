@@ -299,8 +299,11 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
             // v2 头：magic(8) + version(2) + algo(2) + salt(16) + nonce(12) = 40 字节。
             // 盐随头存储，密码模式密钥可确定性重导出。
             if read_count < 40 {
+                let mut args = inklog::i18n::MsgArgs::new();
+                args.set("read_count", read_count);
                 return Err(anyhow!(
-                    "truncated v2 header: expected 40 bytes (including the 16-byte PBKDF2 salt), got {read_count}"
+                    "{}",
+                    inklog::i18n::tr_args("cli-decrypt-err-truncated-v2", args)
                 ));
             }
             let header_salt: [u8; 16] = header[12..28].try_into().unwrap();

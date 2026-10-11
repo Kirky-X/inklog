@@ -602,7 +602,8 @@ impl Database for DbNexusAdapter {
             tracing::debug!(
                 table = %self.table_name,
                 count = records.len(),
-                "Database batch insert succeeded (parameterized)"
+                "{}",
+                crate::i18n::tr("log-db_batch_insert_succeeded_parameterized")
             );
             return Ok(records.len());
         }
@@ -659,7 +660,8 @@ impl Database for DbNexusAdapter {
                     table = %self.table_name,
                     error = %e,
                     elapsed_ms = elapsed_ms,
-                    "Database batch insert failed"
+                    "{}",
+                    crate::i18n::tr("db-batch_insert_warn_failed")
                 );
                 let mut args = crate::i18n::MsgArgs::new();
                 args.set("err", e.to_string());
@@ -675,7 +677,8 @@ impl Database for DbNexusAdapter {
             table = %self.table_name,
             count = records.len(),
             elapsed_ms = elapsed_ms,
-            "Database batch insert succeeded"
+            "{}",
+            crate::i18n::tr("log-db_batch_insert_succeeded")
         );
 
         Ok(records.len())

@@ -64,12 +64,13 @@ pub fn create_log_record(level: &str, message: &str, target: &str) -> LogRecord 
 
 /// 把多个级别的日志按顺序写入 sink，并 flush。
 ///
-/// 每个级别生成一条记录，消息使用 `format!("这是一条 {} 级别日志", level)`。
+/// 每个级别生成一条记录，消息使用 `format!("this is a {} level log", level)`。
 /// 返回写入的记录数（等于 `levels.len()`），便于调用方做完整性检查。
 pub async fn write_level_records(sink: &dyn LogSink, levels: &[&str]) -> Result<usize> {
     let mut written = 0;
     for level in levels {
-        let record = create_log_record(level, &format!("这是一条 {} 级别日志", level), "file_ops");
+        let record =
+            create_log_record(level, &format!("this is a {} level log", level), "file_ops");
         sink.write(&record).await?;
         written += 1;
     }
@@ -156,51 +157,57 @@ mod tests {
         // timestamp 必须是"刚刚"的时间，防止误用零值
         let now = Utc::now();
         let diff = now.signed_duration_since(record.timestamp);
-        assert!(diff.num_seconds().abs() < 5, "timestamp 应为当前时间");
+        assert!(diff.num_seconds().abs() < 5, "timestamp should be current");
     }
 
     #[tokio::test]
     async fn test_write_level_records() {
         // 验证：写入 5 个级别记录后返回 5，且文件非空。
-        let dir = tempdir().expect("创建临时目录失败");
+        let dir = tempdir().expect("failed to create temp dir");
         let log_path = dir.path().join("write_levels.log");
         let path_str = log_path.to_str().unwrap();
 
         let config = create_file_config(path_str, "10MB", false);
-        let sink = FileSink::new(config).expect("创建 FileSink 失败");
+        let sink = FileSink::new(config).expect("failed to create FileSink");
 
         let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
-        let written = write_level_records(&sink, &levels).await.expect("写入失败");
+        let written = write_level_records(&sink, &levels)
+            .await
+            .expect("write failed");
         assert_eq!(written, 5);
 
         // 文件应已被创建且包含内容
-        assert!(log_path.exists(), "日志文件应存在");
+        assert!(log_path.exists(), "log file should exist");
         let content = tokio::fs::read_to_string(&log_path)
             .await
-            .expect("读取文件失败");
-        assert!(!content.is_empty(), "日志文件不应为空");
+            .expect("failed to read file");
+        assert!(!content.is_empty(), "log file should not be empty");
         for level in &levels {
-            assert!(content.contains(level), "日志内容应包含级别 {}", level);
+            assert!(
+                content.contains(level),
+                "log content should contain level {}",
+                level
+            );
         }
     }
 
     #[tokio::test]
     async fn test_write_level_records_empty() {
         // 验证：空级别列表返回 0 且不报错。
-        let dir = tempdir().expect("创建临时目录失败");
+        let dir = tempdir().expect("failed to create temp dir");
         let log_path = dir.path().join("empty.log");
         let config = create_file_config(log_path.to_str().unwrap(), "10MB", false);
-        let sink = FileSink::new(config).expect("创建 FileSink 失败");
+        let sink = FileSink::new(config).expect("failed to create FileSink");
         let written = write_level_records(&sink, &[])
             .await
-            .expect("写入空列表应成功");
+            .expect("writing an empty list should succeed");
         assert_eq!(written, 0);
     }
 
     #[tokio::test]
     async fn test_cleanup_files_removes_matching() {
         // 验证：cleanup_files 只删除文件名包含 prefix 的文件，并返回正确数量。
-        let dir = tempdir().expect("创建临时目录失败");
+        let dir = tempdir().expect("failed to create temp dir");
         let prefix = "inklog_test_cleanup_match";
         let match_a = dir.path().join(format!("{}_a.log", prefix));
         let match_b = dir.path().join(format!("{}_b.log", prefix));
@@ -213,21 +220,24 @@ mod tests {
         let anchor = dir.path().join(format!("{}.log", prefix));
         let deleted = cleanup_files(anchor.to_str().unwrap(), prefix)
             .await
-            .expect("cleanup 失败");
-        assert_eq!(deleted, 2, "应删除 2 个匹配文件（match_a、match_b）");
+            .expect("cleanup failed");
+        assert_eq!(
+            deleted, 2,
+            "should delete 2 matching files (match_a, match_b)"
+        );
         assert!(!match_a.exists());
         assert!(!match_b.exists());
-        assert!(nomatch.exists(), "未匹配的文件不应被删除");
+        assert!(nomatch.exists(), "file with no match should not be deleted");
     }
 
     #[tokio::test]
     async fn test_cleanup_files_no_match() {
         // 验证：无匹配文件时返回 0，不报错。
-        let dir = tempdir().expect("创建临时目录失败");
+        let dir = tempdir().expect("failed to create temp dir");
         let anchor = dir.path().join("anchor.log");
         let deleted = cleanup_files(anchor.to_str().unwrap(), "nonexistent_prefix_xyz")
             .await
-            .expect("cleanup 失败");
+            .expect("cleanup failed");
         assert_eq!(deleted, 0);
     }
 
@@ -236,7 +246,7 @@ mod tests {
         // 验证：目录不存在时返回 0，不报错（fail-loud 的反面：缺目录视为无文件可删）。
         let deleted = cleanup_files("/nonexistent/path/file.log", "any")
             .await
-            .expect("cleanup 失败");
+            .expect("cleanup failed");
         assert_eq!(deleted, 0);
     }
 }

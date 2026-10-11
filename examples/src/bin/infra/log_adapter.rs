@@ -19,17 +19,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 fn main() {
-    println!("=== inklog log crate 适配器示例 ===\n");
+    println!("=== inklog log crate adapter example ===\n");
 
     show_install_and_log();
     show_level_filter_behavior();
 
-    println!("\n✓ 所有 log 适配器示例演示完成");
+    println!("\n✓ All log adapter examples completed");
 }
 
 /// 展示安装 LogLogger 并使用 log 宏输出日志
 fn show_install_and_log() {
-    print_separator("1. 安装 LogLogger 并使用 log 宏");
+    print_separator("1. Install LogLogger and use log macros");
 
     // 创建 console 和 async channel（容量 100）
     let (console_tx, console_rx) = bounded::<Arc<LogRecord>>(100);
@@ -42,43 +42,45 @@ fn show_install_and_log() {
     let logger = LogLogger::new(adapter, LevelFilter::Info);
     let installed = logger.install().is_ok();
     if installed {
-        println!("✓ LogLogger 安装成功（max_level = Info）");
+        println!("✓ LogLogger installed (max_level = Info)");
     } else {
         // 全局 logger 只能安装一次；独立运行本 binary 不会触发此分支
-        println!("⚠ 全局 logger 已被安装，log 宏将路由到既有 logger");
+        println!(
+            "⚠ A global logger is already installed; log macros will route to the existing logger"
+        );
     }
 
-    print_section("1.1 使用 log::info! / warn! / error! 宏");
-    log::info!("这是一条 INFO 级别日志");
-    log::warn!("这是一条 WARN 级别日志");
-    log::error!("这是一条 ERROR 级别日志");
-    log::debug!("这条 DEBUG 日志应被过滤（max_level = Info）");
-    log::trace!("这条 TRACE 日志应被过滤（max_level = Info）");
+    print_section("1.1 Using log::info! / warn! / error! macros");
+    log::info!("this is an INFO level log");
+    log::warn!("this is a WARN level log");
+    log::error!("this is an ERROR level log");
+    log::debug!("this DEBUG log should be filtered (max_level = Info)");
+    log::trace!("this TRACE log should be filtered (max_level = Info)");
 
     // 从 channel 接收日志记录并打印
-    print_section("1.2 从 console channel 接收的记录");
+    print_section("1.2 Records received from the console channel");
     let console_count = drain_channel(&console_rx, "console", installed);
 
-    print_section("1.3 从 async channel 接收的记录");
+    print_section("1.3 Records received from the async channel");
     let async_count = drain_channel(&async_rx, "async", installed);
 
     if installed {
         // info + warn + error = 3 条（debug/trace 被过滤）
-        assert_eq!(console_count, 3, "console channel 应收到 3 条记录");
-        assert_eq!(async_count, 3, "async channel 应收到 3 条记录");
-        println!("\n✓ 校验通过：每个 channel 各收到 3 条记录（info/warn/error）");
+        assert_eq!(console_count, 3, "console channel should receive 3 records");
+        assert_eq!(async_count, 3, "async channel should receive 3 records");
+        println!("\n✓ Verified: each channel received 3 records (info/warn/error)");
     }
 }
 
 /// 展示 LevelFilter 过滤行为说明
 fn show_level_filter_behavior() {
-    print_separator("2. LevelFilter 过滤行为");
-    println!("LogLogger::new(adapter, LevelFilter::Info) 设置 max_level = Info");
-    println!("  → log::info! / warn! / error! 通过");
-    println!("  → log::debug! / trace! 被过滤");
+    print_separator("2. LevelFilter filtering behavior");
+    println!("LogLogger::new(adapter, LevelFilter::Info) sets max_level = Info");
+    println!("  → log::info! / warn! / error! pass through");
+    println!("  → log::debug! / trace! filtered out");
     println!();
-    println!("LogAdapter::enabled() 实现：metadata.level() <= log::max_level()");
-    println!("Level 枚举序：Error < Warn < Info < Debug < Trace");
+    println!("LogAdapter::enabled() impl: metadata.level() <= log::max_level()");
+    println!("Level enum order: Error < Warn < Info < Debug < Trace");
 }
 
 /// 排空 channel 并打印接收到的 LogRecord，返回接收到的记录数
@@ -97,15 +99,15 @@ fn drain_channel(
     }
     if count == 0 {
         if installed {
-            println!("  （{} channel 未收到记录）", name);
+            println!("  ({} channel received no records)", name);
         } else {
             println!(
-                "  （{} channel 未收到记录，全局 logger 未安装到本适配器）",
+                "  ({} channel received no records; the global logger is not installed on this adapter)",
                 name
             );
         }
     } else {
-        println!("  共接收 {} 条 {} 记录", count, name);
+        println!("  Received {} {} records in total", count, name);
     }
     count
 }
