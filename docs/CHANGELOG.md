@@ -45,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **依赖图裁剪**：`tokio` 去掉 `full`，按实际用量显式声明 `rt-multi-thread`/`macros`/`sync`/`time`/`fs`/`io-util`/`net`/`signal`（io-std/process/parking_lot 路径不再进入产物，tokio 对 parking_lot 的依赖随之消失）；`rayon`、`futures` 在 src/ 零引用、仅测试与基准使用，从 `[dependencies]` 移入 `[dev-dependencies]`，不再进入库消费者依赖图；`ctor` 关闭隐式默认特性并显式声明 `std`/`proc_macro`（未使用的 `priority` 一并关闭，`link-section` 退出依赖图）；全部三方依赖统一 `default-features = false` + 显式特性声明。
 - **CI actions 升到最新**：`taiki-e/install-action` v2.87.27、`codecov/codecov-action` v7.1.1、`actions/upload-artifact` v7.0.2、`github/codeql-action` v4.38.3、`docker/setup-compose-action` v2.4.0；`actions/checkout` v7.0.1、`Swatinem/rust-cache` v2.9.2、`actions/cache` v6.1.0、`softprops/action-gh-release` v3.0.3 经解析提交 SHA 复核已是最新，注释精确到语义化版本。
 
+## [0.3.0-rc.8] - 2026-10-08
+
+### Removed
+
+- **生产 API 收缩：删除测试专用公共函数**：`support::io::sink::ring_buffered_file` 公开链上的 `decrypt_file` 与 observability 面的 `reset_ops_hub_for_tests` 等仅测试使用的 `pub` 函数从生产代码移除——公共 API 面收缩，外部消费者如引用需迁移至既有入口或 `test-utils` feature。
+
+### Changed
+
+- **复杂热点收敛与死代码清理**：敏感键/采样/模板热点抽取辅助函数，query 解码过滤路径抽公共助手，压缩守卫按特性隔离；测试面死委托删除并以特性隔离替代 `allow` 标记。
+- **治理与注释卫生**：specmark 目录与 ws-R14 治理复核记录移出 git 跟踪；注释清理（变更史叙述与任务编号残留）；漏洞报告渠道统一为 GH 安全通告首选、邮箱备选。
+
 ## [0.3.0-rc.7] - 2026-10-07
 
 ### Fixed
