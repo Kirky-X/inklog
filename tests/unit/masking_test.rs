@@ -319,7 +319,6 @@ mod masking_test {
             "Card should be masked"
         );
 
-        // 验证脱敏标记存在
         assert!(result.contains("**@**.***") || result.contains("***REDACTED***"));
     }
 

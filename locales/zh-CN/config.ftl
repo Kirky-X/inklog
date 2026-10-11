@@ -141,6 +141,11 @@ config-reload_failed_keep_previous = 配置热更新失败；保留既有配置
 
 # Schema 序列化不变量
 config-json_schema_serialize_invariant = JsonSchema 序列化不会失败
+config-json_path_has_segment_invariant = 点分路径至少包含一个段
+config-json_intermediate_node_object_invariant = 配置树中间节点必然为对象
+config-json_leaf_parent_object_invariant = 配置树叶父节点必然为对象
+config-serialize_invariant = InklogConfig 序列化不会失败（纯 derive 数据）
+config-env_patch_types_invariant = env 补丁保持字段类型不变（逐条规则校验）
 
 # 压缩后端失败消息
 config-compression-create_failed = 创建压缩文件失败：{ $err }

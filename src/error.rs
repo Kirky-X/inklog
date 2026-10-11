@@ -645,7 +645,6 @@ mod tests {
 
     #[test]
     fn test_error_display_format() {
-        // 验证 Display trait 实现
         assert_eq!(
             InklogError::ConfigError("test".into()).to_string(),
             "Configuration error: test"

@@ -154,8 +154,9 @@ impl RegistryInner {
                 {
                     assert_eq!(
                         b0,
-                        buckets.as_ref().expect(&crate::i18n::tr(
-                            "metrics-registry-histogram_buckets-missing"
+                        buckets.as_ref().unwrap_or_else(|| panic!(
+                            "{}",
+                            crate::i18n::tr("metrics-registry-histogram_buckets-missing")
                         )),
                         "{}",
                         {
@@ -181,9 +182,12 @@ impl RegistryInner {
                     MetricKind::Histogram => MetricFamily::Histogram {
                         help: help.to_string(),
                         label_names,
-                        buckets: buckets.expect(&crate::i18n::tr(
-                            "metrics-registry-histogram_buckets-missing",
-                        )),
+                        buckets: buckets.unwrap_or_else(|| {
+                            panic!(
+                                "{}",
+                                crate::i18n::tr("metrics-registry-histogram_buckets-missing")
+                            )
+                        }),
                         series: BTreeMap::new(),
                     },
                 };

@@ -20,13 +20,16 @@ use inklog::sink::ring_buffered_file::{
     BackpressureStrategy, ChannelBufferedConfig, ChannelBufferedFileSink,
 };
 use inklog::tracing::Level;
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::time::Duration;
 use tempfile::TempDir;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog ChannelBufferedFileSink examples ===\n");
+    println!(
+        "{}\n",
+        tr("example-ring-buffered-file-inklog-channelbufferedfilesink")
+    );
 
     show_config_default();
     show_block_strategy().await?;
@@ -34,31 +37,85 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     show_drop_oldest_strategy().await?;
     show_metrics_tracking().await?;
 
-    println!("\n✓ all ChannelBufferedFileSink examples completed");
+    println!(
+        "\n{}",
+        tr("example-ring-buffered-file-all-channelbufferedfilesink")
+    );
     Ok(())
 }
 
 /// 展示 ChannelBufferedConfig 默认配置
 fn show_config_default() {
-    print_separator("1. ChannelBufferedConfig defaults");
+    print_separator(&tr(
+        "example-ring-buffered-file-1-channelbufferedconfig-defaults",
+    ));
 
-    print_section("1.1 Default::default()");
+    print_section(&tr("example-ring-buffered-file-1-1-default-default"));
     let cfg = ChannelBufferedConfig::default();
-    println!("channel_capacity    = {}", cfg.channel_capacity);
-    println!("flush_batch_size    = {}", cfg.flush_batch_size);
-    println!("flush_interval_ms   = {}", cfg.flush_interval_ms);
-    println!("backpressure_strategy = {:?}", cfg.backpressure_strategy);
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-channel-capacity",
+            &[("channel_capacity", &cfg.channel_capacity)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-flush-batch-size",
+            &[("flush_batch_size", &cfg.flush_batch_size)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-flush-interval-ms",
+            &[("flush_interval_ms", &cfg.flush_interval_ms)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-backpressure-strategy",
+            &[(
+                "backpressure_strategy",
+                &format!("{:?}", cfg.backpressure_strategy)
+            )]
+        )
+    );
     assert_eq!(cfg.channel_capacity, 10_000);
     assert_eq!(cfg.flush_batch_size, 1000);
     assert_eq!(cfg.flush_interval_ms, 100);
     assert_eq!(cfg.backpressure_strategy, BackpressureStrategy::Block);
 
-    print_section("1.2 BackpressureStrategy enum values");
-    println!("Block       = {:?}", BackpressureStrategy::Block);
-    println!("DropOldest  = {:?}", BackpressureStrategy::DropOldest);
-    println!("DropNewest  = {:?}", BackpressureStrategy::DropNewest);
+    print_section(&tr(
+        "example-ring-buffered-file-1-2-backpressurestrategy-enum",
+    ));
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-block",
+            &[("value", &format!("{:?}", BackpressureStrategy::Block))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-dropoldest",
+            &[("value", &format!("{:?}", BackpressureStrategy::DropOldest))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-dropnewest",
+            &[("value", &format!("{:?}", BackpressureStrategy::DropNewest))]
+        )
+    );
 
-    print_section("1.3 custom configuration (small capacity + DropNewest)");
+    print_section(&tr(
+        "example-ring-buffered-file-1-3-custom-configuration-small",
+    ));
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             fsync: false,
@@ -70,20 +127,43 @@ fn show_config_default() {
         flush_batch_size: 16,
         flush_interval_ms: 20,
     };
-    println!("channel_capacity    = {}", cfg.channel_capacity);
-    println!("flush_batch_size    = {}", cfg.flush_batch_size);
-    println!("backpressure_strategy = {:?}", cfg.backpressure_strategy);
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-channel-capacity",
+            &[("channel_capacity", &cfg.channel_capacity)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-flush-batch-size",
+            &[("flush_batch_size", &cfg.flush_batch_size)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-backpressure-strategy",
+            &[(
+                "backpressure_strategy",
+                &format!("{:?}", cfg.backpressure_strategy)
+            )]
+        )
+    );
     assert_eq!(cfg.channel_capacity, 64);
 }
 
 /// 展示 Block 背压策略：channel 满时阻塞发送端，直到消费者取走数据
 async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("2. Block backpressure strategy (block when the channel is full)");
+    print_separator(&tr(
+        "example-ring-buffered-file-2-block-backpressure-strategy",
+    ));
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("block.log");
 
-    print_section("2.1 construct a ChannelBufferedFileSink");
+    print_section(&tr("example-ring-buffered-file-2-1-construct-a"));
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -99,11 +179,14 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
     println!(
-        "sink created, channel_capacity = {}",
-        sink.metrics().channel_capacity
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-sink-created-channel-capacity",
+            &[("value", &(sink.metrics().channel_capacity))]
+        )
     );
 
-    print_section("2.2 write 20 log records");
+    print_section(&tr("example-ring-buffered-file-2-2-write-20-log-records"));
     for i in 0..20 {
         let record = LogRecord::new(
             Level::INFO,
@@ -113,23 +196,40 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
         sink.write(&record).await?;
     }
 
-    print_section("2.3 flush + shutdown to ensure data reaches disk");
+    print_section(&tr(
+        "example-ring-buffered-file-2-3-flush-shutdown-to-ensure",
+    ));
     sink.flush().await?;
     sink.shutdown().await?;
 
     let data = std::fs::read_to_string(&log_path)?;
     assert!(data.contains("block-message-00"));
     assert!(data.contains("block-message-19"));
-    println!("File size: {} bytes", data.len());
-    println!("✓ all 20 log records written (the Block strategy loses nothing)");
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-file-size-bytes",
+            &[("value", &(data.len()))]
+        )
+    );
+    println!(
+        "{}",
+        tr("example-ring-buffered-file-all-20-log-records-written-the")
+    );
 
     let m = sink.metrics();
     println!(
-        "metrics after shutdown: dropped_count = {}",
-        m.dropped_count
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-metrics-after-shutdown-dropped",
+            &[("dropped_count", &m.dropped_count)]
+        )
     );
     println!("Note: with the Block strategy dropped_count can be non-zero;");
-    println!("      it counts incomplete batches (recv_count < batch_size) on the IO thread,");
+    println!(
+        "      {}",
+        tr("example-ring-buffered-file-it-counts-incomplete-batches")
+    );
     println!(
         "      not real message drops — the file content was verified to contain all 20 records."
     );
@@ -139,12 +239,14 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 展示 DropNewest 背压策略：channel 满时丢弃新到达的日志
 async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("3. DropNewest backpressure strategy (drop the newest when full)");
+    print_separator(&tr("example-ring-buffered-file-3-dropnewest-backpressure"));
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("drop_newest.log");
 
-    print_section("3.1 small channel + DropNewest");
+    print_section(&tr(
+        "example-ring-buffered-file-3-1-small-channel-dropnewest",
+    ));
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -166,7 +268,9 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
         "channel_capacity = 4, flush_batch_size = 0 (no automatic drain), flush_interval = 1000ms"
     );
 
-    print_section("3.2 write 64 records quickly (over capacity)");
+    print_section(&tr(
+        "example-ring-buffered-file-3-2-write-64-records-quickly",
+    ));
     for i in 0..64 {
         let record = LogRecord::new(
             Level::INFO,
@@ -179,24 +283,35 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let m = sink.metrics();
-    println!("metrics.dropped_count = {}", m.dropped_count);
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-metrics-dropped-count",
+            &[("dropped_count", &m.dropped_count)]
+        )
+    );
     assert!(m.dropped_count > 0, "DropNewest should drop some records");
 
     sink.flush().await?;
     sink.shutdown().await?;
-    println!("✓ DropNewest drops new records when the channel is full, dropped_count > 0");
+    println!(
+        "{}",
+        tr("example-ring-buffered-file-dropnewest-drops-new-records")
+    );
 
     Ok(())
 }
 
 /// 展示 DropOldest 背压策略：channel 满时驱逐最旧的日志
 async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("4. DropOldest backpressure strategy (evict the oldest when full)");
+    print_separator(&tr("example-ring-buffered-file-4-dropoldest-backpressure"));
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("drop_oldest.log");
 
-    print_section("4.1 small channel + DropOldest");
+    print_section(&tr(
+        "example-ring-buffered-file-4-1-small-channel-dropoldest",
+    ));
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -217,7 +332,9 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
         "channel_capacity = 4, flush_batch_size = 0 (no automatic drain), flush_interval = 1000ms"
     );
 
-    print_section("4.2 write 64 records quickly (over capacity)");
+    print_section(&tr(
+        "example-ring-buffered-file-4-2-write-64-records-quickly",
+    ));
     for i in 0..64 {
         let record = LogRecord::new(
             Level::INFO,
@@ -230,7 +347,13 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let m = sink.metrics();
-    println!("metrics.dropped_count = {}", m.dropped_count);
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-metrics-dropped-count",
+            &[("dropped_count", &m.dropped_count)]
+        )
+    );
     assert!(
         m.dropped_count > 0,
         "DropOldest should evict some old records"
@@ -238,19 +361,24 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
 
     sink.flush().await?;
     sink.shutdown().await?;
-    println!("✓ DropOldest evicts old records when the channel is full, dropped_count > 0");
+    println!(
+        "{}",
+        tr("example-ring-buffered-file-dropoldest-evicts-old-records")
+    );
 
     Ok(())
 }
 
 /// 展示 metrics 统计：channel_len / bytes_written / flush_count / dropped_count
 async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("5. ChannelBufferedMetrics runtime statistics");
+    print_separator(&tr("example-ring-buffered-file-5-channelbufferedmetrics"));
 
     let temp_dir = TempDir::new()?;
     let log_path = temp_dir.path().join("metrics.log");
 
-    print_section("5.1 construct the sink (channel_capacity=16, flush_interval=10ms)");
+    print_section(&tr(
+        "example-ring-buffered-file-5-1-construct-the-sink-channel",
+    ));
     let cfg = ChannelBufferedConfig {
         base_config: FileSinkConfig {
             path: log_path.clone(),
@@ -266,7 +394,7 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
     let template = inklog::LogTemplate::default();
     let sink = ChannelBufferedFileSink::new(cfg, template)?;
 
-    print_section("5.2 write 10 log records");
+    print_section(&tr("example-ring-buffered-file-5-2-write-10-log-records"));
     for i in 0..10 {
         let record = LogRecord::new(
             Level::INFO,
@@ -276,7 +404,9 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
         sink.write(&record).await?;
     }
 
-    print_section("5.3 wait for the IO thread and read metrics");
+    print_section(&tr(
+        "example-ring-buffered-file-5-3-wait-for-the-io-thread-and",
+    ));
     // 轮询 metrics 直到 bytes_written > 0 且 flush_count >= 1，或超时 500ms
     // 注意：async 上下文中必须用 tokio::time::sleep 让出执行权，
     // std::thread::sleep 会阻塞 tokio worker 线程
@@ -289,11 +419,41 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
         m = sink.metrics();
     }
 
-    println!("channel_capacity = {}", m.channel_capacity);
-    println!("channel_len      = {}", m.channel_len);
-    println!("bytes_written    = {}", m.bytes_written);
-    println!("flush_count      = {}", m.flush_count);
-    println!("dropped_count    = {}", m.dropped_count);
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-channel-capacity-2",
+            &[("channel_capacity", &m.channel_capacity)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-channel-len",
+            &[("channel_len", &m.channel_len)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-bytes-written",
+            &[("bytes_written", &m.bytes_written)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-flush-count",
+            &[("flush_count", &m.flush_count)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-ring-buffered-file-dropped-count",
+            &[("dropped_count", &m.dropped_count)]
+        )
+    );
     assert!(m.bytes_written > 0, "some bytes should be written");
     assert!(m.flush_count >= 1, "should flush at least once");
 
@@ -303,7 +463,10 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read_to_string(&log_path)?;
     assert!(data.contains("metrics-message-00"));
     assert!(data.contains("metrics-message-09"));
-    println!("\n✓ the file contains all 10 records and the metrics are correct");
+    println!(
+        "\n{}",
+        tr("example-ring-buffered-file-the-file-contains-all-10")
+    );
 
     Ok(())
 }

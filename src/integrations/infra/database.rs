@@ -1104,7 +1104,6 @@ mod tests {
         // 初始状态应该是健康的
         assert!(db.is_healthy().await);
 
-        // 设置为不健康
         db.set_healthy(false);
         assert!(!db.is_healthy().await);
 
@@ -1294,7 +1293,6 @@ mod tests {
         assert!(validate_table_name("logs\";").is_err());
         // Empty name
         assert!(validate_table_name("").is_err());
-        // Starts with digit
         assert!(validate_table_name("123logs").is_err());
         // Contains dot (schema.table)
         assert!(validate_table_name("public.logs").is_err());

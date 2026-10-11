@@ -7,8 +7,6 @@ use super::builder::{LoggerBuilder, LoggerDependencies};
 use super::recovery::SinkControlMessage;
 use super::workers::WorkerParams;
 
-#[allow(unused_imports)]
-use crate::ConsoleSinkConfig;
 use crate::InklogError;
 use crate::LogRecord;
 use crate::LogTemplate;
@@ -27,7 +25,6 @@ use crate::{FileSinkConfig, InklogConfig};
 use crate::{HealthStatus, Metrics};
 use crate::{LogAdapter, LogLogger};
 use crossbeam_channel::{Sender, bounded};
-#[allow(unused_imports)]
 use std::path::Path;
 use std::path::PathBuf;
 use std::string::ToString;
@@ -234,7 +231,6 @@ impl LoggerManager {
             // 我们需要构建一个 InklogConfig 实例
             let mut config = InklogConfig::default();
 
-            // 应用配置值
             if let Some(level) = config_provider.get_string("global.level") {
                 config.global.level = level;
             }
@@ -810,10 +806,7 @@ impl LoggerManager {
             }
         }
 
-        // Filter — use EnvFilter to support RUST_LOG per-module filtering
-        // Configured level serves as the global default; RUST_LOG overrides
-        // specific modules (e.g. RUST_LOG=nebulaid=debug,hyper=warn).
-        // target_levels from config are merged between global level and RUST_LOG.
+        // EnvFilter：配置级别为全局默认；RUST_LOG 按模块覆盖（如 nebulaid=debug,hyper=warn）；target_levels 合并于两者之间
         let level = config
             .global
             .level
@@ -858,7 +851,6 @@ impl LoggerManager {
             std::env::var("RUST_LOG").ok().filter(|v| !v.is_empty()),
         )));
 
-        // Create error sink for logging system errors.
         // 惰性创建：构建期不打开 logs/error.log，一次性命令构建后未发生
         // error 级事件即退出时不再遗留该文件；首次真正写入时才落盘
         //（构造永不失败，打开失败语义后移到写入路径并原样上抛）。
@@ -1587,7 +1579,6 @@ mod tests {
         let manager = LoggerManager::with_config(config)
             .await
             .expect("Failed to create manager");
-        // 验证基本属性
         assert!(manager.effective_channel_capacity() > 0);
         assert_eq!(manager.channel_len(), 0);
         let _ = manager.shutdown();
@@ -3319,7 +3310,6 @@ worker_threads = 1
         .await
         .expect("build_detached should succeed with valid config");
 
-        // 验证 manager 状态
         assert_eq!(
             manager.effective_channel_capacity(),
             2000,
@@ -3439,7 +3429,6 @@ worker_threads = 1
             .await
             .expect("Manager should be created even if FileSink::new fails in worker");
 
-        // 验证 manager 仍然可用
         assert_eq!(manager.effective_channel_capacity(), 1000);
 
         // shutdown 应正常完成（file worker 不会进入循环，直接退出）
@@ -3531,11 +3520,8 @@ worker_threads = 1
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_recover_sink_returns_error_when_control_channel_full() {
-        // control channel 容量为 10。当 worker 未消费消息时，连续发送 11 条
-        // 应使第 11 条返回 ChannelError。
-        // 注意：此测试需要 file worker 存活但暂停消费 control 消息。
-        // 实际上 file worker 在每次循环都会 try_recv control 消息，
-        // 所以很难填满 channel。我们通过发送足够多的消息来触发。
+        // control channel 容量 10：连续发送 11 条应使第 11 条返回 ChannelError。
+        // 注意 file worker 每轮都会 try_recv control 消息，很难填满，故发送足够多条消息来触发。
         let dir = tempfile::tempdir().expect("Failed to create tempdir");
         let log_path = dir.path().join("channel_full.log");
 

@@ -18,11 +18,11 @@
 
 use inklog::ArchiveFormat;
 use inklog::config::{DatabaseDriver, DatabaseSinkConfig, PartitionStrategy};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::str::FromStr;
 
 fn main() {
-    print_separator("inklog archive format examples");
+    print_separator(&tr("example-archive-format-inklog-archive-format-examples"));
 
     show_archive_format_variants();
     show_from_str_parsing();
@@ -32,32 +32,68 @@ fn main() {
     show_toml_config();
     show_selection_guide();
 
-    println!("\n✓ all archive format examples completed");
+    println!(
+        "\n{}",
+        tr("example-archive-format-all-archive-format-examples")
+    );
 }
 
 /// 展示 ArchiveFormat 枚举变体
 fn show_archive_format_variants() {
-    print_section("1. ArchiveFormat enum variants");
+    print_section(&tr("example-archive-format-1-archiveformat-enum-variants"));
 
     let json = ArchiveFormat::Json;
     let parquet = ArchiveFormat::Parquet;
     let csv = ArchiveFormat::Csv;
     let default = ArchiveFormat::default();
 
-    println!("ArchiveFormat::Json    = {:?}", json);
-    println!("ArchiveFormat::Parquet = {:?}", parquet);
-    println!("ArchiveFormat::Csv     = {:?}", csv);
-    println!("ArchiveFormat::default() = {:?}", default);
+    println!(
+        "{}",
+        tr_args(
+            "example-archive-format-archiveformat-json",
+            &[("json", &format!("{:?}", json))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-archive-format-archiveformat-parquet",
+            &[("parquet", &format!("{:?}", parquet))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-archive-format-archiveformat-csv",
+            &[("csv", &format!("{:?}", csv))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-archive-format-archiveformat-default",
+            &[("default", &format!("{:?}", default))]
+        )
+    );
 
     assert_eq!(default, ArchiveFormat::Json);
-    println!("\nDefault format: {:?} (JSON Lines)", default);
+    println!(
+        "\n{}",
+        tr_args(
+            "example-archive-format-default-format-json-lines",
+            &[("default", &format!("{:?}", default))]
+        )
+    );
 }
 
 /// 展示 FromStr 解析
 fn show_from_str_parsing() {
-    print_section("2. FromStr string parsing");
+    print_section(&tr("example-archive-format-2-fromstr-string-parsing"));
 
-    println!("String → ArchiveFormat parsing:\n");
+    println!(
+        "{}\n",
+        tr("example-archive-format-string-archiveformat-parsing")
+    );
 
     let cases = [
         "json", "Json", "JSON", "parquet", "Parquet", "PARQUET", "csv", "Csv", "CSV",
@@ -65,7 +101,13 @@ fn show_from_str_parsing() {
     for s in &cases {
         match ArchiveFormat::from_str(s) {
             Ok(fmt) => println!("  {:?} → {:?} ✓", s, fmt),
-            Err(e) => println!("  {:?} → error: {}", s, e),
+            Err(e) => println!(
+                "  {}",
+                tr_args(
+                    "example-archive-format-error",
+                    &[("s", &format!("{:?}", s)), ("e", &e)]
+                )
+            ),
         }
     }
 
@@ -82,20 +124,43 @@ fn show_from_str_parsing() {
     let invalid = ArchiveFormat::from_str("xml");
     assert!(invalid.is_err());
     println!(
-        "\n  {:?} → error (invalid value): {}",
-        "xml",
-        invalid.unwrap_err()
+        "\n  {}",
+        tr_args(
+            "example-archive-format-error-invalid-value",
+            &[
+                ("value", &format!("{:?}", "xml")),
+                ("value2", &(invalid.unwrap_err()))
+            ]
+        )
     );
 }
 
 /// 展示 Display trait
 fn show_display_trait() {
-    print_section("3. Display trait output");
+    print_section(&tr("example-archive-format-3-display-trait-output"));
 
-    println!("ArchiveFormat → string:\n");
-    println!("  ArchiveFormat::Json    → \"{}\"", ArchiveFormat::Json);
-    println!("  ArchiveFormat::Parquet → \"{}\"", ArchiveFormat::Parquet);
-    println!("  ArchiveFormat::Csv     → \"{}\"", ArchiveFormat::Csv);
+    println!("{}\n", tr("example-archive-format-archiveformat-string"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-archive-format-archiveformat-json-2",
+            &[("value", &(ArchiveFormat::Json))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-archive-format-archiveformat-parquet-2",
+            &[("value", &(ArchiveFormat::Parquet))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-archive-format-archiveformat-csv-2",
+            &[("value", &(ArchiveFormat::Csv))]
+        )
+    );
 
     assert_eq!(format!("{}", ArchiveFormat::Json), "json");
     assert_eq!(format!("{}", ArchiveFormat::Parquet), "parquet");
@@ -104,7 +169,7 @@ fn show_display_trait() {
 
 /// 展示在 DatabaseSinkConfig 中使用归档格式
 fn show_database_config_with_archive() {
-    print_section("4. Archive configuration in DatabaseSinkConfig");
+    print_section(&tr("example-archive-format-4-archive-configuration-in"));
 
     // JSON 归档（默认）
     let json_archive = DatabaseSinkConfig {
@@ -118,32 +183,65 @@ fn show_database_config_with_archive() {
         archive_format: ArchiveFormat::Json,
         ..Default::default()
     };
-    println!("JSON archive (default):");
-    println!("  archive_format = {:?}", json_archive.archive_format);
-    println!("  Output: .jsonl files (one JSON object per line)");
+    println!("{}", tr("example-archive-format-json-archive-default"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-archive-format-archive-format",
+            &[(
+                "archive_format",
+                &format!("{:?}", json_archive.archive_format)
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-output-jsonl-files-one-json")
+    );
 
     // Parquet 归档
     let parquet_archive = DatabaseSinkConfig {
         archive_format: ArchiveFormat::Parquet,
         ..Default::default()
     };
-    println!("\nParquet archive:");
-    println!("  archive_format = {:?}", parquet_archive.archive_format);
-    println!("  Output: .parquet files (columnar storage, high compression)");
+    println!("\n{}", tr("example-archive-format-parquet-archive"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-archive-format-archive-format",
+            &[(
+                "archive_format",
+                &format!("{:?}", parquet_archive.archive_format)
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-output-parquet-files-columnar")
+    );
 
     // CSV 归档
     let csv_archive = DatabaseSinkConfig {
         archive_format: ArchiveFormat::Csv,
         ..Default::default()
     };
-    println!("\nCSV archive:");
-    println!("  archive_format = {:?}", csv_archive.archive_format);
-    println!("  Output: .csv files (comma separated, Excel compatible)");
+    println!("\n{}", tr("example-archive-format-csv-archive"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-archive-format-archive-format",
+            &[(
+                "archive_format",
+                &format!("{:?}", csv_archive.archive_format)
+            )]
+        )
+    );
+    println!("  {}", tr("example-archive-format-output-csv-files-comma"));
 }
 
 /// 对比三种归档格式
 fn show_archive_format_comparison() {
-    print_section("5. Archive format comparison");
+    print_section(&tr("example-archive-format-5-archive-format-comparison"));
 
     println!(
         "{:<15} {:<20} {:<20} {:<20}",
@@ -182,9 +280,11 @@ fn show_archive_format_comparison() {
 
 /// 展示 TOML 配置文件格式
 fn show_toml_config() {
-    print_section("6. TOML configuration file format");
+    print_section(&tr(
+        "example-archive-format-6-toml-configuration-file-format",
+    ));
 
-    println!("JSON archive (default):");
+    println!("{}", tr("example-archive-format-json-archive-default"));
     println!(
         r#"[database_sink]
 enabled = true
@@ -196,7 +296,10 @@ flush_interval_ms = 500
 archive_format = "json""#
     );
 
-    println!("\nParquet archive (with the Parquet settings):");
+    println!(
+        "\n{}",
+        tr("example-archive-format-parquet-archive-with-the")
+    );
     println!(
         r#"[database_sink]
 enabled = true
@@ -213,7 +316,7 @@ max_row_group_size = 100000
 max_page_size = 1048576"#
     );
 
-    println!("\nCSV archive:");
+    println!("\n{}", tr("example-archive-format-csv-archive"));
     println!(
         r#"[database_sink]
 enabled = true
@@ -228,30 +331,75 @@ archive_format = "csv""#
 
 /// 展示归档格式选择指南
 fn show_selection_guide() {
-    print_section("7. How to choose an archive format");
+    print_section(&tr("example-archive-format-7-how-to-choose-an-archive"));
 
-    println!("When to choose Json:");
-    println!("  - You need human-readable archive files");
-    println!("  - You query them with grep/jq");
-    println!("  - A log shipper consumes them (Fluentd/Logstash)");
-    println!("  - Fewer than 1M log records per day");
+    println!("{}", tr("example-archive-format-when-to-choose-json"));
+    println!(
+        "  {}",
+        tr("example-archive-format-you-need-human-readable-archive")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-you-query-them-with-grep-jq")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-a-log-shipper-consumes-them")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-fewer-than-1m-log-records-per")
+    );
 
-    println!("\nWhen to choose Parquet:");
-    println!("  - A big-data analytics platform (Spark/DuckDB/BigQuery)");
-    println!("  - You need a high ratio to save storage cost");
-    println!("  - You run columnar queries (aggregate/filter by field)");
-    println!("  - More than 1M log records per day");
-    println!("  - Compliance retention (long-term cold storage)");
+    println!("\n{}", tr("example-archive-format-when-to-choose-parquet"));
+    println!(
+        "  {}",
+        tr("example-archive-format-a-big-data-analytics-platform")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-you-need-a-high-ratio-to-save")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-you-run-columnar-queries")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-more-than-1m-log-records-per-day")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-compliance-retention-long-term")
+    );
 
-    println!("\nWhen to choose Csv:");
-    println!("  - You import it into Excel or a BI tool");
-    println!("  - Simple reports and data sharing");
-    println!("  - Integrating with legacy systems (CSV parsers are widely supported)");
+    println!("\n{}", tr("example-archive-format-when-to-choose-csv"));
+    println!(
+        "  {}",
+        tr("example-archive-format-you-import-it-into-excel-or-a")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-simple-reports-and-data-sharing")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-integrating-with-legacy-systems")
+    );
 
-    println!("\nPerformance characteristics:");
-    println!("  - Json: fast writes, large files, slow queries");
-    println!("  - Parquet: slow writes (CPU intensive), small files, fast queries");
-    println!("  - Csv: fast writes, large files, no nested structures");
+    println!(
+        "\n{}",
+        tr("example-archive-format-performance-characteristics")
+    );
+    println!(
+        "  {}",
+        tr("example-archive-format-json-fast-writes-large-files")
+    );
+    println!("  {}", tr("example-archive-format-parquet-slow-writes-cpu"));
+    println!(
+        "  {}",
+        tr("example-archive-format-csv-fast-writes-large-files-no")
+    );
     println!(
         "  - Archiving runs asynchronously in the background and does not affect the main log path"
     );

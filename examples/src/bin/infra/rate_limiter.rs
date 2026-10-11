@@ -16,12 +16,12 @@
 //! ```
 
 use inklog::RateLimiter;
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::thread;
 use std::time::Duration;
 
 fn main() {
-    print_separator("inklog rate limiter example");
+    print_separator(&tr("example-rate-limiter-inklog-rate-limiter-example"));
 
     show_basic_creation();
     show_rate_limiting();
@@ -31,31 +31,43 @@ fn main() {
     show_zero_rate();
     show_best_practices();
 
-    println!("\n✓ All rate limiter examples completed");
+    println!("\n{}", tr("example-rate-limiter-all-rate-limiter-examples"));
 }
 
 /// 展示限流器创建与基础属性
 fn show_basic_creation() {
-    print_section("Example 1: creating the rate limiter");
+    print_section(&tr("example-rate-limiter-example-1-creating-the-rate"));
 
     let limiter = RateLimiter::new(1000);
-    println!("RateLimiter::new(1000) — 1000 tokens per second");
-    println!("  Initial state: bucket full (tokens = max_tokens = 1000)");
-    println!("  Refill rate: 1000 tokens/sec");
+    println!("{}", tr("example-rate-limiter-ratelimiter-new-1000-1000"));
+    println!("  {}", tr("example-rate-limiter-initial-state-bucket-full"));
+    println!(
+        "  {}",
+        tr("example-rate-limiter-refill-rate-1000-tokens-sec")
+    );
 
     assert!(limiter.try_acquire());
-    println!("  ✓ try_acquire() → true (bucket full, allowed)");
+    println!(
+        "  {}",
+        tr("example-rate-limiter-try-acquire-true-bucket-full")
+    );
 }
 
 /// 展示速率限制行为
 fn show_rate_limiting() {
-    print_section("2. Rate limiting behavior");
+    print_section(&tr("example-rate-limiter-2-rate-limiting-behavior"));
 
     // 低速率便于演示：每秒 5 个令牌
     let limiter = RateLimiter::new(5);
-    println!("RateLimiter::new(5) — 5 tokens per second\n");
+    println!(
+        "{}\n",
+        tr("example-rate-limiter-ratelimiter-new-5-5-tokens-per")
+    );
 
-    println!("Rapid consecutive try_acquire():");
+    println!(
+        "{}",
+        tr("example-rate-limiter-rapid-consecutive-try-acquire")
+    );
     let mut allowed = 0;
     let mut rejected = 0;
     for i in 1..=10 {
@@ -70,24 +82,36 @@ fn show_rate_limiting() {
         println!("  #{:<3} {}", i, status);
     }
 
-    println!("\nResult: {} allowed, {} rejected", allowed, rejected);
+    println!(
+        "\n{}",
+        tr_args(
+            "example-rate-limiter-result-allowed-rejected",
+            &[("allowed", &allowed), ("rejected", &rejected)]
+        )
+    );
     assert!(allowed > 0, "should allow a few through");
     assert!(rejected > 0, "should reject once the bucket is drained");
-    println!("  ✓ Token bucket rate-limits correctly");
+    println!("  {}", tr("example-rate-limiter-token-bucket-rate-limits"));
 }
 
 /// 展示 dropped_count 统计
 fn show_dropped_count() {
-    print_section("Example 3: dropped_count() statistics");
+    print_section(&tr("example-rate-limiter-example-3-dropped-count"));
 
     let limiter = RateLimiter::new(2);
-    println!("RateLimiter::new(2) — 2 tokens per second\n");
+    println!(
+        "{}\n",
+        tr("example-rate-limiter-ratelimiter-new-2-2-tokens-per")
+    );
 
     assert!(limiter.try_acquire());
     assert!(limiter.try_acquire());
     println!(
-        "After consuming 2 tokens: dropped_count = {}",
-        limiter.dropped_count()
+        "{}",
+        tr_args(
+            "example-rate-limiter-after-consuming-2-tokens",
+            &[("value", &(limiter.dropped_count()))]
+        )
     );
     assert_eq!(limiter.dropped_count(), 0);
 
@@ -96,110 +120,203 @@ fn show_dropped_count() {
     assert!(!limiter.try_acquire());
     assert!(!limiter.try_acquire());
     println!(
-        "After 3 rejections: dropped_count = {}",
-        limiter.dropped_count()
+        "{}",
+        tr_args(
+            "example-rate-limiter-after-3-rejections-dropped-count",
+            &[("value", &(limiter.dropped_count()))]
+        )
     );
     assert_eq!(limiter.dropped_count(), 3);
 
-    println!("\n  ✓ dropped_count correctly counts rate-limited logs");
+    println!(
+        "\n  {}",
+        tr("example-rate-limiter-dropped-count-correctly-counts")
+    );
 }
 
 /// 展示令牌自动补充
 fn show_token_refill() {
-    print_section("Example 4: automatic token refill");
+    print_section(&tr("example-rate-limiter-example-4-automatic-token-refill"));
 
     let limiter = RateLimiter::new(100);
-    println!("RateLimiter::new(100) — 100 tokens per second\n");
+    println!(
+        "{}\n",
+        tr("example-rate-limiter-ratelimiter-new-100-100-tokens")
+    );
 
     for _ in 0..100 {
         limiter.try_acquire();
     }
-    println!("After draining 100 tokens:");
+    println!("{}", tr("example-rate-limiter-after-draining-100-tokens"));
     assert!(!limiter.try_acquire());
-    println!("  try_acquire() → false (bucket empty)");
+    println!(
+        "  {}",
+        tr("example-rate-limiter-try-acquire-false-bucket-empty")
+    );
 
     // 等待 50ms，应补充约 5 个令牌（100 tokens/sec × 0.05s）
     thread::sleep(Duration::from_millis(50));
-    println!("\nAfter waiting 50ms (~5 tokens refilled):");
+    println!(
+        "\n{}",
+        tr("example-rate-limiter-after-waiting-50ms-5-tokens")
+    );
     let mut refilled = 0;
     for _ in 0..10 {
         if limiter.try_acquire() {
             refilled += 1;
         }
     }
-    println!("  Acquired again: {} allowed (expected ~5)", refilled);
+    println!(
+        "  {}",
+        tr_args(
+            "example-rate-limiter-acquired-again-allowed-expected",
+            &[("refilled", &refilled)]
+        )
+    );
     assert!(refilled > 0, "tokens should be available after waiting");
-    println!("  ✓ Tokens refill automatically at refill_rate");
+    println!(
+        "  {}",
+        tr("example-rate-limiter-tokens-refill-automatically-at")
+    );
 }
 
 /// 展示日志限流的实际应用模式
 fn show_log_rate_limiting_pattern() {
-    print_section("Example 5: log rate-limiting patterns");
+    print_section(&tr("example-rate-limiter-example-5-log-rate-limiting"));
 
     let limiter = RateLimiter::new(10);
-    println!("Scenario: cap log output at 10 logs/second\n");
+    println!(
+        "{}\n",
+        tr("example-rate-limiter-scenario-cap-log-output-at-10")
+    );
 
-    println!("Simulating a burst of logs (20):");
+    println!(
+        "{}",
+        tr("example-rate-limiter-simulating-a-burst-of-logs-20")
+    );
     let mut written = 0;
     let mut dropped = 0;
     for i in 1..=20 {
         if limiter.try_acquire() {
-            println!("  [INFO] log #{} — written", i);
+            println!(
+                "  {}",
+                tr_args("example-rate-limiter-info-log-written", &[("i", &i)])
+            );
             written += 1;
         } else {
             dropped += 1;
         }
     }
 
-    println!("\nStatistics:");
-    println!("  Written: {}", written);
-    println!("  Dropped: {}", dropped);
-    println!("  Total dropped: {}", limiter.dropped_count());
+    println!("\n{}", tr("example-rate-limiter-statistics"));
+    println!(
+        "  {}",
+        tr_args("example-rate-limiter-written", &[("written", &written)])
+    );
+    println!(
+        "  {}",
+        tr_args("example-rate-limiter-dropped", &[("dropped", &dropped)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-rate-limiter-total-dropped",
+            &[("value", &(limiter.dropped_count()))]
+        )
+    );
     assert_eq!(written + dropped, 20);
     assert_eq!(limiter.dropped_count(), dropped as u64);
-    println!("\n  ✓ Rate limiting works: protects downstream systems under bursts");
+    println!(
+        "\n  {}",
+        tr("example-rate-limiter-rate-limiting-works-protects")
+    );
 }
 
 /// 展示零速率限流器
 fn show_zero_rate() {
-    print_section("Example 6: zero-rate limiter (rate=0)");
+    print_section(&tr("example-rate-limiter-example-6-zero-rate-limiter"));
 
     let limiter = RateLimiter::new(0);
-    println!("RateLimiter::new(0) — allows no logs at all\n");
+    println!(
+        "{}\n",
+        tr("example-rate-limiter-ratelimiter-new-0-allows-no")
+    );
 
     assert!(!limiter.try_acquire());
     assert!(!limiter.try_acquire());
-    println!("  try_acquire() → always false");
-    println!("  dropped_count = {}", limiter.dropped_count());
+    println!("  {}", tr("example-rate-limiter-try-acquire-always-false"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-rate-limiter-dropped-count",
+            &[("value", &(limiter.dropped_count()))]
+        )
+    );
     assert_eq!(limiter.dropped_count(), 2);
-    println!("  ✓ rate=0 is equivalent to full silence");
+    println!(
+        "  {}",
+        tr("example-rate-limiter-rate-0-is-equivalent-to-full")
+    );
 }
 
 /// 最佳实践建议
 fn show_best_practices() {
-    print_section("7. Best practices");
+    print_section(&tr("example-rate-limiter-7-best-practices"));
 
-    println!("RateLimiter usage advice:\n");
+    println!("{}\n", tr("example-rate-limiter-ratelimiter-usage-advice"));
 
-    println!("1. Rate selection:");
-    println!("   - Development: 1000-5000 tokens/sec (loose)");
-    println!("   - Production: 100-1000 tokens/sec (based on downstream capacity)");
-    println!("   - Failure scenarios: 10-50 tokens/sec (prevents log storms)");
+    println!("{}", tr("example-rate-limiter-1-rate-selection"));
+    println!(
+        "   {}",
+        tr("example-rate-limiter-development-1000-5000-tokens")
+    );
+    println!(
+        "   {}",
+        tr("example-rate-limiter-production-100-1000-tokens-sec")
+    );
+    println!(
+        "   {}",
+        tr("example-rate-limiter-failure-scenarios-10-50-tokens")
+    );
 
-    println!("\n2. Integrating with LoggerManager:");
+    println!(
+        "\n{}",
+        tr("example-rate-limiter-2-integrating-with-loggermanager")
+    );
     println!("   let limiter = RateLimiter::new(1000);");
     println!("   // Check before writing logs:");
     println!("   if limiter.try_acquire() {{");
     println!("       sink.write(&record).await;");
     println!("   }}");
 
-    println!("\n3. Monitoring dropped_count:");
-    println!("   - Report dropped_count to Metrics periodically");
-    println!("   - continuously growing dropped_count means the limit is too strict");
-    println!("   - dropped_count = 0 means the limit is loose or there is no pressure");
+    println!(
+        "\n{}",
+        tr("example-rate-limiter-3-monitoring-dropped-count")
+    );
+    println!(
+        "   {}",
+        tr("example-rate-limiter-report-dropped-count-to-metrics")
+    );
+    println!(
+        "   {}",
+        tr("example-rate-limiter-continuously-growing-dropped")
+    );
+    println!(
+        "   {}",
+        tr("example-rate-limiter-dropped-count-0-means-the-limit")
+    );
 
-    println!("\n4. Performance characteristics:");
-    println!("   - try_acquire() is O(1)");
-    println!("   - Uses parking_lot::Mutex (~20ns lock overhead)");
-    println!("   - Suits high-frequency logging");
+    println!(
+        "\n{}",
+        tr("example-rate-limiter-4-performance-characteristics")
+    );
+    println!("   {}", tr("example-rate-limiter-try-acquire-is-o-1"));
+    println!(
+        "   {}",
+        tr("example-rate-limiter-uses-parking-lot-mutex-20ns")
+    );
+    println!(
+        "   {}",
+        tr("example-rate-limiter-suits-high-frequency-logging")
+    );
 }

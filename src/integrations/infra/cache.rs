@@ -563,14 +563,11 @@ mod tests {
     async fn test_mock_cache_delete_operation() {
         let cache = MockCache::new();
 
-        // 删除不存在的键
         assert!(!cache.delete("nonexistent").await.expect("delete failed"));
 
-        // 设置并删除
         cache.set("key", "value".to_string()).await.unwrap();
         assert!(cache.delete("key").await.expect("delete failed"));
 
-        // 验证已删除
         assert_eq!(cache.get("key").await.expect("get failed"), None);
         assert!(!cache.exists("key").await.expect("exists failed"));
     }
@@ -582,11 +579,9 @@ mod tests {
         // 不存在的键
         assert!(!cache.exists("key1").await.expect("exists failed"));
 
-        // 设置后存在
         cache.set("key1", "value1".to_string()).await.unwrap();
         assert!(cache.exists("key1").await.expect("exists failed"));
 
-        // 删除后不存在
         cache.delete("key1").await.unwrap();
         assert!(!cache.exists("key1").await.expect("exists failed"));
     }
@@ -616,7 +611,6 @@ mod tests {
             handle.await.unwrap();
         }
 
-        // 验证所有写入
         for i in 0..10 {
             let value = cache.get(&format!("key{}", i)).await.expect("get failed");
             assert_eq!(value, Some(format!("value{}", i)));

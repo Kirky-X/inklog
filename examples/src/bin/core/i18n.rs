@@ -18,10 +18,10 @@
 //! ```
 
 use inklog::i18n::LogI18nFormatter;
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 fn main() {
-    print_separator("inklog internationalization (i18n) formatting examples");
+    print_separator(&tr("example-i18n-inklog-internationalization"));
 
     show_locale_creation();
     show_number_formatting();
@@ -31,38 +31,49 @@ fn main() {
     show_field_comparison();
     show_error_handling();
 
-    println!("\nAll i18n formatting examples shown.");
+    println!("\n{}", tr("example-i18n-all-i18n-formatting-examples"));
 }
 
 /// 演示多语言格式化器创建
 fn show_locale_creation() {
-    print_section("Example 1: create multi-locale formatters");
+    print_section(&tr("example-i18n-example-1-create-multi-locale"));
 
-    println!("Create the en-US formatter:");
+    println!("{}", tr("example-i18n-create-the-en-us-formatter"));
     let fmt_en = LogI18nFormatter::new("en-US").expect("en-US locale");
-    println!("  ✓ LogI18nFormatter::new(\"en-US\") created");
+    println!("  {}", tr("example-i18n-logi18nformatter-new-en-us"));
 
-    println!("\nCreate the zh-CN formatter:");
+    println!("\n{}", tr("example-i18n-create-the-zh-cn-formatter"));
     let _fmt_zh = LogI18nFormatter::new("zh-CN").expect("zh-CN locale");
-    println!("  ✓ LogI18nFormatter::new(\"zh-CN\") created");
+    println!("  {}", tr("example-i18n-logi18nformatter-new-zh-cn"));
 
-    println!("\nSupported BCP-47 language tags:");
-    println!("  en-US: English (United States)");
-    println!("  zh-CN: Chinese (Simplified)");
-    println!("  ja-JP: Japanese (Japan)");
-    println!("  de-DE: German (Germany)");
+    println!("\n{}", tr("example-i18n-supported-bcp-47-language-tags"));
+    println!("  {}", tr("example-i18n-en-us-english-united-states"));
+    println!("  {}", tr("example-i18n-zh-cn-chinese-simplified"));
+    println!("  {}", tr("example-i18n-ja-jp-japanese-japan"));
+    println!("  {}", tr("example-i18n-de-de-german-germany"));
 
     // 使用格式化器演示字段比较
     match fmt_en.compare_fields("a", "b") {
-        Ok(std::cmp::Ordering::Less) => println!("\nField comparison example: \"a\" < \"b\""),
-        Ok(other) => println!("\nField comparison example: {:?}", other),
-        Err(e) => println!("\nField comparison failed: {}", e),
+        Ok(std::cmp::Ordering::Less) => {
+            println!("\n{}", tr("example-i18n-field-comparison-example-a-b"))
+        }
+        Ok(other) => println!(
+            "\n{}",
+            tr_args(
+                "example-i18n-field-comparison-example",
+                &[("other", &format!("{:?}", other))]
+            )
+        ),
+        Err(e) => println!(
+            "\n{}",
+            tr_args("example-i18n-field-comparison-failed", &[("e", &e)])
+        ),
     }
 }
 
 /// 演示数字格式化
 fn show_number_formatting() {
-    print_section("Example 2: number formatting");
+    print_section(&tr("example-i18n-example-2-number-formatting"));
 
     let fmt_en = LogI18nFormatter::new("en-US").expect("en-US");
     let fmt_zh = LogI18nFormatter::new("zh-CN").expect("zh-CN");
@@ -78,15 +89,15 @@ fn show_number_formatting() {
         println!("{:<15} {:<25} {:<25}", val, en_str, zh_str);
     }
 
-    println!("\nNotes:");
-    println!("  - en-US: comma thousands separator, dot decimal point");
-    println!("  - zh-CN: the separator may differ (depends on ICU data)");
-    println!("  - Use case: format performance metrics and counters in logs");
+    println!("\n{}", tr("example-i18n-notes"));
+    println!("  {}", tr("example-i18n-en-us-comma-thousands-separator"));
+    println!("  {}", tr("example-i18n-zh-cn-the-separator-may-differ"));
+    println!("  {}", tr("example-i18n-use-case-format-performance"));
 }
 
 /// 演示事件计数复数形式
 fn show_event_count_plural() {
-    print_section("Example 3: event count plurals");
+    print_section(&tr("example-i18n-example-3-event-count-plurals"));
 
     let fmt_en = LogI18nFormatter::new("en-US").expect("en-US");
     let fmt_zh = LogI18nFormatter::new("zh-CN").expect("zh-CN");
@@ -106,14 +117,14 @@ fn show_event_count_plural() {
         println!("{:<10} {:<15} {:<15}", count, en_plural, zh_plural);
     }
 
-    println!("\nUse case: generate locale-aware log messages");
-    println!("  en: \"One event processed\" / \"Other events processed\"");
-    println!("  zh: \"Other 事件已处理\" (Chinese has no plural inflection)");
+    println!("\n{}", tr("example-i18n-use-case-generate-locale-aware"));
+    println!("  {}", tr("example-i18n-en-one-event-processed-other"));
+    println!("  {}", tr("example-i18n-zh-other-chinese-has-no-plural"));
 }
 
 /// 演示时间戳格式化
 fn show_timestamp_formatting() {
-    print_section("Example 4: timestamp formatting");
+    print_section(&tr("example-i18n-example-4-timestamp-formatting"));
 
     let fmt_en = LogI18nFormatter::new("en-US").expect("en-US");
     let fmt_zh = LogI18nFormatter::new("zh-CN").expect("zh-CN");
@@ -133,14 +144,14 @@ fn show_timestamp_formatting() {
         println!("{:<4}-{:02}-{:02}  {:<25} {:<25}", y, m, d, en_ts, zh_ts);
     }
 
-    println!("\nUse case: localized display of log timestamps");
-    println!("  - Use the ICU4X DateTimeFormatter medium format");
-    println!("  - Adapts automatically to the date conventions of the target language");
+    println!("\n{}", tr("example-i18n-use-case-localized-display-of"));
+    println!("  {}", tr("example-i18n-use-the-icu4x-datetimeformatter"));
+    println!("  {}", tr("example-i18n-adapts-automatically-to-the"));
 }
 
 /// 演示日志级别规范化
 fn show_log_level_normalization() {
-    print_section("Example 5: log level normalization");
+    print_section(&tr("example-i18n-example-5-log-level"));
 
     let fmt = LogI18nFormatter::new("en-US").expect("en-US");
 
@@ -148,7 +159,7 @@ fn show_log_level_normalization() {
         "trace", "debug", "info", "warn", "error", "fatal", "INFO", "Debug",
     ];
 
-    println!("Log level normalization (unified upper case):");
+    println!("{}", tr("example-i18n-log-level-normalization-unified"));
     println!("{}", "-".repeat(40));
     for level in &levels {
         let normalized = fmt
@@ -157,14 +168,14 @@ fn show_log_level_normalization() {
         println!("  {:<10} → {}", level, normalized);
     }
 
-    println!("\nUse case: unify the displayed log level format");
+    println!("\n{}", tr("example-i18n-use-case-unify-the-displayed"));
 }
 
 /// 演示字段名区域排序比较
 fn show_field_comparison() {
     use std::cmp::Ordering;
 
-    print_section("Example 6: locale-sensitive field name comparison");
+    print_section(&tr("example-i18n-example-6-locale-sensitive"));
 
     let fmt_en = LogI18nFormatter::new("en-US").expect("en-US");
 
@@ -189,35 +200,35 @@ fn show_field_comparison() {
         println!("{:<20} {:<20} {:<15}", a, b, result_str);
     }
 
-    println!("\nUse case: order log fields alphabetically");
-    println!("  - Use the ICU4X Collator for locale-sensitive ordering");
-    println!("  - Supports the ordering rules of different languages");
+    println!("\n{}", tr("example-i18n-use-case-order-log-fields"));
+    println!("  {}", tr("example-i18n-use-the-icu4x-collator-for"));
+    println!("  {}", tr("example-i18n-supports-the-ordering-rules-of"));
 }
 
 /// 演示错误处理
 fn show_error_handling() {
-    print_section("Example 7: error handling");
+    print_section(&tr("example-i18n-example-7-error-handling"));
 
-    println!("Invalid locale tag:");
+    println!("{}", tr("example-i18n-invalid-locale-tag"));
     match LogI18nFormatter::new("not-valid!!!") {
-        Ok(_) => println!("  unexpected success"),
-        Err(e) => println!("  ✓ expected error: {}", e),
+        Ok(_) => println!("  {}", tr("example-i18n-unexpected-success")),
+        Err(e) => println!("  {}", tr_args("example-i18n-expected-error", &[("e", &e)])),
     }
 
-    println!("\nNon-finite number formatting:");
+    println!("\n{}", tr("example-i18n-non-finite-number-formatting"));
     let fmt = LogI18nFormatter::new("en-US").expect("en-US");
     match fmt.format_number(f64::NAN) {
-        Ok(_) => println!("  unexpected success"),
-        Err(e) => println!("  ✓ NaN error: {}", e),
+        Ok(_) => println!("  {}", tr("example-i18n-unexpected-success")),
+        Err(e) => println!("  {}", tr_args("example-i18n-nan-error", &[("e", &e)])),
     }
     match fmt.format_number(f64::INFINITY) {
-        Ok(_) => println!("  unexpected success"),
-        Err(e) => println!("  ✓ Infinity error: {}", e),
+        Ok(_) => println!("  {}", tr("example-i18n-unexpected-success")),
+        Err(e) => println!("  {}", tr_args("example-i18n-infinity-error", &[("e", &e)])),
     }
 
-    println!("\nError types:");
-    println!("  I18nError::InvalidLocale  - the locale tag failed to parse");
-    println!("  I18nError::InvalidNumber  - a non-finite number");
-    println!("  I18nError::DateError      - an invalid date component");
-    println!("  I18nError::FormatError    - ICU4X formatting failed");
+    println!("\n{}", tr("example-i18n-error-types"));
+    println!("  {}", tr("example-i18n-i18nerror-invalidlocale-the"));
+    println!("  {}", tr("example-i18n-i18nerror-invalidnumber-a-non"));
+    println!("  {}", tr("example-i18n-i18nerror-dateerror-an-invalid"));
+    println!("  {}", tr("example-i18n-i18nerror-formaterror-icu4x"));
 }

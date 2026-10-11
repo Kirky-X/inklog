@@ -57,7 +57,7 @@ use inklog::sink::LogSink;
 use inklog::sink::encryption::get_encryption_key;
 use inklog::tracing::Level;
 use inklog::{FileSinkConfig, LogRecord};
-use inklog_examples::common::{print_section, print_separator, temp_file_path};
+use inklog_examples::common::{print_section, print_separator, temp_file_path, tr, tr_args};
 use rand::Rng;
 use std::io::Write;
 use std::path::PathBuf;
@@ -217,7 +217,6 @@ fn parse_encrypted_format(file_path: &str) -> Result<(), Box<dyn std::error::Err
 
     let file_size = std::fs::metadata(&path)?.len();
 
-    // 解析并展示各字段
     print_section("Header parsing (24 bytes)");
 
     // Magic Header (8 bytes)
@@ -327,7 +326,6 @@ fn decrypt_and_verify(
     println!("  Ciphertext size: {} bytes", ciphertext.len());
     println!("  Plaintext size: {} bytes", plaintext.len());
 
-    // 验证内容
     print_section("Content verification");
 
     let has_expected_content = plaintext_str.contains("encrypted log message")
@@ -403,9 +401,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let plain_path = temp_file_path("plaintext");
     let encrypted_path = format!("{}.enc", plain_path);
-    println!("\nTemporary file paths:");
-    println!("  Plaintext: {}", plain_path);
-    println!("  Encrypted: {}", encrypted_path);
+    println!("\n{}", tr("example-encryption-temporary-file-paths"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-encryption-plaintext",
+            &[("plain_path", &plain_path)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-encryption-encrypted",
+            &[("encrypted_path", &encrypted_path)]
+        )
+    );
 
     write_plaintext_log(&plain_path).await?;
 
@@ -423,71 +433,131 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 移除环境变量
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::remove_var(key_env) };
-    println!("✓ environment variable cleared: {}", key_env);
+    println!(
+        "{}",
+        tr_args(
+            "example-encryption-environment-variable-cleared",
+            &[("key_env", &key_env)]
+        )
+    );
 
-    print_separator("Key management best practices");
+    print_separator(&tr("example-encryption-key-management-best-practices"));
 
-    println!("In production, follow these best practices:\n");
+    println!(
+        "{}\n",
+        tr("example-encryption-in-production-follow-these-best")
+    );
 
-    println!("1. Key storage:");
-    println!("   - Use a managed key service (such as AWS KMS or HashiCorp Vault)");
-    println!("   - Never hard-code keys in source code");
-    println!("   - Pass keys through environment variables or key files\n");
+    println!("{}", tr("example-encryption-1-key-storage"));
+    println!(
+        "   {}",
+        tr("example-encryption-use-a-managed-key-service-such")
+    );
+    println!(
+        "   {}",
+        tr("example-encryption-never-hard-code-keys-in-source")
+    );
+    println!(
+        "   {}\n",
+        tr("example-encryption-pass-keys-through-environment")
+    );
 
-    println!("2. Key rotation:");
-    println!("   - Rotate encryption keys regularly");
-    println!("   - Keep old keys to decrypt historical logs");
-    println!("   - Use key versioning\n");
+    println!("{}", tr("example-encryption-2-key-rotation"));
+    println!(
+        "   {}",
+        tr("example-encryption-rotate-encryption-keys-regularly")
+    );
+    println!("   {}", tr("example-encryption-keep-old-keys-to-decrypt"));
+    println!("   {}\n", tr("example-encryption-use-key-versioning"));
 
-    println!("3. Access control:");
-    println!("   - Restrict who can access keys");
-    println!("   - Log key usage");
-    println!("   - Apply least privilege\n");
+    println!("{}", tr("example-encryption-3-access-control"));
+    println!(
+        "   {}",
+        tr("example-encryption-restrict-who-can-access-keys")
+    );
+    println!("   {}", tr("example-encryption-log-key-usage"));
+    println!("   {}\n", tr("example-encryption-apply-least-privilege"));
 
-    println!("4. Secure transport:");
-    println!("   - Transport keys over TLS");
-    println!("   - Never print keys in logs");
-    println!("   - Use a secure CI/CD pipeline\n");
+    println!("{}", tr("example-encryption-4-secure-transport"));
+    println!("   {}", tr("example-encryption-transport-keys-over-tls"));
+    println!("   {}", tr("example-encryption-never-print-keys-in-logs"));
+    println!(
+        "   {}\n",
+        tr("example-encryption-use-a-secure-ci-cd-pipeline")
+    );
 
-    print_separator("Encryption performance");
+    print_separator(&tr("example-encryption-encryption-performance"));
 
-    println!("AES-256-GCM performance advantages:\n");
+    println!("{}\n", tr("example-encryption-aes-256-gcm-performance"));
 
-    println!("1. Hardware acceleration:");
-    println!("   - Modern CPUs support the AES-NI instruction set");
-    println!("   - Hardware acceleration reaches 10+ GB/s");
-    println!("   - Log write performance is barely affected\n");
+    println!("{}", tr("example-encryption-1-hardware-acceleration"));
+    println!(
+        "   {}",
+        tr("example-encryption-modern-cpus-support-the-aes-ni")
+    );
+    println!(
+        "   {}",
+        tr("example-encryption-hardware-acceleration-reaches")
+    );
+    println!(
+        "   {}\n",
+        tr("example-encryption-log-write-performance-is-barely")
+    );
 
-    println!("2. AEAD authentication:");
-    println!("   - Provides encryption and integrity together");
-    println!("   - Detects tampering automatically");
-    println!("   - Protects against ciphertext attacks\n");
+    println!("{}", tr("example-encryption-2-aead-authentication"));
+    println!("   {}", tr("example-encryption-provides-encryption-and"));
+    println!(
+        "   {}",
+        tr("example-encryption-detects-tampering-automatically")
+    );
+    println!(
+        "   {}\n",
+        tr("example-encryption-protects-against-ciphertext")
+    );
 
-    println!("3. Parallelism:");
-    println!("   - GCM mode supports parallel encryption");
-    println!("   - Uses multiple cores for throughput");
-    println!("   - Suits bulk log processing\n");
+    println!("{}", tr("example-encryption-3-parallelism"));
+    println!("   {}", tr("example-encryption-gcm-mode-supports-parallel"));
+    println!("   {}", tr("example-encryption-uses-multiple-cores-for"));
+    println!(
+        "   {}\n",
+        tr("example-encryption-suits-bulk-log-processing")
+    );
 
-    print_separator("Supported key formats");
+    print_separator(&tr("example-encryption-supported-key-formats"));
 
-    println!("inklog supports three key formats:\n");
+    println!("{}\n", tr("example-encryption-inklog-supports-three-key"));
 
-    println!("1. Base64 encoded (recommended):");
-    println!("   - The Base64 encoding of a 32-byte key");
-    println!("   - Example: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=");
-    println!("   - Safe, standard, and easy to transport\n");
+    println!("{}", tr("example-encryption-1-base64-encoded-recommended"));
+    println!(
+        "   {}",
+        tr("example-encryption-the-base64-encoding-of-a-32")
+    );
+    println!("   {}", tr("example-encryption-example"));
+    println!(
+        "   {}\n",
+        tr("example-encryption-safe-standard-and-easy-to")
+    );
 
-    println!("2. Raw bytes:");
-    println!("   - Uses the 32 raw key bytes directly");
-    println!("   - Example: abcdefghijklmnopqrstuvwxyz123456");
-    println!("   - Fits simple test scenarios\n");
+    println!("{}", tr("example-encryption-2-raw-bytes"));
+    println!("   {}", tr("example-encryption-uses-the-32-raw-key-bytes"));
+    println!("   {}", tr("example-encryption-example-2"));
+    println!(
+        "   {}\n",
+        tr("example-encryption-fits-simple-test-scenarios")
+    );
 
-    println!("3. Password derivation:");
-    println!("   - Derives a key from a password with PBKDF2");
-    println!("   - Example: my-secret-password");
-    println!("   - Fits user-supplied passwords\n");
+    println!("{}", tr("example-encryption-3-password-derivation"));
+    println!(
+        "   {}",
+        tr("example-encryption-derives-a-key-from-a-password")
+    );
+    println!("   {}", tr("example-encryption-example-my-secret-password"));
+    println!(
+        "   {}\n",
+        tr("example-encryption-fits-user-supplied-passwords")
+    );
 
-    println!("\n✓ all examples completed");
+    println!("\n{}", tr("example-encryption-all-examples-completed"));
 
     Ok(())
 }

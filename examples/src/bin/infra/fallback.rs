@@ -34,7 +34,7 @@ use inklog::sink::console::ConsoleSink;
 use inklog::sink::file::FileSink;
 use inklog::tokio::sync::Mutex;
 use inklog::{SinkHealth, SinkStatus};
-use inklog_examples::common::{print_section, print_separator, temp_file_path};
+use inklog_examples::common::{print_section, print_separator, temp_file_path, tr, tr_args};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -63,10 +63,15 @@ impl FallbackState {
 
     fn trigger_fallback(&mut self, new_sink: &str) {
         println!(
-            "[{}] degrading: {} -> {}",
-            Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-            self.active_sink,
-            new_sink
+            "{}",
+            tr_args(
+                "example-fallback-degrading",
+                &[
+                    ("value", &(Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"))),
+                    ("active_sink", &self.active_sink),
+                    ("new_sink", &new_sink)
+                ]
+            )
         );
         self.active_sink = new_sink.to_string();
         self.fallback_count += 1;
@@ -167,10 +172,13 @@ impl LogSink for FailingSink {
 /// 展示如何同时配置 Console 和 File Sink，实现日志的双重输出。
 /// 这是在生产环境中推荐的配置方式，确保日志不会因单一 Sink 故障而丢失。
 async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("Example 1: multi-sink setup (console + file)");
+    print_separator(&tr("example-fallback-example-1-multi-sink-setup"));
 
     let log_path = temp_file_path("multi_sink");
-    println!("Log file path: {}", log_path);
+    println!(
+        "{}",
+        tr_args("example-fallback-log-file-path", &[("log_path", &log_path)])
+    );
 
     // 1. 配置 Console Sink
     let console_config = ConsoleSinkConfig {
@@ -182,7 +190,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         secret_scan_enabled: false,
     };
     let console_sink = ConsoleSink::new(console_config, LogTemplate::new("[{level}] {message}"));
-    println!("Console sink: configured");
+    println!("{}", tr("example-fallback-console-sink-configured"));
 
     let file_config = FileSinkConfig {
         enabled: true,
@@ -206,7 +214,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         output_format: Default::default(),
     };
     let file_sink = FileSink::new(file_config)?;
-    println!("File sink: configured");
+    println!("{}", tr("example-fallback-file-sink-configured"));
 
     let records = vec![
         LogRecord {
@@ -247,7 +255,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    print_section("writing logs to multiple sinks");
+    print_section(&tr("example-fallback-writing-logs-to-multiple-sinks"));
 
     for record in &records {
         console_sink.write(record).await?;
@@ -259,23 +267,38 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
             "INFO" => "[INFO] ",
             _ => "[     ]",
         };
-        println!("{} -> Console + File: {}", level_marker, record.message);
+        println!(
+            "{}",
+            tr_args(
+                "example-fallback-console-file",
+                &[
+                    ("level_marker", &level_marker),
+                    ("message", &record.message)
+                ]
+            )
+        );
     }
 
     console_sink.flush().await?;
     file_sink.flush().await?;
 
-    print_section("verifying the file sink");
+    print_section(&tr("example-fallback-verifying-the-file-sink"));
     let content = fs::read_to_string(&log_path)?;
-    println!("File content ({} bytes):\n{}", content.len(), content);
+    println!(
+        "{}",
+        tr_args(
+            "example-fallback-file-content-bytes",
+            &[("value", &(content.len())), ("content", &content)]
+        )
+    );
 
     // 6. 清理
     cleanup_files(&log_path, "inklog_example_multi_sink")?;
 
-    println!("\n✓ Multi-sink setup completed");
-    println!("  - Console sink: real-time output to the console");
-    println!("  - File sink: persist to a file");
-    println!("  - Both work simultaneously without interfering");
+    println!("\n{}", tr("example-fallback-multi-sink-setup-completed"));
+    println!("  {}", tr("example-fallback-console-sink-real-time-output"));
+    println!("  {}", tr("example-fallback-file-sink-persist-to-a-file"));
+    println!("  {}", tr("example-fallback-both-work-simultaneously"));
 
     Ok(())
 }
@@ -285,13 +308,19 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
 /// 演示当primary sink 发生故障时，系统如何检测故障并切换到fallback sink。
 /// 这是 inklog 高可用性的核心机制。
 async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("Example 2: failure simulation and fallback switch");
+    print_separator(&tr("example-fallback-example-2-failure-simulation"));
 
     let backup_path = temp_file_path("fallback_backup");
-    println!("Fallback log file: {}", backup_path);
+    println!(
+        "{}",
+        tr_args(
+            "example-fallback-fallback-log-file",
+            &[("backup_path", &backup_path)]
+        )
+    );
 
     let mut state = FallbackState::new("Console");
-    println!("\nInitial state: primary sink = console");
+    println!("\n{}", tr("example-fallback-initial-state-primary-sink"));
 
     // 2. 配置备用 File Sink
     let backup_config = FileSinkConfig {
@@ -316,7 +345,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         output_format: Default::default(),
     };
     let backup_sink = FileSink::new(backup_config)?;
-    println!("Fallback file sink: ready");
+    println!("{}", tr("example-fallback-fallback-file-sink-ready"));
 
     // 3. 配置主 Console Sink（包装为会故障的 Sink）
     let primary_config = ConsoleSinkConfig {
@@ -347,7 +376,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    print_section("writing logs (triggering failure)");
+    print_section(&tr("example-fallback-writing-logs-triggering-failure"));
 
     let mut success_count = 0;
     let mut fallback_triggered = false;
@@ -357,22 +386,33 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
             Ok(()) => {
                 success_count += 1;
                 println!(
-                    "[{}] [primary sink] write succeeded #{}",
-                    Utc::now().format("%H:%M:%S%.3f"),
-                    success_count
+                    "{}",
+                    tr_args(
+                        "example-fallback-primary-sink-write-succeeded",
+                        &[
+                            ("value", &(Utc::now().format("%H:%M:%S%.3f"))),
+                            ("success_count", &success_count)
+                        ]
+                    )
                 );
             }
             Err(e) => {
                 // primary sink 故障，触发degraded
                 if !fallback_triggered {
-                    println!("\n*** Primary sink failure: {} ***", e);
+                    println!(
+                        "\n{}",
+                        tr_args("example-fallback-primary-sink-failure", &[("e", &e)])
+                    );
                     state.trigger_fallback("File");
                     fallback_triggered = true;
                 }
 
                 println!(
-                    "[{}] [fallback sink] took over writing",
-                    Utc::now().format("%H:%M:%S%.3f")
+                    "{}",
+                    tr_args(
+                        "example-fallback-fallback-sink-took-over-writing",
+                        &[("value", &(Utc::now().format("%H:%M:%S%.3f")))]
+                    )
                 );
                 backup_sink.write(record).await?;
                 backup_sink.flush().await?;
@@ -380,20 +420,44 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    print_section("degradation event statistics");
-    println!("degradation count: {}", state.fallback_count);
+    print_section(&tr("example-fallback-degradation-event-statistics"));
     println!(
-        "last degradation time: {}",
-        state
-            .last_fallback_time
-            .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_else(|| "none".to_string())
+        "{}",
+        tr_args(
+            "example-fallback-degradation-count",
+            &[("fallback_count", &state.fallback_count)]
+        )
     );
-    println!("active sinks: {}", state.active_sink);
+    println!(
+        "{}",
+        tr_args(
+            "example-fallback-last-degradation-time",
+            &[(
+                "value",
+                &(state
+                    .last_fallback_time
+                    .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| "none".to_string()))
+            )]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-fallback-active-sinks",
+            &[("active_sink", &state.active_sink)]
+        )
+    );
 
-    print_section("verifying the fallback file");
+    print_section(&tr("example-fallback-verifying-the-fallback-file"));
     let content = fs::read_to_string(&backup_path)?;
-    println!("Fallback file content ({} bytes):", content.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-fallback-fallback-file-content-bytes",
+            &[("value", &(content.len()))]
+        )
+    );
     for line in content.lines() {
         println!("  {}", line);
     }
@@ -401,9 +465,24 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
     // 8. 清理
     cleanup_files(&backup_path, "inklog_example_fallback_backup")?;
 
-    println!("\n✓ Failure simulation and fallback switch completed");
-    println!("  - Primary sink fails after write #{}", 5);
-    println!("  - Fallback sink took over the next {} logs", 8 - 5);
+    println!(
+        "\n{}",
+        tr("example-fallback-failure-simulation-and-fallback")
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-fallback-primary-sink-fails-after-write",
+            &[("value", &(5))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-fallback-fallback-sink-took-over-the",
+            &[("value", &(8 - 5))]
+        )
+    );
 
     Ok(())
 }
@@ -415,25 +494,46 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
 /// - degraded条件判断
 /// - degraded执行和日志记录
 async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("Example 3: full fallback strategy demo");
+    print_separator(&tr("example-fallback-example-3-full-fallback"));
 
     let primary_path = temp_file_path("primary");
     let fallback_path = temp_file_path("fallback");
-    println!("Primary log file: {}", primary_path);
-    println!("Fallback log file: {}", fallback_path);
+    println!(
+        "{}",
+        tr_args(
+            "example-fallback-primary-log-file",
+            &[("primary_path", &primary_path)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-fallback-fallback-log-file-2",
+            &[("fallback_path", &fallback_path)]
+        )
+    );
 
     // 1. 展示 Sink healthy状态枚举
-    print_section("Sink health status types");
+    print_section(&tr("example-fallback-sink-health-status-types"));
 
-    println!("\nSinkStatus enum:");
-    println!("  - Healthy: sink fully healthy");
-    println!("  - Degraded: sink degraded, may need fallback");
-    println!("  - Unhealthy: sink unavailable, fallback required");
+    println!("\n{}", tr("example-fallback-sinkstatus-enum"));
+    println!("  {}", tr("example-fallback-healthy-sink-fully-healthy"));
+    println!(
+        "  {}",
+        tr("example-fallback-degraded-sink-degraded-may-need")
+    );
+    println!("  {}", tr("example-fallback-unhealthy-sink-unavailable"));
 
-    println!("\nSinkHealth struct:");
-    println!("  - is_healthy: bool - whether healthy");
-    println!("  - status: SinkStatus - detailed status");
-    println!("  - last_error: Option<String> - error info");
+    println!("\n{}", tr("example-fallback-sinkhealth-struct"));
+    println!(
+        "  {}",
+        tr("example-fallback-is-healthy-bool-whether-healthy")
+    );
+    println!("  {}", tr("example-fallback-status-sinkstatus-detailed"));
+    println!(
+        "  {}",
+        tr("example-fallback-last-error-option-string-error")
+    );
 
     let health_checks = vec![
         ("Console Sink", SinkHealth::healthy()),
@@ -444,7 +544,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         ),
     ];
 
-    print_section("simulated health check result");
+    print_section(&tr("example-fallback-simulated-health-check-result"));
     for (name, health) in &health_checks {
         let is_healthy = matches!(health.status, SinkStatus::Healthy);
         let status_icon = if is_healthy { "✓" } else { "✗" };
@@ -463,7 +563,10 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         if !is_healthy {
-            println!("     -> Advice: degrade to the fallback sink");
+            println!(
+                "     {}",
+                tr("example-fallback-advice-degrade-to-the-fallback")
+            );
         }
     }
 
@@ -513,7 +616,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     };
     let fallback_sink = FileSink::new(fallback_config)?;
 
-    print_section("degradation flow simulation");
+    print_section(&tr("example-fallback-degradation-flow-simulation"));
 
     let records: Vec<LogRecord> = (1..=10)
         .map(|i| {
@@ -548,10 +651,16 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
 
         if log_num == failure_point {
             println!(
-                "\n[{}] *** Primary sink failed ***",
-                Utc::now().format("%H:%M:%S%.3f")
+                "\n{}",
+                tr_args(
+                    "example-fallback-primary-sink-failed",
+                    &[("value", &(Utc::now().format("%H:%M:%S%.3f")))]
+                )
             );
-            println!("     Degrading: File(primary) -> File(fallback)");
+            println!(
+                "     {}",
+                tr("example-fallback-degrading-file-primary-file")
+            );
             current_sink = "fallback";
         }
 
@@ -591,15 +700,21 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    print_section("file content after degradation");
+    print_section(&tr("example-fallback-file-content-after-degradation"));
 
-    println!("\n--- Primary file (first {} logs) ---", failure_point - 1);
+    println!(
+        "\n{}",
+        tr_args(
+            "example-fallback-primary-file-first-logs",
+            &[("value", &(failure_point - 1))]
+        )
+    );
     let primary_content = fs::read_to_string(&primary_path)?;
     for line in primary_content.lines().take(10) {
         println!("  {}", line);
     }
 
-    println!("\n--- Fallback file (logs after takeover) ---");
+    println!("\n{}", tr("example-fallback-fallback-file-logs-after"));
     let fallback_content = fs::read_to_string(&fallback_path)?;
     for line in fallback_content.lines().take(10) {
         println!("  {}", line);
@@ -609,27 +724,48 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
     cleanup_files(&primary_path, "inklog_example_primary")?;
     cleanup_files(&fallback_path, "inklog_example_fallback")?;
 
-    print_section("fallback strategy summary");
+    print_section(&tr("example-fallback-fallback-strategy-summary"));
 
-    println!("\nThree-tier fallback:");
-    println!("  1. Database -> File (when the database is unavailable)");
-    println!("     - Trigger: connection timeout, SQL errors");
-    println!("     - Degradation action: write to a local file");
+    println!("\n{}", tr("example-fallback-three-tier-fallback"));
+    println!("  {}", tr("example-fallback-1-database-file-when-the"));
+    println!(
+        "     {}",
+        tr("example-fallback-trigger-connection-timeout-sql")
+    );
+    println!(
+        "     {}",
+        tr("example-fallback-degradation-action-write-to-a")
+    );
     println!();
-    println!("  2. File -> Console (when the file is unavailable)");
-    println!("     - Trigger: disk full, permission errors");
-    println!("     - Degradation action: output to the console");
+    println!(
+        "  {}",
+        tr("example-fallback-2-file-console-when-the-file-is")
+    );
+    println!(
+        "     {}",
+        tr("example-fallback-trigger-disk-full-permission")
+    );
+    println!(
+        "     {}",
+        tr("example-fallback-degradation-action-output-to")
+    );
     println!();
-    println!("  3. Console (final fallback)");
-    println!("     - Trigger: all sinks unavailable");
-    println!("     - Degradation action: log to syslog + alert");
+    println!("  {}", tr("example-fallback-3-console-final-fallback"));
+    println!(
+        "     {}",
+        tr("example-fallback-trigger-all-sinks-unavailable")
+    );
+    println!("     {}", tr("example-fallback-degradation-action-log-to"));
 
-    println!("\nDegradation event log:");
-    println!("  - All degradation events are logged");
-    println!("  - Includes degradation reason, time, and recovery state");
-    println!("  - Degradation state queryable via the HTTP endpoint");
+    println!("\n{}", tr("example-fallback-degradation-event-log"));
+    println!("  {}", tr("example-fallback-all-degradation-events-are"));
+    println!("  {}", tr("example-fallback-includes-degradation-reason"));
+    println!(
+        "  {}",
+        tr("example-fallback-degradation-state-queryable-via")
+    );
 
-    println!("\n✓ Full fallback strategy demo completed");
+    println!("\n{}", tr("example-fallback-full-fallback-strategy-demo"));
 
     Ok(())
 }
@@ -655,7 +791,13 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
     }
 
     if deleted_count > 0 {
-        println!("  Cleaned up {} temp files", deleted_count);
+        println!(
+            "  {}",
+            tr_args(
+                "example-fallback-cleaned-up-temp-files",
+                &[("deleted_count", &deleted_count)]
+            )
+        );
     }
 
     Ok(())
@@ -663,7 +805,10 @@ fn cleanup_files(log_path: &str, prefix: &str) -> Result<(), Box<dyn std::error:
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog sink fallback mechanism example ===\n");
+    println!(
+        "{}\n",
+        tr("example-fallback-inklog-sink-fallback-mechanism")
+    );
 
     multi_sink_config().await?;
 
@@ -671,6 +816,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     fallback_demo().await?;
 
-    println!("\n=== All examples completed ===");
+    println!("\n{}", tr("example-fallback-all-examples-completed"));
     Ok(())
 }

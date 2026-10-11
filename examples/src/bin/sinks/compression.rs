@@ -17,54 +17,90 @@ use inklog::sink::compression::{
     CompressionStrategy, GzipCompression, NoCompression, ZstdCompression, compress_data,
     compress_file,
 };
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::fs;
 use std::io::Write;
 use tempfile::TempDir;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog Zstd compression examples ===\n");
+    println!(
+        "{}\n",
+        tr("example-compression-inklog-zstd-compression-examples")
+    );
 
     show_in_memory_compression();
     show_file_compression().await?;
     show_compression_levels_comparison();
     show_strategy_variants();
 
-    println!("\n✓ all compression examples completed");
+    println!("\n{}", tr("example-compression-all-compression-examples"));
     Ok(())
 }
 
 /// 展示内存数据压缩/解压
 fn show_in_memory_compression() {
-    print_separator("1. In-memory Zstd compress/decompress");
+    print_separator(&tr("example-compression-1-in-memory-zstd-compress"));
 
-    print_section("1.1 ZstdCompression::default() (level=3)");
+    print_section(&tr("example-compression-1-1-zstdcompression-default"));
     let strategy = ZstdCompression::default();
-    println!("Algorithm name: {}", strategy.name());
-    println!("Extension  : {}", strategy.extension());
+    println!(
+        "{}",
+        tr_args(
+            "example-compression-algorithm-name",
+            &[("value", &(strategy.name()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-compression-extension",
+            &[("value", &(strategy.extension()))]
+        )
+    );
     assert_eq!(strategy.name(), "zstd");
     assert_eq!(strategy.extension(), "zst");
 
-    print_section("1.2 compress() a string");
+    print_section(&tr("example-compression-1-2-compress-a-string"));
     let original =
         "inklog enterprise log infrastructure — a log message used to test compression.".repeat(8);
     let compressed = strategy
         .compress(original.as_bytes())
         .expect("compression failed");
-    println!("Original size : {} bytes", original.len());
-    println!("Compressed size : {} bytes", compressed.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-compression-original-size-bytes",
+            &[("value", &(original.len()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-compression-compressed-size-bytes",
+            &[("value", &(compressed.len()))]
+        )
+    );
     assert!(!compressed.is_empty());
 
-    print_section("1.3 decompress() back to the original");
+    print_section(&tr("example-compression-1-3-decompress-back-to-the"));
     let decompressed = strategy
         .decompress(&compressed)
         .expect("decompression failed");
-    println!("Decompressed size : {} bytes", decompressed.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-compression-decompressed-size-bytes",
+            &[("value", &(decompressed.len()))]
+        )
+    );
     assert_eq!(decompressed, original.as_bytes());
-    println!("✓ decompressed data matches the original");
+    println!(
+        "{}",
+        tr("example-compression-decompressed-data-matches-the")
+    );
 
-    print_section("1.4 the compress_data() convenience function");
+    print_section(&tr("example-compression-1-4-the-compress-data"));
     let compressed2 = compress_data(b"compress_data convenience function", 3)
         .expect("the convenience function failed to compress");
     println!(

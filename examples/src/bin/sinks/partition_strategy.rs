@@ -16,10 +16,10 @@
 //! ```
 
 use inklog::config::{DatabaseDriver, DatabaseSinkConfig, PartitionStrategy};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 fn main() {
-    print_separator("inklog database partition strategy examples");
+    print_separator(&tr("example-partition-strategy-inklog-database-partition"));
 
     show_partition_strategy_enum();
     show_database_config_with_partition();
@@ -27,42 +27,98 @@ fn main() {
     show_toml_config();
     show_selection_guide();
 
-    println!("\nAll partition strategy examples shown.");
+    println!(
+        "\n{}",
+        tr("example-partition-strategy-all-partition-strategy-examples")
+    );
 }
 
 /// 演示 PartitionStrategy 枚举值
 fn show_partition_strategy_enum() {
-    print_section("Example 1: PartitionStrategy enum values");
+    print_section(&tr(
+        "example-partition-strategy-example-1-partitionstrategy",
+    ));
 
-    println!("PartitionStrategy supports two partition strategies:\n");
+    println!(
+        "{}\n",
+        tr("example-partition-strategy-partitionstrategy-supports-two")
+    );
 
     let monthly = PartitionStrategy::Monthly;
     let yearly = PartitionStrategy::Yearly;
     let default = PartitionStrategy::default();
 
-    println!("  Monthly (default): {}", monthly);
-    println!("  Yearly:         {}", yearly);
-    println!("  Default:        {}", default);
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-monthly-default",
+            &[("monthly", &monthly)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args("example-partition-strategy-yearly", &[("yearly", &yearly)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-default",
+            &[("default", &default)]
+        )
+    );
 
-    println!("\nString parsing:");
+    println!("\n{}", tr("example-partition-strategy-string-parsing"));
     let from_str_monthly: PartitionStrategy = "monthly".parse().unwrap();
     let from_str_yearly: PartitionStrategy = "yearly".parse().unwrap();
     let from_str_month: PartitionStrategy = "month".parse().unwrap();
     let from_str_year: PartitionStrategy = "year".parse().unwrap();
 
-    println!("  \"monthly\" → {:?}", from_str_monthly);
-    println!("  \"yearly\"  → {:?}", from_str_yearly);
-    println!("  \"month\"   → {:?} (alias)", from_str_month);
-    println!("  \"year\"    → {:?} (alias)", from_str_year);
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-monthly",
+            &[("from_str_monthly", &format!("{:?}", from_str_monthly))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-yearly-2",
+            &[("from_str_yearly", &format!("{:?}", from_str_yearly))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-month-alias",
+            &[("from_str_month", &format!("{:?}", from_str_month))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-year-alias",
+            &[("from_str_year", &format!("{:?}", from_str_year))]
+        )
+    );
 
-    println!("\nInvalid value parsing:");
+    println!(
+        "\n{}",
+        tr("example-partition-strategy-invalid-value-parsing")
+    );
     let invalid: Result<PartitionStrategy, _> = "daily".parse();
-    println!("  \"daily\" → {:?} (returns an error)", invalid.err());
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-daily-returns-an-error",
+            &[("value", &format!("{:?}", invalid.err()))]
+        )
+    );
 }
 
 /// 演示在 DatabaseSinkConfig 中使用分区策略
 fn show_database_config_with_partition() {
-    print_section("Example 2: partition configuration in DatabaseSinkConfig");
+    print_section(&tr("example-partition-strategy-example-2-partition"));
 
     // Monthly 分区配置
     let monthly_config = DatabaseSinkConfig {
@@ -78,10 +134,28 @@ fn show_database_config_with_partition() {
         ..Default::default()
     };
 
-    println!("Monthly partition configuration:");
-    println!("  driver    = {:?}", monthly_config.driver);
-    println!("  partition = {}", monthly_config.partition);
-    println!("  Table name pattern = logs_2026_01, logs_2026_02, ...");
+    println!(
+        "{}",
+        tr("example-partition-strategy-monthly-partition-configuration")
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-driver",
+            &[("driver", &format!("{:?}", monthly_config.driver))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-partition",
+            &[("partition", &monthly_config.partition)]
+        )
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-table-name-pattern-logs-2026-01")
+    );
 
     // Yearly 分区配置
     let yearly_config = DatabaseSinkConfig {
@@ -97,15 +171,35 @@ fn show_database_config_with_partition() {
         ..Default::default()
     };
 
-    println!("\nYearly partition configuration:");
-    println!("  driver    = {:?}", yearly_config.driver);
-    println!("  partition = {}", yearly_config.partition);
-    println!("  Table name pattern = logs_2026, logs_2027, ...");
+    println!(
+        "\n{}",
+        tr("example-partition-strategy-yearly-partition-configuration")
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-driver",
+            &[("driver", &format!("{:?}", yearly_config.driver))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-partition-strategy-partition",
+            &[("partition", &yearly_config.partition)]
+        )
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-table-name-pattern-logs-2026")
+    );
 }
 
 /// 对比两种分区策略
 fn show_partition_comparison() {
-    print_section("Example 3: partition strategy comparison");
+    print_section(&tr(
+        "example-partition-strategy-example-3-partition-strategy",
+    ));
 
     println!("{:<20} {:<25} {:<25}", "aspect", "Monthly", "Yearly");
     println!("{}", "-".repeat(70));
@@ -138,14 +232,25 @@ fn show_partition_comparison() {
         "recommended driver", "PostgreSQL/MySQL", "PostgreSQL/MySQL"
     );
 
-    println!("\nDefault strategy: {}", PartitionStrategy::default());
+    println!(
+        "\n{}",
+        tr_args(
+            "example-partition-strategy-default-strategy",
+            &[("value", &(PartitionStrategy::default()))]
+        )
+    );
 }
 
 /// 演示 TOML 配置文件格式
 fn show_toml_config() {
-    print_section("Example 4: TOML configuration file format");
+    print_section(&tr(
+        "example-partition-strategy-example-4-toml-configuration",
+    ));
 
-    println!("Monthly partition (default):");
+    println!(
+        "{}",
+        tr("example-partition-strategy-monthly-partition-default")
+    );
     println!(
         r#"[database_sink]
 enabled = true
@@ -157,7 +262,7 @@ flush_interval_ms = 500
 partition = "monthly""#
     );
 
-    println!("\nYearly partition:");
+    println!("\n{}", tr("example-partition-strategy-yearly-partition"));
     println!(
         r#"[database_sink]
 enabled = true
@@ -169,28 +274,76 @@ flush_interval_ms = 500
 partition = "yearly""#
     );
 
-    println!("\nNote: when the partition field is omitted it defaults to \"monthly\".");
+    println!(
+        "\n{}",
+        tr("example-partition-strategy-note-when-the-partition-field")
+    );
 }
 
 /// 演示分区策略选择指南
 fn show_selection_guide() {
-    print_section("Example 5: how to choose a partition strategy");
+    print_section(&tr("example-partition-strategy-example-5-how-to-choose-a"));
 
-    println!("When to choose Monthly:");
-    println!("  - More than 100k log records per day");
-    println!("  - You archive or purge history by month");
-    println!("  - Queries are usually limited to specific months");
-    println!("  - You use PostgreSQL partitioned tables or MySQL partitions");
+    println!(
+        "{}",
+        tr("example-partition-strategy-when-to-choose-monthly")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-more-than-100k-log-records-per")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-you-archive-or-purge-history-by")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-queries-are-usually-limited-to")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-you-use-postgresql-partitioned")
+    );
 
-    println!("\nWhen to choose Yearly:");
-    println!("  - Fewer than 10k log records per day");
-    println!("  - Retention is measured in years");
-    println!("  - Management simplicity comes first");
-    println!("  - You do not purge history frequently");
+    println!(
+        "\n{}",
+        tr("example-partition-strategy-when-to-choose-yearly")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-fewer-than-10k-log-records-per")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-retention-is-measured-in-years")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-management-simplicity-comes")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-you-do-not-purge-history")
+    );
 
-    println!("\nPartitioned table management advice:");
-    println!("  - Drop expired partitions periodically (DROP PARTITION)");
-    println!("  - Watch per-partition sizes to avoid data skew");
-    println!("  - Index the fields that queries hit most");
-    println!("  - Archive cold data as Parquet (see the parquet_archive example)");
+    println!(
+        "\n{}",
+        tr("example-partition-strategy-partitioned-table-management")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-drop-expired-partitions")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-watch-per-partition-sizes-to")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-index-the-fields-that-queries")
+    );
+    println!(
+        "  {}",
+        tr("example-partition-strategy-archive-cold-data-as-parquet")
+    );
 }

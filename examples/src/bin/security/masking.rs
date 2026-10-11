@@ -23,57 +23,93 @@
 
 use inklog::DataMasker;
 use inklog::{MaskRule, MaskRuleRegistry};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use serde_json::json;
 use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog data masking examples ===\n");
+    println!("{}\n", tr("example-masking-inklog-data-masking-examples"));
 
     let masker = DataMasker::new();
 
-    print_separator("1. Basic masking");
+    print_separator(&tr("example-masking-1-basic-masking"));
 
-    print_section("1.1 Email masking");
+    print_section(&tr("example-masking-1-1-email-masking"));
     let email = "user@example.com";
     let masked_email = masker.mask(email);
-    println!("Raw email: {}", email);
-    println!("Masked:    {}", masked_email);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-email", &[("email", &email)])
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked", &[("masked_email", &masked_email)])
+    );
     assert_eq!(masked_email, "**@**.***");
 
-    print_section("1.2 Phone number masking");
+    print_section(&tr("example-masking-1-2-phone-number-masking"));
     let phone = "13812345678";
     let masked_phone = masker.mask(phone);
-    println!("Raw phone: {}", phone);
-    println!("Masked:    {}", masked_phone);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-phone", &[("phone", &phone)])
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-masked-2",
+            &[("masked_phone", &masked_phone)]
+        )
+    );
     assert_eq!(masked_phone, "***-****-****");
 
-    print_section("1.3 National ID masking");
+    print_section(&tr("example-masking-1-3-national-id-masking"));
     let id_card = "110101199001011234";
     let masked_id = masker.mask(id_card);
-    println!("Raw ID: {}", id_card);
-    println!("Masked:     {}", masked_id);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-id", &[("id_card", &id_card)])
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked-3", &[("masked_id", &masked_id)])
+    );
     assert_eq!(masked_id, "******1234");
 
-    print_section("1.4 Bank card masking");
+    print_section(&tr("example-masking-1-4-bank-card-masking"));
     // 注意：此处为演示刻意打印原始卡号以对照脱敏效果，使用的是公开测试号。
     // 生产代码严禁将真实 PII 原文写入日志或 stdout。
     let bank_card = "6222021234567890123";
     let masked_card = masker.mask(bank_card);
-    println!("Raw bank card: {}", bank_card);
-    println!("Masked:     {}", masked_card);
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-raw-bank-card",
+            &[("bank_card", &bank_card)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked-4", &[("masked_card", &masked_card)])
+    );
 
-    print_separator("2. Mixed sensitive data");
+    print_separator(&tr("example-masking-2-mixed-sensitive-data"));
 
     let mixed_text = "user info: email=test@example.com, phone=13812345678, note=contact support";
     let masked_text = masker.mask(mixed_text);
-    println!("Raw text: {}", mixed_text);
-    println!("Masked:   {}", masked_text);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-text", &[("mixed_text", &mixed_text)])
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked-5", &[("masked_text", &masked_text)])
+    );
     assert!(!masked_text.contains("test@example.com"));
     assert!(!masked_text.contains("13812345678"));
 
-    print_separator("3. JSON data masking");
+    print_separator(&tr("example-masking-3-json-data-masking"));
 
     let mut user_data = json!({
         "name": "John Doe",
@@ -83,19 +119,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "address": "Chaoyang District, Beijing"
     });
 
-    println!("Raw JSON:");
+    println!("{}", tr("example-masking-raw-json"));
     println!("{}", serde_json::to_string_pretty(&user_data)?);
 
     masker.mask_value(&mut user_data);
 
-    println!("\nMasked JSON:");
+    println!("\n{}", tr("example-masking-masked-json"));
     println!("{}", serde_json::to_string_pretty(&user_data)?);
 
     assert_eq!(user_data["email"], "**@**.***");
     assert_eq!(user_data["phone"], "***-****-****");
     assert_eq!(user_data["name"], "John Doe"); // non-sensitive fields stay unchanged
 
-    print_separator("4. Nested JSON masking");
+    print_separator(&tr("example-masking-4-nested-json-masking"));
 
     let mut nested_data = json!({
         "user": {
@@ -113,17 +149,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    println!("Raw nested JSON:");
+    println!("{}", tr("example-masking-raw-nested-json"));
     println!("{}", serde_json::to_string_pretty(&nested_data)?);
 
     masker.mask_value(&mut nested_data);
 
-    println!("\nMasked nested JSON:");
+    println!("\n{}", tr("example-masking-masked-nested-json"));
     println!("{}", serde_json::to_string_pretty(&nested_data)?);
 
-    print_separator("5. Sensitive field detection");
+    print_separator(&tr("example-masking-5-sensitive-field-detection"));
 
-    print_section("5.1 Sensitive field examples");
+    print_section(&tr("example-masking-5-1-sensitive-field-examples"));
     let sensitive_fields = vec![
         "password",
         "api_key",
@@ -135,22 +171,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "cvv",
     ];
 
-    println!("These fields are detected as sensitive:");
+    println!("{}", tr("example-masking-these-fields-are-detected-as"));
     for field in &sensitive_fields {
         assert!(DataMasker::is_sensitive_field(field));
         println!("  ✓ {}", field);
     }
 
-    print_section("5.2 Non-sensitive field examples");
+    print_section(&tr("example-masking-5-2-non-sensitive-field-examples"));
     let normal_fields = vec!["username", "message", "content", "title", "description"];
 
-    println!("These fields are not sensitive:");
+    println!("{}", tr("example-masking-these-fields-are-not-sensitive"));
     for field in &normal_fields {
         assert!(!DataMasker::is_sensitive_field(field));
         println!("  ✓ {}", field);
     }
 
-    print_separator("6. HashMap data masking");
+    print_separator(&tr("example-masking-6-hashmap-data-masking"));
 
     let mut user_map: HashMap<String, serde_json::Value> = HashMap::new();
     user_map.insert(
@@ -167,14 +203,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     user_map.insert("age".to_string(), serde_json::Value::Number(30.into()));
 
-    println!("Raw HashMap:");
+    println!("{}", tr("example-masking-raw-hashmap"));
     for (key, value) in &user_map {
         println!("  {}: {}", key, value);
     }
 
     masker.mask_hashmap(&mut user_map);
 
-    println!("\nMasked HashMap:");
+    println!("\n{}", tr("example-masking-masked-hashmap"));
     for (key, value) in &user_map {
         println!("  {}: {}", key, value);
     }
@@ -183,58 +219,139 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(user_map["phone"], "***-****-****");
     assert_eq!(user_map["name"], "Jane Doe");
 
-    print_separator("7. Advanced sensitive data");
+    print_separator(&tr("example-masking-7-advanced-sensitive-data"));
 
-    print_section("7.1 JWT token masking");
+    print_section(&tr("example-masking-7-1-jwt-token-masking"));
     let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     let masked_jwt = masker.mask(jwt);
-    println!("Raw JWT: {}...", &jwt[..50]);
-    println!("Masked:   {}", masked_jwt);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-jwt", &[("value", &(&jwt[..50]))])
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked-6", &[("masked_jwt", &masked_jwt)])
+    );
     assert!(masked_jwt.contains("***REDACTED_JWT***"));
 
-    print_section("7.2 AWS access key masking");
+    print_section(&tr("example-masking-7-2-aws-access-key-masking"));
     let aws_key = "AKIAIOSFODNN7EXAMPLE";
     let masked_aws = masker.mask(aws_key);
-    println!("Raw AWS key: {}", aws_key);
-    println!("Masked:       {}", masked_aws);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-aws-key", &[("aws_key", &aws_key)])
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked-7", &[("masked_aws", &masked_aws)])
+    );
     assert!(masked_aws.contains("***REDACTED***"));
 
-    print_section("7.4 Credit card masking (Luhn)");
+    print_section(&tr("example-masking-7-4-credit-card-masking-luhn"));
     let visa = "4111111111111111";
     let masked_visa = masker.mask(visa);
-    println!("Raw Visa:  {}", visa);
-    println!("Masked:     {}", masked_visa);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-visa", &[("visa", &visa)])
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked-8", &[("masked_visa", &masked_visa)])
+    );
 
     let amex = "378282246310005";
     let masked_amex = masker.mask(amex);
-    println!("Raw Amex:  {}", amex);
-    println!("Masked:     {}", masked_amex);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-amex", &[("amex", &amex)])
+    );
+    println!(
+        "{}",
+        tr_args("example-masking-masked-9", &[("masked_amex", &masked_amex)])
+    );
 
-    print_section("7.5 International phone masking");
+    print_section(&tr("example-masking-7-5-international-phone-masking"));
     let intl_phone = "+1-202-555-0123";
     let masked_intl = masker.mask(intl_phone);
-    println!("Raw international phone: {}", intl_phone);
-    println!("Masked:       {}", masked_intl);
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-raw-international-phone",
+            &[("intl_phone", &intl_phone)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-masked-10",
+            &[("masked_intl", &masked_intl)]
+        )
+    );
 
-    print_section("7.6 IP/MAC address masking");
+    print_section(&tr("example-masking-7-6-ip-mac-address-masking"));
     let ipv4 = "Server at 192.168.1.100 port 8080";
     let ipv6 = "IPv6 addr: 2001:0db8:85a3:0000:0000:8a2e:0370:7334";
     let mac = "Device MAC: 00:1A:2B:3C:4D:5E";
-    println!("IPv4: {} → {}", ipv4, masker.mask(ipv4));
-    println!("IPv6: {} → {}", ipv6, masker.mask(ipv6));
-    println!("MAC:  {} → {}", mac, masker.mask(mac));
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-ipv4",
+            &[("ipv4", &ipv4), ("value", &(masker.mask(ipv4)))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-ipv6",
+            &[("ipv6", &ipv6), ("value", &(masker.mask(ipv6)))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-mac",
+            &[("mac", &mac), ("value", &(masker.mask(mac)))]
+        )
+    );
 
-    print_section("7.7 Third-party token masking");
+    print_section(&tr("example-masking-7-7-third-party-token-masking"));
     let github_token = "ghp_1234567890abcdefghij1234567890abcdef";
     let slack_token = "xoxb-1234567890-1234567890-abcDEF123";
     let stripe_key = "sk_test_1234567890abcdefghij";
-    println!("GitHub: {} → {}", github_token, masker.mask(github_token));
-    println!("Slack:  {} → {}", slack_token, masker.mask(slack_token));
-    println!("Stripe: {} → {}", stripe_key, masker.mask(stripe_key));
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-github",
+            &[
+                ("github_token", &github_token),
+                ("value", &(masker.mask(github_token)))
+            ]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-slack",
+            &[
+                ("slack_token", &slack_token),
+                ("value", &(masker.mask(slack_token)))
+            ]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-stripe",
+            &[
+                ("stripe_key", &stripe_key),
+                ("value", &(masker.mask(stripe_key)))
+            ]
+        )
+    );
 
-    print_separator("8. Real-world scenarios");
+    print_separator(&tr("example-masking-8-real-world-scenarios"));
 
-    print_section("8.1 Masking log messages");
+    print_section(&tr("example-masking-8-1-masking-log-messages"));
 
     let log_message = r#"User logged in successfully:
    Email: user@example.com
@@ -243,10 +360,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
    Login time: 2026-03-19 10:30:00"#;
 
     let masked_log = masker.mask(log_message);
-    println!("Raw log:\n{}", log_message);
-    println!("\nMasked log:\n{}", masked_log);
+    println!(
+        "{}",
+        tr_args("example-masking-raw-log", &[("log_message", &log_message)])
+    );
+    println!(
+        "\n{}",
+        tr_args("example-masking-masked-log", &[("masked_log", &masked_log)])
+    );
 
-    print_section("8.2 Masking API responses");
+    print_section(&tr("example-masking-8-2-masking-api-responses"));
 
     let mut api_response = json!({
         "code": 200,
@@ -260,17 +383,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    println!("Raw API response:");
+    println!("{}", tr("example-masking-raw-api-response"));
     println!("{}", serde_json::to_string_pretty(&api_response)?);
 
     masker.mask_value(&mut api_response);
 
-    println!("\nMasked API response:");
+    println!("\n{}", tr("example-masking-masked-api-response"));
     println!("{}", serde_json::to_string_pretty(&api_response)?);
 
-    print_separator("9. Custom rules");
+    print_separator(&tr("example-masking-9-custom-rules"));
 
-    print_section("9.1 MaskRuleBuilder");
+    print_section(&tr("example-masking-9-1-maskrulebuilder"));
     let custom_rule = MaskRule::builder("employee_id")
         .pattern(r"\bEMP-\d{6}\b")
         .replacement("EMP-***")
@@ -278,12 +401,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .expect("Invalid pattern");
     println!(
-        "Custom rule: {} (priority={})",
-        custom_rule.name(),
-        custom_rule.priority()
+        "{}",
+        tr_args(
+            "example-masking-custom-rule-priority",
+            &[
+                ("value", &(custom_rule.name())),
+                ("value2", &(custom_rule.priority()))
+            ]
+        )
     );
 
-    print_section("9.2 DataMaskerBuilder");
+    print_section(&tr("example-masking-9-2-datamaskerbuilder"));
     let custom_masker = DataMasker::builder()
         .add_rule(
             MaskRule::builder("employee_id")
@@ -296,12 +424,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .disable_builtin("bank_card")
         .build();
     let emp_text = "Employee EMP-123456 logged in";
-    println!("Raw: {}", emp_text);
-    println!("Masked: {}", custom_masker.mask(emp_text));
+    println!(
+        "{}",
+        tr_args("example-masking-raw", &[("emp_text", &emp_text)])
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-masked-11",
+            &[("value", &(custom_masker.mask(emp_text)))]
+        )
+    );
 
-    print_section("9.3 MaskRuleRegistry");
+    print_section(&tr("example-masking-9-3-maskruleregistry"));
     let mut registry = MaskRuleRegistry::with_builtins();
-    println!("Built-in rule count: {}", registry.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-built-in-rule-count",
+            &[("value", &(registry.len()))]
+        )
+    );
     registry
         .register(
             MaskRule::builder("project_code")
@@ -312,10 +455,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap(),
         )
         .unwrap();
-    println!("After registering the custom rule: {}", registry.len());
-    println!("Active rule count: {}", registry.active_rules().len());
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-after-registering-the-custom",
+            &[("value", &(registry.len()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-active-rule-count",
+            &[("value", &(registry.active_rules().len()))]
+        )
+    );
 
-    print_section("9.4 MaskRuleRegistry::load_from_toml");
+    print_section(&tr("example-masking-9-4-maskruleregistry-load-from"));
     let toml_config = r#"
 [[masking_rules]]
 name = "order_id"
@@ -330,13 +485,24 @@ pattern = "\\bTRACE-[A-F0-9]{16}\\b"
 replacement = "***TRACE***"
 "#;
     let toml_rules = MaskRuleRegistry::load_from_toml(toml_config).expect("Invalid TOML");
-    println!("Loaded {} custom rules from TOML", toml_rules.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-loaded-custom-rules-from-toml",
+            &[("value", &(toml_rules.len()))]
+        )
+    );
     for rule in &toml_rules {
         println!(
-            "  Rule: {} (priority={}, enabled={})",
-            rule.name(),
-            rule.priority(),
-            rule.is_enabled()
+            "  {}",
+            tr_args(
+                "example-masking-rule-priority-enabled",
+                &[
+                    ("value", &(rule.name())),
+                    ("value2", &(rule.priority())),
+                    ("value3", &(rule.is_enabled()))
+                ]
+            )
         );
     }
     // 将 TOML 规则注册到注册中心并构建 DataMasker
@@ -346,21 +512,30 @@ replacement = "***TRACE***"
     }
     let toml_masker = DataMasker::builder().with_registry(toml_registry).build();
     let order_text = "Order ORD-20260803 processed, trace: TRACE-0123456789ABCDEF";
-    println!("Raw: {}", order_text);
-    println!("Masked: {}", toml_masker.mask(order_text));
+    println!(
+        "{}",
+        tr_args("example-masking-raw-2", &[("order_text", &order_text)])
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-masking-masked-11",
+            &[("value", &(toml_masker.mask(order_text)))]
+        )
+    );
 
-    print_separator("10. Performance notes");
+    print_separator(&tr("example-masking-10-performance-notes"));
 
-    println!("DataMasker performance notes:");
-    println!("  1. Uses pre-compiled LazyLock regular expressions");
-    println!("  2. Handles HashMap and JSON in bulk");
-    println!("  3. Recurses into nested structures");
-    println!("  4. Field name detection is case-insensitive");
-    println!("  5. Rules run in priority order");
-    println!("  6. Rules can be managed dynamically through the registry");
+    println!("{}", tr("example-masking-datamasker-performance-notes"));
+    println!("  {}", tr("example-masking-1-uses-pre-compiled-lazylock"));
+    println!("  {}", tr("example-masking-2-handles-hashmap-and-json-in"));
+    println!("  {}", tr("example-masking-3-recurses-into-nested"));
+    println!("  {}", tr("example-masking-4-field-name-detection-is-case"));
+    println!("  {}", tr("example-masking-5-rules-run-in-priority-order"));
+    println!("  {}", tr("example-masking-6-rules-can-be-managed"));
 
-    println!("\n✓ all examples completed");
-    println!("\nPress Ctrl+C to exit...");
+    println!("\n{}", tr("example-masking-all-examples-completed"));
+    println!("\n{}", tr("example-masking-press-ctrl-c-to-exit"));
 
     inklog_examples::wait_for_ctrl_c().await?;
 

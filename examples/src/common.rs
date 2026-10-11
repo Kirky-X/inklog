@@ -7,6 +7,20 @@
 use anyhow::Result;
 use std::time::Duration;
 
+/// 从 i18n catalog 查询无参文案（示例叙述性输出统一走 catalog，默认英文）。
+pub fn tr(id: &str) -> String {
+    inklog::i18n::tr(id)
+}
+
+/// 从 i18n catalog 查询带命名参数的文案；参数按 `{ $key }` 占位插值。
+pub fn tr_args(id: &str, args: &[(&str, &dyn std::fmt::Display)]) -> String {
+    let mut msg = inklog::i18n::MsgArgs::new();
+    for (key, value) in args {
+        msg.set(key, *value);
+    }
+    inklog::i18n::tr_args(id, msg)
+}
+
 /// 等待用户按 Ctrl+C
 pub async fn wait_for_ctrl_c() -> Result<()> {
     tokio::signal::ctrl_c().await?;

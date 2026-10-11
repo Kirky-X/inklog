@@ -279,7 +279,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("inklog_config.toml");
         write_config(&path, "info");
-        let mut watcher = ConfersConfigWatcher::spawn(path.clone(), 50, |_| {})
+        let watcher = ConfersConfigWatcher::spawn(path.clone(), 50, |_| {})
             .await
             .unwrap();
 
@@ -316,7 +316,7 @@ mod tests {
         write_config(&path, "info");
         let reloads = Arc::new(AtomicUsize::new(0));
         let reloads_cb = reloads.clone();
-        let mut watcher = ConfersConfigWatcher::spawn(path.clone(), 50, move |_| {
+        let watcher = ConfersConfigWatcher::spawn(path.clone(), 50, move |_| {
             reloads_cb.fetch_add(1, Ordering::SeqCst);
         })
         .await

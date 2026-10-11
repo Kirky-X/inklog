@@ -20,7 +20,7 @@
 
 use inklog::LoggerManager;
 use inklog::config::InklogConfig;
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::fs;
 use tempfile::TempDir;
 
@@ -65,125 +65,269 @@ port = 9090
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog config file loading example ===\n");
+    println!("{}\n", tr("example-config-file-inklog-config-file-loading"));
 
     show_toml_format();
     show_sync_parse();
     show_search_paths().await?;
     show_from_file_initialization().await?;
 
-    println!("\n✓ All config file loading examples completed");
+    println!("\n{}", tr("example-config-file-all-config-file-loading"));
     Ok(())
 }
 
 /// 展示 TOML 配置文件格式
 fn show_toml_format() {
-    print_separator("1. TOML config file format");
+    print_separator(&tr("example-config-file-1-toml-config-file-format"));
     println!("{}", TOML_CONFIG);
-    println!("--- The config file contains the following sections ---");
-    println!("- [global]            Global log level, format, masking, degradation");
-    println!("- [console_sink]      Console output (color, stderr routing)");
-    println!("- [file_sink]         File output (path, rotation, compression, encryption)");
-    println!("- [database_sink]     Database output (driver, connection, batching)");
-    println!("- [performance]       Performance tuning (channel capacity, worker threads)");
-    println!("- [http_server]       HTTP health check and Prometheus metrics endpoint");
+    println!("{}", tr("example-config-file-the-config-file-contains-the"));
+    println!(
+        "{}",
+        tr("example-config-file-global-global-log-level-format")
+    );
+    println!("{}", tr("example-config-file-console-sink-console-output"));
+    println!("{}", tr("example-config-file-file-sink-file-output-path"));
+    println!(
+        "{}",
+        tr("example-config-file-database-sink-database-output")
+    );
+    println!(
+        "{}",
+        tr("example-config-file-performance-performance-tuning")
+    );
+    println!(
+        "{}",
+        tr("example-config-file-http-server-http-health-check")
+    );
 }
 
 /// 展示 InklogConfig 同步解析（不初始化 logger）
 fn show_sync_parse() {
-    print_separator("2. InklogConfig sync parsing (from_str)");
+    print_separator(&tr("example-config-file-2-inklogconfig-sync-parsing"));
 
-    print_section("2.1 Parsing config with toml::from_str");
+    print_section(&tr("example-config-file-2-1-parsing-config-with-toml"));
     let config: InklogConfig = TOML_CONFIG.parse().expect("failed to parse TOML");
-    println!("global.level           = {}", config.global.level);
-    println!("global.format          = {}", config.global.format);
-    println!("global.masking_enabled = {}", config.global.masking_enabled);
     println!(
-        "console_sink.enabled   = {}",
-        config.console_sink.as_ref().unwrap().enabled
+        "{}",
+        tr_args(
+            "example-config-file-global-level",
+            &[("level", &config.global.level)]
+        )
     );
     println!(
-        "console_sink.colored   = {}",
-        config.console_sink.as_ref().unwrap().colored
+        "{}",
+        tr_args(
+            "example-config-file-global-format",
+            &[("format", &config.global.format)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-global-masking-enabled",
+            &[("masking_enabled", &config.global.masking_enabled)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-console-sink-enabled",
+            &[("value", &(config.console_sink.as_ref().unwrap().enabled))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-console-sink-colored",
+            &[("value", &(config.console_sink.as_ref().unwrap().colored))]
+        )
     );
     assert_eq!(config.global.level, "info");
     assert!(!config.console_sink.as_ref().unwrap().colored);
 
-    print_section("2.2 file_sink fields");
+    print_section(&tr("example-config-file-2-2-file-sink-fields"));
     let file = config.file_sink.as_ref().unwrap();
-    println!("file_sink.enabled          = {}", file.enabled);
-    println!("file_sink.path             = {}", file.path.display());
-    println!("file_sink.max_size         = {}", file.max_size);
-    println!("file_sink.rotation_time    = {}", file.rotation_time);
-    println!("file_sink.compress         = {}", file.compress);
-    println!("file_sink.compression_level = {}", file.compression_level);
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-file-sink-enabled",
+            &[("enabled", &file.enabled)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-file-sink-path",
+            &[("value", &(file.path.display()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-file-sink-max-size",
+            &[("max_size", &file.max_size)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-file-sink-rotation-time",
+            &[("rotation_time", &file.rotation_time)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-file-sink-compress",
+            &[("compress", &file.compress)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-file-sink-compression-level",
+            &[("compression_level", &file.compression_level)]
+        )
+    );
     assert!(!file.enabled);
     assert_eq!(file.max_size, "100MB");
 
-    print_section("2.3 database_sink fields");
+    print_section(&tr("example-config-file-2-3-database-sink-fields"));
     let db = config.database_sink.as_ref().unwrap();
-    println!("database_sink.enabled    = {}", db.enabled);
-    println!("database_sink.driver     = {:?}", db.driver);
-    println!("database_sink.url        = {}", db.url);
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-database-sink-enabled",
+            &[("enabled", &db.enabled)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-database-sink-driver",
+            &[("driver", &format!("{:?}", db.driver))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args("example-config-file-database-sink-url", &[("url", &db.url)])
+    );
     assert!(!db.enabled);
 
-    print_section("2.4 performance fields");
-    println!("channel_capacity = {}", config.performance.channel_capacity);
-    println!("worker_threads   = {}", config.performance.worker_threads);
+    print_section(&tr("example-config-file-2-4-performance-fields"));
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-channel-capacity",
+            &[("channel_capacity", &config.performance.channel_capacity)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-worker-threads",
+            &[("worker_threads", &config.performance.worker_threads)]
+        )
+    );
     assert_eq!(config.performance.channel_capacity, 10000);
 
-    print_section("2.5 http_server fields");
+    print_section(&tr("example-config-file-2-5-http-server-fields"));
     let http = config.http_server.as_ref().unwrap();
-    println!("http_server.enabled = {}", http.enabled);
-    println!("http_server.host    = {}", http.host);
-    println!("http_server.port    = {}", http.port);
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-http-server-enabled",
+            &[("enabled", &http.enabled)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-http-server-host",
+            &[("host", &http.host)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-http-server-port",
+            &[("port", &http.port)]
+        )
+    );
     assert!(!http.enabled);
 
-    print_section("2.6 validate() check");
+    print_section(&tr("example-config-file-2-6-validate-check"));
     config.validate().expect("config should pass validation");
-    println!("✓ Config validation passed");
+    println!("{}", tr("example-config-file-config-validation-passed"));
 }
 
 /// 展示 InklogConfig::from_search_paths（LoggerManager::load 的搜索逻辑）
 async fn show_search_paths() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("3. from_search_paths auto search (config source of load)");
+    print_separator(&tr("example-config-file-3-from-search-paths-auto-search"));
 
     let temp_dir = TempDir::new()?;
     let config_path = temp_dir.path().join("auto_search.toml");
     fs::write(&config_path, TOML_CONFIG)?;
 
-    print_section("3.1 Setting the INKLOG_CONFIG_PATH env var");
+    print_section(&tr("example-config-file-3-1-setting-the-inklog-config"));
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap()) };
-    println!("INKLOG_CONFIG_PATH = {}", config_path.display());
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-inklog-config-path",
+            &[("value", &(config_path.display()))]
+        )
+    );
 
-    print_section("3.2 Reading and parsing with from_search_paths");
+    print_section(&tr("example-config-file-3-2-reading-and-parsing-with"));
     let config = InklogConfig::from_search_paths().expect("search should succeed");
     assert_eq!(config.global.level, "info");
     println!(
-        "✓ Loaded from INKLOG_CONFIG_PATH: level = {}",
-        config.global.level
+        "{}",
+        tr_args(
+            "example-config-file-loaded-from-inklog-config-path",
+            &[("level", &config.global.level)]
+        )
     );
 
     // 清理环境变量
     // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::remove_var("INKLOG_CONFIG_PATH") };
-    println!("INKLOG_CONFIG_PATH env var removed");
+    println!("{}", tr("example-config-file-inklog-config-path-env-var"));
 
-    println!("\nNote: LoggerManager::load() calls InklogConfig::load_sync(),");
-    println!("      searching for the config file in this order (first existing file wins):");
-    println!("      1. $INKLOG_CONFIG_PATH");
-    println!("      2. ./inklog_config.toml (current directory)");
-    println!("      3. ~/.config/inklog/config.toml");
-    println!("      4. /etc/inklog/config.toml");
-    println!("      If none exist, Default::default() is used.");
+    println!(
+        "\n{}",
+        tr("example-config-file-note-loggermanager-load-calls")
+    );
+    println!(
+        "      {}",
+        tr("example-config-file-searching-for-the-config-file")
+    );
+    println!("      {}", tr("example-config-file-1-inklog-config-path"));
+    println!(
+        "      {}",
+        tr("example-config-file-2-inklog-config-toml-current")
+    );
+    println!(
+        "      {}",
+        tr("example-config-file-3-config-inklog-config-toml")
+    );
+    println!(
+        "      {}",
+        tr("example-config-file-4-etc-inklog-config-toml")
+    );
+    println!(
+        "      {}",
+        tr("example-config-file-if-none-exist-default-default")
+    );
 
     Ok(())
 }
 
 /// 展示 LoggerManager::from_file 初始化 logger
 async fn show_from_file_initialization() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("4. Initializing the logger with LoggerManager::from_file");
+    print_separator(&tr("example-config-file-4-initializing-the-logger-with"));
 
     let temp_dir = TempDir::new()?;
     let config_path = temp_dir.path().join("inklog_config.toml");
@@ -202,27 +346,51 @@ channel_capacity = 1000
 worker_threads = 2
 "#;
     fs::write(&config_path, minimal_config)?;
-    println!("Temporary config file: {}", config_path.display());
+    println!(
+        "{}",
+        tr_args(
+            "example-config-file-temporary-config-file",
+            &[("value", &(config_path.display()))]
+        )
+    );
 
-    print_section("4.1 LoggerManager::from_file(path)");
+    print_section(&tr("example-config-file-4-1-loggermanager-from-file-path"));
     let _logger = LoggerManager::from_file(&config_path).await?;
-    println!("✓ LoggerManager initialized");
+    println!("{}", tr("example-config-file-loggermanager-initialized"));
 
-    print_section("4.2 Logging via tracing macros (verifying the logger is active)");
-    tracing::info!("INFO log from the config_file example");
-    tracing::warn!("WARN log from the config_file example");
-    tracing::error!("ERROR log from the config_file example");
+    print_section(&tr("example-config-file-4-2-logging-via-tracing-macros"));
+    tracing::info!(
+        "{}",
+        tr("example-config-file-info-log-from-the-config-file")
+    );
+    tracing::warn!(
+        "{}",
+        tr("example-config-file-warn-log-from-the-config-file")
+    );
+    tracing::error!(
+        "{}",
+        tr("example-config-file-error-log-from-the-config-file")
+    );
 
     // 给后台 worker 一点时间处理日志
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    print_section("4.3 from_file vs load comparison");
-    println!("from_file(path) : load the config file from the given path");
+    print_section(&tr("example-config-file-4-3-from-file-vs-load-comparison"));
+    println!(
+        "{}",
+        tr("example-config-file-from-file-path-load-the-config")
+    );
     println!(
         "load()          : auto-search INKLOG_CONFIG_PATH / current dir / user config / system config"
     );
-    println!("\nNote: LoggerManager internally creates logs/error.log for system error logs,");
-    println!("      and installs the global tracing subscriber and the log crate adapter.");
+    println!(
+        "\n{}",
+        tr("example-config-file-note-loggermanager-internally")
+    );
+    println!(
+        "      {}",
+        tr("example-config-file-and-installs-the-global-tracing")
+    );
 
     Ok(())
 }

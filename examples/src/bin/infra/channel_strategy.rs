@@ -16,11 +16,11 @@
 //! ```
 
 use inklog::config::{ChannelStrategy, PerformanceConfig};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::str::FromStr;
 
 fn main() {
-    print_separator("inklog adaptive channel strategy example");
+    print_separator(&tr("example-channel-strategy-inklog-adaptive-channel"));
 
     show_strategy_variants();
     show_from_str_display();
@@ -28,27 +28,45 @@ fn main() {
     show_performance_profiles();
     show_config_compatibility();
 
-    println!("\nAll ChannelStrategy examples completed.");
+    println!(
+        "\n{}",
+        tr("example-channel-strategy-all-channelstrategy-examples")
+    );
 }
 
 /// 演示 ChannelStrategy 两个变体
 fn show_strategy_variants() {
-    print_section("Example 1: ChannelStrategy variants");
+    print_section(&tr("example-channel-strategy-example-1-channelstrategy"));
 
     let fixed = ChannelStrategy::Fixed;
     let adaptive = ChannelStrategy::Adaptive;
 
-    println!("Enum variants:");
-    println!("  {:?} - static capacity, predictable memory use", fixed);
-    println!("  {:?} - dynamic sizing, better burst handling", adaptive);
-
-    println!("\nDefault strategy:");
+    println!("{}", tr("example-channel-strategy-enum-variants"));
     println!(
-        "  ChannelStrategy::default() = {:?}",
-        ChannelStrategy::default()
+        "  {}",
+        tr_args(
+            "example-channel-strategy-static-capacity-predictable",
+            &[("fixed", &format!("{:?}", fixed))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-dynamic-sizing-better-burst",
+            &[("adaptive", &format!("{:?}", adaptive))]
+        )
     );
 
-    println!("\nBehavior comparison:");
+    println!("\n{}", tr("example-channel-strategy-default-strategy"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-channelstrategy-default",
+            &[("value", &format!("{:?}", ChannelStrategy::default()))]
+        )
+    );
+
+    println!("\n{}", tr("example-channel-strategy-behavior-comparison"));
     println!("{:<15} {:<25} {:<25}", "Scenario", "Fixed", "Adaptive");
     println!("{}", "-".repeat(65));
     println!(
@@ -71,26 +89,58 @@ fn show_strategy_variants() {
 
 /// 演示 FromStr 和 Display trait
 fn show_from_str_display() {
-    print_section("Example 2: FromStr / Display traits");
+    print_section(&tr(
+        "example-channel-strategy-example-2-fromstr-display-traits",
+    ));
 
-    println!("FromStr parsing:");
+    println!("{}", tr("example-channel-strategy-fromstr-parsing"));
     for input in ["fixed", "adaptive", "FIXED", "Adaptive"] {
         match ChannelStrategy::from_str(input) {
-            Ok(strategy) => println!("  {:>10}.parse() → Ok({:?})", input, strategy),
-            Err(e) => println!("  {:>10}.parse() → Err(\"{}\")", input, e),
+            Ok(strategy) => println!(
+                "  {}",
+                tr_args(
+                    "example-channel-strategy-parse-ok",
+                    &[
+                        ("input", &format!("{:>10}", input)),
+                        ("strategy", &format!("{:?}", strategy))
+                    ]
+                )
+            ),
+            Err(e) => println!(
+                "  {}",
+                tr_args(
+                    "example-channel-strategy-parse-err",
+                    &[("input", &format!("{:>10}", input)), ("e", &e)]
+                )
+            ),
         }
     }
 
-    println!("\nInvalid input:");
+    println!("\n{}", tr("example-channel-strategy-invalid-input"));
     for input in ["dynamic", "flexible", "", "invalid"] {
         let result: Result<ChannelStrategy, String> = input.parse();
         match result {
-            Ok(s) => println!("  {:>10}.parse() → Ok({:?})", input, s),
-            Err(e) => println!("  {:>10}.parse() → Err(\"{}\")", input, e),
+            Ok(s) => println!(
+                "  {}",
+                tr_args(
+                    "example-channel-strategy-parse-ok-2",
+                    &[
+                        ("input", &format!("{:>10}", input)),
+                        ("s", &format!("{:?}", s))
+                    ]
+                )
+            ),
+            Err(e) => println!(
+                "  {}",
+                tr_args(
+                    "example-channel-strategy-parse-err",
+                    &[("input", &format!("{:>10}", input)), ("e", &e)]
+                )
+            ),
         }
     }
 
-    println!("\nDisplay output:");
+    println!("\n{}", tr("example-channel-strategy-display-output"));
     for strategy in [ChannelStrategy::Fixed, ChannelStrategy::Adaptive] {
         println!("  format!(\"{{}}\", {:?}) → \"{}\"", strategy, strategy);
     }
@@ -98,40 +148,112 @@ fn show_from_str_display() {
 
 /// 演示自适应阈值参数（PerformanceConfig）
 fn show_adaptive_thresholds() {
-    print_section("Example 3: adaptive threshold parameters");
+    print_section(&tr("example-channel-strategy-example-3-adaptive-threshold"));
 
     let default = PerformanceConfig::default();
-    println!("Default PerformanceConfig:");
-    println!("  channel_capacity        = {}", default.channel_capacity);
-    println!("  worker_threads          = {}", default.worker_threads);
-    println!("  channel_strategy        = {:?}", default.channel_strategy);
     println!(
-        "  expand_threshold_percent= {}",
-        default.expand_threshold_percent
+        "{}",
+        tr("example-channel-strategy-default-performanceconfig")
     );
     println!(
-        "  shrink_threshold_percent= {}",
-        default.shrink_threshold_percent
+        "  {}",
+        tr_args(
+            "example-channel-strategy-channel-capacity",
+            &[("channel_capacity", &default.channel_capacity)]
+        )
     );
     println!(
-        "  shrink_wait_seconds     = {}",
-        default.shrink_wait_seconds
+        "  {}",
+        tr_args(
+            "example-channel-strategy-worker-threads",
+            &[("worker_threads", &default.worker_threads)]
+        )
     );
-    println!("  min_capacity            = {}", default.min_capacity);
-    println!("  max_capacity            = {}", default.max_capacity);
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-channel-strategy",
+            &[(
+                "channel_strategy",
+                &format!("{:?}", default.channel_strategy)
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-expand-threshold-percent",
+            &[(
+                "expand_threshold_percent",
+                &default.expand_threshold_percent
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-shrink-threshold-percent",
+            &[(
+                "shrink_threshold_percent",
+                &default.shrink_threshold_percent
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-shrink-wait-seconds",
+            &[("shrink_wait_seconds", &default.shrink_wait_seconds)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-min-capacity",
+            &[("min_capacity", &default.min_capacity)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-max-capacity",
+            &[("max_capacity", &default.max_capacity)]
+        )
+    );
 
-    println!("\nThreshold parameter semantics (only effective for the Adaptive strategy):");
-    println!("  expand_threshold_percent: expand when capacity usage reaches this percent");
-    println!("    default 80% → expand at 8000/10000");
-    println!("  shrink_threshold_percent: consider shrinking when usage drops to this percent");
-    println!("    default 20% → shrink at 2000/10000");
+    println!(
+        "\n{}",
+        tr("example-channel-strategy-threshold-parameter-semantics")
+    );
+    println!(
+        "  {}",
+        tr("example-channel-strategy-expand-threshold-percent-expand")
+    );
+    println!(
+        "    {}",
+        tr("example-channel-strategy-default-80-expand-at-8000-10000")
+    );
+    println!(
+        "  {}",
+        tr("example-channel-strategy-shrink-threshold-percent-2")
+    );
+    println!(
+        "    {}",
+        tr("example-channel-strategy-default-20-shrink-at-2000-10000")
+    );
     println!(
         "  shrink_wait_seconds: shrink only after low load persists this many seconds (debounce)"
     );
-    println!("    default 30 seconds");
-    println!("  min_capacity / max_capacity: lower/upper bounds for shrink/expand");
+    println!("    {}", tr("example-channel-strategy-default-30-seconds"));
+    println!(
+        "  {}",
+        tr("example-channel-strategy-min-capacity-max-capacity-lower")
+    );
 
-    println!("\nCustom adaptive config (aggressive expansion, conservative shrinking):");
+    println!(
+        "\n{}",
+        tr("example-channel-strategy-custom-adaptive-config")
+    );
     let aggressive = PerformanceConfig {
         channel_capacity: 20000,
         worker_threads: 4,
@@ -144,32 +266,68 @@ fn show_adaptive_thresholds() {
         rate_limit: None,
     };
     println!(
-        "  channel_capacity        = {}",
-        aggressive.channel_capacity
+        "  {}",
+        tr_args(
+            "example-channel-strategy-channel-capacity",
+            &[("channel_capacity", &aggressive.channel_capacity)]
+        )
     );
     println!(
-        "  channel_strategy        = {:?}",
-        aggressive.channel_strategy
+        "  {}",
+        tr_args(
+            "example-channel-strategy-channel-strategy",
+            &[(
+                "channel_strategy",
+                &format!("{:?}", aggressive.channel_strategy)
+            )]
+        )
     );
     println!(
-        "  expand_threshold_percent= {} (expands earlier)",
-        aggressive.expand_threshold_percent
+        "  {}",
+        tr_args(
+            "example-channel-strategy-expand-threshold-percent-2",
+            &[(
+                "expand_threshold_percent",
+                &aggressive.expand_threshold_percent
+            )]
+        )
     );
     println!(
-        "  shrink_threshold_percent= {} (shrinks later)",
-        aggressive.shrink_threshold_percent
+        "  {}",
+        tr_args(
+            "example-channel-strategy-shrink-threshold-percent-3",
+            &[(
+                "shrink_threshold_percent",
+                &aggressive.shrink_threshold_percent
+            )]
+        )
     );
     println!(
-        "  shrink_wait_seconds     = {} (longer debounce)",
-        aggressive.shrink_wait_seconds
+        "  {}",
+        tr_args(
+            "example-channel-strategy-shrink-wait-seconds-longer",
+            &[("shrink_wait_seconds", &aggressive.shrink_wait_seconds)]
+        )
     );
-    println!("  min_capacity            = {}", aggressive.min_capacity);
-    println!("  max_capacity            = {}", aggressive.max_capacity);
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-min-capacity",
+            &[("min_capacity", &aggressive.min_capacity)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-channel-strategy-max-capacity",
+            &[("max_capacity", &aggressive.max_capacity)]
+        )
+    );
 }
 
 /// 演示不同负载Scenario的配置推荐
 fn show_performance_profiles() {
-    print_section("Example 4: performance config recommendations");
+    print_section(&tr("example-channel-strategy-example-4-performance-config"));
 
     let profiles = [
         (
@@ -233,17 +391,32 @@ fn show_performance_profiles() {
     for (name, config) in profiles {
         println!("{}:", name);
         println!(
-            "  channel_capacity={}, workers={}, strategy={:?}",
-            config.channel_capacity, config.worker_threads, config.channel_strategy
+            "  {}",
+            tr_args(
+                "example-channel-strategy-channel-capacity-workers",
+                &[
+                    ("channel_capacity", &config.channel_capacity),
+                    ("worker_threads", &config.worker_threads),
+                    (
+                        "channel_strategy",
+                        &format!("{:?}", config.channel_strategy)
+                    )
+                ]
+            )
         );
         if config.channel_strategy == ChannelStrategy::Adaptive {
             println!(
-                "  expand@{}%, shrink@{}%, wait={}s, range=[{},{}]",
-                config.expand_threshold_percent,
-                config.shrink_threshold_percent,
-                config.shrink_wait_seconds,
-                config.min_capacity,
-                config.max_capacity
+                "  {}",
+                tr_args(
+                    "example-channel-strategy-expand-shrink-wait-s-range",
+                    &[
+                        ("expand_threshold_percent", &config.expand_threshold_percent),
+                        ("shrink_threshold_percent", &config.shrink_threshold_percent),
+                        ("shrink_wait_seconds", &config.shrink_wait_seconds),
+                        ("min_capacity", &config.min_capacity),
+                        ("max_capacity", &config.max_capacity)
+                    ]
+                )
             );
         }
         println!();
@@ -252,7 +425,7 @@ fn show_performance_profiles() {
 
 /// 演示配置兼容性和序列化
 fn show_config_compatibility() {
-    print_section("Example 5: formatted config display");
+    print_section(&tr("example-channel-strategy-example-5-formatted-config"));
 
     let config = PerformanceConfig {
         channel_strategy: ChannelStrategy::Adaptive,
@@ -280,10 +453,10 @@ max_capacity = {}"#,
         config.min_capacity,
         config.max_capacity,
     );
-    println!("Serialized to TOML:");
+    println!("{}", tr("example-channel-strategy-serialized-to-toml"));
     println!("{}", toml_str);
 
-    println!("\nEnv-var overrides:");
+    println!("\n{}", tr("example-channel-strategy-env-var-overrides"));
     println!("  export INKLOG_PERFORMANCE_CHANNEL_STRATEGY=adaptive");
     println!("  export INKLOG_PERFORMANCE_CHANNEL_CAPACITY=20000");
     println!("  export INKLOG_PERFORMANCE_WORKER_THREADS=4");

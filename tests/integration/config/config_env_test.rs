@@ -56,7 +56,6 @@ fn test_config_from_env_overrides() {
 
     let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
 
-    // 验证环境变量覆盖生效
     assert_eq!(config.global.level, "debug");
 
     let file = config

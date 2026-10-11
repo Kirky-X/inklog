@@ -139,7 +139,7 @@ sink-database_line_num_clamp = line_num 超出 i32 范围，已收敛
 db-batch_insert_warn_failed = 数据库批量插入失败
 
 # 装配不变量与 worker 健康面（panic/健康）
-sink-db_sender = db sender
+sink-db_sender = db sender 必然在位
 sink-db_sender_present_when_db_enabled = db_enabled 时 db sender 必然在位
 sink-worker_handles_lock_poisoned = worker 句柄锁已中毒：{ $err }
 manager-level_state_mutex_poisoned = level_state 互斥锁已中毒
@@ -198,3 +198,4 @@ log-kit_observer_module_build_started = inklog 构建观察者：模块构建开
 log-kit_observer_module_built = inklog 构建观察者：模块构建成功
 log-db_batch_insert_succeeded = 数据库批量插入成功
 log-db_batch_insert_succeeded_parameterized = 数据库批量插入成功（参数化）
+log-custom_sink_write_failed = 自定义 sink '{ $name }' 写入失败（第 { $attempt }/{ $max_attempts } 次尝试）：{ $err }

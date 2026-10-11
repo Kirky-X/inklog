@@ -174,7 +174,9 @@ impl SecretPatternRegistry {
             // 内置表静态保证合法；编译失败属实现缺陷，构造期 panic 暴露
             registry
                 .register(name, pattern, replacement)
-                .expect(&crate::i18n::tr("secret-builtin_pattern_invariant"));
+                .unwrap_or_else(|_| {
+                    panic!("{}", crate::i18n::tr("secret-builtin_pattern_invariant"))
+                });
         }
         registry
     }
@@ -210,7 +212,9 @@ impl SecretPatternRegistry {
         for (name, pattern, replacement) in EXTENDED {
             registry
                 .register(name, pattern, replacement)
-                .expect(&crate::i18n::tr("secret-extended_pattern_invariant"));
+                .unwrap_or_else(|_| {
+                    panic!("{}", crate::i18n::tr("secret-extended_pattern_invariant"))
+                });
         }
         registry
     }

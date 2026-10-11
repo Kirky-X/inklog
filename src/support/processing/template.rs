@@ -803,4 +803,24 @@ mod trace_placeholder_tests {
             "None trace ids must render as empty strings"
         );
     }
+
+    #[test]
+    fn test_output_format_display_and_from_str() {
+        assert_eq!(OutputFormat::Text.to_string(), "text");
+        assert_eq!(OutputFormat::Json.to_string(), "json");
+        assert_eq!(OutputFormat::default(), OutputFormat::Text);
+
+        assert_eq!("text".parse::<OutputFormat>().unwrap(), OutputFormat::Text);
+        assert_eq!(
+            "Json".parse::<OutputFormat>().unwrap(),
+            OutputFormat::Json,
+            "parsing must accept mixed case"
+        );
+
+        let err = "xml".parse::<OutputFormat>().unwrap_err();
+        assert!(
+            err.contains("xml") && err.contains("text") && err.contains("json"),
+            "error must name both the offending value and the accepted formats, got: {err}"
+        );
+    }
 }

@@ -14,7 +14,8 @@ pre-commit:
     cargo-deny:
       run: cargo deny check
     no-private-key:
-      run: "! git diff --cached --name-only | xargs -r grep -IlE 'BEGIN (RSA|OPENSSH|PGP|EC|PRIVATE) PRIVATE KEY|sk-[A-Za-z0-9]{20,}'"
+      # 豁免名单与 .pre-commit-config.yaml 的 detect-private-key 保持一致（假密钥测试夹具）
+      run: "! git diff --cached --name-only | grep -vE '^(src/domain/config/config\\.rs|src/domain/config/http\\.rs|tests/unit/masking_test\\.rs)$' | xargs -r grep -IlE 'BEGIN (RSA|OPENSSH|PGP|EC|PRIVATE) PRIVATE KEY|sk-[A-Za-z0-9]{20,}'"
 
 commit-msg:
   commands:

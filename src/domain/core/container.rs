@@ -542,7 +542,6 @@ mod tests {
     #[serial]
     fn test_container_default() {
         let container = InklogContainer::default();
-        // 验证容器已创建
         let _cache = container.cache();
         let _config = container.config();
     }
@@ -593,7 +592,6 @@ mod tests {
         let cache1 = container.cache();
         let cache2 = container.cache();
 
-        // 设置值
         cache1.set("key", "value".to_string()).await.unwrap();
 
         // 另一个引用应该能看到

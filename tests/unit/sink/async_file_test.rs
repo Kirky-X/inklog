@@ -107,7 +107,6 @@ mod async_file_test {
         let template = LogTemplate::default();
         let mut sink = AsyncFileSink::new(config, template).unwrap();
 
-        // 写入日志记录
         let record = inklog::LogRecord {
             timestamp: chrono::Utc::now(),
             level: "INFO".to_string(),
@@ -128,7 +127,6 @@ mod async_file_test {
         let flush_result = sink.flush();
         assert!(flush_result.is_ok());
 
-        // 验证文件存在
         assert!(file_path.exists());
     }
 
@@ -176,7 +174,6 @@ mod async_file_test {
 
         sink.flush().ok();
 
-        // 验证文件存在且非空
         assert!(file_path.exists());
         let metadata = fs::metadata(&file_path).unwrap();
         assert!(metadata.len() > 0);
@@ -199,7 +196,6 @@ mod async_file_test {
         let template = LogTemplate::default();
         let sink = AsyncFileSink::new(config, template).unwrap();
 
-        // 检查健康状态
         let is_healthy = sink.is_healthy();
         assert!(is_healthy);
     }
@@ -320,7 +316,6 @@ mod async_file_test {
         let template = LogTemplate::default();
         let mut sink = AsyncFileSink::new(config, template).unwrap();
 
-        // 写入大量数据
         for i in 0..100 {
             let record = inklog::LogRecord {
                 timestamp: chrono::Utc::now(),
@@ -340,7 +335,6 @@ mod async_file_test {
 
         sink.flush().ok();
 
-        // 验证文件存在
         assert!(file_path.exists());
     }
 

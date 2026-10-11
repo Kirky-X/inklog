@@ -13,23 +13,26 @@
 
 use crossbeam_channel::bounded;
 use inklog::{LogAdapter, LogLogger, LogRecord, Metrics};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use log::LevelFilter;
 use std::sync::Arc;
 use std::time::Duration;
 
 fn main() {
-    println!("=== inklog log crate adapter example ===\n");
+    println!(
+        "{}\n",
+        tr("example-log-adapter-inklog-log-crate-adapter-example")
+    );
 
     show_install_and_log();
     show_level_filter_behavior();
 
-    println!("\n✓ All log adapter examples completed");
+    println!("\n{}", tr("example-log-adapter-all-log-adapter-examples"));
 }
 
 /// 展示安装 LogLogger 并使用 log 宏输出日志
 fn show_install_and_log() {
-    print_separator("1. Install LogLogger and use log macros");
+    print_separator(&tr("example-log-adapter-1-install-loglogger-and-use-log"));
 
     // 创建 console 和 async channel（容量 100）
     let (console_tx, console_rx) = bounded::<Arc<LogRecord>>(100);
@@ -42,7 +45,10 @@ fn show_install_and_log() {
     let logger = LogLogger::new(adapter, LevelFilter::Info);
     let installed = logger.install().is_ok();
     if installed {
-        println!("✓ LogLogger installed (max_level = Info)");
+        println!(
+            "{}",
+            tr("example-log-adapter-loglogger-installed-max-level")
+        );
     } else {
         // 全局 logger 只能安装一次；独立运行本 binary 不会触发此分支
         println!(
@@ -50,7 +56,7 @@ fn show_install_and_log() {
         );
     }
 
-    print_section("1.1 Using log::info! / warn! / error! macros");
+    print_section(&tr("example-log-adapter-1-1-using-log-info-warn-error"));
     log::info!("this is an INFO level log");
     log::warn!("this is a WARN level log");
     log::error!("this is an ERROR level log");
@@ -58,29 +64,38 @@ fn show_install_and_log() {
     log::trace!("this TRACE log should be filtered (max_level = Info)");
 
     // 从 channel 接收日志记录并打印
-    print_section("1.2 Records received from the console channel");
+    print_section(&tr("example-log-adapter-1-2-records-received-from-the"));
     let console_count = drain_channel(&console_rx, "console", installed);
 
-    print_section("1.3 Records received from the async channel");
+    print_section(&tr("example-log-adapter-1-3-records-received-from-the"));
     let async_count = drain_channel(&async_rx, "async", installed);
 
     if installed {
         // info + warn + error = 3 条（debug/trace 被过滤）
         assert_eq!(console_count, 3, "console channel should receive 3 records");
         assert_eq!(async_count, 3, "async channel should receive 3 records");
-        println!("\n✓ Verified: each channel received 3 records (info/warn/error)");
+        println!(
+            "\n{}",
+            tr("example-log-adapter-verified-each-channel-received")
+        );
     }
 }
 
 /// 展示 LevelFilter 过滤行为说明
 fn show_level_filter_behavior() {
-    print_separator("2. LevelFilter filtering behavior");
-    println!("LogLogger::new(adapter, LevelFilter::Info) sets max_level = Info");
-    println!("  → log::info! / warn! / error! pass through");
-    println!("  → log::debug! / trace! filtered out");
+    print_separator(&tr("example-log-adapter-2-levelfilter-filtering-behavior"));
+    println!("{}", tr("example-log-adapter-loglogger-new-adapter"));
+    println!(
+        "  {}",
+        tr("example-log-adapter-log-info-warn-error-pass-through")
+    );
+    println!(
+        "  {}",
+        tr("example-log-adapter-log-debug-trace-filtered-out")
+    );
     println!();
-    println!("LogAdapter::enabled() impl: metadata.level() <= log::max_level()");
-    println!("Level enum order: Error < Warn < Info < Debug < Trace");
+    println!("{}", tr("example-log-adapter-logadapter-enabled-impl"));
+    println!("{}", tr("example-log-adapter-level-enum-order-error-warn"));
 }
 
 /// 排空 channel 并打印接收到的 LogRecord，返回接收到的记录数
@@ -93,21 +108,44 @@ fn drain_channel(
     while let Ok(record) = rx.recv_timeout(Duration::from_millis(100)) {
         count += 1;
         println!(
-            "  [{}] level={}, target={}, message={}",
-            name, record.level, record.target, record.message
+            "  {}",
+            tr_args(
+                "example-log-adapter-level-target-message",
+                &[
+                    ("name", &name),
+                    ("level", &record.level),
+                    ("target", &record.target),
+                    ("message", &record.message)
+                ]
+            )
         );
     }
     if count == 0 {
         if installed {
-            println!("  ({} channel received no records)", name);
+            println!(
+                "  {}",
+                tr_args(
+                    "example-log-adapter-channel-received-no-records",
+                    &[("name", &name)]
+                )
+            );
         } else {
             println!(
-                "  ({} channel received no records; the global logger is not installed on this adapter)",
-                name
+                "  {}",
+                tr_args(
+                    "example-log-adapter-channel-received-no-records-the",
+                    &[("name", &name)]
+                )
             );
         }
     } else {
-        println!("  Received {} {} records in total", count, name);
+        println!(
+            "  {}",
+            tr_args(
+                "example-log-adapter-received-records-in-total",
+                &[("count", &count), ("name", &name)]
+            )
+        );
     }
     count
 }

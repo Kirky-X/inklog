@@ -572,7 +572,6 @@ mod sink_registry_e2e {
         let temp = tempdir().expect("tempdir failed");
         let mut registry = SinkRegistry::new();
 
-        // 注册多个
         let config1 = make_test_config(temp.path());
         registry.register(FileSinkFactory::new(config1));
 
@@ -2540,11 +2539,9 @@ mod file_sink_e2e {
         sink.write(&record).await.expect("write should succeed");
         sink.flush().await.expect("flush should succeed");
 
-        // 验证文件存在
         let log_path = temp.path().join("e2e_test.log");
         assert!(log_path.exists(), "log file should exist after write");
 
-        // 验证文件内容
         let content = std::fs::read_to_string(&log_path).expect("should read log file");
         assert!(
             content.contains("e2e test message"),

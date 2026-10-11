@@ -228,10 +228,8 @@ impl FileSink {
             }
         }
 
-        // 启动轮转定时器
         sink.start_rotation_timer();
 
-        // 启动清理定时器
         sink.start_cleanup_timer();
 
         Ok(sink)
@@ -363,7 +361,6 @@ impl FileSink {
             // Wrap thread body in catch_unwind to make panics observable
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 loop {
-                    // 检查关闭标志
                     if shutdown_flag.load(Ordering::Relaxed) {
                         break;
                     }
@@ -383,7 +380,6 @@ impl FileSink {
                         elapsed += step;
                     }
 
-                    // 检查关闭标志
                     if shutdown_flag.load(Ordering::Relaxed) {
                         break;
                     }
@@ -393,7 +389,6 @@ impl FileSink {
                     let now = Instant::now();
 
                     if last_cleanup.is_none_or(|t| now.duration_since(t) >= cleanup_interval) {
-                        // 执行清理
                         if let Err(e) = Self::perform_cleanup(&config, &path) {
                             let mut args = crate::i18n::MsgArgs::new();
                             args.set("err", &e);
@@ -486,7 +481,6 @@ impl FileSink {
         // 最旧在前，保证删除时优先删最旧的日志
         candidates.sort_by_key(|(_, modified)| *modified);
 
-        // 计算截止日期
         let cutoff_date = Utc::now()
             .checked_sub_signed(chrono::Duration::days(config.retention_days as i64))
             .unwrap_or_else(Utc::now);
@@ -561,7 +555,6 @@ impl FileSink {
                 let total_blocks = stat.blocks();
                 let available_blocks = stat.blocks_available();
 
-                // 获取块大小
                 let block_size = stat.block_size() as u64;
                 let total_bytes = total_blocks * block_size;
                 let available_bytes = available_blocks * block_size;
@@ -1235,7 +1228,6 @@ pub(crate) fn encrypt_file_v2(
     rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from(nonce_bytes);
 
-    // 读取输入文件
     let input_data = fs::read(input_path).map_err(|e| {
         let mut args = crate::i18n::MsgArgs::new();
         args.set("err", &e);
@@ -1389,7 +1381,6 @@ fn compress_rotated(
             }
             return Ok(encrypted_path);
         }
-        // 删除原始文件
         if let Err(e) = fs::remove_file(path) {
             let mut args = crate::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
@@ -1630,7 +1621,6 @@ impl LogSink for FileSink {
         let rotation_failed_fallback: Option<Arc<dyn LogSink + Send + Sync>> = {
             let mut inner = self.inner.write();
 
-            // 应用数据脱敏（如果启用）
             let masked_record = if self.config.masking_enabled {
                 let mut masked = record.clone();
                 masked.message = self.masker.mask(&record.message);
@@ -4581,7 +4571,7 @@ mod tests {
         // 构造写入失败：删除底层文件，使 writeln! 到已关闭的句柄失败
         // 注意：append 模式下的 File 句柄即使文件被删除仍可写入（POSIX 语义）
         // 所以我们改为构造一个无文件句柄的场景
-        let _ = inner.current_file.take(); // 移除文件句柄
+        let _ = inner.current_file.take();
 
         // 此时 batch_buffer 有记录但无文件句柄
         inner.batch_buffer.push(create_test_record("Will fail"));
@@ -4710,7 +4700,6 @@ mod tests {
             for _ in 0..5 {
                 inner.circuit_breaker.record_failure();
             }
-            // 验证断路器确实打开了
             assert_eq!(inner.circuit_breaker.state(), CircuitState::Open);
         }
 

@@ -16,10 +16,10 @@
 //! ```
 
 use inklog::config::{HttpServerConfig, TlsConfig};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 fn main() {
-    print_separator("inklog TLS configuration examples");
+    print_separator(&tr("example-tls-config-inklog-tls-configuration"));
 
     show_tls_config_basic();
     show_http_with_tls();
@@ -27,41 +27,80 @@ fn main() {
     show_tls_toml_config();
     show_tls_best_practices();
 
-    println!("\nAll TLS configuration examples shown.");
+    println!(
+        "\n{}",
+        tr("example-tls-config-all-tls-configuration-examples")
+    );
 }
 
 /// 演示 TlsConfig 基础配置
 fn show_tls_config_basic() {
-    print_section("Example 1: TlsConfig basics");
+    print_section(&tr("example-tls-config-example-1-tlsconfig-basics"));
 
-    println!("TlsConfig fields:");
-    println!("  cert_path: path to the PEM encoded certificate file");
-    println!("  key_path:  path to the PEM encoded private key file");
+    println!("{}", tr("example-tls-config-tlsconfig-fields"));
+    println!("  {}", tr("example-tls-config-cert-path-path-to-the-pem"));
+    println!("  {}", tr("example-tls-config-key-path-path-to-the-pem"));
 
-    println!("\nBasic TlsConfig:");
+    println!("\n{}", tr("example-tls-config-basic-tlsconfig"));
     let tls = TlsConfig {
         cert_path: "/etc/ssl/certs/inklog.crt".to_string(),
         key_path: "/etc/ssl/private/inklog.key".to_string(),
     };
-    println!("  cert_path = \"{}\"", tls.cert_path);
-    println!("  key_path  = \"{}\"", tls.key_path);
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-cert-path",
+            &[("cert_path", &tls.cert_path)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-key-path",
+            &[("key_path", &tls.key_path)]
+        )
+    );
 
-    println!("\nCertificate format requirements:");
-    println!("  - Certificate: X.509 PEM format (.crt / .pem)");
-    println!("  - Private key: PKCS#8 PEM format (.key / .pem)");
-    println!("  - Self-signed certificates work (development/test)");
-    println!("  - In production use a certificate from Let's Encrypt or a commercial CA");
+    println!(
+        "\n{}",
+        tr("example-tls-config-certificate-format-requirements")
+    );
+    println!(
+        "  {}",
+        tr("example-tls-config-certificate-x-509-pem-format")
+    );
+    println!(
+        "  {}",
+        tr("example-tls-config-private-key-pkcs-8-pem-format")
+    );
+    println!(
+        "  {}",
+        tr("example-tls-config-self-signed-certificates-work")
+    );
+    println!(
+        "  {}",
+        tr("example-tls-config-in-production-use-a-certificate")
+    );
 }
 
 /// 演示启用 TLS 的 HTTP 服务器配置
 fn show_http_with_tls() {
-    print_section("Example 2: an HTTP server with TLS enabled");
+    print_section(&tr("example-tls-config-example-2-an-http-server-with"));
 
-    println!("Default configuration (no TLS):");
+    println!("{}", tr("example-tls-config-default-configuration-no-tls"));
     let default_http = HttpServerConfig::default();
-    println!("  tls = {:?} (None = TLS disabled)", default_http.tls);
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-tls-none-tls-disabled",
+            &[("tls", &format!("{:?}", default_http.tls))]
+        )
+    );
 
-    println!("\nHTTP server configuration with TLS:");
+    println!(
+        "\n{}",
+        tr("example-tls-config-http-server-configuration-with")
+    );
     let tls_http = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -74,34 +113,61 @@ fn show_http_with_tls() {
         }),
         ..Default::default()
     };
-    println!("  enabled      = {}", tls_http.enabled);
-    println!("  host:port    = {}:{}", tls_http.host, tls_http.port);
     println!(
-        "  tls.cert     = \"{}\"",
-        tls_http
-            .tls
-            .as_ref()
-            .map(|t| t.cert_path.as_str())
-            .unwrap_or("")
+        "  {}",
+        tr_args(
+            "example-tls-config-enabled",
+            &[("enabled", &tls_http.enabled)]
+        )
     );
     println!(
-        "  tls.key      = \"{}\"",
-        tls_http
-            .tls
-            .as_ref()
-            .map(|t| t.key_path.as_str())
-            .unwrap_or("")
+        "  {}",
+        tr_args(
+            "example-tls-config-host-port",
+            &[("host", &tls_http.host), ("port", &tls_http.port)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-tls-cert",
+            &[(
+                "value",
+                &(tls_http
+                    .tls
+                    .as_ref()
+                    .map(|t| t.cert_path.as_str())
+                    .unwrap_or(""))
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-tls-key",
+            &[(
+                "value",
+                &(tls_http
+                    .tls
+                    .as_ref()
+                    .map(|t| t.key_path.as_str())
+                    .unwrap_or(""))
+            )]
+        )
     );
 
-    println!("\nHow access changes:");
-    println!("  No TLS: http://localhost:9090/health");
-    println!("  With TLS: https://localhost:9443/health");
-    println!("  curl -k https://localhost:9443/metrics");
+    println!("\n{}", tr("example-tls-config-how-access-changes"));
+    println!("  {}", tr("example-tls-config-no-tls-http-localhost-9090"));
+    println!(
+        "  {}",
+        tr("example-tls-config-with-tls-https-localhost-9443")
+    );
+    println!("  {}", tr("example-tls-config-curl-k-https-localhost-9443"));
 }
 
 /// 演示完整的生产级 TLS 安全配置
 fn show_full_secure_tls_config() {
-    print_section("Example 3: full production-grade TLS config");
+    print_section(&tr("example-tls-config-example-3-full-production-grade"));
 
     use inklog::config::{HttpAuthConfig, HttpErrorMode};
 
@@ -123,47 +189,92 @@ fn show_full_secure_tls_config() {
         }),
     };
 
-    println!("Production-grade HttpServerConfig (TLS + auth + whitelist):");
-    println!("  enabled      = {}", secure_config.enabled);
+    println!("{}", tr("example-tls-config-production-grade"));
     println!(
-        "  host:port    = {}:{}",
-        secure_config.host, secure_config.port
-    );
-    println!("  error_mode   = {:?}", secure_config.error_mode);
-    println!(
-        "  auth.enabled = {}",
-        secure_config.auth.as_ref().is_some_and(|a| a.enabled)
-    );
-    println!("  ip_whitelist = {:?}", secure_config.ip_whitelist);
-    println!(
-        "  tls.cert     = \"{}\"",
-        secure_config
-            .tls
-            .as_ref()
-            .map(|t| t.cert_path.as_str())
-            .unwrap_or("")
+        "  {}",
+        tr_args(
+            "example-tls-config-enabled",
+            &[("enabled", &secure_config.enabled)]
+        )
     );
     println!(
-        "  tls.key      = \"{}\"",
-        secure_config
-            .tls
-            .as_ref()
-            .map(|t| t.key_path.as_str())
-            .unwrap_or("")
+        "  {}",
+        tr_args(
+            "example-tls-config-host-port",
+            &[("host", &secure_config.host), ("port", &secure_config.port)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-error-mode",
+            &[("error_mode", &format!("{:?}", secure_config.error_mode))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-auth-enabled",
+            &[(
+                "value",
+                &(secure_config.auth.as_ref().is_some_and(|a| a.enabled))
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-ip-whitelist",
+            &[("ip_whitelist", &format!("{:?}", secure_config.ip_whitelist))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-tls-cert",
+            &[(
+                "value",
+                &(secure_config
+                    .tls
+                    .as_ref()
+                    .map(|t| t.cert_path.as_str())
+                    .unwrap_or(""))
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-tls-config-tls-key",
+            &[(
+                "value",
+                &(secure_config
+                    .tls
+                    .as_ref()
+                    .map(|t| t.key_path.as_str())
+                    .unwrap_or(""))
+            )]
+        )
     );
 
-    println!("\nSecurity layers:");
-    println!("  1. TLS transport encryption → stops man-in-the-middle attacks");
-    println!("  2. Bearer token auth → stops unauthorized access");
-    println!("  3. IP whitelist → restricts access sources");
-    println!("  4. Strict error mode → fail closed");
+    println!("\n{}", tr("example-tls-config-security-layers"));
+    println!("  {}", tr("example-tls-config-1-tls-transport-encryption"));
+    println!("  {}", tr("example-tls-config-2-bearer-token-auth-stops"));
+    println!(
+        "  {}",
+        tr("example-tls-config-3-ip-whitelist-restricts-access")
+    );
+    println!(
+        "  {}",
+        tr("example-tls-config-4-strict-error-mode-fail-closed")
+    );
 }
 
 /// 演示 TOML 配置文件格式
 fn show_tls_toml_config() {
-    print_section("Example 4: TOML configuration file format");
+    print_section(&tr("example-tls-config-example-4-toml-configuration"));
 
-    println!("The TLS configuration inside inklog.toml:");
+    println!("{}", tr("example-tls-config-the-tls-configuration-inside"));
     println!(
         r#"[http_server]
 enabled = true
@@ -183,7 +294,7 @@ cert_path = "/etc/ssl/certs/inklog.crt"
 key_path = "/etc/ssl/private/inklog.key""#
     );
 
-    println!("\nLoad the configuration:");
+    println!("\n{}", tr("example-tls-config-load-the-configuration"));
     println!("  // Load from a TOML file (the tls field is parsed automatically)");
     println!("  let _logger = LoggerManager::from_file(\"inklog.toml\").await?;");
     println!();
@@ -193,28 +304,58 @@ key_path = "/etc/ssl/private/inklog.key""#
 
 /// 演示 TLS 最佳实践
 fn show_tls_best_practices() {
-    print_section("Example 5: TLS best practices");
+    print_section(&tr("example-tls-config-example-5-tls-best-practices"));
 
-    println!("Certificate management:");
-    println!("  - Use a Let's Encrypt or commercial CA certificate in production");
-    println!("  - A self-signed certificate is fine in development:");
-    println!("    openssl req -x509 -newkey rsa:4096 -days 365 \\");
-    println!("      -keyout inklog.key -out inklog.crt -nodes \\");
-    println!("      -subj '/CN=localhost'");
-    println!("  - Rotate certificates regularly (90 days is a good target)");
+    println!("{}", tr("example-tls-config-certificate-management"));
+    println!("  {}", tr("example-tls-config-use-a-let-s-encrypt-or"));
+    println!(
+        "  {}",
+        tr("example-tls-config-a-self-signed-certificate-is")
+    );
+    println!(
+        "    {}",
+        tr("example-tls-config-openssl-req-x509-newkey-rsa")
+    );
+    println!(
+        "      {}",
+        tr("example-tls-config-keyout-inklog-key-out-inklog")
+    );
+    println!("      {}", tr("example-tls-config-subj-cn-localhost"));
+    println!(
+        "  {}",
+        tr("example-tls-config-rotate-certificates-regularly")
+    );
 
-    println!("\nPrivate key protection:");
-    println!("  - Set the private key file mode to 600 (owner only)");
-    println!("  - Use chmod 600 /etc/ssl/private/inklog.key");
-    println!("  - Consider managing keys with Kubernetes Secrets or Vault");
+    println!("\n{}", tr("example-tls-config-private-key-protection"));
+    println!(
+        "  {}",
+        tr("example-tls-config-set-the-private-key-file-mode")
+    );
+    println!(
+        "  {}",
+        tr("example-tls-config-use-chmod-600-etc-ssl-private")
+    );
+    println!("  {}", tr("example-tls-config-consider-managing-keys-with"));
 
-    println!("\nPort selection:");
-    println!("  - Standard HTTPS port: 443 (needs root)");
-    println!("  - Custom HTTPS port: 8443 / 9443 (recommended)");
-    println!("  - Do not share it with the HTTP port (9090 vs 9443)");
+    println!("\n{}", tr("example-tls-config-port-selection"));
+    println!(
+        "  {}",
+        tr("example-tls-config-standard-https-port-443-needs")
+    );
+    println!("  {}", tr("example-tls-config-custom-https-port-8443-9443"));
+    println!(
+        "  {}",
+        tr("example-tls-config-do-not-share-it-with-the-http")
+    );
 
-    println!("\nMonitoring and alerting:");
-    println!("  - Alert on certificate expiry (30 days ahead is recommended)");
-    println!("  - Watch the TLS handshake failure rate");
-    println!("  - Use the /health endpoint to verify availability");
+    println!("\n{}", tr("example-tls-config-monitoring-and-alerting"));
+    println!(
+        "  {}",
+        tr("example-tls-config-alert-on-certificate-expiry-30")
+    );
+    println!(
+        "  {}",
+        tr("example-tls-config-watch-the-tls-handshake-failure")
+    );
+    println!("  {}", tr("example-tls-config-use-the-health-endpoint-to"));
 }

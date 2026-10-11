@@ -526,7 +526,6 @@ mod tests {
     #[serial]
     #[test]
     fn test_log_adapter_handles_full_channel() {
-        // Create channels with capacity 1
         let (console_tx, console_rx) = bounded(1);
         let (async_tx, async_rx) = bounded(1);
         let metrics = Arc::new(Metrics::new());
@@ -635,7 +634,6 @@ mod tests {
         let metrics = Arc::new(Metrics::new());
         let adapter = LogAdapter::new(console_tx, async_tx, metrics);
 
-        // Set global max level to Info
         log::set_max_level(log::LevelFilter::Info);
 
         let info_meta = log::Metadata::builder()

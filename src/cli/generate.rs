@@ -58,7 +58,6 @@ fn default_console_section() -> &'static str {
 /// Generates configuration templates with four levels: minimal, full, database, and file.
 /// Templates are hardcoded TOML strings.
 pub fn generate_config(output_path: &Path, config_type: &str) -> Result<()> {
-    // Validate output path safety
     validate_output_path_safety(output_path)?;
 
     // Determine output path
@@ -260,7 +259,6 @@ pub fn generate_config_schema(output_path: &Path) -> Result<()> {
 }
 
 pub fn generate_env_example(output_path: &Path) -> Result<()> {
-    // Validate output path safety
     validate_output_path_safety(output_path)?;
 
     let env_content = r#"# inklog environment variables example

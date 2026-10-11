@@ -26,11 +26,11 @@ use inklog::{
     LogRecord, ObjectPool, ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record,
     put_string_buffer,
 };
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("inklog object pool example");
+    print_separator(&tr("example-object-pool-inklog-object-pool-example"));
 
     show_pool_basic_operations().await?;
     show_pool_with_ttl_config().await?;
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     show_error_handling().await?;
     show_best_practices();
 
-    println!("\nAll object pool examples completed.");
+    println!("\n{}", tr("example-object-pool-all-object-pool-examples"));
     Ok(())
 }
 
@@ -48,22 +48,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 演示 put/get 存取、缺失键处理、Result 类型验证。
 async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> {
-    print_section("Example 1: basic ObjectPool operations");
+    print_section(&tr("example-object-pool-example-1-basic-objectpool"));
 
-    print_section("1.1 new() defaults (capacity 1024)");
+    print_section(&tr("example-object-pool-1-1-new-defaults-capacity-1024"));
     let pool = ObjectPool::<String, String>::new().await?;
-    println!("default pool built");
+    println!("{}", tr("example-object-pool-default-pool-built"));
     assert_eq!(pool.len(), 0, "a new pool should be empty");
 
-    print_section("1.2 Custom config via with_config(ObjectPoolConfig)");
+    print_section(&tr("example-object-pool-1-2-custom-config-via-with"));
     let config = ObjectPoolConfig {
         max_capacity: 64,
         ttl_secs: None,
     };
     let pool = ObjectPool::<String, String>::with_config(config).await?;
-    println!("custom config pool built");
+    println!("{}", tr("example-object-pool-custom-config-pool-built"));
 
-    print_section("1.3 put() / get() access");
+    print_section(&tr("example-object-pool-1-3-put-get-access"));
     pool.put(&"greeting".to_string(), "hello".to_string())
         .await?;
     pool.put(&"name".to_string(), "inklog".to_string()).await?;
@@ -75,18 +75,42 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
     let version = pool.get(&"version".to_string()).await?;
     let missing = pool.get(&"missing".to_string()).await?;
 
-    println!("greeting = {:?}", greeting);
-    println!("name     = {:?}", name);
-    println!("version  = {:?}", version);
-    println!("missing  = {:?}", missing);
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-greeting",
+            &[("greeting", &format!("{:?}", greeting))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-name",
+            &[("name", &format!("{:?}", name))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-version",
+            &[("version", &format!("{:?}", version))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-missing",
+            &[("missing", &format!("{:?}", missing))]
+        )
+    );
 
     assert_eq!(greeting, Some("hello".to_string()));
     assert_eq!(name, Some("inklog".to_string()));
     assert_eq!(version, Some("0.1.12".to_string()));
     assert_eq!(missing, None, "a missing key should return None");
-    println!("✓ All access assertions passed");
+    println!("{}", tr("example-object-pool-all-access-assertions-passed"));
 
-    print_section("1.4 Overwriting");
+    print_section(&tr("example-object-pool-1-4-overwriting"));
     pool.put(&"greeting".to_string(), "world".to_string())
         .await?;
     let updated = pool.get(&"greeting".to_string()).await?;
@@ -95,15 +119,21 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
         Some("world".to_string()),
         "should return the new value after overwrite"
     );
-    println!("overwriting greeting: hello → world");
-    println!("✓ Overwrite verified");
+    println!(
+        "{}",
+        tr("example-object-pool-overwriting-greeting-hello-world")
+    );
+    println!("{}", tr("example-object-pool-overwrite-verified"));
 
-    print_section("1.5 Explicit error propagation (Result return)");
+    print_section(&tr("example-object-pool-1-5-explicit-error-propagation"));
     let put_result = pool.put(&"k".to_string(), "v".to_string()).await;
     assert!(put_result.is_ok(), "put should return Ok");
     let get_result = pool.get(&"k".to_string()).await;
     assert!(get_result.is_ok(), "get should return Ok");
-    println!("put/get both return Ok; errors propagate explicitly");
+    println!(
+        "{}",
+        tr("example-object-pool-put-get-both-return-ok-errors")
+    );
     Ok(())
 }
 
@@ -111,7 +141,7 @@ async fn show_pool_basic_operations() -> Result<(), Box<dyn std::error::Error>> 
 ///
 /// 演示带 TTL 的对象池配置。
 async fn show_pool_with_ttl_config() -> Result<(), Box<dyn std::error::Error>> {
-    print_section("Example 2: custom ObjectPoolConfig (with TTL)");
+    print_section(&tr("example-object-pool-example-2-custom"));
 
     // 2.1 带 TTL
     let config = ObjectPoolConfig {
@@ -122,7 +152,7 @@ async fn show_pool_with_ttl_config() -> Result<(), Box<dyn std::error::Error>> {
     pool.put(&"k".to_string(), "v".to_string()).await?;
     let v = pool.get(&"k".to_string()).await?;
     assert_eq!(v, Some("v".to_string()));
-    println!("pool with TTL=60s built and accessed successfully");
+    println!("{}", tr("example-object-pool-pool-with-ttl-60s-built-and"));
 
     // 2.2 不同容量配置
     let small_config = ObjectPoolConfig {
@@ -135,14 +165,14 @@ async fn show_pool_with_ttl_config() -> Result<(), Box<dyn std::error::Error>> {
             .put(&format!("key{}", i), format!("val{}", i))
             .await?;
     }
-    println!("small pool (4) filled with 4 objects");
+    println!("{}", tr("example-object-pool-small-pool-4-filled-with-4"));
 
     // 2.3 验证小容量池
     for i in 0..4 {
         let v = small_pool.get(&format!("key{}", i)).await?;
         assert_eq!(v, Some(format!("val{}", i)), "key{} should exist", i);
     }
-    println!("✓ Small-capacity pool fully verified\n");
+    println!("{}\n", tr("example-object-pool-small-capacity-pool-fully"));
     Ok(())
 }
 
@@ -150,11 +180,17 @@ async fn show_pool_with_ttl_config() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 演示基于线程本地池的 LogRecord 复用。
 fn show_global_log_record_functions() {
-    print_section("Example 3: get_log_record / put_log_record global functions");
+    print_section(&tr("example-object-pool-example-3-get-log-record-put"));
 
-    print_section("3.1 get_log_record() fetches a LogRecord");
+    print_section(&tr("example-object-pool-3-1-get-log-record-fetches-a"));
     let mut record: LogRecord = get_log_record();
-    println!("LogRecord from the global pool: level = {}", record.level);
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-logrecord-from-the-global-pool",
+            &[("level", &record.level)]
+        )
+    );
     assert_eq!(record.level, "INFO", "default level should be INFO");
 
     // 修改后放回池中
@@ -164,9 +200,15 @@ fn show_global_log_record_functions() {
         "modified the message and returned it to the global pool (put resets the record automatically)"
     );
 
-    print_section("3.2 get_log_record() again verifies reset");
+    print_section(&tr("example-object-pool-3-2-get-log-record-again"));
     let record2 = get_log_record();
-    println!("fetched again: level = {}", record2.level);
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-fetched-again-level",
+            &[("level", &record2.level)]
+        )
+    );
     assert_eq!(record2.level, "INFO", "level after reset should be INFO");
     assert!(
         record2.message.is_empty() || record2.message == "object pool example",
@@ -179,30 +221,48 @@ fn show_global_log_record_functions() {
         assert_eq!(r.level, "INFO", "level should be INFO in round {}", i);
         put_log_record(r);
     }
-    println!("10 get/put rounds completed without panic");
-    println!("✓ Global LogRecord pool verified\n");
+    println!("{}", tr("example-object-pool-10-get-put-rounds-completed"));
+    println!(
+        "{}\n",
+        tr("example-object-pool-global-logrecord-pool-verified")
+    );
 }
 
 /// 示例 4：全局便捷函数 get_string_buffer / put_string_buffer
 ///
 /// 演示基于线程本地池的 String 复用。
 fn show_global_string_functions() {
-    print_section("Example 4: get_string_buffer / put_string_buffer global functions");
+    print_section(&tr("example-object-pool-example-4-get-string-buffer-put"));
 
-    print_section("4.1 get_string_buffer() fetches a String");
+    print_section(&tr("example-object-pool-4-1-get-string-buffer-fetches-a"));
     let buf: String = get_string_buffer();
-    println!("String from the global pool: len = {}", buf.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-string-from-the-global-pool-len",
+            &[("value", &(buf.len()))]
+        )
+    );
     assert!(buf.is_empty(), "initial String should be empty");
 
     // 填充内容后放回
     let mut buf = buf;
     buf.push_str("inklog string buffer");
     put_string_buffer(buf);
-    println!("filled 'inklog string buffer' and returned it to the global pool");
+    println!(
+        "{}",
+        tr("example-object-pool-filled-inklog-string-buffer-and")
+    );
 
-    print_section("4.2 get_string_buffer() again");
+    print_section(&tr("example-object-pool-4-2-get-string-buffer-again"));
     let s = get_string_buffer();
-    println!("fetched again: len = {}", s.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-object-pool-fetched-again-len",
+            &[("value", &(s.len()))]
+        )
+    );
     put_string_buffer(s);
 
     // 4.3 多次循环验证
@@ -211,15 +271,18 @@ fn show_global_string_functions() {
         b.push_str("test data");
         put_string_buffer(b);
     }
-    println!("5 get/put rounds completed");
-    println!("✓ Global String pool verified\n");
+    println!("{}", tr("example-object-pool-5-get-put-rounds-completed"));
+    println!(
+        "{}\n",
+        tr("example-object-pool-global-string-pool-verified")
+    );
 }
 
 /// Example 5: edge cases
 ///
 /// 测试空键、空值、重复 put 等边界情况。
 async fn show_edge_cases() -> Result<(), Box<dyn std::error::Error>> {
-    print_section("Example 5: edge cases");
+    print_section(&tr("example-object-pool-example-5-edge-cases"));
 
     let pool = ObjectPool::<String, String>::new().await?;
 
@@ -228,13 +291,13 @@ async fn show_edge_cases() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let v = pool.get(&String::new()).await?;
     assert_eq!(v, Some("empty_key_value".to_string()));
-    println!("✓ Empty-key access works");
+    println!("{}", tr("example-object-pool-empty-key-access-works"));
 
     // 5.2 空值
     pool.put(&"empty_val".to_string(), String::new()).await?;
     let v = pool.get(&"empty_val".to_string()).await?;
     assert_eq!(v, Some(String::new()));
-    println!("✓ Empty-value access works");
+    println!("{}", tr("example-object-pool-empty-value-access-works"));
 
     // 5.3 重复 put 同一键
     pool.put(&"dup".to_string(), "first".to_string()).await?;
@@ -245,7 +308,7 @@ async fn show_edge_cases() -> Result<(), Box<dyn std::error::Error>> {
         Some("second".to_string()),
         "repeated put should keep the last value"
     );
-    println!("✓ Repeated put keeps the last value");
+    println!("{}", tr("example-object-pool-repeated-put-keeps-the-last"));
 
     // 5.4 大量键值对
     let large_pool = ObjectPool::<String, String>::with_config(ObjectPoolConfig {
@@ -265,7 +328,7 @@ async fn show_edge_cases() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     assert_eq!(found, 100, "all 100 key-value pairs should exist");
-    println!("✓ All 100 key-value pairs accessed correctly\n");
+    println!("{}\n", tr("example-object-pool-all-100-key-value-pairs"));
 
     Ok(())
 }
@@ -274,27 +337,45 @@ async fn show_edge_cases() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 演示对象池操作的 Result 类型和错误处理模式。
 async fn show_error_handling() -> Result<(), Box<dyn std::error::Error>> {
-    print_section("Example 6: error handling checks");
+    print_section(&tr("example-object-pool-example-6-error-handling-checks"));
 
     // 6.1 put 返回 Result
     let pool = ObjectPool::<String, String>::new().await?;
     match pool.put(&"key".to_string(), "value".to_string()).await {
-        Ok(()) => println!("✓ put succeeded: Ok(())"),
-        Err(e) => println!("✗ put failed: {}", e),
+        Ok(()) => println!("{}", tr("example-object-pool-put-succeeded-ok")),
+        Err(e) => println!(
+            "{}",
+            tr_args("example-object-pool-put-failed", &[("e", &e)])
+        ),
     }
 
     // 6.2 get 返回 Result<Option<V>>
     match pool.get(&"key".to_string()).await {
-        Ok(Some(v)) => println!("✓ get succeeded: Ok(Some({}))", v),
-        Ok(None) => println!("  get returned: Ok(None) — key absent"),
-        Err(e) => println!("✗ get failed: {}", e),
+        Ok(Some(v)) => println!(
+            "{}",
+            tr_args("example-object-pool-get-succeeded-ok-some", &[("v", &v)])
+        ),
+        Ok(None) => println!(
+            "  {}",
+            tr("example-object-pool-get-returned-ok-none-key-absent")
+        ),
+        Err(e) => println!(
+            "{}",
+            tr_args("example-object-pool-get-failed", &[("e", &e)])
+        ),
     }
 
     // 6.3 get 不存在的键
     match pool.get(&"nonexistent".to_string()).await {
-        Ok(Some(_)) => println!("  unexpected: key exists"),
-        Ok(None) => println!("✓ get of a missing key: Ok(None) — as expected"),
-        Err(e) => println!("✗ get failed: {}", e),
+        Ok(Some(_)) => println!("  {}", tr("example-object-pool-unexpected-key-exists")),
+        Ok(None) => println!(
+            "{}",
+            tr("example-object-pool-get-of-a-missing-key-ok-none-as")
+        ),
+        Err(e) => println!(
+            "{}",
+            tr_args("example-object-pool-get-failed", &[("e", &e)])
+        ),
     }
 
     // 6.4 ? 操作符传播
@@ -306,38 +387,83 @@ async fn show_error_handling() -> Result<(), Box<dyn std::error::Error>> {
     }
     let result = propagate_error(&pool).await;
     assert!(result.is_ok(), "? propagation should succeed");
-    println!("✓ ? operator error propagation works\n");
+    println!(
+        "{}\n",
+        tr("example-object-pool-operator-error-propagation-works")
+    );
 
     Ok(())
 }
 
 /// Best practices建议
 fn show_best_practices() {
-    print_section("Best practices");
+    print_section(&tr("example-object-pool-best-practices"));
 
-    println!("1. When to use an object pool:");
-    println!("   - When creating/destroying the same type at high frequency (e.g. log pipelines)");
-    println!("   - Reduces GC pressure and allocation overhead");
-    println!("   - Typical uses: LogRecord reuse, String buffer reuse");
+    println!("{}", tr("example-object-pool-1-when-to-use-an-object-pool"));
+    println!(
+        "   {}",
+        tr("example-object-pool-when-creating-destroying-the")
+    );
+    println!("   {}", tr("example-object-pool-reduces-gc-pressure-and"));
+    println!(
+        "   {}",
+        tr("example-object-pool-typical-uses-logrecord-reuse")
+    );
 
-    println!("\n2. Capacity config:");
-    println!("   - max_capacity: size by concurrency (threads × per-thread cache recommended)");
-    println!("   - Too small: objects are created constantly, defeating pooling");
-    println!("   - Too large: wastes memory; at most 2x the real need is advised");
+    println!("\n{}", tr("example-object-pool-2-capacity-config"));
+    println!("   {}", tr("example-object-pool-max-capacity-size-by"));
+    println!(
+        "   {}",
+        tr("example-object-pool-too-small-objects-are-created")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-too-large-wastes-memory-at-most")
+    );
 
-    println!("\n3. TTL config:");
-    println!("   - ttl_secs: maximum lifetime of an object in the pool");
-    println!("   - Suits stateful objects that need periodic cleanup");
-    println!("   - None: never expires (suits stateless objects like String)");
+    println!("\n{}", tr("example-object-pool-3-ttl-config"));
+    println!(
+        "   {}",
+        tr("example-object-pool-ttl-secs-maximum-lifetime-of-an")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-suits-stateful-objects-that")
+    );
+    println!("   {}", tr("example-object-pool-none-never-expires-suits"));
 
-    println!("\n4. Global functions vs direct API:");
-    println!("   - get_log_record/put_log_record: thread-local pool, zero lock contention");
-    println!("   - ObjectPool::new(): shared pool, shared across threads");
-    println!("   - Prefer the global functions in single-threaded scenarios");
-    println!("   - Use an ObjectPool instance for multi-threaded sharing");
+    println!(
+        "\n{}",
+        tr("example-object-pool-4-global-functions-vs-direct-api")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-get-log-record-put-log-record")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-objectpool-new-shared-pool")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-prefer-the-global-functions-in")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-use-an-objectpool-instance-for")
+    );
 
-    println!("\n5. Usage patterns:");
-    println!("   - Always pair get/put to avoid leaking objects");
-    println!("   - Objects are reset on put; do not keep referencing old values");
-    println!("   - Do not keep using a reference returned by get after put");
+    println!("\n{}", tr("example-object-pool-5-usage-patterns"));
+    println!(
+        "   {}",
+        tr("example-object-pool-always-pair-get-put-to-avoid")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-objects-are-reset-on-put-do-not")
+    );
+    println!(
+        "   {}",
+        tr("example-object-pool-do-not-keep-using-a-reference")
+    );
 }

@@ -17,10 +17,10 @@
 
 use inklog::InklogConfig;
 use inklog::config::{HttpAuthConfig, HttpErrorMode, HttpServerConfig};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 fn main() {
-    print_separator("inklog HTTP auth and IP whitelist examples");
+    print_separator(&tr("example-http-auth-inklog-http-auth-and-ip"));
 
     show_auth_config();
     show_ip_whitelist();
@@ -28,59 +28,95 @@ fn main() {
     show_full_secure_config();
     show_env_overrides();
 
-    println!("\nAll HTTP auth examples shown.");
+    println!("\n{}", tr("example-http-auth-all-http-auth-examples-shown"));
 }
 
 /// 演示 HttpAuthConfig Bearer Token 认证
 fn show_auth_config() {
-    print_section("Example 1: HttpAuthConfig bearer token auth");
+    print_section(&tr("example-http-auth-example-1-httpauthconfig-bearer"));
 
     let default_auth = HttpAuthConfig::default();
-    println!("Default HttpAuthConfig:");
+    println!("{}", tr("example-http-auth-default-httpauthconfig"));
     println!(
-        "  enabled   = {} (disabled by default)",
-        default_auth.enabled
+        "  {}",
+        tr_args(
+            "example-http-auth-enabled-disabled-by-default",
+            &[("enabled", &default_auth.enabled)]
+        )
     );
     println!(
-        "  token_env = \"{}\" (environment variable name)",
-        default_auth.token_env
+        "  {}",
+        tr_args(
+            "example-http-auth-token-env-environment-variable",
+            &[("token_env", &default_auth.token_env)]
+        )
     );
 
-    println!("\nEnable auth:");
+    println!("\n{}", tr("example-http-auth-enable-auth"));
     let enabled_auth = HttpAuthConfig {
         enabled: true,
         token_env: "INKLOG_HTTP_AUTH_TOKEN".to_string(),
     };
-    println!("  enabled   = {}", enabled_auth.enabled);
-    println!("  token_env = \"{}\"", enabled_auth.token_env);
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-enabled",
+            &[("enabled", &enabled_auth.enabled)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-token-env",
+            &[("token_env", &enabled_auth.token_env)]
+        )
+    );
 
-    println!("\nHow it works:");
+    println!("\n{}", tr("example-http-auth-how-it-works"));
     println!(
         "  1. The client sends: curl -H \"Authorization: Bearer $TOKEN\" http://localhost:9090/metrics"
     );
     println!(
-        "  2. The server reads the expected token from environment variable {}",
-        enabled_auth.token_env
+        "  {}",
+        tr_args(
+            "example-http-auth-2-the-server-reads-the-expected",
+            &[("token_env", &enabled_auth.token_env)]
+        )
     );
-    println!("  3. It compares the bearer token in the Authorization header");
-    println!("  4. A match returns data, a mismatch returns 401 Unauthorized");
+    println!(
+        "  {}",
+        tr("example-http-auth-3-it-compares-the-bearer-token")
+    );
+    println!("  {}", tr("example-http-auth-4-a-match-returns-data-a"));
 
-    println!("\nCustom token environment variable:");
+    println!("\n{}", tr("example-http-auth-custom-token-environment"));
     let custom_auth = HttpAuthConfig {
         enabled: true,
         token_env: "MY_APP_AUTH_TOKEN".to_string(),
     };
-    println!("  enabled   = {}", custom_auth.enabled);
-    println!("  token_env = \"{}\" (custom)", custom_auth.token_env);
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-enabled",
+            &[("enabled", &custom_auth.enabled)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-token-env-custom",
+            &[("token_env", &custom_auth.token_env)]
+        )
+    );
 }
 
 /// 演示 IP 白名单配置
 fn show_ip_whitelist() {
-    print_section("Example 2: IP whitelist (ip_whitelist)");
+    print_section(&tr("example-http-auth-example-2-ip-whitelist-ip"));
 
-    println!("Supported formats:");
-    println!("  1. Exact IP:    \"192.168.1.100\"");
-    println!("  2. CIDR range:  \"10.0.0.0/8\"");
+    println!("{}", tr("example-http-auth-supported-formats"));
+    println!("  {}", tr("example-http-auth-1-exact-ip-192-168-1-100"));
+    println!("  {}", tr("example-http-auth-2-cidr-range-10-0-0-0-8"));
     println!(
         "  3. Prefix wildcard: \"192.168.*\" (a trailing .* only, with 1-3 numeric segments before it)"
     );
@@ -88,7 +124,7 @@ fn show_ip_whitelist() {
         "     Note: \"192.168.*.*\" is not valid — a wildcard is allowed only in the last segment"
     );
 
-    println!("\nConfig example 1: internal network only");
+    println!("\n{}", tr("example-http-auth-config-example-1-internal"));
     let internal_only = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -101,7 +137,13 @@ fn show_ip_whitelist() {
         ]),
         ..Default::default()
     };
-    println!("  ip_whitelist = {:?}", internal_only.ip_whitelist);
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-ip-whitelist",
+            &[("ip_whitelist", &format!("{:?}", internal_only.ip_whitelist))]
+        )
+    );
 
     // 用公开校验 API 检查白名单条目：坏条目在配置期直接报错，
     // 不会等到运行期静默 fail-closed（拒绝所有请求）
@@ -111,7 +153,7 @@ fn show_ip_whitelist() {
     }
     .validate()
     .expect("the whitelist entries should pass config validation");
-    println!("  ✓ InklogConfig::validate() passed");
+    println!("  {}", tr("example-http-auth-inklogconfig-validate-passed"));
 
     // 反例：多段通配（"192.168.*.*"）不是受支持格式，配置期即被拒绝
     let invalid = HttpServerConfig {
@@ -125,9 +167,15 @@ fn show_ip_whitelist() {
     }
     .validate()
     .expect_err("a multi-segment wildcard should be rejected at config time");
-    println!("  ✓ the invalid \"192.168.*.*\" was rejected: {}", err);
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-the-invalid-192-168-was-rejected",
+            &[("err", &err)]
+        )
+    );
 
-    println!("\nConfig example 2: specific monitoring hosts only");
+    println!("\n{}", tr("example-http-auth-config-example-2-specific"));
     let monitoring_only = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -135,9 +183,18 @@ fn show_ip_whitelist() {
         ip_whitelist: Some(vec!["10.0.1.50".to_string(), "10.0.1.51".to_string()]),
         ..Default::default()
     };
-    println!("  ip_whitelist = {:?}", monitoring_only.ip_whitelist);
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-ip-whitelist",
+            &[(
+                "ip_whitelist",
+                &format!("{:?}", monitoring_only.ip_whitelist)
+            )]
+        )
+    );
 
-    println!("\nConfig example 3: whitelist disabled (all IPs allowed)");
+    println!("\n{}", tr("example-http-auth-config-example-3-whitelist"));
     let open = HttpServerConfig {
         enabled: true,
         host: "0.0.0.0".to_string(),
@@ -146,16 +203,19 @@ fn show_ip_whitelist() {
         ..Default::default()
     };
     println!(
-        "  ip_whitelist = {:?} (None = allow all)",
-        open.ip_whitelist
+        "  {}",
+        tr_args(
+            "example-http-auth-ip-whitelist-none-allow-all",
+            &[("ip_whitelist", &format!("{:?}", open.ip_whitelist))]
+        )
     );
 }
 
 /// 演示 HttpErrorMode 错误处理模式
 fn show_error_modes() {
-    print_section("Example 3: HttpErrorMode error handling modes");
+    print_section(&tr("example-http-auth-example-3-httperrormode-error"));
 
-    println!("A comparison of the two modes (they apply when the HTTP server fails to start):");
+    println!("{}", tr("example-http-auth-a-comparison-of-the-two-modes"));
     println!(
         "{:<20} {:<24} {:<24}",
         "scenario", "Warn", "Strict (default)"
@@ -173,17 +233,20 @@ fn show_error_modes() {
     println!(
         "\nRequest-time auth/whitelist rejections are not affected by error_mode and are always rejected:"
     );
-    println!("  missing or invalid auth → 401 Unauthorized");
-    println!("  IP not in the whitelist → 403 Forbidden");
+    println!("  {}", tr("example-http-auth-missing-or-invalid-auth-401"));
+    println!("  {}", tr("example-http-auth-ip-not-in-the-whitelist-403"));
 
-    println!("\nDefault mode:");
+    println!("\n{}", tr("example-http-auth-default-mode"));
     println!(
-        "  HttpErrorMode::default() = {:?}",
-        HttpErrorMode::default()
+        "  {}",
+        tr_args(
+            "example-http-auth-httperrormode-default",
+            &[("value", &format!("{:?}", HttpErrorMode::default()))]
+        )
     );
 
-    println!("\nRecommended usage:");
-    println!("  Dev/test:    Warn  (a busy port or TLS error only warns)");
+    println!("\n{}", tr("example-http-auth-recommended-usage"));
+    println!("  {}", tr("example-http-auth-dev-test-warn-a-busy-port-or"));
     println!(
         "  Production:  Strict (startup failure surfaces immediately; security best practice)"
     );
@@ -191,7 +254,7 @@ fn show_error_modes() {
 
 /// 演示完整的安全配置
 fn show_full_secure_config() {
-    print_section("Example 4: full production-grade security config");
+    print_section(&tr("example-http-auth-example-4-full-production-grade"));
 
     let secure_config = HttpServerConfig {
         enabled: true,
@@ -208,34 +271,79 @@ fn show_full_secure_config() {
         tls: None,
     };
 
-    println!("Production-grade HttpServerConfig:");
-    println!("  enabled      = {}", secure_config.enabled);
+    println!("{}", tr("example-http-auth-production-grade"));
     println!(
-        "  host:port    = {}:{}",
-        secure_config.host, secure_config.port
-    );
-    println!("  metrics_path = \"{}\"", secure_config.metrics_path);
-    println!("  health_path  = \"{}\"", secure_config.health_path);
-    println!("  error_mode   = {:?}", secure_config.error_mode);
-    println!(
-        "  auth.enabled = {}",
-        secure_config
-            .auth
-            .as_ref()
-            .map(|a| a.enabled)
-            .unwrap_or(false)
+        "  {}",
+        tr_args(
+            "example-http-auth-enabled-2",
+            &[("enabled", &secure_config.enabled)]
+        )
     );
     println!(
-        "  auth.token_env = \"{}\"",
-        secure_config
-            .auth
-            .as_ref()
-            .map(|a| a.token_env.as_str())
-            .unwrap_or("")
+        "  {}",
+        tr_args(
+            "example-http-auth-host-port",
+            &[("host", &secure_config.host), ("port", &secure_config.port)]
+        )
     );
-    println!("  ip_whitelist = {:?}", secure_config.ip_whitelist);
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-metrics-path",
+            &[("metrics_path", &secure_config.metrics_path)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-health-path",
+            &[("health_path", &secure_config.health_path)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-error-mode",
+            &[("error_mode", &format!("{:?}", secure_config.error_mode))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-auth-enabled",
+            &[(
+                "value",
+                &(secure_config
+                    .auth
+                    .as_ref()
+                    .map(|a| a.enabled)
+                    .unwrap_or(false))
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-auth-token-env",
+            &[(
+                "value",
+                &(secure_config
+                    .auth
+                    .as_ref()
+                    .map(|a| a.token_env.as_str())
+                    .unwrap_or(""))
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-auth-ip-whitelist",
+            &[("ip_whitelist", &format!("{:?}", secure_config.ip_whitelist))]
+        )
+    );
 
-    println!("\nThe corresponding TOML configuration:");
+    println!("\n{}", tr("example-http-auth-the-corresponding-toml"));
     println!(
         r#"[http_server]
 enabled = true
@@ -251,15 +359,18 @@ enabled = true
 token_env = "INKLOG_HTTP_AUTH_TOKEN""#
     );
 
-    println!("\nEnvironment variables to set before starting:");
+    println!("\n{}", tr("example-http-auth-environment-variables-to-set"));
     println!("  export INKLOG_HTTP_AUTH_TOKEN=\"<your-secret-token>\"");
 }
 
 /// 演示环境变量覆盖
 fn show_env_overrides() {
-    print_section("Example 5: environment variable overrides");
+    print_section(&tr("example-http-auth-example-5-environment-variable"));
 
-    println!("Environment variables supported by the HTTP server:");
+    println!(
+        "{}",
+        tr("example-http-auth-environment-variables-supported")
+    );
     println!("  INKLOG_HTTP_SERVER_ENABLED=true");
     println!("  INKLOG_HTTP_SERVER_HOST=0.0.0.0");
     println!("  INKLOG_HTTP_SERVER_PORT=9090");
@@ -272,6 +383,6 @@ fn show_env_overrides() {
         "configure them through TOML or code; the token value comes from the variable named by token_env."
     );
 
-    println!("\nLoad with load_with_env_overrides():");
+    println!("\n{}", tr("example-http-auth-load-with-load-with-env"));
     println!("  let config = InklogConfig::load_with_env_overrides()?;");
 }

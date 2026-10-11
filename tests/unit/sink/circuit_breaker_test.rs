@@ -250,7 +250,6 @@ mod circuit_breaker_test {
             // 半开状态下成功应该转换回闭合
         }
 
-        // 验证恢复
         tokio::time::sleep(Duration::from_millis(10)).await;
         let guard = breaker.lock().await;
         assert_eq!(guard.state(), CircuitBreakerState::Closed);
@@ -277,7 +276,6 @@ mod circuit_breaker_test {
             guard.record_result(Err(()));
         }
 
-        // 验证重新打开
         tokio::time::sleep(Duration::from_millis(10)).await;
         let guard = breaker.lock().await;
         assert_eq!(guard.state(), CircuitBreakerState::Open);

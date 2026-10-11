@@ -26,6 +26,7 @@ use async_trait::async_trait;
 
 use crate::support::io::LogSink;
 use crate::{InklogError, LogRecord};
+#[cfg(feature = "net-sink")]
 use std::sync::Arc;
 
 /// OTLP sink 配置。
@@ -334,7 +335,7 @@ impl OtlpSink {
     }
 
     /// https 传输的 rustls 客户端配置（构造期校验，避免发送期才发现 CA 问题）。
-    #[cfg(all(feature = "net-sink"))]
+    #[cfg(feature = "net-sink")]
     fn build_tls_config(config: &OtlpConfig) -> Result<rustls::ClientConfig, InklogError> {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
@@ -567,8 +568,8 @@ mod tests {
     }
 
     /// mock collector：接受一次 POST，捕获请求体并回 200。
-
-    /// mock collector 标准行为：完整读取请求（头 + Content-Length 体）后响应 `status`。
+    ///
+    /// 标准行为：完整读取请求（头 + Content-Length 体）后响应 `status`。
     fn serve_one_request(
         listener: std::net::TcpListener,
         captured: Arc<Mutex<Vec<u8>>>,

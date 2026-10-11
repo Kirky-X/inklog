@@ -510,7 +510,6 @@ mod tests {
             let _ = pool.get();
         }
 
-        // Add 3 items
         for _ in 0..3 {
             let record = pool.get();
             pool.put(record);

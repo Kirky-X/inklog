@@ -69,6 +69,7 @@ const EN_FALLBACK_SOURCES: &[&str] = &[
     include_str!("../../locales/en/sink.ftl"),
     include_str!("../../locales/en/metrics.ftl"),
     include_str!("../../locales/en/validation.ftl"),
+    include_str!("../../locales/en/examples.ftl"),
 ];
 
 static EN_FALLBACK: LazyLock<HashMap<String, String>> = LazyLock::new(|| {

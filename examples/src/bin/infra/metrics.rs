@@ -26,12 +26,12 @@ use inklog::{
     FallbackConfig, FallbackState, GaugeF64, HealthStatus, Metrics, SinkHealth, SinkHealthMonitor,
     SinkStatus,
 };
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog health monitoring and metrics example ===\n");
+    println!("{}\n", tr("example-metrics-inklog-health-monitoring-and"));
 
     // 1. Metrics creation and basic counters
     show_metrics_creation();
@@ -57,188 +57,382 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 8. Prometheus format export
     show_prometheus_export();
 
-    println!("\n✓ All health monitoring and metrics examples completed");
+    println!("\n{}", tr("example-metrics-all-health-monitoring-and"));
     Ok(())
 }
 
 /// 展示 Metrics 创建和基础计数器操作
 fn show_metrics_creation() {
-    print_separator("1. Metrics creation and basic counters");
+    print_separator(&tr("example-metrics-1-metrics-creation-and-basic"));
 
-    print_section("1.1 Creating an instance with Metrics::new()");
+    print_section(&tr("example-metrics-1-1-creating-an-instance-with"));
     let metrics = Metrics::new();
-    println!("initial logs_written = {}", metrics.logs_written());
-    println!("initial logs_dropped = {}", metrics.logs_dropped());
-    println!("initial sink_errors  = {}", metrics.sink_errors());
-    println!("initial channel_blocked = {}", metrics.channel_blocked());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-initial-logs-written",
+            &[("value", &(metrics.logs_written()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-initial-logs-dropped",
+            &[("value", &(metrics.logs_dropped()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-initial-sink-errors",
+            &[("value", &(metrics.sink_errors()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-initial-channel-blocked",
+            &[("value", &(metrics.channel_blocked()))]
+        )
+    );
     assert_eq!(metrics.logs_written(), 0);
 
-    print_section("1.2 inc_logs_written() accumulates log writes");
+    print_section(&tr("example-metrics-1-2-inc-logs-written"));
     for i in 0..5 {
         metrics.inc_logs_written();
         println!(
-            "  write #{}, cumulative = {}",
-            i + 1,
-            metrics.logs_written()
+            "  {}",
+            tr_args(
+                "example-metrics-write-cumulative",
+                &[("value", &(i + 1)), ("value2", &(metrics.logs_written()))]
+            )
         );
     }
     assert_eq!(metrics.logs_written(), 5);
 
-    print_section("1.3 inc_logs_dropped() / inc_sink_error() / inc_channel_blocked()");
+    print_section(&tr("example-metrics-1-3-inc-logs-dropped-inc-sink"));
     metrics.inc_logs_dropped();
     metrics.inc_logs_dropped();
     metrics.inc_sink_error();
     metrics.inc_channel_blocked();
     metrics.inc_channel_blocked();
     metrics.inc_channel_blocked();
-    println!("logs_dropped   = {}", metrics.logs_dropped());
-    println!("sink_errors    = {}", metrics.sink_errors());
-    println!("channel_blocked = {}", metrics.channel_blocked());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-logs-dropped",
+            &[("value", &(metrics.logs_dropped()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-sink-errors",
+            &[("value", &(metrics.sink_errors()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-channel-blocked",
+            &[("value", &(metrics.channel_blocked()))]
+        )
+    );
 
-    print_section("1.4 DB batch metrics set_db_batch_size / add_db_batch_records_total");
+    print_section(&tr("example-metrics-1-4-db-batch-metrics-set-db"));
     metrics.set_db_batch_size(64);
     metrics.add_db_batch_records_total(64);
     metrics.add_db_batch_records_total(32);
-    println!("db_batch_size           = {}", metrics.db_batch_size());
     println!(
-        "db_batch_records_total  = {}",
-        metrics.db_batch_records_total()
+        "{}",
+        tr_args(
+            "example-metrics-db-batch-size",
+            &[("value", &(metrics.db_batch_size()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-db-batch-records-total",
+            &[("value", &(metrics.db_batch_records_total()))]
+        )
     );
     assert_eq!(metrics.db_batch_size(), 64);
     assert_eq!(metrics.db_batch_records_total(), 96);
 
-    print_section("1.5 Lock contention counter (active_workers is internal; read-only externally)");
+    print_section(&tr("example-metrics-1-5-lock-contention-counter"));
     metrics.inc_lock_contention();
     metrics.inc_lock_contention();
     println!(
-        "active_workers   = {} (default 0, set by internal workers)",
-        metrics.active_workers()
+        "{}",
+        tr_args(
+            "example-metrics-active-workers-default-0-set-by",
+            &[("value", &(metrics.active_workers()))]
+        )
     );
-    println!("lock_contention  = {}", metrics.lock_contention());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-lock-contention",
+            &[("value", &(metrics.lock_contention()))]
+        )
+    );
 
-    print_section("1.6 uptime() runtime duration");
+    print_section(&tr("example-metrics-1-6-uptime-runtime-duration"));
     let uptime = metrics.uptime();
-    println!("uptime = {:?}", uptime);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-uptime",
+            &[("uptime", &format!("{:?}", uptime))]
+        )
+    );
     assert!(uptime.as_secs() < 60);
 }
 
 /// 展示延迟直方图与百分位统计
 fn show_latency_histogram() {
-    print_separator("2. Latency histogram and percentiles");
+    print_separator(&tr("example-metrics-2-latency-histogram-and"));
 
-    print_section("2.1 record_latency() records several latencies");
+    print_section(&tr("example-metrics-2-1-record-latency-records"));
     let metrics = Metrics::new();
     // 模拟 10 条延迟：50μs ~ 5000μs
     let samples = [50u64, 120, 300, 800, 1500, 2200, 3500, 5000, 7500, 12000];
     for &us in &samples {
         metrics.record_latency(Duration::from_micros(us));
     }
-    println!("recorded {} latency samples", samples.len());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-recorded-latency-samples",
+            &[("value", &(samples.len()))]
+        )
+    );
 
-    print_section("2.2 Latency aggregates (avg / p50 / p95 / p99)");
+    print_section(&tr("example-metrics-2-2-latency-aggregates-avg-p50"));
     let status = metrics.get_status(0, 100);
     let snap = &status.metrics;
-    println!("avg_latency_us = {}", snap.avg_latency_us);
-    println!("p50_latency_us = {}", snap.p50_latency_us);
-    println!("p95_latency_us = {}", snap.p95_latency_us);
-    println!("p99_latency_us = {}", snap.p99_latency_us);
-    println!("latency_distribution = {:?}", snap.latency_distribution);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-avg-latency-us",
+            &[("avg_latency_us", &snap.avg_latency_us)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-p50-latency-us",
+            &[("p50_latency_us", &snap.p50_latency_us)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-p95-latency-us",
+            &[("p95_latency_us", &snap.p95_latency_us)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-p99-latency-us",
+            &[("p99_latency_us", &snap.p99_latency_us)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-latency-distribution",
+            &[(
+                "latency_distribution",
+                &format!("{:?}", snap.latency_distribution)
+            )]
+        )
+    );
     assert!(snap.p95_latency_us >= snap.p50_latency_us);
 }
 
 /// 展示 GaugeF64 浮点指标
 fn show_gauge_f64() {
-    print_separator("3. GaugeF64 floating-point metric");
+    print_separator(&tr("example-metrics-3-gaugef64-floating-point-metric"));
 
-    print_section("3.1 GaugeF64::new() / set() / get()");
+    print_section(&tr("example-metrics-3-1-gaugef64-new-set-get"));
     let gauge = GaugeF64::new(0.0);
-    println!("initial value = {}", gauge.get());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-initial-value",
+            &[("value", &(gauge.get()))]
+        )
+    );
     gauge.set(87.5);
-    println!("after set(87.5) = {}", gauge.get());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-after-set-87-5",
+            &[("value", &(gauge.get()))]
+        )
+    );
     gauge.set(99.9);
-    println!("after set(99.9) = {}", gauge.get());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-after-set-99-9",
+            &[("value", &(gauge.get()))]
+        )
+    );
 
-    print_section("3.2 The pool_hit_rate metric exposed by Metrics");
+    print_section(&tr("example-metrics-3-2-the-pool-hit-rate-metric"));
     let metrics = Metrics::new();
     metrics.set_pool_hit_rate(85.5);
-    println!("pool_hit_rate = {:.2}%", metrics.pool_hit_rate());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-pool-hit-rate",
+            &[("value", &format!("{:.2}", metrics.pool_hit_rate()))]
+        )
+    );
     metrics.set_pool_hit_rate(0.0);
     println!(
-        "pool_hit_rate after reset = {:.2}%",
-        metrics.pool_hit_rate()
+        "{}",
+        tr_args(
+            "example-metrics-pool-hit-rate-after-reset",
+            &[("value", &format!("{:.2}", metrics.pool_hit_rate()))]
+        )
     );
     assert!((metrics.pool_hit_rate() - 0.0).abs() < f64::EPSILON);
 
-    print_section("3.3 SinkHealth::healthy() / unhealthy() constructors");
+    print_section(&tr("example-metrics-3-3-sinkhealth-healthy"));
     let healthy = SinkHealth::healthy();
     assert!(matches!(healthy.status, SinkStatus::Healthy));
     assert_eq!(healthy.consecutive_failures, 0);
-    println!("healthy.status = {:?}", healthy.status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-healthy-status",
+            &[("status", &format!("{:?}", healthy.status))]
+        )
+    );
 
     let unhealthy = SinkHealth::unhealthy("Connection refused".to_string());
     assert!(matches!(unhealthy.status, SinkStatus::Unhealthy { .. }));
     assert_eq!(unhealthy.consecutive_failures, 1);
-    println!("unhealthy.status = {:?}", unhealthy.status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-unhealthy-status",
+            &[("status", &format!("{:?}", unhealthy.status))]
+        )
+    );
 }
 
 /// 展示 SinkStatus 状态转换
 fn show_sink_status_transitions() {
-    print_separator("4. SinkStatus transitions");
+    print_separator(&tr("example-metrics-4-sinkstatus-transitions"));
 
-    print_section("4.1 Default state NotStarted");
+    print_section(&tr("example-metrics-4-1-default-state-notstarted"));
     let mut status = SinkStatus::default();
-    println!("status = {:?}", status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-status",
+            &[("status", &format!("{:?}", status))]
+        )
+    );
     assert_eq!(status, SinkStatus::NotStarted);
     assert!(!status.is_operational());
 
-    print_section("4.2 NotStarted → Healthy");
+    print_section(&tr("example-metrics-4-2-notstarted-healthy"));
     status = SinkStatus::Healthy;
-    println!("status = {:?}", status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-status",
+            &[("status", &format!("{:?}", status))]
+        )
+    );
     assert!(status.is_operational());
 
     print_section("4.3 Healthy → Degraded { reason }");
     status = SinkStatus::Degraded {
         reason: "slow disk IO".to_string(),
     };
-    println!("status = {:?}", status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-status",
+            &[("status", &format!("{:?}", status))]
+        )
+    );
     assert!(status.is_operational(), "Degraded still runs");
 
     print_section("4.4 Degraded → Unhealthy { error }");
     status = SinkStatus::Unhealthy {
         error: "disk space low".to_string(),
     };
-    println!("status = {:?}", status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-status",
+            &[("status", &format!("{:?}", status))]
+        )
+    );
     assert!(!status.is_operational());
 
-    print_section("4.5 Unhealthy → Healthy (recovery)");
+    print_section(&tr("example-metrics-4-5-unhealthy-healthy-recovery"));
     status = SinkStatus::Healthy;
-    println!("status = {:?}", status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-status",
+            &[("status", &format!("{:?}", status))]
+        )
+    );
     assert!(status.is_operational());
 
-    print_section("4.6 State machine summary");
+    print_section(&tr("example-metrics-4-6-state-machine-summary"));
     println!(
-        "NotStarted.is_operational()  = {}",
-        SinkStatus::NotStarted.is_operational()
+        "{}",
+        tr_args(
+            "example-metrics-notstarted-is-operational",
+            &[("value", &(SinkStatus::NotStarted.is_operational()))]
+        )
     );
     println!(
-        "Healthy.is_operational()     = {}",
-        SinkStatus::Healthy.is_operational()
+        "{}",
+        tr_args(
+            "example-metrics-healthy-is-operational",
+            &[("value", &(SinkStatus::Healthy.is_operational()))]
+        )
     );
     println!(
-        "Degraded.is_operational()    = {}",
-        SinkStatus::Degraded { reason: "r".into() }.is_operational()
+        "{}",
+        tr_args(
+            "example-metrics-degraded-is-operational",
+            &[(
+                "value",
+                &(SinkStatus::Degraded { reason: "r".into() }.is_operational())
+            )]
+        )
     );
     println!(
-        "Unhealthy.is_operational()   = {}",
-        SinkStatus::Unhealthy { error: "e".into() }.is_operational()
+        "{}",
+        tr_args(
+            "example-metrics-unhealthy-is-operational",
+            &[(
+                "value",
+                &(SinkStatus::Unhealthy { error: "e".into() }.is_operational())
+            )]
+        )
     );
 }
 
 /// 展示 Metrics 的 Sink 健康跟踪
 fn show_sink_health_tracking() {
-    print_separator("5. Metrics sink health tracking");
+    print_separator(&tr("example-metrics-5-metrics-sink-health-tracking"));
 
-    print_section("5.1 sink_started() marks a sink as started");
+    print_section(&tr("example-metrics-5-1-sink-started-marks-a-sink"));
     let metrics = Metrics::new();
     metrics.sink_started("console");
     metrics.sink_started("file");
@@ -247,44 +441,93 @@ fn show_sink_health_tracking() {
     for name in ["console", "file", "database"] {
         let h = health.get(name).expect("sink should exist");
         println!(
-            "  {} -> {:?}, failures = {}",
-            name, h.status, h.consecutive_failures
+            "  {}",
+            tr_args(
+                "example-metrics-failures",
+                &[
+                    ("name", &name),
+                    ("status", &format!("{:?}", h.status)),
+                    ("consecutive_failures", &h.consecutive_failures)
+                ]
+            )
         );
         assert!(matches!(h.status, SinkStatus::Healthy));
     }
 
-    print_section("5.2 sink_degraded() marks degradation");
+    print_section(&tr("example-metrics-5-2-sink-degraded-marks"));
     metrics.sink_degraded("file", "disk IO latency increased".to_string());
     let health = metrics.sink_health();
     let h = health.get("file").expect("file should exist");
-    println!("file.status = {:?}", h.status);
-    println!("file.last_error = {:?}", h.last_error);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-file-status",
+            &[("status", &format!("{:?}", h.status))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-file-last-error",
+            &[("last_error", &format!("{:?}", h.last_error))]
+        )
+    );
     assert!(matches!(h.status, SinkStatus::Degraded { .. }));
 
-    print_section("5.3 update_sink_health() accumulates the failure count");
+    print_section(&tr("example-metrics-5-3-update-sink-health"));
     // 多次失败，consecutive_failures 应累加
     metrics.update_sink_health("database", false, Some("Connection refused".into()));
     metrics.update_sink_health("database", false, Some("Timeout".into()));
     let health = metrics.sink_health();
     let h = health.get("database").expect("database should exist");
-    println!("database.status = {:?}", h.status);
-    println!("database.consecutive_failures = {}", h.consecutive_failures);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-database-status",
+            &[("status", &format!("{:?}", h.status))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-database-consecutive-failures",
+            &[("consecutive_failures", &h.consecutive_failures)]
+        )
+    );
     assert_eq!(h.consecutive_failures, 2);
 
-    print_section("5.4 update_sink_health() resets the count on recovery");
+    print_section(&tr("example-metrics-5-4-update-sink-health-resets"));
     metrics.update_sink_health("database", true, None);
     let health = metrics.sink_health();
     let h = health.get("database").expect("database should exist");
-    println!("database.status = {:?}", h.status);
-    println!("database.consecutive_failures = {}", h.consecutive_failures);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-database-status",
+            &[("status", &format!("{:?}", h.status))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-database-consecutive-failures",
+            &[("consecutive_failures", &h.consecutive_failures)]
+        )
+    );
     assert_eq!(h.consecutive_failures, 0);
 
-    print_section("5.5 update_sink_health() uses a default message when no error info exists");
+    print_section(&tr("example-metrics-5-5-update-sink-health-uses-a"));
     metrics.update_sink_health("file", false, None);
     let health = metrics.sink_health();
     let h = health.get("file").expect("file should exist");
     if let SinkStatus::Unhealthy { error } = &h.status {
-        println!("file.status.error = {:?}", error);
+        println!(
+            "{}",
+            tr_args(
+                "example-metrics-file-status-error",
+                &[("error", &format!("{:?}", error))]
+            )
+        );
         assert_eq!(error, "Unknown error");
     } else {
         panic!("file should be Unhealthy");
@@ -293,66 +536,144 @@ fn show_sink_health_tracking() {
 
 /// 展示 HealthStatus 整体快照
 fn show_health_status_snapshot() {
-    print_separator("6. HealthStatus overall snapshot");
+    print_separator(&tr("example-metrics-6-healthstatus-overall-snapshot"));
 
-    print_section("6.1 Empty sinks → NotStarted");
+    print_section(&tr("example-metrics-6-1-empty-sinks-notstarted"));
     let metrics = Metrics::new();
     let status: HealthStatus = metrics.get_status(0, 100);
-    println!("overall_status = {:?}", status.overall_status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-overall-status",
+            &[("overall_status", &format!("{:?}", status.overall_status))]
+        )
+    );
     assert!(matches!(status.overall_status, SinkStatus::NotStarted));
 
-    print_section("6.2 All Healthy");
+    print_section(&tr("example-metrics-6-2-all-healthy"));
     metrics.sink_started("console");
     metrics.sink_started("file");
     let status = metrics.get_status(50, 1000);
-    println!("overall_status = {:?}", status.overall_status);
-    println!("channel_usage  = {:.2}%", status.channel_usage * 100.0);
-    println!("uptime_seconds = {}", status.uptime_seconds);
-    println!("encryption_key_valid = {}", status.encryption_key_valid);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-overall-status",
+            &[("overall_status", &format!("{:?}", status.overall_status))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-channel-usage",
+            &[("value", &format!("{:.2}", status.channel_usage * 100.0))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-uptime-seconds",
+            &[("uptime_seconds", &status.uptime_seconds)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-encryption-key-valid",
+            &[("encryption_key_valid", &status.encryption_key_valid)]
+        )
+    );
     assert!(matches!(status.overall_status, SinkStatus::Healthy));
 
-    print_section("6.3 Degraded present (no Unhealthy)");
+    print_section(&tr("example-metrics-6-3-degraded-present-no"));
     metrics.sink_degraded("file", "slow IO".to_string());
     let status = metrics.get_status(0, 100);
-    println!("overall_status = {:?}", status.overall_status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-overall-status",
+            &[("overall_status", &format!("{:?}", status.overall_status))]
+        )
+    );
     assert!(matches!(status.overall_status, SinkStatus::Degraded { .. }));
 
-    print_section("6.4 Unhealthy present");
+    print_section(&tr("example-metrics-6-4-unhealthy-present"));
     metrics.update_sink_health("database", false, Some("Connection refused".into()));
     let status = metrics.get_status(0, 100);
-    println!("overall_status = {:?}", status.overall_status);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-overall-status",
+            &[("overall_status", &format!("{:?}", status.overall_status))]
+        )
+    );
     match &status.overall_status {
         SinkStatus::Unhealthy { error } => {
-            println!("error = {}", error);
+            println!("{}", tr_args("example-metrics-error", &[("error", &error)]));
             assert!(error.contains("Connection refused"));
         }
         _ => panic!("should be Unhealthy"),
     }
 
-    print_section("6.5 HealthStatus fields at a glance");
-    println!("sinks count = {}", status.sinks.len());
-    println!("metrics.logs_written     = {}", status.metrics.logs_written);
-    println!("metrics.sink_errors      = {}", status.metrics.sink_errors);
+    print_section(&tr("example-metrics-6-5-healthstatus-fields-at-a"));
     println!(
-        "metrics.active_workers   = {}",
-        status.metrics.active_workers
+        "{}",
+        tr_args(
+            "example-metrics-sinks-count",
+            &[("value", &(status.sinks.len()))]
+        )
     );
     println!(
-        "metrics.pool_hit_rate    = {}",
-        status.metrics.pool_hit_rate
+        "{}",
+        tr_args(
+            "example-metrics-metrics-logs-written",
+            &[("logs_written", &status.metrics.logs_written)]
+        )
     );
-    println!("pool_stats = {:?}", status.pool_stats);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-metrics-sink-errors",
+            &[("sink_errors", &status.metrics.sink_errors)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-metrics-active-workers",
+            &[("active_workers", &status.metrics.active_workers)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-metrics-pool-hit-rate",
+            &[("pool_hit_rate", &status.metrics.pool_hit_rate)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-pool-stats",
+            &[("pool_stats", &format!("{:?}", status.pool_stats))]
+        )
+    );
 }
 
 /// 展示 SinkHealthMonitor 智能降级与恢复
 fn show_sink_health_monitor() {
-    print_separator("7. SinkHealthMonitor smart fallback and recovery");
+    print_separator(&tr("example-metrics-7-sinkhealthmonitor-smart"));
 
-    print_section("7.1 SinkHealthMonitor::default() initial state");
+    print_section(&tr("example-metrics-7-1-sinkhealthmonitor-default"));
     let monitor = SinkHealthMonitor::default();
     println!(
-        "database initial state = {:?}",
-        monitor.get_fallback_state("database")
+        "{}",
+        tr_args(
+            "example-metrics-database-initial-state",
+            &[(
+                "value",
+                &format!("{:?}", monitor.get_fallback_state("database"))
+            )]
+        )
     );
     assert_eq!(
         monitor.get_fallback_state("database"),
@@ -360,78 +681,141 @@ fn show_sink_health_monitor() {
     );
     assert!(!monitor.is_any_in_fallback());
 
-    print_section("7.2 Failures below threshold → Retry");
+    print_section(&tr("example-metrics-7-2-failures-below-threshold"));
     let action = monitor.check_and_fallback("database", false, Some("Connection refused"));
-    println!("action = {:?}", action);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-action",
+            &[("action", &format!("{:?}", action))]
+        )
+    );
     assert!(matches!(action, FallbackAction::Retry { .. }));
-    println!("requires_action = {}", action.requires_action());
-    println!("sink_name = {:?}", action.sink_name());
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-requires-action",
+            &[("value", &(action.requires_action()))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-sink-name",
+            &[("value", &format!("{:?}", action.sink_name()))]
+        )
+    );
 
-    print_section("7.3 Threshold reached → Fallback to file");
+    print_section(&tr("example-metrics-7-3-threshold-reached-fallback"));
     // 默认 failure_threshold = 3，前面已失败 1 次
     for _ in 0..3 {
         let _ = monitor.check_and_fallback("database", false, Some("Connection refused"));
     }
     let state = monitor.get_fallback_state("database");
-    println!("database state = {:?}", state);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-database-state",
+            &[("state", &format!("{:?}", state))]
+        )
+    );
     match &state {
         FallbackState::Fallback { target, reason } => {
-            println!("target = {}", target);
-            println!("reason = {}", reason);
+            println!(
+                "{}",
+                tr_args("example-metrics-target", &[("target", &target)])
+            );
+            println!(
+                "{}",
+                tr_args("example-metrics-reason", &[("reason", &reason)])
+            );
             assert_eq!(target, "file");
         }
         _ => panic!("should be Fallback"),
     }
     assert!(monitor.is_any_in_fallback());
 
-    print_section("7.4 Healthy again → AttemptRecovery (exponential backoff)");
+    print_section(&tr("example-metrics-7-4-healthy-again"));
     let action = monitor.check_and_fallback("database", true, None);
-    println!("action = {:?}", action);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-action",
+            &[("action", &format!("{:?}", action))]
+        )
+    );
     match &action {
         FallbackAction::AttemptRecovery { delay_ms, .. } => {
-            println!("delay_ms = {}", delay_ms);
+            println!(
+                "{}",
+                tr_args("example-metrics-delay-ms", &[("delay_ms", &delay_ms)])
+            );
         }
         _ => panic!("should be AttemptRecovery"),
     }
 
-    print_section("7.5 Healthy again during recovery → Wait");
+    print_section(&tr("example-metrics-7-5-healthy-again-during"));
     let action = monitor.check_and_fallback("database", true, None);
-    println!("action = {:?}", action);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-action",
+            &[("action", &format!("{:?}", action))]
+        )
+    );
     assert!(matches!(action, FallbackAction::Wait { .. }));
 
-    print_section("7.6 confirm_recovery() confirms recovery");
+    print_section(&tr("example-metrics-7-6-confirm-recovery-confirms"));
     monitor.confirm_recovery("database");
     println!(
-        "database state = {:?}",
-        monitor.get_fallback_state("database")
+        "{}",
+        tr_args(
+            "example-metrics-database-state-2",
+            &[(
+                "value",
+                &format!("{:?}", monitor.get_fallback_state("database"))
+            )]
+        )
     );
     assert_eq!(
         monitor.get_fallback_state("database"),
         FallbackState::Active
     );
 
-    print_section("7.7 FileSink disk full → fallback to console");
+    print_section(&tr("example-metrics-7-7-filesink-disk-full-fallback"));
     let monitor2 = SinkHealthMonitor::with_defaults();
     for _ in 0..3 {
         let _ = monitor2.check_and_fallback("file", false, Some("No space left on device"));
     }
     let state = monitor2.get_fallback_state("file");
-    println!("file state = {:?}", state);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-file-state",
+            &[("state", &format!("{:?}", state))]
+        )
+    );
     match &state {
         FallbackState::Fallback { target, .. } => assert_eq!(target, "console"),
         _ => panic!("should be Fallback"),
     }
 
-    print_section("7.8 Encryption error → fallback to plaintext");
+    print_section(&tr("example-metrics-7-8-encryption-error-fallback"));
     let monitor3 = SinkHealthMonitor::with_defaults();
     let action = monitor3.handle_encryption_error("file", "Invalid key");
-    println!("action = {:?}", action);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-action",
+            &[("action", &format!("{:?}", action))]
+        )
+    );
     match &action {
         FallbackAction::Fallback { target, .. } => assert_eq!(target, "plaintext"),
         _ => panic!("should be Fallback"),
     }
 
-    print_section("7.9 Custom FallbackConfig + FallbackStats");
+    print_section(&tr("example-metrics-7-9-custom-fallbackconfig"));
     let config = FallbackConfig {
         enabled: true,
         initial_delay_ms: 500,
@@ -443,10 +827,16 @@ fn show_sink_health_monitor() {
     // 触发 1 次失败（未达阈值 2）
     let _ = monitor4.check_and_fallback("database", false, Some("err"));
     let stats = monitor4.get_fallback_stats();
-    println!("stats = {:?}", stats);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-stats",
+            &[("stats", &format!("{:?}", stats))]
+        )
+    );
     assert_eq!(stats.active_fallbacks, 0);
 
-    print_section("7.10 reset() resets the monitor");
+    print_section(&tr("example-metrics-7-10-reset-resets-the-monitor"));
     for _ in 0..3 {
         let _ = monitor4.check_and_fallback("database", false, Some("err"));
     }
@@ -454,28 +844,52 @@ fn show_sink_health_monitor() {
     monitor4.reset();
     assert!(!monitor4.is_any_in_fallback());
     println!(
-        "is_any_in_fallback after reset = {}",
-        monitor4.is_any_in_fallback()
+        "{}",
+        tr_args(
+            "example-metrics-is-any-in-fallback-after-reset",
+            &[("value", &(monitor4.is_any_in_fallback()))]
+        )
     );
 
-    print_section("7.11 get_fallback_events() event history");
+    print_section(&tr("example-metrics-7-11-get-fallback-events-event"));
     let monitor5 = SinkHealthMonitor::with_defaults();
     for _ in 0..3 {
         let _ = monitor5.check_and_fallback("database", false, Some("err"));
     }
     let events = monitor5.get_fallback_events(10);
-    println!("event count = {}", events.len());
+    println!(
+        "{}",
+        tr_args("example-metrics-event-count", &[("value", &(events.len()))])
+    );
     assert!(!events.is_empty());
-    println!("first event sink = {}", events[0].sink_name);
-    println!("first event from = {:?}", events[0].from_state);
-    println!("first event to   = {:?}", events[0].to_state);
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-first-event-sink",
+            &[("value", &(events[0].sink_name))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-first-event-from",
+            &[("value", &format!("{:?}", events[0].from_state))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-metrics-first-event-to",
+            &[("value", &format!("{:?}", events[0].to_state))]
+        )
+    );
 }
 
 /// 展示 Prometheus 格式导出
 fn show_prometheus_export() {
-    print_separator("8. Prometheus format export");
+    print_separator(&tr("example-metrics-8-prometheus-format-export"));
 
-    print_section("8.1 Simulated metric collection");
+    print_section(&tr("example-metrics-8-1-simulated-metric-collection"));
     let metrics = Metrics::new();
     // 模拟日志写入
     for _ in 0..1000 {
@@ -502,7 +916,7 @@ fn show_prometheus_export() {
     metrics.sink_started("database");
     metrics.update_sink_health("database", false, Some("Connection refused".into()));
 
-    print_section("8.2 export_prometheus() output (key lines excerpted)");
+    print_section(&tr("example-metrics-8-2-export-prometheus-output"));
     let output = metrics.export_prometheus();
     // 验证关键 Prometheus 行存在
     assert!(output.contains("# TYPE inklog_logs_written_total counter"));
@@ -533,21 +947,26 @@ fn show_prometheus_export() {
         }
     }
 
-    print_section("8.3 HealthStatus serialization preview (serde_json)");
+    print_section(&tr("example-metrics-8-3-healthstatus-serialization"));
     let status = metrics.get_status(128, 1024);
     let json = serde_json::to_string_pretty(&status.metrics).unwrap_or_default();
     // 仅打印前若干行避免刷屏
     for (i, line) in json.lines().enumerate() {
         if i >= 12 {
-            println!("  ... (truncated)");
+            println!("  {}", tr("example-metrics-truncated"));
             break;
         }
         println!("  {}", line);
     }
 
     println!(
-        "\n✓ Prometheus export has {} characters, {} lines",
-        output.len(),
-        output.lines().count()
+        "\n{}",
+        tr_args(
+            "example-metrics-prometheus-export-has",
+            &[
+                ("value", &(output.len())),
+                ("value2", &(output.lines().count()))
+            ]
+        )
     );
 }

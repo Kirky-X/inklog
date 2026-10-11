@@ -413,7 +413,6 @@ mod tests {
         let failing_db = Arc::new(FailingDatabase);
         let sink = DatabaseSink::new(failing_db).unwrap();
 
-        // 写入记录
         let record = LogRecord::default();
         let _ = sink.write(&record).await;
 

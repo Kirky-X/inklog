@@ -7,11 +7,9 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn test_file_sink_auto_recovery() {
-    // Create a test directory
     let test_dir = "tests/temp_recovery";
     let _ = fs::create_dir_all(test_dir);
 
-    // Create a logger with file sink
     let log_file = format!("{}/test_recovery.log", test_dir);
     let manager = LoggerManager::builder()
         .level("info")
@@ -40,11 +38,9 @@ async fn test_file_sink_auto_recovery() {
     tracing::info!("Test message after recovery");
     thread::sleep(Duration::from_millis(100));
 
-    // Check health status
     let health = manager.get_health_status();
     println!("Health status: {:?}", health);
 
-    // Clean up
     let _ = fs::remove_dir_all(test_dir);
 }
 

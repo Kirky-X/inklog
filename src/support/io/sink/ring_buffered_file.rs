@@ -1397,7 +1397,6 @@ mod tests {
         let tmpl = LogTemplate::default();
         let sink = ChannelBufferedFileSink::new(cfg, tmpl).unwrap();
 
-        // Write a single record
         let rec = make_record("block-strategy-test");
         sink.write(&rec).await.unwrap();
         sink.flush().await.unwrap();

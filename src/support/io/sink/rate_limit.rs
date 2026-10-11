@@ -72,7 +72,7 @@ impl SinkRateLimit for NoOpRateLimit {
 
 /// 全局令牌桶（[`SinkRateLimit`] 端口的内置基线实现）。
 ///
-/// 算法内核委托 limiteron [`TokenBucketLimiter`]（CAS + 补充时间积分守恒
+/// 算法内核委托 limiteron `TokenBucketLimiter`（CAS + 补充时间积分守恒
 /// 修复，算法修复收敛库侧单处）：`new(capacity)` 映射
 /// `TokenBucketLimiter::new(capacity, 0)`——`refill_rate = 0` 保持既有纯
 /// 预算语义（无时间补充，预算耗尽后不放行）。同步决策点（trait 契约）经

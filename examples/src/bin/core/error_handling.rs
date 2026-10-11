@@ -17,10 +17,10 @@
 //! ```
 
 use inklog::{InklogError, InklogResult};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 fn main() {
-    print_separator("inklog error handling examples");
+    print_separator(&tr("example-error-handling-inklog-error-handling-examples"));
 
     show_error_variants();
     show_display_trait();
@@ -31,12 +31,15 @@ fn main() {
     show_result_type_alias();
     show_error_handling_patterns();
 
-    println!("\n✓ all error handling examples completed");
+    println!(
+        "\n{}",
+        tr("example-error-handling-all-error-handling-examples")
+    );
 }
 
 /// 展示所有错误变体的构造
 fn show_error_variants() {
-    print_section("1. All InklogError variants");
+    print_section(&tr("example-error-handling-1-all-inklogerror-variants"));
 
     let errors: Vec<(&str, InklogError)> = vec![
         (
@@ -85,25 +88,43 @@ fn show_error_variants() {
         ("Unknown", InklogError::Unknown("unexpected state".into())),
     ];
 
-    println!("{:<20} Display output", "variant");
+    println!(
+        "{}",
+        tr_args(
+            "example-error-handling-display-output",
+            &[("value", &format!("{:<20}", "variant"))]
+        )
+    );
     println!("{}", "-".repeat(70));
     for (name, err) in &errors {
         println!("{:<20} {}", name, err);
     }
 
-    println!("\n  ✓ {} error variants in total", errors.len());
+    println!(
+        "\n  {}",
+        tr_args(
+            "example-error-handling-error-variants-in-total",
+            &[("value", &(errors.len()))]
+        )
+    );
 }
 
 /// 展示 Display trait
 fn show_display_trait() {
-    print_section("2. Display trait format");
+    print_section(&tr("example-error-handling-2-display-trait-format"));
 
     let err = InklogError::ConfigError("invalid level 'xyz'".into());
-    println!("Error: {}", err);
+    println!(
+        "{}",
+        tr_args("example-error-handling-error", &[("err", &err)])
+    );
     assert_eq!(err.to_string(), "Configuration error: invalid level 'xyz'");
 
     let err = InklogError::ChannelError("disconnected".into());
-    println!("Error: {}", err);
+    println!(
+        "{}",
+        tr_args("example-error-handling-error", &[("err", &err)])
+    );
     assert_eq!(err.to_string(), "Channel error: disconnected");
 
     println!("\n  ✓ Display format: \"{{prefix}}: {{detail}}\"");
@@ -111,15 +132,27 @@ fn show_display_trait() {
 
 /// 展示 safe_message() 敏感数据脱敏
 fn show_safe_message() {
-    print_section("3. safe_message() sensitive data redaction");
+    print_section(&tr("example-error-handling-3-safe-message-sensitive-data"));
 
-    println!("safe_message() redacts sensitive data inside error messages:\n");
+    println!(
+        "{}\n",
+        tr("example-error-handling-safe-message-redacts-sensitive")
+    );
 
     // AWS 密钥
     let err = InklogError::ConfigError("Failed to load AKIAIOSFODNN7EXAMPLE from config".into());
-    println!("AWS key redaction:");
-    println!("  Raw: {}", err);
-    println!("  Safe: {}", err.safe_message());
+    println!("{}", tr("example-error-handling-aws-key-redaction"));
+    println!(
+        "  {}",
+        tr_args("example-error-handling-raw", &[("err", &err)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-error-handling-safe",
+            &[("value", &(err.safe_message()))]
+        )
+    );
     assert!(!err.safe_message().contains("AKIAIOSFODNN7EXAMPLE"));
 
     // 数据库连接串
@@ -127,40 +160,88 @@ fn show_safe_message() {
         message: "Connection failed: postgres://admin:secret@localhost/db".into(),
         source: None,
     };
-    println!("\nDatabase connection string redaction:");
-    println!("  Raw: {}", err);
-    println!("  Safe: {}", err.safe_message());
+    println!(
+        "\n{}",
+        tr("example-error-handling-database-connection-string")
+    );
+    println!(
+        "  {}",
+        tr_args("example-error-handling-raw", &[("err", &err)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-error-handling-safe",
+            &[("value", &(err.safe_message()))]
+        )
+    );
     assert!(!err.safe_message().contains("secret"));
 
     // 用户路径
     let err = InklogError::ConfigError("Config not found at /home/user/.config/inklog.toml".into());
-    println!("\nUser path redaction:");
-    println!("  Raw: {}", err);
-    println!("  Safe: {}", err.safe_message());
+    println!("\n{}", tr("example-error-handling-user-path-redaction"));
+    println!(
+        "  {}",
+        tr_args("example-error-handling-raw", &[("err", &err)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-error-handling-safe",
+            &[("value", &(err.safe_message()))]
+        )
+    );
     assert!(!err.safe_message().contains("/home/user/"));
 
     // 邮箱
     let err = InklogError::ConfigError("Contact admin@example.com for help".into());
-    println!("\nEmail redaction:");
-    println!("  Raw: {}", err);
-    println!("  Safe: {}", err.safe_message());
+    println!("\n{}", tr("example-error-handling-email-redaction"));
+    println!(
+        "  {}",
+        tr_args("example-error-handling-raw", &[("err", &err)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-error-handling-safe",
+            &[("value", &(err.safe_message()))]
+        )
+    );
     assert!(!err.safe_message().contains("admin@example.com"));
 
     // 非敏感信息保持不变
     let err = InklogError::ConfigError("Invalid log level value".into());
-    println!("\nNon-sensitive information is left unchanged:");
-    println!("  Raw: {}", err);
-    println!("  Safe: {}", err.safe_message());
+    println!(
+        "\n{}",
+        tr("example-error-handling-non-sensitive-information-is")
+    );
+    println!(
+        "  {}",
+        tr_args("example-error-handling-raw", &[("err", &err)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-error-handling-safe",
+            &[("value", &(err.safe_message()))]
+        )
+    );
     assert!(err.safe_message().contains("Invalid log level value"));
 
-    println!("\n  ✓ safe_message() redacts sensitive data correctly");
+    println!(
+        "\n  {}",
+        tr("example-error-handling-safe-message-redacts-sensitive-2")
+    );
 }
 
 /// 展示 localized_message() 国际化
 fn show_localized_message() {
-    print_section("4. localized_message() internationalized messages");
+    print_section(&tr("example-error-handling-4-localized-message"));
 
-    println!("localized_message() returns the translated error prefix for the current locale:\n");
+    println!(
+        "{}\n",
+        tr("example-error-handling-localized-message-returns-the")
+    );
 
     let errors = vec![
         InklogError::ConfigError("bad value".into()),
@@ -175,7 +256,13 @@ fn show_localized_message() {
         InklogError::Unknown("something".into()),
     ];
 
-    println!("{:<25} localized_message()", "error type");
+    println!(
+        "{}",
+        tr_args(
+            "example-error-handling-localized-message",
+            &[("value", &format!("{:<25}", "error type"))]
+        )
+    );
     println!("{}", "-".repeat(70));
     for err in &errors {
         println!(
@@ -185,20 +272,38 @@ fn show_localized_message() {
         );
     }
 
-    println!("\n  ✓ every error variant supports an internationalized message");
+    println!(
+        "\n  {}",
+        tr("example-error-handling-every-error-variant-supports-an")
+    );
 }
 
 /// 展示便捷构造方法
 fn show_convenience_constructors() {
-    print_section("5. Convenience constructors");
+    print_section(&tr("example-error-handling-5-convenience-constructors"));
 
     let err = InklogError::database_error("connection pool exhausted");
-    println!("InklogError::database_error(\"connection pool exhausted\"):");
-    println!("  Display: {}", err);
+    println!(
+        "{}",
+        tr("example-error-handling-inklogerror-database-error")
+    );
+    println!(
+        "  {}",
+        tr_args("example-error-handling-display", &[("err", &err)])
+    );
     match &err {
         InklogError::DatabaseError { message, source } => {
-            println!("  message: {}", message);
-            println!("  source:  {:?}", source.is_some());
+            println!(
+                "  {}",
+                tr_args("example-error-handling-message", &[("message", &message)])
+            );
+            println!(
+                "  {}",
+                tr_args(
+                    "example-error-handling-source",
+                    &[("value", &format!("{:?}", source.is_some()))]
+                )
+            );
         }
         _ => panic!("expected DatabaseError"),
     }
@@ -206,60 +311,92 @@ fn show_convenience_constructors() {
     // database_error_with_source
     let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
     let err = InklogError::database_error_with_source("table creation failed", io_err);
-    println!("\nInklogError::database_error_with_source(...):");
-    println!("  Display: {}", err);
+    println!(
+        "\n{}",
+        tr("example-error-handling-inklogerror-database-error-with")
+    );
+    println!(
+        "  {}",
+        tr_args("example-error-handling-display", &[("err", &err)])
+    );
     match &err {
         InklogError::DatabaseError { source, .. } => {
             println!(
-                "  source:  {} (has an error chain)",
-                source.as_ref().unwrap()
+                "  {}",
+                tr_args(
+                    "example-error-handling-source-has-an-error-chain",
+                    &[("value", &(source.as_ref().unwrap()))]
+                )
             );
         }
         _ => panic!("expected DatabaseError"),
     }
 
     let err = InklogError::encryption_error("invalid key length: 16");
-    println!("\nInklogError::encryption_error(\"invalid key length: 16\"):");
-    println!("  Display: {}", err);
+    println!(
+        "\n{}",
+        tr("example-error-handling-inklogerror-encryption-error")
+    );
+    println!(
+        "  {}",
+        tr_args("example-error-handling-display", &[("err", &err)])
+    );
 
     // encryption_error_with_source
     let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "key file missing");
     let err = InklogError::encryption_error_with_source("key load failed", io_err);
-    println!("\nInklogError::encryption_error_with_source(...):");
-    println!("  Display: {}", err);
+    println!(
+        "\n{}",
+        tr("example-error-handling-inklogerror-encryption-error-2")
+    );
+    println!(
+        "  {}",
+        tr_args("example-error-handling-display", &[("err", &err)])
+    );
 }
 
 /// 展示 From trait 自动转换
 fn show_from_conversions() {
-    print_section("6. Automatic From trait conversion");
+    print_section(&tr("example-error-handling-6-automatic-from-trait"));
 
     // io::Error → InklogError
     let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
     let err: InklogError = io_err.into();
-    println!("io::Error → InklogError:");
+    println!("{}", tr("example-error-handling-io-error-inklogerror"));
     println!("  {}", err);
     assert!(matches!(err, InklogError::IoError(_)));
 
     // serde_json::Error → InklogError
     let json_err = serde_json::from_str::<String>("invalid json").unwrap_err();
     let err: InklogError = json_err.into();
-    println!("\nserde_json::Error → InklogError:");
+    println!(
+        "\n{}",
+        tr("example-error-handling-serde-json-error-inklogerror")
+    );
     println!("  {}", err);
     assert!(matches!(err, InklogError::SerializationError(_)));
 
     // toml::de::Error → InklogError (via From<toml::de::Error>)
     let toml_err = toml::from_str::<toml::Value>("invalid = = toml").unwrap_err();
     let err: InklogError = toml_err.into();
-    println!("\ntoml::de::Error → InklogError:");
+    println!(
+        "\n{}",
+        tr("example-error-handling-toml-de-error-inklogerror")
+    );
     println!("  {}", err);
     assert!(matches!(err, InklogError::ConfigError(_)));
 
-    println!("\n  ✓ standard error types convert to InklogError automatically");
+    println!(
+        "\n  {}",
+        tr("example-error-handling-standard-error-types-convert-to")
+    );
 }
 
 /// 展示 InklogResult 类型别名
 fn show_result_type_alias() {
-    print_section("7. The InklogResult<T> type alias");
+    print_section(&tr(
+        "example-error-handling-7-the-inklogresult-t-type-alias",
+    ));
 
     println!("type InklogResult<T> = Result<T, InklogError>;\n");
 
@@ -269,7 +406,13 @@ fn show_result_type_alias() {
 
     // 失败场景
     let err: InklogResult<i32> = Err(InklogError::ConfigError("bad config".into()));
-    println!("Err(...) → is_err = {}", err.is_err());
+    println!(
+        "{}",
+        tr_args(
+            "example-error-handling-err-is-err",
+            &[("value", &(err.is_err()))]
+        )
+    );
 
     // 使用 ? 运算符
     fn read_value() -> InklogResult<String> {
@@ -277,55 +420,103 @@ fn show_result_type_alias() {
         Ok(content)
     }
     match read_value() {
-        Ok(_) => println!("  unexpected success"),
+        Ok(_) => println!("  {}", tr("example-error-handling-unexpected-success")),
         Err(e) => {
-            println!("\nPropagate io::Error with the ? operator:");
+            println!(
+                "\n{}",
+                tr("example-error-handling-propagate-io-error-with-the")
+            );
             println!("  {}", e);
             assert!(matches!(e, InklogError::IoError(_)));
         }
     }
 
-    println!("\n  ✓ InklogResult works with the ? operator");
+    println!(
+        "\n  {}",
+        tr("example-error-handling-inklogresult-works-with-the")
+    );
 }
 
 /// 展示实际错误处理模式
 fn show_error_handling_patterns() {
-    print_section("8. Practical error handling patterns");
+    print_section(&tr("example-error-handling-8-practical-error-handling"));
 
-    println!("Pattern 1: match branch handling\n");
+    println!(
+        "{}\n",
+        tr("example-error-handling-pattern-1-match-branch-handling")
+    );
 
     let result: InklogResult<()> = Err(InklogError::ConfigError("invalid level".into()));
     match result {
-        Ok(()) => println!("  operation succeeded"),
+        Ok(()) => println!("  {}", tr("example-error-handling-operation-succeeded")),
         Err(InklogError::ConfigError(msg)) => {
-            println!("  config error (recoverable): {}", msg);
-            println!("  → retry with the default configuration");
+            println!(
+                "  {}",
+                tr_args(
+                    "example-error-handling-config-error-recoverable",
+                    &[("msg", &msg)]
+                )
+            );
+            println!("  {}", tr("example-error-handling-retry-with-the-default"));
         }
         Err(InklogError::IoError(e)) => {
-            println!("  IO error: {}", e);
-            println!("  → check file permissions and disk space");
+            println!(
+                "  {}",
+                tr_args("example-error-handling-io-error", &[("e", &e)])
+            );
+            println!(
+                "  {}",
+                tr("example-error-handling-check-file-permissions-and-disk")
+            );
         }
         Err(e) => {
-            println!("  other error: {}", e);
-            println!("  → report and exit");
+            println!(
+                "  {}",
+                tr_args("example-error-handling-other-error", &[("e", &e)])
+            );
+            println!("  {}", tr("example-error-handling-report-and-exit"));
         }
     }
 
-    println!("\nPattern 2: safe log output\n");
+    println!(
+        "\n{}\n",
+        tr("example-error-handling-pattern-2-safe-log-output")
+    );
     let err = InklogError::ConfigError("Failed: postgres://user:pass@localhost/db".into());
     // 在日志中使用 safe_message 避免泄露敏感信息
-    println!("  Log output: {}", err.safe_message());
+    println!(
+        "  {}",
+        tr_args(
+            "example-error-handling-log-output",
+            &[("value", &(err.safe_message()))]
+        )
+    );
     // 在终端使用 localized_message 提供本地化提示
-    println!("  User message: {}", err.localized_message());
+    println!(
+        "  {}",
+        tr_args(
+            "example-error-handling-user-message",
+            &[("value", &(err.localized_message()))]
+        )
+    );
 
-    println!("\nPattern 3: error chain tracing\n");
+    println!(
+        "\n{}\n",
+        tr("example-error-handling-pattern-3-error-chain-tracing")
+    );
     let source = std::io::Error::new(std::io::ErrorKind::NotFound, "config.toml");
     let err = InklogError::database_error_with_source("failed to load db config", source);
-    println!("  Top-level error: {}", err);
+    println!(
+        "  {}",
+        tr_args("example-error-handling-top-level-error", &[("err", &err)])
+    );
     if let InklogError::DatabaseError {
         source: Some(src), ..
     } = &err
     {
-        println!("  Root cause: {}", src);
+        println!(
+            "  {}",
+            tr_args("example-error-handling-root-cause", &[("src", &src)])
+        );
     }
 }

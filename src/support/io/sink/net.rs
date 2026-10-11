@@ -100,7 +100,7 @@ pub struct UdpSinkConfig {
 enum Wire {
     Plain(std::net::TcpStream),
     #[cfg(feature = "net-sink")]
-    Tls(rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>),
+    Tls(Box<rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>>),
 }
 
 impl Wire {
@@ -263,7 +263,7 @@ impl TcpSink {
                         .map_err(|e| {
                             InklogError::ConfigError(format!("TLS handshake setup: {e}"))
                         })?;
-                Ok(Wire::Tls(rustls::StreamOwned::new(conn, stream)))
+                Ok(Wire::Tls(Box::new(rustls::StreamOwned::new(conn, stream))))
             }
             (Some(_), None) => Err(InklogError::ConfigError(
                 "TLS requested but client config unavailable".to_string(),
@@ -765,7 +765,7 @@ mod tests {
 
         sink.write(&test_record("buffered 2")).await.unwrap();
         assert!(
-            sink.connect_allowed() == false
+            !sink.connect_allowed()
                 || sink
                     .consecutive_failures
                     .load(std::sync::atomic::Ordering::Acquire)

@@ -16,10 +16,10 @@
 //! ```
 
 use inklog::LogLevel;
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 fn main() {
-    print_separator("inklog LogLevel type example");
+    print_separator(&tr("example-log-level-inklog-loglevel-type-example"));
 
     show_from_str_parsing();
     show_trait_from_str();
@@ -28,24 +28,33 @@ fn main() {
     show_helper_methods();
     show_error_handling();
 
-    println!("\nAll LogLevel examples completed.");
+    println!(
+        "\n{}",
+        tr("example-log-level-all-loglevel-examples-completed")
+    );
 }
 
 /// 演示 `LogLevel::from_str` 静态方法（大小写不敏感）
 fn show_from_str_parsing() {
-    print_section("Example 1: the LogLevel::from_str static method");
+    print_section(&tr("example-log-level-example-1-the-loglevel-from-str"));
 
-    println!("Case-insensitive parsing:");
+    println!("{}", tr("example-log-level-case-insensitive-parsing"));
     for input in [
         "trace", "DEBUG", "Info", "WARN", "warning", "ERROR", "fatal", "critical",
     ] {
         match LogLevel::from_str(input) {
             Some(level) => println!("  {:>10} → {:?}", input, level),
-            None => println!("  {:>10} → None", input),
+            None => println!(
+                "  {}",
+                tr_args(
+                    "example-log-level-none",
+                    &[("input", &format!("{:>10}", input))]
+                )
+            ),
         }
     }
 
-    println!("\nInvalid input returns None:");
+    println!("\n{}", tr("example-log-level-invalid-input-returns-none"));
     for input in ["", "invalid", "trace_level", "123"] {
         let result = LogLevel::from_str(input);
         println!("  {:>12} → {:?}", input, result);
@@ -54,33 +63,60 @@ fn show_from_str_parsing() {
 
 /// 演示 `FromStr` trait 实现（返回 `Result`，支持 `?` 运算符）
 fn show_trait_from_str() {
-    print_section("Example 2: the FromStr trait (returns Result)");
+    print_section(&tr("example-log-level-example-2-the-fromstr-trait"));
 
-    println!("Using .parse::<LogLevel>():");
+    println!("{}", tr("example-log-level-using-parse-loglevel"));
     let valid_inputs = [
         "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical",
     ];
     for input in valid_inputs {
         let level: LogLevel = input.parse().expect("valid level should parse");
-        println!("  {:>10}.parse() → Ok({:?})", input, level);
+        println!(
+            "  {}",
+            tr_args(
+                "example-log-level-parse-ok",
+                &[
+                    ("input", &format!("{:>10}", input)),
+                    ("level", &format!("{:?}", level))
+                ]
+            )
+        );
     }
 
-    println!("\nError handling:");
+    println!("\n{}", tr("example-log-level-error-handling"));
     let invalid_inputs = ["", "invalid", "trace_level"];
     for input in invalid_inputs {
         let result: Result<LogLevel, _> = input.parse();
         match &result {
-            Ok(level) => println!("  {:>12}.parse() → Ok({:?})", input, level),
-            Err(e) => println!("  {:>12}.parse() → Err(\"{}\")", input, e),
+            Ok(level) => println!(
+                "  {}",
+                tr_args(
+                    "example-log-level-parse-ok",
+                    &[
+                        ("input", &format!("{:>12}", input)),
+                        ("level", &format!("{:?}", level))
+                    ]
+                )
+            ),
+            Err(e) => println!(
+                "  {}",
+                tr_args(
+                    "example-log-level-parse-err",
+                    &[("input", &format!("{:>12}", input)), ("e", &e)]
+                )
+            ),
         }
     }
 }
 
 /// 演示 `Ord` / `PartialOrd` 序比较（用于级别过滤）
 fn show_ordering_comparison() {
-    print_section("Example 3: ordering (Ord / PartialOrd)");
+    print_section(&tr("example-log-level-example-3-ordering-ord"));
 
-    println!("Levels low to high (higher value = more severe):");
+    println!(
+        "{}",
+        tr("example-log-level-levels-low-to-high-higher-value")
+    );
     let levels = [
         LogLevel::Trace,
         LogLevel::Debug,
@@ -93,15 +129,39 @@ fn show_ordering_comparison() {
         println!("  {:?} = {}", level, level as u8);
     }
 
-    println!("\nComparison operators:");
+    println!("\n{}", tr("example-log-level-comparison-operators"));
     let l1 = LogLevel::Error;
     let l2 = LogLevel::Error;
-    println!("  Error > Debug  → {}", LogLevel::Error > LogLevel::Debug);
-    println!("  Info  <= Warn  → {}", LogLevel::Info <= LogLevel::Warn);
-    println!("  Trace < Fatal  → {}", LogLevel::Trace < LogLevel::Fatal);
-    println!("  Error == Error → {}", l1 == l2);
+    println!(
+        "  {}",
+        tr_args(
+            "example-log-level-error-debug",
+            &[("value", &(LogLevel::Error > LogLevel::Debug))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-log-level-info-warn",
+            &[("value", &(LogLevel::Info <= LogLevel::Warn))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-log-level-trace-fatal",
+            &[("value", &(LogLevel::Trace < LogLevel::Fatal))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args("example-log-level-error-error", &[("value", &(l1 == l2))])
+    );
 
-    println!("\nPractical use: level filtering (record only >= WARN)");
+    println!(
+        "\n{}",
+        tr("example-log-level-practical-use-level-filtering")
+    );
     let min_level = LogLevel::Warn;
     let incoming = [
         LogLevel::Trace,
@@ -124,7 +184,7 @@ fn show_ordering_comparison() {
 
 /// 演示 `Display` trait 实现
 fn show_display_trait() {
-    print_section("Example 4: the Display trait");
+    print_section(&tr("example-log-level-example-4-the-display-trait"));
 
     println!("format!(\"{{}}\", level):");
     for level in [
@@ -138,7 +198,10 @@ fn show_display_trait() {
         println!("  format!(\"{{}}\", {:?}) → \"{}\"", level, level);
     }
 
-    println!("\nConsistency check against as_str():");
+    println!(
+        "\n{}",
+        tr("example-log-level-consistency-check-against-as-str")
+    );
     for level in [
         LogLevel::Trace,
         LogLevel::Debug,
@@ -151,15 +214,23 @@ fn show_display_trait() {
         let as_str = level.as_str();
         let consistent = display == as_str;
         println!(
-            "  {:?}: Display=\"{}\", as_str=\"{}\", match={}",
-            level, display, as_str, consistent
+            "  {}",
+            tr_args(
+                "example-log-level-display-as-str-match",
+                &[
+                    ("level", &format!("{:?}", level)),
+                    ("display", &display),
+                    ("as_str", &as_str),
+                    ("consistent", &consistent)
+                ]
+            )
         );
     }
 }
 
 /// 演示辅助方法 `as_str` 和 `as_short_str`
 fn show_helper_methods() {
-    print_section("Example 5: helper methods as_str / as_short_str");
+    print_section(&tr("example-log-level-example-5-helper-methods-as-str"));
 
     println!("{:<10} {:<8} {:<10}", "Variant", "as_str", "as_short_str");
     println!("{}", "-".repeat(30));
@@ -179,15 +250,24 @@ fn show_helper_methods() {
         );
     }
 
-    println!("\nShort format use case: compact console output");
-    println!("  [INF] 2026-01-01 service started");
-    println!("  [WRN] 2026-01-01 missing config entry, using defaults");
-    println!("  [ERR] 2026-01-01 database connection failed");
+    println!(
+        "\n{}",
+        tr("example-log-level-short-format-use-case-compact")
+    );
+    println!(
+        "  {}",
+        tr("example-log-level-inf-2026-01-01-service-started")
+    );
+    println!(
+        "  {}",
+        tr("example-log-level-wrn-2026-01-01-missing-config")
+    );
+    println!("  {}", tr("example-log-level-err-2026-01-01-database"));
 }
 
 /// 演示错误处理和 `LogLevelParseError`
 fn show_error_handling() {
-    print_section("Example 6: error handling (LogLevelParseError)");
+    print_section(&tr("example-log-level-example-6-error-handling"));
 
     use inklog::LogLevelParseError;
 
@@ -200,10 +280,31 @@ fn show_error_handling() {
                 let msg = format!("{}", e);
                 let contains_input =
                     msg.contains(input) || (input.is_empty() && msg.contains("Unknown"));
-                println!("  input: {:>12}", format!("\"{}\"", input));
-                println!("    error type: {:?}", e);
-                println!("    error message: {}", msg);
-                println!("    input included: {}", contains_input);
+                println!(
+                    "  {}",
+                    tr_args(
+                        "example-log-level-input",
+                        &[("value", &format!("{:>12}", format!("\"{}\"", input)))]
+                    )
+                );
+                println!(
+                    "    {}",
+                    tr_args(
+                        "example-log-level-error-type",
+                        &[("e", &format!("{:?}", e))]
+                    )
+                );
+                println!(
+                    "    {}",
+                    tr_args("example-log-level-error-message", &[("msg", &msg)])
+                );
+                println!(
+                    "    {}",
+                    tr_args(
+                        "example-log-level-input-included",
+                        &[("contains_input", &contains_input)]
+                    )
+                );
             }
         }
     }

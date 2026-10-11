@@ -17,13 +17,13 @@
 
 use inklog::tracing::Level;
 use inklog::{LogRecord, LogTemplate, OutputFormat};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 
 fn main() {
-    print_separator("inklog output format example");
+    print_separator(&tr("example-output-format-inklog-output-format-example"));
 
     show_output_format_variants();
     show_from_str_parsing();
@@ -33,44 +33,97 @@ fn main() {
     show_sink_config_usage();
     show_best_practices();
 
-    println!("\n✓ All output format examples completed");
+    println!(
+        "\n{}",
+        tr("example-output-format-all-output-format-examples")
+    );
 }
 
 /// 展示 OutputFormat 枚举变体
 #[allow(clippy::eq_op)] // 示例代码故意展示相同变体比较
 fn show_output_format_variants() {
-    print_section("Example 1: OutputFormat enum variants");
+    print_section(&tr("example-output-format-example-1-outputformat-enum"));
 
     let text = OutputFormat::Text;
     let json = OutputFormat::Json;
     let default = OutputFormat::default();
 
-    println!("OutputFormat::Text    = {:?}", text);
-    println!("OutputFormat::Json    = {:?}", json);
-    println!("OutputFormat::default() = {:?}", default);
-    println!("\nDefault format: {:?} (human-readable text)", default);
+    println!(
+        "{}",
+        tr_args(
+            "example-output-format-outputformat-text",
+            &[("text", &format!("{:?}", text))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-output-format-outputformat-json",
+            &[("json", &format!("{:?}", json))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-output-format-outputformat-default",
+            &[("default", &format!("{:?}", default))]
+        )
+    );
+    println!(
+        "\n{}",
+        tr_args(
+            "example-output-format-default-format-human-readable",
+            &[("default", &format!("{:?}", default))]
+        )
+    );
     assert_eq!(default, OutputFormat::Text);
 
-    println!("\nEquivalence check:");
+    println!("\n{}", tr("example-output-format-equivalence-check"));
     let is_text_equal = OutputFormat::Text == OutputFormat::Text;
-    println!("  Text == Text → {}", is_text_equal);
     println!(
-        "  Text == Json → {}",
-        OutputFormat::Text == OutputFormat::Json
+        "  {}",
+        tr_args(
+            "example-output-format-text-text",
+            &[("is_text_equal", &is_text_equal)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-output-format-text-json",
+            &[("value", &(OutputFormat::Text == OutputFormat::Json))]
+        )
     );
 }
 
 /// 展示 FromStr 解析
 fn show_from_str_parsing() {
-    print_section("Example 2: FromStr string parsing");
+    print_section(&tr(
+        "example-output-format-example-2-fromstr-string-parsing",
+    ));
 
-    println!("String → OutputFormat parsing:\n");
+    println!(
+        "{}\n",
+        tr("example-output-format-string-outputformat-parsing")
+    );
 
     let cases = ["text", "Text", "TEXT", "json", "Json", "JSON"];
     for s in &cases {
         match OutputFormat::from_str(s) {
-            Ok(fmt) => println!("  {:?} → {:?} ✓", s, fmt),
-            Err(e) => println!("  {:?} → error: {}", s, e),
+            Ok(fmt) => println!(
+                "  {}",
+                tr_args(
+                    "example-output-format-from-str-parsed-check",
+                    &[("s", &format!("{:?}", s)), ("fmt", &format!("{:?}", fmt))]
+                )
+            ),
+            Err(e) => println!(
+                "  {}",
+                tr_args(
+                    "example-output-format-error",
+                    &[("s", &format!("{:?}", s)), ("e", &e)]
+                )
+            ),
         }
     }
 
@@ -83,19 +136,36 @@ fn show_from_str_parsing() {
     let invalid = OutputFormat::from_str("xml");
     assert!(invalid.is_err());
     println!(
-        "\n  {:?} → error (invalid value): {}",
-        "xml",
-        invalid.unwrap_err()
+        "\n  {}",
+        tr_args(
+            "example-output-format-error-invalid-value",
+            &[
+                ("value", &format!("{:?}", "xml")),
+                ("value2", &(invalid.unwrap_err()))
+            ]
+        )
     );
 }
 
 /// 展示 Display trait
 fn show_display_trait() {
-    print_section("Example 3: Display trait output");
+    print_section(&tr("example-output-format-example-3-display-trait-output"));
 
-    println!("OutputFormat → string:\n");
-    println!("  OutputFormat::Text → \"{}\"", OutputFormat::Text);
-    println!("  OutputFormat::Json → \"{}\"", OutputFormat::Json);
+    println!("{}\n", tr("example-output-format-outputformat-string"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-output-format-outputformat-text-2",
+            &[("value", &(OutputFormat::Text))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-output-format-outputformat-json-2",
+            &[("value", &(OutputFormat::Json))]
+        )
+    );
 
     assert_eq!(format!("{}", OutputFormat::Text), "text");
     assert_eq!(format!("{}", OutputFormat::Json), "json");
@@ -103,23 +173,37 @@ fn show_display_trait() {
 
 /// 展示 Text 格式的日志渲染效果
 fn show_text_format_rendering() {
-    print_section("Example 4: Text rendering (default)");
+    print_section(&tr(
+        "example-output-format-example-4-text-rendering-default",
+    ));
 
     let template = LogTemplate::default();
     let record = create_sample_record();
 
     let rendered = template.render(&record);
-    println!("LogTemplate::default() rendering:");
+    println!(
+        "{}",
+        tr("example-output-format-logtemplate-default-rendering")
+    );
     println!("  {}", rendered);
-    println!("\nCharacteristics:");
-    println!("  - Human-readable; suits consoles and log files");
-    println!("  - Contains timestamp, level, target, message");
-    println!("  - Structured fields appended as JSON at the end");
+    println!("\n{}", tr("example-output-format-characteristics"));
+    println!(
+        "  {}",
+        tr("example-output-format-human-readable-suits-consoles")
+    );
+    println!(
+        "  {}",
+        tr("example-output-format-contains-timestamp-level-target")
+    );
+    println!(
+        "  {}",
+        tr("example-output-format-structured-fields-appended-as")
+    );
 }
 
 /// 展示 Json 格式的日志渲染效果
 fn show_json_format_rendering() {
-    print_section("Example 5: Json rendering (NDJSON)");
+    print_section(&tr("example-output-format-example-5-json-rendering-ndjson"));
 
     let record = create_sample_record();
 
@@ -133,24 +217,39 @@ fn show_json_format_rendering() {
     }))
     .unwrap();
 
-    println!("NDJSON output:");
+    println!("{}", tr("example-output-format-ndjson-output"));
     println!("  {}", json_line);
-    println!("\nCharacteristics:");
-    println!("  - Machine-parseable; suits log collection systems");
-    println!("  - One complete JSON object per line");
-    println!("  - Directly collectable by Fluentd/Logstash/Promtail");
-    println!("  - Supports nested structured fields");
+    println!("\n{}", tr("example-output-format-characteristics"));
+    println!(
+        "  {}",
+        tr("example-output-format-machine-parseable-suits-log")
+    );
+    println!(
+        "  {}",
+        tr("example-output-format-one-complete-json-object-per")
+    );
+    println!(
+        "  {}",
+        tr("example-output-format-directly-collectable-by-fluentd")
+    );
+    println!(
+        "  {}",
+        tr("example-output-format-supports-nested-structured")
+    );
 
     // 验证 JSON 合法性
     let parsed: Value = serde_json::from_str(&json_line).unwrap();
     assert_eq!(parsed["level"], "INFO");
     assert_eq!(parsed["message"], "user logged in");
-    println!("\n  ✓ JSON output parses correctly with standard parsers");
+    println!(
+        "\n  {}",
+        tr("example-output-format-json-output-parses-correctly")
+    );
 }
 
 /// 展示在 Sink 配置中使用 OutputFormat
 fn show_sink_config_usage() {
-    print_section("Example 6: OutputFormat in sink configs");
+    print_section(&tr("example-output-format-example-6-outputformat-in-sink"));
 
     use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 
@@ -163,8 +262,17 @@ fn show_sink_config_usage() {
         output_format: OutputFormat::Json,
         secret_scan_enabled: false,
     };
-    println!("Console sink config (JSON format):");
-    println!("  output_format = {:?}", console_cfg.output_format);
+    println!(
+        "{}",
+        tr("example-output-format-console-sink-config-json-format")
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-output-format-output-format",
+            &[("output_format", &format!("{:?}", console_cfg.output_format))]
+        )
+    );
 
     // File Sink 使用 Text 格式
     let file_cfg = FileSinkConfig {
@@ -172,10 +280,19 @@ fn show_sink_config_usage() {
         output_format: OutputFormat::Text,
         ..Default::default()
     };
-    println!("\nFile sink config (Text format):");
-    println!("  output_format = {:?}", file_cfg.output_format);
+    println!(
+        "\n{}",
+        tr("example-output-format-file-sink-config-text-format")
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-output-format-output-format",
+            &[("output_format", &format!("{:?}", file_cfg.output_format))]
+        )
+    );
 
-    println!("\nTOML config example:");
+    println!("\n{}", tr("example-output-format-toml-config-example"));
     println!(
         r#"
 [console_sink]
@@ -191,29 +308,68 @@ output_format = "text""#
 
 /// 最佳实践建议
 fn show_best_practices() {
-    print_section("7. Best practices");
+    print_section(&tr("example-output-format-7-best-practices"));
 
-    println!("OutputFormat selection guide:\n");
+    println!(
+        "{}\n",
+        tr("example-output-format-outputformat-selection-guide")
+    );
 
-    println!("1. Text format use cases:");
-    println!("   - Development console output");
-    println!("   - Log files read directly by humans");
-    println!("   - Debugging and troubleshooting");
+    println!("{}", tr("example-output-format-1-text-format-use-cases"));
+    println!(
+        "   {}",
+        tr("example-output-format-development-console-output")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-log-files-read-directly-by")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-debugging-and-troubleshooting")
+    );
 
-    println!("\n2. Json format use cases:");
-    println!("   - Production structured log collection");
-    println!("   - Log analytics platforms (ELK/Loki/Datadog)");
-    println!("   - Suits field-level querying and filtering");
+    println!("\n{}", tr("example-output-format-2-json-format-use-cases"));
+    println!(
+        "   {}",
+        tr("example-output-format-production-structured-log")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-log-analytics-platforms-elk")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-suits-field-level-querying-and")
+    );
 
-    println!("\n3. Mixing formats:");
-    println!("   - Console → Text (easy for developers to read)");
-    println!("   - File → Json (easy to collect and analyze)");
-    println!("   - Database → structured fields stored directly");
+    println!("\n{}", tr("example-output-format-3-mixing-formats"));
+    println!("   {}", tr("example-output-format-console-text-easy-for"));
+    println!(
+        "   {}",
+        tr("example-output-format-file-json-easy-to-collect-and")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-database-structured-fields")
+    );
 
-    println!("\n4. Performance considerations:");
-    println!("   - Text format renders faster (simple string concatenation)");
-    println!("   - Json format needs serialization (~2-3x overhead)");
-    println!("   - For high throughput, use Text for files and convert to Json at the collector");
+    println!(
+        "\n{}",
+        tr("example-output-format-4-performance-considerations")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-text-format-renders-faster")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-json-format-needs-serialization")
+    );
+    println!(
+        "   {}",
+        tr("example-output-format-for-high-throughput-use-text")
+    );
 }
 
 /// 创建示例日志记录

@@ -63,7 +63,7 @@ use inklog::tokio::io::{AsyncReadExt, AsyncWriteExt};
 use inklog::tokio::net::{TcpListener, TcpStream};
 use inklog::tokio::time::sleep;
 use inklog::{Metrics, SinkStatus};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::collections::HashMap;
 
 /// 外部响应内容打印前统一脱敏 + 截断（CodeQL CWE-117：外部输入直入
@@ -102,7 +102,7 @@ use std::time::Duration;
 /// }
 /// ```
 async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> {
-    print_separator("1. Start the HTTP server");
+    print_separator(&tr("example-http-1-start-the-http-server"));
 
     // 创建 Metrics 实例用于演示
     let metrics = Metrics::new();
@@ -127,15 +127,24 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
     let port = find_available_port()?;
     let addr = format!("127.0.0.1:{}", port);
 
-    print_section("HTTP server configuration");
-    println!("Listen address: {}", addr);
-    println!("Endpoints:");
-    println!("  - GET /health  → health status as JSON");
-    println!("  - GET /metrics → metrics in Prometheus format");
+    print_section(&tr("example-http-http-server-configuration"));
+    println!(
+        "{}",
+        tr_args("example-http-listen-address", &[("addr", &addr)])
+    );
+    println!("{}", tr("example-http-endpoints"));
+    println!("  {}", tr("example-http-get-health-health-status-as-json"));
+    println!("  {}", tr("example-http-get-metrics-metrics-in"));
     println!();
 
     let listener = TcpListener::bind(&addr).await?;
-    println!("✓ HTTP server started on port {}", port);
+    println!(
+        "{}",
+        tr_args(
+            "example-http-http-server-started-on-port",
+            &[("port", &port)]
+        )
+    );
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -159,22 +168,22 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
                                 match handle.await {
                                     Ok(Ok(())) => {}
                                     Ok(Err(e)) => {
-                                        eprintln!("failed to handle connection {}: {}", addr, e);
+                                        eprintln!("{}", tr_args("example-http-failed-to-handle-connection", &[("addr", &addr), ("e", &e)]));
                                     }
                                     Err(join_err) => {
-                                        eprintln!("connection {} handler task aborted: {}", addr, join_err);
+                                        eprintln!("{}", tr_args("example-http-connection-handler-task-aborted", &[("addr", &addr), ("join_err", &join_err)]));
                                     }
                                 }
                             });
                         }
                         Err(e) => {
-                            eprintln!("failed to accept a connection: {}", e);
+                            eprintln!("{}", tr_args("example-http-failed-to-accept-a-connection", &[("e", &e)]));
                         }
                     }
                 }
                 // 检查 shutdown 信号
                 _ = &mut shutdown_rx => {
-                    println!("\n✓ shutdown signal received, closing the server");
+                    println!("\n{}", tr("example-http-shutdown-signal-received"));
                     break;
                 }
             }
@@ -203,8 +212,11 @@ async fn handle_connection(mut stream: TcpStream, metrics: std::sync::Arc<Metric
             Ok(Err(e)) => return Err(e.into()),
             Err(_elapsed) => {
                 eprintln!(
-                    "request read timed out ({}s), closing the connection",
-                    READ_TIMEOUT.as_secs()
+                    "{}",
+                    tr_args(
+                        "example-http-request-read-timed-out-s",
+                        &[("value", &(READ_TIMEOUT.as_secs()))]
+                    )
                 );
                 return Ok(());
             }
@@ -431,20 +443,35 @@ async fn http_get(url: &str) -> Result<(u16, String, String)> {
 ///
 /// 演示如何访问 `/health` 端点并解析响应。
 async fn health_endpoint(port: u16) -> Result<()> {
-    print_separator("2. Health check endpoint demo");
+    print_separator(&tr("example-http-2-health-check-endpoint-demo"));
 
-    print_section("Send a GET /health request");
+    print_section(&tr("example-http-send-a-get-health-request"));
 
     // 发送 HTTP 请求
     let url = format!("http://127.0.0.1:{}/health", port);
-    println!("Request URL: {}\n", url);
+    println!(
+        "{}\n",
+        tr_args("example-http-request-url", &[("url", &url)])
+    );
 
     let (status_code, content_type, body) = http_get(&url).await?;
 
-    println!("Response status: {}", status_code);
-    println!("Content-Type: {}", content_type);
+    println!(
+        "{}",
+        tr_args(
+            "example-http-response-status",
+            &[("status_code", &status_code)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-http-content-type",
+            &[("content_type", &content_type)]
+        )
+    );
 
-    println!("\nResponse body (JSON):\n");
+    println!("\n{}\n", tr("example-http-response-body-json"));
     let json: serde_json::Value = serde_json::from_str(&body)?;
     println!(
         "{}",
@@ -463,15 +490,27 @@ async fn health_endpoint(port: u16) -> Result<()> {
     assert!(json.get("metrics").is_some(), "missing the metrics field");
 
     let overall_status = json["overall_status"].as_str().unwrap();
-    println!("\n✓ Health status: {}", overall_status);
+    println!(
+        "\n{}",
+        tr_args(
+            "example-http-health-status",
+            &[("overall_status", &overall_status)]
+        )
+    );
 
     if let Some(sinks) = json["sinks"].as_object() {
         for (name, health) in sinks {
-            println!("  ✓ Sink '{}': {}", name, health["status"]);
+            println!(
+                "  {}",
+                tr_args(
+                    "example-http-sink",
+                    &[("name", &name), ("value", &(health["status"]))]
+                )
+            );
         }
     }
 
-    println!("\n✓ /health endpoint test passed");
+    println!("\n{}", tr("example-http-health-endpoint-test-passed"));
     Ok(())
 }
 
@@ -479,19 +518,34 @@ async fn health_endpoint(port: u16) -> Result<()> {
 ///
 /// 演示如何访问 `/metrics` 端点并解析 Prometheus 格式的指标。
 async fn metrics_endpoint(port: u16) -> Result<()> {
-    print_separator("3. Metrics endpoint demo");
+    print_separator(&tr("example-http-3-metrics-endpoint-demo"));
 
-    print_section("Send a GET /metrics request");
+    print_section(&tr("example-http-send-a-get-metrics-request"));
 
     let url = format!("http://127.0.0.1:{}/metrics", port);
-    println!("Request URL: {}\n", url);
+    println!(
+        "{}\n",
+        tr_args("example-http-request-url", &[("url", &url)])
+    );
 
     let (status_code, content_type, body) = http_get(&url).await?;
 
-    println!("Response status: {}", status_code);
-    println!("Content-Type: {}", content_type);
+    println!(
+        "{}",
+        tr_args(
+            "example-http-response-status",
+            &[("status_code", &status_code)]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-http-content-type",
+            &[("content_type", &content_type)]
+        )
+    );
 
-    print_section("Prometheus format metrics output");
+    print_section(&tr("example-http-prometheus-format-metrics-output"));
     println!("{}", safe_body_preview(&body));
 
     // 验证关键指标存在（uptime_seconds 只在运行时间 > 0 时输出）
@@ -504,7 +558,7 @@ async fn metrics_endpoint(port: u16) -> Result<()> {
         "missing the sink_healthy metric"
     );
 
-    print_section("Key metrics summary");
+    print_section(&tr("example-http-key-metrics-summary"));
 
     let metrics: Vec<&str> = body
         .lines()
@@ -516,29 +570,50 @@ async fn metrics_endpoint(port: u16) -> Result<()> {
     }
 
     if metrics.len() > 10 {
-        println!("  ... ({} metrics in total)", metrics.len());
+        println!(
+            "  {}",
+            tr_args(
+                "example-http-metrics-in-total",
+                &[("value", &(metrics.len()))]
+            )
+        );
     }
 
-    println!("\n✓ /metrics endpoint test passed");
+    println!("\n{}", tr("example-http-metrics-endpoint-test-passed"));
     Ok(())
 }
 
 /// 错误处理端点演示
 async fn error_endpoint_demo(port: u16) -> Result<()> {
-    print_separator("4. Error handling endpoint demo");
+    print_separator(&tr("example-http-4-error-handling-endpoint-demo"));
 
-    print_section("Request a nonexistent endpoint");
+    print_section(&tr("example-http-request-a-nonexistent-endpoint"));
 
     let url = format!("http://127.0.0.1:{}/invalid-path", port);
-    println!("Request URL: {}\n", url);
+    println!(
+        "{}\n",
+        tr_args("example-http-request-url", &[("url", &url)])
+    );
 
     let (status_code, _content_type, body) = http_get(&url).await?;
-    println!("Response status: {} (expected: 404)", status_code);
+    println!(
+        "{}",
+        tr_args(
+            "example-http-response-status-expected-404",
+            &[("status_code", &status_code)]
+        )
+    );
 
     let json: serde_json::Value = serde_json::from_str(&body)?;
-    println!("\nResponse body:\n{}", serde_json::to_string_pretty(&json)?);
+    println!(
+        "\n{}",
+        tr_args(
+            "example-http-response-body",
+            &[("value", &(serde_json::to_string_pretty(&json)?))]
+        )
+    );
 
-    println!("\n✓ 404 error handling test passed");
+    println!("\n{}", tr("example-http-404-error-handling-test-passed"));
     Ok(())
 }
 
@@ -567,7 +642,7 @@ fn find_available_port() -> Result<u16> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("=== inklog HTTP health check and metrics endpoint examples ===\n");
+    println!("{}\n", tr("example-http-inklog-http-health-check-and"));
 
     let (port, shutdown) = start_http_server().await?;
 
@@ -580,31 +655,46 @@ async fn main() -> Result<()> {
 
     error_endpoint_demo(port).await?;
 
-    print_separator("5. Integration guide");
+    print_separator(&tr("example-http-5-integration-guide"));
 
-    println!("\nConfigure scraping in Prometheus:");
+    println!("\n{}", tr("example-http-configure-scraping-in-prometheus"));
     println!();
-    println!("  # prometheus.yml");
-    println!("  scrape_configs:");
-    println!("    - job_name: 'inklog'");
-    println!("      static_configs:");
-    println!("        - targets: ['localhost:{}']", port);
+    println!("  {}", tr("example-http-prometheus-yml"));
+    println!("  {}", tr("example-http-scrape-configs"));
+    println!("    {}", tr("example-http-job-name-inklog"));
+    println!("      {}", tr("example-http-static-configs"));
+    println!(
+        "        {}",
+        tr_args("example-http-targets-localhost", &[("port", &port)])
+    );
     println!();
-    println!("  Then run: prometheus --config.file=prometheus.yml");
+    println!("  {}", tr("example-http-then-run-prometheus-config-file"));
     println!();
 
-    println!("Test with curl:");
+    println!("{}", tr("example-http-test-with-curl"));
     println!();
-    println!("  # health check");
-    println!("  curl http://localhost:{}/health | jq", port);
+    println!("  {}", tr("example-http-health-check"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-curl-http-localhost-health-jq",
+            &[("port", &port)]
+        )
+    );
     println!();
-    println!("  # Prometheus metrics");
-    println!("  curl http://localhost:{}/metrics", port);
+    println!("  {}", tr("example-http-prometheus-metrics"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-http-curl-http-localhost-metrics",
+            &[("port", &port)]
+        )
+    );
     println!();
 
     let _ = shutdown.send(());
 
-    println!("\nPress Ctrl+C to exit...");
+    println!("\n{}", tr("example-http-press-ctrl-c-to-exit"));
     inklog_examples::wait_for_ctrl_c().await?;
 
     Ok(())

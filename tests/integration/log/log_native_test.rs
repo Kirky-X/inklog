@@ -20,7 +20,6 @@ async fn test_log_crate_native_support() {
         .await
         .unwrap();
 
-    // 使用 log crate 的宏
     info!("This is a log::info message");
     warn!("This is a log::warn message");
     error!("This is a log::error message");
@@ -56,7 +55,6 @@ async fn test_tracing_and_log_coexist() {
 /// 测试日志级别过滤
 #[tokio::test]
 async fn test_log_level_filtering() {
-    // 设置为 WARN 级别
     let _logger = LoggerManager::builder()
         .level("warn")
         .build()

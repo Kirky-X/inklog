@@ -947,7 +947,6 @@ mod tests {
 
     #[test]
     fn test_on_event_handles_full_channel() {
-        // Create a channel with capacity 1
         let (console_tx, console_rx) = bounded(1);
         let (async_tx, async_rx) = bounded(1);
         let metrics = Arc::new(Metrics::new());
@@ -1292,13 +1291,11 @@ mod tests {
         // 调用 try_flush_fallback，async channel 有容量 → send 成功 → pop_front
         subscriber.try_flush_fallback();
 
-        // 验证 buffer 已清空
         assert!(
             subscriber.fallback_buffer.lock().is_empty(),
             "buffer should be empty after successful flush"
         );
 
-        // 验证记录已发送到 async channel
         let received = async_rx.recv_timeout(std::time::Duration::from_millis(100));
         assert!(received.is_ok(), "should receive the flushed record");
         assert_eq!(received.unwrap().message, "fallback flush test");

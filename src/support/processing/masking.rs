@@ -681,7 +681,6 @@ impl DataMaskerBuilder {
             rules.retain(|r| r.name() != name.as_str());
         }
 
-        // Add extra rules
         rules.extend(self.extra_rules);
 
         // Sort by priority

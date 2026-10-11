@@ -198,3 +198,4 @@ log-kit_observer_module_build_started = inklog build observer: module build star
 log-kit_observer_module_built = inklog build observer: module built successfully
 log-db_batch_insert_succeeded = Database batch insert succeeded
 log-db_batch_insert_succeeded_parameterized = Database batch insert succeeded (parameterized)
+log-custom_sink_write_failed = custom sink '{ $name }' write failed (attempt { $attempt }/{ $max_attempts }): { $err }

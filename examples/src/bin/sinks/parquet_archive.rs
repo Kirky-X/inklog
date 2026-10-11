@@ -38,7 +38,7 @@ use inklog::tracing::Level;
     feature = "parquet",
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 #[cfg(not(all(
     feature = "parquet",
@@ -57,14 +57,19 @@ fn main() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn main() {
-    print_separator("inklog Parquet archive examples");
+    print_separator(&tr(
+        "example-parquet-archive-inklog-parquet-archive-examples",
+    ));
 
     show_parquet_config();
     show_convert_logs_to_parquet();
     show_database_sink_with_parquet();
     show_archive_workflow();
 
-    println!("\nAll Parquet archive examples shown.");
+    println!(
+        "\n{}",
+        tr("example-parquet-archive-all-parquet-archive-examples")
+    );
 }
 
 /// 演示 ParquetConfig 配置字段
@@ -73,33 +78,71 @@ fn main() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_parquet_config() {
-    print_section("Example 1: ParquetConfig fields");
+    print_section(&tr(
+        "example-parquet-archive-example-1-parquetconfig-fields",
+    ));
 
     let default = ParquetConfig::default();
-    println!("Default ParquetConfig:");
+    println!("{}", tr("example-parquet-archive-default-parquetconfig"));
     println!(
-        "  compression_level  = {} (Zstandard 0-10)",
-        default.compression_level
-    );
-    println!("  encoding           = \"{}\"", default.encoding);
-    println!(
-        "  max_row_group_size = {} (rows per row group)",
-        default.max_row_group_size
+        "  {}",
+        tr_args(
+            "example-parquet-archive-compression-level-zstandard-0-10",
+            &[("compression_level", &default.compression_level)]
+        )
     );
     println!(
-        "  max_page_size      = {} (bytes per page)",
-        default.max_page_size
+        "  {}",
+        tr_args(
+            "example-parquet-archive-encoding",
+            &[("encoding", &default.encoding)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-max-row-group-size-rows-per-row",
+            &[("max_row_group_size", &default.max_row_group_size)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-max-page-size-bytes-per-page",
+            &[("max_page_size", &default.max_page_size)]
+        )
     );
 
-    println!("\nField semantics:");
-    println!("  compression_level: the Zstandard compression level");
-    println!("    0 = none, 3 = balanced (recommended), 10 = maximum (slower)");
-    println!("  max_row_group_size: the maximum rows per row group");
-    println!("    a smaller value helps selective queries");
-    println!("    a larger value gives a better ratio");
-    println!("  max_page_size: the maximum bytes per page; controls read memory use");
+    println!("\n{}", tr("example-parquet-archive-field-semantics"));
+    println!(
+        "  {}",
+        tr("example-parquet-archive-compression-level-the-zstandard")
+    );
+    println!(
+        "    {}",
+        tr("example-parquet-archive-0-none-3-balanced-recommended")
+    );
+    println!(
+        "  {}",
+        tr("example-parquet-archive-max-row-group-size-the-maximum")
+    );
+    println!(
+        "    {}",
+        tr("example-parquet-archive-a-smaller-value-helps-selective")
+    );
+    println!(
+        "    {}",
+        tr("example-parquet-archive-a-larger-value-gives-a-better")
+    );
+    println!(
+        "  {}",
+        tr("example-parquet-archive-max-page-size-the-maximum-bytes")
+    );
 
-    println!("\nCustom configuration (high compression):");
+    println!(
+        "\n{}",
+        tr("example-parquet-archive-custom-configuration-high")
+    );
     let high_compression = ParquetConfig {
         compression_level: 10,
         encoding: "DELTA_BINARY_PACKED".to_string(),
@@ -108,20 +151,38 @@ fn show_parquet_config() {
         ..Default::default()
     };
     println!(
-        "  compression_level  = {} (maximum compression)",
-        high_compression.compression_level
-    );
-    println!("  encoding           = \"{}\"", high_compression.encoding);
-    println!(
-        "  max_row_group_size = {} (larger row groups)",
-        high_compression.max_row_group_size
+        "  {}",
+        tr_args(
+            "example-parquet-archive-compression-level-maximum",
+            &[("compression_level", &high_compression.compression_level)]
+        )
     );
     println!(
-        "  max_page_size      = {} (2MB)",
-        high_compression.max_page_size
+        "  {}",
+        tr_args(
+            "example-parquet-archive-encoding",
+            &[("encoding", &high_compression.encoding)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-max-row-group-size-larger-row",
+            &[("max_row_group_size", &high_compression.max_row_group_size)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-max-page-size-2mb",
+            &[("max_page_size", &high_compression.max_page_size)]
+        )
     );
 
-    println!("\nCustom configuration (low-latency queries):");
+    println!(
+        "\n{}",
+        tr("example-parquet-archive-custom-configuration-low")
+    );
     let low_latency = ParquetConfig {
         compression_level: 1,
         encoding: "PLAIN".to_string(),
@@ -130,17 +191,32 @@ fn show_parquet_config() {
         ..Default::default()
     };
     println!(
-        "  compression_level  = {} (fast)",
-        low_latency.compression_level
-    );
-    println!("  encoding           = \"{}\"", low_latency.encoding);
-    println!(
-        "  max_row_group_size = {} (smaller row groups)",
-        low_latency.max_row_group_size
+        "  {}",
+        tr_args(
+            "example-parquet-archive-compression-level-fast",
+            &[("compression_level", &low_latency.compression_level)]
+        )
     );
     println!(
-        "  max_page_size      = {} (512KB)",
-        low_latency.max_page_size
+        "  {}",
+        tr_args(
+            "example-parquet-archive-encoding",
+            &[("encoding", &low_latency.encoding)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-max-row-group-size-smaller-row",
+            &[("max_row_group_size", &low_latency.max_row_group_size)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-max-page-size-512kb",
+            &[("max_page_size", &low_latency.max_page_size)]
+        )
     );
 }
 
@@ -150,9 +226,14 @@ fn show_parquet_config() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_convert_logs_to_parquet() {
-    print_section("Example 2: calling convert_logs_to_parquet() for real");
+    print_section(&tr(
+        "example-parquet-archive-example-2-calling-convert-logs",
+    ));
 
-    println!("Create test LogRecord values...");
+    println!(
+        "{}",
+        tr("example-parquet-archive-create-test-logrecord-values")
+    );
 
     let records = vec![
         LogRecord::new(
@@ -176,42 +257,87 @@ fn show_convert_logs_to_parquet() {
             "request completed".to_string(),
         ),
     ];
-    println!("  ✓ created {} LogRecord values", records.len());
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-created-logrecord-values",
+            &[("value", &(records.len()))]
+        )
+    );
 
     let config = ParquetConfig::default();
-    println!("\nCall convert_logs_to_parquet()...");
+    println!(
+        "\n{}",
+        tr("example-parquet-archive-call-convert-logs-to-parquet")
+    );
     match convert_logs_to_parquet(&records, &config) {
         Ok(parquet_bytes) => {
-            println!("  ✓ Parquet conversion succeeded");
-            println!("  Input: {} LogRecord values", records.len());
-            println!("  Output: {} bytes of Parquet data", parquet_bytes.len());
             println!(
-                "  Ratio: {:.2} bytes/record",
-                parquet_bytes.len() as f64 / records.len() as f64
+                "  {}",
+                tr("example-parquet-archive-parquet-conversion-succeeded")
+            );
+            println!(
+                "  {}",
+                tr_args(
+                    "example-parquet-archive-input-logrecord-values",
+                    &[("value", &(records.len()))]
+                )
+            );
+            println!(
+                "  {}",
+                tr_args(
+                    "example-parquet-archive-output-bytes-of-parquet-data",
+                    &[("value", &(parquet_bytes.len()))]
+                )
+            );
+            println!(
+                "  {}",
+                tr_args(
+                    "example-parquet-archive-ratio-bytes-record",
+                    &[(
+                        "value",
+                        &format!("{:.2}", parquet_bytes.len() as f64 / records.len() as f64)
+                    )]
+                )
             );
 
             // 验证 Parquet magic number (PAR1)
             if parquet_bytes.len() >= 4 {
                 let magic = &parquet_bytes[..4];
                 println!(
-                    "  Parquet magic: {:?} (expected: [80, 65, 82, 49] = \"PAR1\")",
-                    magic
+                    "  {}",
+                    tr_args(
+                        "example-parquet-archive-parquet-magic-expected-80-65-82",
+                        &[("magic", &format!("{:?}", magic))]
+                    )
                 );
             }
         }
         Err(e) => {
-            println!("  ✗ conversion failed: {}", e);
+            println!(
+                "  {}",
+                tr_args("example-parquet-archive-conversion-failed", &[("e", &e)])
+            );
         }
     }
 
-    println!("\nEmpty record test:");
+    println!("\n{}", tr("example-parquet-archive-empty-record-test"));
     let empty: Vec<LogRecord> = vec![];
     match convert_logs_to_parquet(&empty, &config) {
         Ok(bytes) => println!(
-            "  ✓ empty record conversion succeeded: {} bytes",
-            bytes.len()
+            "  {}",
+            tr_args(
+                "example-parquet-archive-empty-record-conversion",
+                &[("value", &(bytes.len()))]
+            )
         ),
-        Err(e) => println!("  ✗ empty record conversion failed: {}", e),
+        Err(e) => println!(
+            "  {}",
+            tr_args(
+                "example-parquet-archive-empty-record-conversion-failed",
+                &[("e", &e)]
+            )
+        ),
     }
 }
 
@@ -221,7 +347,7 @@ fn show_convert_logs_to_parquet() {
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_database_sink_with_parquet() {
-    print_section("Example 3: DatabaseSinkConfig Parquet integration");
+    print_section(&tr("example-parquet-archive-example-3-databasesinkconfig"));
 
     let config = DatabaseSinkConfig {
         enabled: true,
@@ -239,27 +365,78 @@ fn show_database_sink_with_parquet() {
         ..Default::default()
     };
 
-    println!("A DatabaseSinkConfig with Parquet archiving enabled:");
-    println!("  enabled          = {}", config.enabled);
-    println!("  driver           = {:?}", config.driver);
-    println!("  url              = \"{}\"", config.url);
-    println!("  table_name       = \"{}\"", config.table_name);
-    println!("  batch_size       = {}", config.batch_size);
-    println!("  flush_interval_ms= {}", config.flush_interval_ms);
     println!(
-        "  archive_format   = \"{}\" ← enables the Parquet archive",
-        config.archive_format
+        "{}",
+        tr("example-parquet-archive-a-databasesinkconfig-with")
     );
     println!(
-        "  parquet_config.compression_level  = {}",
-        config.parquet_config.compression_level
+        "  {}",
+        tr_args(
+            "example-parquet-archive-enabled",
+            &[("enabled", &config.enabled)]
+        )
     );
     println!(
-        "  parquet_config.max_row_group_size = {}",
-        config.parquet_config.max_row_group_size
+        "  {}",
+        tr_args(
+            "example-parquet-archive-driver",
+            &[("driver", &format!("{:?}", config.driver))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args("example-parquet-archive-url", &[("url", &config.url)])
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-table-name",
+            &[("table_name", &config.table_name)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-batch-size",
+            &[("batch_size", &config.batch_size)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-flush-interval-ms",
+            &[("flush_interval_ms", &config.flush_interval_ms)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-archive-format-enables-the",
+            &[("archive_format", &config.archive_format)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-parquet-config-compression-level",
+            &[(
+                "compression_level",
+                &config.parquet_config.compression_level
+            )]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-parquet-archive-parquet-config-max-row-group",
+            &[(
+                "max_row_group_size",
+                &config.parquet_config.max_row_group_size
+            )]
+        )
     );
 
-    println!("\nThe corresponding TOML configuration:");
+    println!("\n{}", tr("example-parquet-archive-the-corresponding-toml"));
     println!(
         r#"[database_sink]
 enabled = true
@@ -282,37 +459,100 @@ max_row_group_size = 20000"#
     any(feature = "sqlite", feature = "postgres", feature = "mysql")
 ))]
 fn show_archive_workflow() {
-    print_section("Example 4: the Parquet archive workflow");
+    print_section(&tr("example-parquet-archive-example-4-the-parquet-archive"));
 
-    println!("The Parquet archive workflow:\n");
+    println!(
+        "{}\n",
+        tr("example-parquet-archive-the-parquet-archive-workflow")
+    );
 
-    println!("1. Logs are written into the database");
+    println!(
+        "{}",
+        tr("example-parquet-archive-1-logs-are-written-into-the")
+    );
     println!("   tracing::info!(\"service started\");");
-    println!("   → LogRecord → DatabaseSink → INSERT INTO logs");
+    println!(
+        "   {}",
+        tr("example-parquet-archive-logrecord-databasesink-insert")
+    );
 
-    println!("\n2. Periodically export to Parquet (in the background)");
-    println!("   flush_interval_ms triggers → convert_logs_to_parquet()");
-    println!("   → produce the Parquet byte stream");
+    println!(
+        "\n{}",
+        tr("example-parquet-archive-2-periodically-export-to")
+    );
+    println!(
+        "   {}",
+        tr("example-parquet-archive-flush-interval-ms-triggers")
+    );
+    println!(
+        "   {}",
+        tr("example-parquet-archive-produce-the-parquet-byte-stream")
+    );
 
-    println!("\n3. Parquet file storage");
-    println!("   → write the local file /tmp/inklog_archive_20260101.parquet");
-    println!("   → or upload to object/cold storage (integration is up to you)");
+    println!("\n{}", tr("example-parquet-archive-3-parquet-file-storage"));
+    println!(
+        "   {}",
+        tr("example-parquet-archive-write-the-local-file-tmp-inklog")
+    );
+    println!(
+        "   {}",
+        tr("example-parquet-archive-or-upload-to-object-cold")
+    );
 
-    println!("\n4. Analytical queries (external tools)");
-    println!("   # query Parquet with DuckDB");
-    println!("   duckdb -c \"SELECT level, COUNT(*) FROM 'archive.parquet' GROUP BY level\"");
+    println!(
+        "\n{}",
+        tr("example-parquet-archive-4-analytical-queries-external")
+    );
+    println!(
+        "   {}",
+        tr("example-parquet-archive-query-parquet-with-duckdb")
+    );
+    println!(
+        "   {}",
+        tr("example-parquet-archive-duckdb-c-select-level-count")
+    );
     println!();
-    println!("   # use Apache Arrow from Python");
-    println!("   import pyarrow.parquet as pq");
-    println!("   table = pq.read_table('archive.parquet')");
+    println!(
+        "   {}",
+        tr("example-parquet-archive-use-apache-arrow-from-python")
+    );
+    println!(
+        "   {}",
+        tr("example-parquet-archive-import-pyarrow-parquet-as-pq")
+    );
+    println!(
+        "   {}",
+        tr("example-parquet-archive-table-pq-read-table-archive")
+    );
 
-    println!("\nUse cases:");
-    println!("  - Analytics: load into Snowflake/BigQuery/Redshift");
-    println!("  - Archive: object storage cold tier (integration is up to you)");
-    println!("  - Compliance: efficient storage that meets regulatory retention");
+    println!("\n{}", tr("example-parquet-archive-use-cases"));
+    println!(
+        "  {}",
+        tr("example-parquet-archive-analytics-load-into-snowflake")
+    );
+    println!(
+        "  {}",
+        tr("example-parquet-archive-archive-object-storage-cold")
+    );
+    println!(
+        "  {}",
+        tr("example-parquet-archive-compliance-efficient-storage")
+    );
 
-    println!("\nPerformance characteristics:");
-    println!("  - Asynchronous background export that does not affect the main log path");
-    println!("  - Columnar storage with a high ratio (typically 5-10x)");
-    println!("  - Predicate pushdown keeps queries efficient");
+    println!(
+        "\n{}",
+        tr("example-parquet-archive-performance-characteristics")
+    );
+    println!(
+        "  {}",
+        tr("example-parquet-archive-asynchronous-background-export")
+    );
+    println!(
+        "  {}",
+        tr("example-parquet-archive-columnar-storage-with-a-high")
+    );
+    println!(
+        "  {}",
+        tr("example-parquet-archive-predicate-pushdown-keeps")
+    );
 }

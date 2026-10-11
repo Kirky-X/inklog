@@ -157,7 +157,6 @@ impl LogSink for ConsoleSink {
         if !self.config.enabled {
             return Ok(());
         }
-        // 应用数据脱敏（如果启用）
         // masking 关闭时零克隆借用原记录;开启时才物化脱敏副本
         let masked_record: Cow<'_, LogRecord> = if self.config.masking_enabled {
             let mut masked = record.clone();

@@ -73,8 +73,8 @@ impl EntropyScanner {
         );
         let min_token_chars = min_token_chars.max(1);
         let pattern = TOKEN_PATTERN_TEMPLATE.replace("@@MIN@@", &min_token_chars.to_string());
-        let token_regex =
-            Regex::new(&pattern).expect(&crate::i18n::tr("secret-token_regex_invariant"));
+        let token_regex = Regex::new(&pattern)
+            .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("secret-token_regex_invariant")));
         Self {
             threshold_bits,
             min_token_chars,

@@ -141,6 +141,11 @@ config-reload_failed_keep_previous = config reload failed; keeping previous conf
 
 # Schema serialization invariant
 config-json_schema_serialize_invariant = JsonSchema serialization cannot fail
+config-json_path_has_segment_invariant = dotted path has at least one segment
+config-json_intermediate_node_object_invariant = config tree intermediate nodes are objects
+config-json_leaf_parent_object_invariant = config tree leaf parent is an object
+config-serialize_invariant = InklogConfig serialization cannot fail (derived pure data)
+config-env_patch_types_invariant = env patches preserve field types (validated per rule)
 
 # Compression backend failure messages
 config-compression-create_failed = Failed to create compressed file: { $err }

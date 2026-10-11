@@ -18,49 +18,70 @@
 //! ```
 
 use inklog::InklogConfig;
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    print_separator("inklog LoggerManager runtime operations API example");
+    print_separator(&tr("example-runtime-ops-inklog-loggermanager-runtime"));
 
     show_health_status();
     show_channel_info();
     show_sink_recovery();
     show_shutdown();
 
-    println!("\nAll runtime operations API examples completed.");
+    println!("\n{}", tr("example-runtime-ops-all-runtime-operations-api"));
     Ok(())
 }
 
 /// 演示 get_health_status() 获取健康状态
 fn show_health_status() {
-    print_section("Example 1: get_health_status() health state");
+    print_section(&tr("example-runtime-ops-example-1-get-health-status"));
 
-    println!("API signature:");
+    println!("{}", tr("example-runtime-ops-api-signature"));
     println!("  pub fn get_health_status(&self) -> HealthStatus\n");
 
-    println!("HealthStatus fields:");
-    println!("  overall_status:      SinkStatus (Healthy/Degraded/Unhealthy/NotStarted)");
-    println!("  sinks:               HashMap<String, SinkHealth>");
-    println!("  channel_usage:       f64 (0.0 ~ 1.0)");
-    println!("  uptime_seconds:      u64");
-    println!("  metrics:             MetricsSnapshot");
-    println!("  pool_stats:          Option<PoolStats>");
-    println!("  encryption_key_valid: bool");
+    println!("{}", tr("example-runtime-ops-healthstatus-fields"));
+    println!("  {}", tr("example-runtime-ops-overall-status-sinkstatus"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-sinks-hashmap-string-sinkhealth")
+    );
+    println!("  {}", tr("example-runtime-ops-channel-usage-f64-0-0-1-0"));
+    println!("  {}", tr("example-runtime-ops-uptime-seconds-u64"));
+    println!("  {}", tr("example-runtime-ops-metrics-metricssnapshot"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-pool-stats-option-poolstats")
+    );
+    println!("  {}", tr("example-runtime-ops-encryption-key-valid-bool"));
 
-    println!("\nSinkStatus enum values:");
-    println!("  Healthy             - sink running normally");
+    println!("\n{}", tr("example-runtime-ops-sinkstatus-enum-values"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-healthy-sink-running-normally")
+    );
     println!("  Degraded {{ reason }}  - sink degraded but still usable");
     println!("  Unhealthy {{ error }}  - sink failed and unusable");
-    println!("  NotStarted          - sink not started yet");
+    println!(
+        "  {}",
+        tr("example-runtime-ops-notstarted-sink-not-started-yet")
+    );
 
-    println!("\nUse cases:");
-    println!("  - Poll health status periodically (e.g. every 30 seconds)");
-    println!("  - Integrate into the /health HTTP endpoint");
-    println!("  - Trigger alert notifications");
+    println!("\n{}", tr("example-runtime-ops-use-cases"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-poll-health-status-periodically")
+    );
+    println!(
+        "  {}",
+        tr("example-runtime-ops-integrate-into-the-health-http")
+    );
+    println!(
+        "  {}",
+        tr("example-runtime-ops-trigger-alert-notifications")
+    );
 
-    println!("\nCode example:");
+    println!("\n{}", tr("example-runtime-ops-code-example"));
     println!(
         r#"  let logger = LoggerManager::new().await?;
   let health = logger.get_health_status();
@@ -75,29 +96,41 @@ fn show_health_status() {
 
 /// 演示 Channel 容量和队列长度查询
 fn show_channel_info() {
-    print_section("Example 2: channel capacity and queue length");
+    print_section(&tr("example-runtime-ops-example-2-channel-capacity-and"));
 
-    println!("API signature:");
+    println!("{}", tr("example-runtime-ops-api-signature"));
     println!("  pub fn effective_channel_capacity(&self) -> usize");
     println!("  pub fn channel_len(&self) -> usize\n");
 
-    println!("Config defaults:");
+    println!("{}", tr("example-runtime-ops-config-defaults"));
     let config = InklogConfig::default();
     println!(
-        "  performance.channel_capacity = {} (default)",
-        config.performance.channel_capacity
+        "  {}",
+        tr_args(
+            "example-runtime-ops-performance-channel-capacity",
+            &[("channel_capacity", &config.performance.channel_capacity)]
+        )
     );
     println!(
-        "  performance.worker_threads   = {} (default)",
-        config.performance.worker_threads
+        "  {}",
+        tr_args(
+            "example-runtime-ops-performance-worker-threads",
+            &[("worker_threads", &config.performance.worker_threads)]
+        )
     );
 
-    println!("\nUse cases:");
-    println!("  - Monitor channel usage to warn about backpressure");
-    println!("  - channel_len / effective_channel_capacity > 0.8 → alert");
-    println!("  - Adjust channel_capacity dynamically (requires rebuilding LoggerManager)");
+    println!("\n{}", tr("example-runtime-ops-use-cases"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-monitor-channel-usage-to-warn")
+    );
+    println!(
+        "  {}",
+        tr("example-runtime-ops-channel-len-effective-channel")
+    );
+    println!("  {}", tr("example-runtime-ops-adjust-channel-capacity"));
 
-    println!("\nCode example:");
+    println!("\n{}", tr("example-runtime-ops-code-example"));
     println!(
         r#"  let logger = LoggerManager::new().await?;
   let capacity = logger.effective_channel_capacity();
@@ -112,25 +145,40 @@ fn show_channel_info() {
 
 /// 演示 Sink 恢复操作
 fn show_sink_recovery() {
-    print_section("Example 3: sink recovery operations");
+    print_section(&tr("example-runtime-ops-example-3-sink-recovery"));
 
-    println!("API signature:");
+    println!("{}", tr("example-runtime-ops-api-signature"));
     println!("  pub fn recover_sink(&self, sink_name: &str) -> Result<(), InklogError>");
     println!(
         "  pub fn trigger_recovery_for_unhealthy_sinks(&self) -> Result<Vec<String>, InklogError>\n"
     );
 
-    println!("recover_sink() usage:");
-    println!("  - Manually recover a sink by name");
-    println!("  - Sink names come from the config (e.g. \"console\", \"file\", \"database\")");
-    println!("  - Returns Err(InklogError) when recovery fails");
+    println!("{}", tr("example-runtime-ops-recover-sink-usage"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-manually-recover-a-sink-by-name")
+    );
+    println!(
+        "  {}",
+        tr("example-runtime-ops-sink-names-come-from-the-config")
+    );
+    println!(
+        "  {}",
+        tr("example-runtime-ops-returns-err-inklogerror-when")
+    );
 
-    println!("\ntrigger_recovery_for_unhealthy_sinks() usage:");
-    println!("  - Automatically scan all unhealthy sinks");
-    println!("  - Try to recover every unhealthy sink");
-    println!("  - Returns the list of successfully recovered sink names");
+    println!(
+        "\n{}",
+        tr("example-runtime-ops-trigger-recovery-for-unhealthy")
+    );
+    println!("  {}", tr("example-runtime-ops-automatically-scan-all"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-try-to-recover-every-unhealthy")
+    );
+    println!("  {}", tr("example-runtime-ops-returns-the-list-of"));
 
-    println!("\nCode example:");
+    println!("\n{}", tr("example-runtime-ops-code-example"));
     println!(
         r#"  let logger = LoggerManager::new().await?;
 
@@ -152,10 +200,16 @@ fn show_sink_recovery() {
   }}"#
     );
 
-    println!("\nRecovery strategies:");
-    println!("  - Console sink: usually needs no recovery (writes straight to stdout)");
-    println!("  - File sink: reopen the file handle");
-    println!("  - Database sink: rebuild the connection pool");
+    println!("\n{}", tr("example-runtime-ops-recovery-strategies"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-console-sink-usually-needs-no")
+    );
+    println!(
+        "  {}",
+        tr("example-runtime-ops-file-sink-reopen-the-file-handle")
+    );
+    println!("  {}", tr("example-runtime-ops-database-sink-rebuild-the"));
     println!(
         "  - Fallback: if auto_fallback=true, automatically degrades to the next-priority sink"
     );
@@ -163,19 +217,25 @@ fn show_sink_recovery() {
 
 /// 演示优雅关闭
 fn show_shutdown() {
-    print_section("Example 4: graceful shutdown with shutdown()");
+    print_section(&tr("example-runtime-ops-example-4-graceful-shutdown"));
 
-    println!("API signature:");
+    println!("{}", tr("example-runtime-ops-api-signature"));
     println!("  pub fn shutdown(&self) -> Result<(), InklogError>\n");
 
-    println!("shutdown() behavior:");
-    println!("  1. Stop accepting new log records");
-    println!("  2. Wait for all logs in the channel to be written to sinks");
-    println!("  3. Close all sinks (file handles, database connections, etc.)");
-    println!("  4. Stop the HTTP server (if enabled)");
-    println!("  5. Stop all worker threads");
+    println!("{}", tr("example-runtime-ops-shutdown-behavior"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-1-stop-accepting-new-log-records")
+    );
+    println!("  {}", tr("example-runtime-ops-2-wait-for-all-logs-in-the"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-3-close-all-sinks-file-handles")
+    );
+    println!("  {}", tr("example-runtime-ops-4-stop-the-http-server-if"));
+    println!("  {}", tr("example-runtime-ops-5-stop-all-worker-threads"));
 
-    println!("\nCode example:");
+    println!("\n{}", tr("example-runtime-ops-code-example"));
     println!(
         r#"  let logger = LoggerManager::new().await?;
 
@@ -188,15 +248,21 @@ fn show_shutdown() {
   println!("Logger shut down gracefully");"#
     );
 
-    println!("\nCaveats:");
-    println!("  - shutdown() is synchronous; it blocks until all logs are written");
-    println!("  - shutdown() can take a while if the channel holds many pending logs");
-    println!("  - Call shutdown() from the app's exit signal handler");
+    println!("\n{}", tr("example-runtime-ops-caveats"));
+    println!("  {}", tr("example-runtime-ops-shutdown-is-synchronous-it"));
+    println!(
+        "  {}",
+        tr("example-runtime-ops-shutdown-can-take-a-while-if")
+    );
+    println!(
+        "  {}",
+        tr("example-runtime-ops-call-shutdown-from-the-app-s")
+    );
     println!(
         "  - LoggerManager's Drop impl also tries to close, but without a completion guarantee"
     );
 
-    println!("\nFull lifecycle example:");
+    println!("\n{}", tr("example-runtime-ops-full-lifecycle-example"));
     println!(
         r#"  // 1. Initialize
   let logger = LoggerManager::new().await?;

@@ -19,9 +19,10 @@
 //! 本身没有限制，真实项目在 async 函数中调用 `build().await` 即生效。
 
 use inklog_examples::common::print_section;
+use inklog_examples::common::{tr, tr_args};
 
 fn main() {
-    println!("=== inklog Builder pattern configuration examples ===\n");
+    println!("{}\n", tr("example-builder-inklog-builder-pattern"));
 
     show_basic_builder();
     show_multi_sink_builder();
@@ -33,7 +34,10 @@ fn main() {
     // 展示 Builder 配置构建（不实际初始化）
     show_builder_pattern_flexibility();
 
-    println!("\nAll configuration examples have been shown.");
+    println!(
+        "\n{}",
+        tr("example-builder-all-configuration-examples-have")
+    );
     println!(
         "\nNote: the code snippets above are shown as strings (for section-by-section reading); they are not actually initialized in this example;"
     );
@@ -46,7 +50,7 @@ fn main() {
 ///
 /// 演示最简单的链式配置，仅启用 Console Sink。
 fn show_basic_builder() {
-    print_section("Example 1: basic Builder usage");
+    print_section(&tr("example-builder-example-1-basic-builder-usage"));
 
     let code = r#"
 // Simplest configuration: console sink only
@@ -57,18 +61,21 @@ let _logger = LoggerManager::builder()
     .await?;
 "#;
 
-    println!("Code example:\n{}", code);
-    println!("Configuration notes:");
-    println!("  ✓ Log level: DEBUG");
-    println!("  ✓ Console sink: enabled");
-    println!("  ✗ File sink: not enabled\n");
+    println!(
+        "{}",
+        tr_args("example-builder-code-example", &[("code", &code)])
+    );
+    println!("{}", tr("example-builder-configuration-notes"));
+    println!("  {}", tr("example-builder-log-level-debug"));
+    println!("  {}", tr("example-builder-console-sink-enabled"));
+    println!("  {}\n", tr("example-builder-file-sink-not-enabled"));
 }
 
 /// 展示多 Sink 配置
 ///
 /// 演示同时配置 Console 和 File Sink，日志同时输出到控制台和文件。
 fn show_multi_sink_builder() {
-    print_section("Example 2: multiple sinks");
+    print_section(&tr("example-builder-example-2-multiple-sinks"));
 
     let code = r#"
 // Enable both the console and file sinks
@@ -80,18 +87,21 @@ let _logger = LoggerManager::builder()
     .await?;
 "#;
 
-    println!("Code example:\n{}", code);
-    println!("Configuration notes:");
-    println!("  ✓ Log level: INFO");
-    println!("  ✓ Console sink: enabled");
-    println!("  ✓ File Sink: logs/app.log\n");
+    println!(
+        "{}",
+        tr_args("example-builder-code-example", &[("code", &code)])
+    );
+    println!("{}", tr("example-builder-configuration-notes"));
+    println!("  {}", tr("example-builder-log-level-info"));
+    println!("  {}", tr("example-builder-console-sink-enabled"));
+    println!("  {}\n", tr("example-builder-file-sink-logs-app-log"));
 }
 
 /// 展示高级配置选项
 ///
 /// 演示 Builder 的高级配置选项，包括格式、输出格式等。
 fn show_advanced_options_builder() {
-    print_section("Example 3: advanced options");
+    print_section(&tr("example-builder-example-3-advanced-options"));
 
     let code = r#"
 // Console emits JSON lines + the most detailed level
@@ -104,25 +114,28 @@ let _logger = LoggerManager::builder()
     .await?;
 "#;
 
-    println!("Code example:\n{}", code);
-    println!("Configuration notes:");
-    println!("  ✓ Log level: TRACE (most detailed)");
-    println!("  ✓ Console output: JSON lines (console_json(true))");
-    println!("  ✓ File Sink: logs/app.log\n");
+    println!(
+        "{}",
+        tr_args("example-builder-code-example", &[("code", &code)])
+    );
+    println!("{}", tr("example-builder-configuration-notes"));
+    println!("  {}", tr("example-builder-log-level-trace-most-detailed"));
+    println!("  {}", tr("example-builder-console-output-json-lines"));
+    println!("  {}\n", tr("example-builder-file-sink-logs-app-log"));
     println!(
         "Note: format() sets the text render template (e.g. \"{{timestamp}} [{{level}}] ...\");"
     );
     println!(
         "it is orthogonal to the output format — format(\"json\") only prints the template text as-is,"
     );
-    println!("JSON output requires console_json(true) (no coloring in JSON mode)\n");
+    println!("{}\n", tr("example-builder-json-output-requires-console"));
 }
 
 /// 展示性能配置选项
 ///
 /// 演示 Channel 容量、Worker 线程数等性能相关配置。
 fn show_performance_options() {
-    print_section("Example 4: performance options");
+    print_section(&tr("example-builder-example-4-performance-options"));
 
     let code = r#"
 // High-performance configuration (for production)
@@ -136,18 +149,24 @@ let _logger = LoggerManager::builder()
     .await?;
 "#;
 
-    println!("Code example:\n{}", code);
-    println!("Configuration notes:");
-    println!("  ✓ Channel capacity: 50,000 (default 10,000)");
-    println!("  ✓ Worker threads: 4 (default 3)");
-    println!("  ✓ Use case: high-throughput production\n");
+    println!(
+        "{}",
+        tr_args("example-builder-code-example", &[("code", &code)])
+    );
+    println!("{}", tr("example-builder-configuration-notes"));
+    println!(
+        "  {}",
+        tr("example-builder-channel-capacity-50-000-default")
+    );
+    println!("  {}", tr("example-builder-worker-threads-4-default-3"));
+    println!("  {}\n", tr("example-builder-use-case-high-throughput"));
 }
 
 /// 展示 Console Sink 配置选项
 ///
 /// 演示 Console 的彩色输出、错误级别输出等配置。
 fn show_console_options() {
-    print_section("Example 5: console sink options");
+    print_section(&tr("example-builder-example-5-console-sink-options"));
 
     let code = r#"
 // Custom console output behavior
@@ -160,18 +179,24 @@ let _logger = LoggerManager::builder()
     .await?;
 "#;
 
-    println!("Code example:\n{}", code);
-    println!("Configuration notes:");
-    println!("  ✓ Colored output: enabled");
-    println!("  ✓ stderr output: ERROR and WARN levels");
-    println!("  ✓ stdout output: all other levels\n");
+    println!(
+        "{}",
+        tr_args("example-builder-code-example", &[("code", &code)])
+    );
+    println!("{}", tr("example-builder-configuration-notes"));
+    println!("  {}", tr("example-builder-colored-output-enabled"));
+    println!("  {}", tr("example-builder-stderr-output-error-and-warn"));
+    println!(
+        "  {}\n",
+        tr("example-builder-stdout-output-all-other-levels")
+    );
 }
 
 /// 展示 File Sink 配置选项
 ///
 /// 演示文件轮转、压缩、保留文件数等配置。
 fn show_file_options() {
-    print_section("Example 6: file sink options");
+    print_section(&tr("example-builder-example-6-file-sink-options"));
 
     let code = r#"
 // File rotation, compression, and retention policy
@@ -186,24 +211,27 @@ let _logger = LoggerManager::builder()
     .await?;
 "#;
 
-    println!("Code example:\n{}", code);
-    println!("Configuration notes:");
-    println!("  ✓ File path: logs/app.log");
-    println!("  ✓ Single file size: 100MB");
-    println!("  ✓ Compression: Zstd (requires the inklog `compression`/`zstd` or `gzip` feature)");
-    println!("  ✓ Rotation policy: daily rotation");
-    println!("  ✓ Keep files: 7\n");
+    println!(
+        "{}",
+        tr_args("example-builder-code-example", &[("code", &code)])
+    );
+    println!("{}", tr("example-builder-configuration-notes"));
+    println!("  {}", tr("example-builder-file-path-logs-app-log"));
+    println!("  {}", tr("example-builder-single-file-size-100mb"));
+    println!("  {}", tr("example-builder-compression-zstd-requires-the"));
+    println!("  {}", tr("example-builder-rotation-policy-daily-rotation"));
+    println!("  {}\n", tr("example-builder-keep-files-7"));
     println!(
         "Note: the compression backend is an optional feature (off by default); when it is off, file_compress(true)"
     );
-    println!("only warns and leaves rotated files uncompressed; it does not error\n");
+    println!("{}\n", tr("example-builder-only-warns-and-leaves-rotated"));
 }
 
 /// 展示 Builder 模式的灵活性
 ///
 /// 演示如何根据条件构建不同的配置。
 fn show_builder_pattern_flexibility() {
-    print_section("Example 7: Builder pattern flexibility");
+    print_section(&tr("example-builder-example-7-builder-pattern"));
 
     let code = r#"
 // Configure dynamically from environment variables
@@ -230,10 +258,16 @@ let _logger = LoggerManager::builder()
     .await?;
 "#;
 
-    println!("Code example:\n{}", code);
-    println!("Configuration notes:");
-    println!("  ✓ Supports conditional construction");
-    println!("  ✓ Supports environment variable checks");
-    println!("  ✓ Builder instances can be reused");
-    println!("  ✓ Fluent chained calls\n");
+    println!(
+        "{}",
+        tr_args("example-builder-code-example", &[("code", &code)])
+    );
+    println!("{}", tr("example-builder-configuration-notes"));
+    println!("  {}", tr("example-builder-supports-conditional"));
+    println!("  {}", tr("example-builder-supports-environment-variable"));
+    println!(
+        "  {}",
+        tr("example-builder-builder-instances-can-be-reused")
+    );
+    println!("  {}\n", tr("example-builder-fluent-chained-calls"));
 }

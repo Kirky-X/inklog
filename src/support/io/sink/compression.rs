@@ -807,7 +807,6 @@ mod tests {
             result
         );
 
-        // 验证压缩文件已生成
         let compressed_path = result.unwrap();
         assert!(compressed_path.exists());
         assert!(compressed_path.extension().is_some_and(|ext| ext == "zst"));

@@ -751,7 +751,6 @@ mod tests {
         config.set("level", "info");
         assert_eq!(config.get_string("level"), Some("info".to_string()));
 
-        // 添加新值
         config.set("new_key", "new_value");
         assert_eq!(config.get_string("new_key"), Some("new_value".to_string()));
     }

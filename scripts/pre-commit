@@ -174,9 +174,9 @@ else
     echo ""
     echo -e "${BLUE}Quick fix commands:${NC}"
     echo -e "  ${BLUE}Formatting:${NC}    cargo fmt"
-    echo -e "  ${BLUE}Clippy:${NC}       cargo clippy --all-features -- -D warnings"
-    echo -e "  ${BLUE}Build:${NC}        cargo check --all-features"
-    echo -e "  ${BLUE}Tests:${NC}        cargo test --lib --all-features"
+    echo -e "  ${BLUE}Clippy:${NC}       cargo clippy --features 'sqlite,kit,compression,fast-masking' -- -D warnings && cargo clippy --features 'postgres,kit,compression,fast-masking' -- -D warnings"
+    echo -e "  ${BLUE}Build:${NC}        cargo check --features 'sqlite,kit,compression,fast-masking' && cargo check --features 'postgres,kit,compression,fast-masking'"
+    echo -e "  ${BLUE}Tests:${NC}        cargo test --lib --features 'sqlite,kit,compression,fast-masking' -- --test-threads=4 && cargo test --lib --features 'postgres,kit,compression,fast-masking' -- --test-threads=4"
     echo ""
     echo -e "${RED}Elapsed time: ${ELAPSED}s${NC}"
     exit 1

@@ -615,7 +615,6 @@ impl Metrics {
                     reason: reasons.join("; "),
                 }
             } else {
-                // Check if all sinks are still in NotStarted state
                 let all_not_started = sinks
                     .values()
                     .all(|s| matches!(s.status, SinkStatus::NotStarted));
@@ -1054,7 +1053,6 @@ impl SinkHealthMonitor {
 
                 retries.insert(sink_name.to_string(), attempt);
 
-                // 计算指数退避延迟
                 let delay_ms = self
                     .config
                     .initial_delay_ms
@@ -2546,6 +2544,41 @@ mod histogram_export_tests {
         assert!(matches!(
             monitor.check_and_fallback("database", true, None),
             FallbackAction::None
+        ));
+    }
+
+    #[test]
+    fn test_max_retries_breach_stops_recovery_and_encryption_fallback() {
+        // 恢复尝试超出 max_retries：停止调度恢复（None）并保持降级态
+        let capped = SinkHealthMonitor::new(FallbackConfig {
+            failure_threshold: 1,
+            max_retries: 0,
+            ..FallbackConfig::default()
+        });
+        assert!(matches!(
+            capped.check_and_fallback("database", false, Some("boom")),
+            FallbackAction::Fallback { .. }
+        ));
+        let action = capped.check_and_fallback("database", true, None);
+        assert!(
+            matches!(action, FallbackAction::None),
+            "max_retries breach must stop recovery scheduling, got {action:?}"
+        );
+        assert!(matches!(
+            capped.get_fallback_state("database"),
+            FallbackState::Fallback { .. }
+        ));
+
+        // 加密密钥错误：降级目标为明文并记录降级态
+        let monitor = SinkHealthMonitor::with_defaults();
+        let action = monitor.handle_encryption_error("encrypted", "bad key");
+        assert!(
+            matches!(action, FallbackAction::Fallback { ref target, .. } if target == "plaintext"),
+            "encryption errors must fall back to plaintext, got {action:?}"
+        );
+        assert!(matches!(
+            monitor.get_fallback_state("encrypted"),
+            FallbackState::Fallback { ref target, .. } if target == "plaintext"
         ));
     }
 }

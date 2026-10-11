@@ -478,14 +478,20 @@ fn json_path_get<'a>(json: &'a serde_json::Value, path: &str) -> Option<&'a serd
 /// （static_fields 的插入语义，不整表替换）。
 fn json_path_set(json: &mut serde_json::Value, path: &str, value: serde_json::Value) {
     let segments: Vec<&str> = path.split('.').collect();
-    let (leaf, parents) = segments
-        .split_last()
-        .expect("dotted path has at least one segment");
+    let (leaf, parents) = segments.split_last().unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::i18n::tr("config-json_path_has_segment_invariant")
+        )
+    });
     let mut current = json;
     for segment in parents {
-        let map = current
-            .as_object_mut()
-            .expect("config tree intermediate nodes are objects");
+        let map = current.as_object_mut().unwrap_or_else(|| {
+            panic!(
+                "{}",
+                crate::i18n::tr("config-json_intermediate_node_object_invariant")
+            )
+        });
         let entry = map
             .entry(*segment)
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
@@ -496,9 +502,12 @@ fn json_path_set(json: &mut serde_json::Value, path: &str, value: serde_json::Va
         }
         current = entry;
     }
-    let map = current
-        .as_object_mut()
-        .expect("config tree leaf parent is an object");
+    let map = current.as_object_mut().unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::i18n::tr("config-json_leaf_parent_object_invariant")
+        )
+    });
     let both_objects = matches!(
         (map.get(*leaf), &value),
         (
@@ -634,7 +643,7 @@ impl InklogConfig {
         // JSON 视图承载补丁：规则解释读取现值（warn 文案参数）与补丁落位
         // 共用同一棵树；序列化途经自有的 Serialize derive，不引入外部数据。
         let mut json = serde_json::to_value(config.clone())
-            .expect("InklogConfig serialization cannot fail (derived pure data)");
+            .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("config-serialize_invariant")));
 
         for spec in ENV_OVERRIDE_SPECS {
             let Some((_, raw)) = env_vars.iter().find(|(name, _)| *name == spec.env_name) else {
@@ -663,7 +672,7 @@ impl InklogConfig {
         apply_static_fields_env(&env_vars, &mut json);
 
         *config = serde_json::from_value(json)
-            .expect("env patches preserve field types (validated per rule)");
+            .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("config-env_patch_types_invariant")));
     }
 
     /// Search paths (first existing file wins):

@@ -167,7 +167,6 @@ fn format_message(locale: &str, id: &str, args: Option<&FluentArgs<'_>>) -> Opti
 }
 
 fn resolve_locale() -> String {
-    // 1. Environment variable (highest priority)
     if let Ok(locale) = std::env::var("INKLOG_LOCALE") {
         let locale = locale.trim();
         if !locale.is_empty() && is_valid_locale(locale) {
@@ -175,7 +174,6 @@ fn resolve_locale() -> String {
         }
     }
 
-    // 2. System locale detection
     if let Some(sys_locale) = sys_locale::get_locale() {
         let sys_locale = sys_locale.trim();
         if !sys_locale.is_empty() && is_valid_locale(sys_locale) {
@@ -183,7 +181,6 @@ fn resolve_locale() -> String {
         }
     }
 
-    // 3. Fallback
     "en".to_string()
 }
 
@@ -243,6 +240,10 @@ const EMBEDDED_LOCALES: &[(&str, &[(&str, &str)])] = &[
                 "validation.ftl",
                 include_str!("../../locales/en/validation.ftl"),
             ),
+            (
+                "examples.ftl",
+                include_str!("../../locales/en/examples.ftl"),
+            ),
         ],
     ),
     (
@@ -263,6 +264,10 @@ const EMBEDDED_LOCALES: &[(&str, &[(&str, &str)])] = &[
             (
                 "validation.ftl",
                 include_str!("../../locales/zh-CN/validation.ftl"),
+            ),
+            (
+                "examples.ftl",
+                include_str!("../../locales/zh-CN/examples.ftl"),
             ),
         ],
     ),

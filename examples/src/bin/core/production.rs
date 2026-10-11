@@ -20,10 +20,14 @@
 //! ```
 
 use inklog::LoggerManager;
+use inklog_examples::common::{tr, tr_args};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog production configuration examples ===\n");
+    println!(
+        "{}\n",
+        tr("example-production-inklog-production-configuration")
+    );
 
     show_env_comparison();
     show_builder_production_config().await?;
@@ -33,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     show_error_handling().await;
     show_best_practices();
 
-    println!("\nAll production examples completed.");
+    println!("\n{}", tr("example-production-all-production-examples"));
     Ok(())
 }
 
@@ -41,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 展示开发、预发布、生产三种环境的典型配置差异。
 fn show_env_comparison() {
-    println!("--- Example 1: per-environment configuration comparison ---\n");
+    println!("{}\n", tr("example-production-example-1-per-environment"));
 
     println!(
         "{:<20} {:<20} {:<20} {:<20}",
@@ -92,7 +96,10 @@ fn show_env_comparison() {
 ///
 /// 使用 Builder 模式构建生产级配置，实际初始化并验证。
 async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- Example 2: Builder pattern for production ---\n");
+    println!(
+        "{}\n",
+        tr("example-production-example-2-builder-pattern-for")
+    );
 
     let logger = LoggerManager::builder()
         .level("info")
@@ -109,18 +116,24 @@ async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Erro
         .build()
         .await?;
 
-    println!("✓ production configuration initialized");
-    println!("  Log level:   info");
-    println!("  Console:    on (colored)");
-    println!("  File:       logs/production.log (100MB, daily, keep 30)");
-    println!("  Compression: Zstd");
-    println!("  Channel:    10000");
-    println!("  Workers:    4\n");
+    println!("{}", tr("example-production-production-configuration"));
+    println!("  {}", tr("example-production-log-level-info"));
+    println!("  {}", tr("example-production-console-on-colored"));
+    println!(
+        "  {}",
+        tr("example-production-file-logs-production-log-100mb")
+    );
+    println!("  {}", tr("example-production-compression-zstd"));
+    println!("  {}", tr("example-production-channel-10000"));
+    println!("  {}\n", tr("example-production-workers-4"));
 
     // 验证配置生效
-    tracing::info!("production log system started");
-    tracing::debug!("this DEBUG log is not emitted (level=info)");
-    println!("✓ level filter verified: DEBUG is not visible (as expected)");
+    tracing::info!("{}", tr("example-production-production-log-system-started"));
+    tracing::debug!("{}", tr("example-production-this-debug-log-is-not-emitted"));
+    println!(
+        "{}",
+        tr("example-production-level-filter-verified-debug-is")
+    );
 
     // 模拟业务日志
     for i in 1..=3 {
@@ -130,7 +143,7 @@ async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Erro
             "handling request"
         );
     }
-    println!("✓ 3 business logs recorded");
+    println!("{}", tr("example-production-3-business-logs-recorded"));
 
     tracing::warn!(
         component = "database",
@@ -138,7 +151,7 @@ async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Erro
         threshold_ms = 100,
         "database query latency exceeded the threshold"
     );
-    println!("✓ alert log recorded");
+    println!("{}", tr("example-production-alert-log-recorded"));
 
     tracing::error!(
         error_code = "E001",
@@ -146,10 +159,10 @@ async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Erro
         retry_count = 3,
         "cache connection failed"
     );
-    println!("✓ error log recorded\n");
+    println!("{}\n", tr("example-production-error-log-recorded"));
 
     logger.shutdown()?;
-    println!("✓ shut down gracefully\n");
+    println!("{}\n", tr("example-production-shut-down-gracefully"));
 
     Ok(())
 }
@@ -158,9 +171,12 @@ async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Erro
 ///
 /// 展示生产环境推荐的 TOML 配置文件内容。
 fn show_toml_config() {
-    println!("--- Example 3: TOML configuration file format ---\n");
+    println!(
+        "{}\n",
+        tr("example-production-example-3-toml-configuration")
+    );
 
-    println!("inklog.toml (recommended production configuration):");
+    println!("{}", tr("example-production-inklog-toml-recommended"));
     println!(
         r#"[global]
 level = "info"
@@ -194,7 +210,7 @@ batch_size = 100
 flush_interval_ms = 500"#
     );
 
-    println!("\nHow to load:");
+    println!("\n{}", tr("example-production-how-to-load"));
     println!("  // Search for inklog.toml or INKLOG_CONFIG_PATH automatically");
     println!("  let _logger = LoggerManager::load().await?;");
     println!();
@@ -207,7 +223,10 @@ flush_interval_ms = 500"#
 ///
 /// 演示初始化后如何验证系统健康状态。
 async fn show_health_check_after_init() -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- Example 4: health check after initialization ---\n");
+    println!(
+        "{}\n",
+        tr("example-production-example-4-health-check-after")
+    );
 
     let logger = LoggerManager::builder()
         .level("info")
@@ -216,31 +235,64 @@ async fn show_health_check_after_init() -> Result<(), Box<dyn std::error::Error>
         .await?;
 
     let health = logger.get_health_status();
-    println!("Health check:");
-    println!("  overall_status:     {:?}", health.overall_status);
-    println!("  uptime_seconds:     {}s", health.uptime_seconds);
-    println!("  channel_usage:      {:.1}%", health.channel_usage * 100.0);
-    println!("  encryption_valid:   {}", health.encryption_key_valid);
+    println!("{}", tr("example-production-health-check"));
+    println!(
+        "  {}",
+        tr_args(
+            "example-production-overall-status",
+            &[("overall_status", &format!("{:?}", health.overall_status))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-production-uptime-seconds-s",
+            &[("uptime_seconds", &health.uptime_seconds)]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-production-channel-usage",
+            &[("value", &format!("{:.1}", health.channel_usage * 100.0))]
+        )
+    );
+    println!(
+        "  {}",
+        tr_args(
+            "example-production-encryption-valid",
+            &[("encryption_key_valid", &health.encryption_key_valid)]
+        )
+    );
 
     // 验证健康状态可获取（状态取决于 Sink 初始化时机）
-    println!("  ✓ health status retrieved");
+    println!("  {}", tr("example-production-health-status-retrieved"));
 
     // 写入日志后再检查状态
-    tracing::info!("health check log");
+    tracing::info!("{}", tr("example-production-health-check-log"));
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     let health2 = logger.get_health_status();
     println!(
-        "  overall_status after writing a log: {:?}",
-        health2.overall_status
+        "  {}",
+        tr_args(
+            "example-production-overall-status-after-writing-a",
+            &[("overall_status", &format!("{:?}", health2.overall_status))]
+        )
     );
 
     let capacity = logger.effective_channel_capacity();
     let queued = logger.channel_len();
-    println!("\nChannel info:");
-    println!("  capacity: {}", capacity);
-    println!("  queued:   {}", queued);
+    println!("\n{}", tr("example-production-channel-info"));
+    println!(
+        "  {}",
+        tr_args("example-production-capacity", &[("capacity", &capacity)])
+    );
+    println!(
+        "  {}",
+        tr_args("example-production-queued", &[("queued", &queued)])
+    );
     assert!(capacity > 0, "channel capacity must be greater than 0");
-    println!("  ✓ channel verified\n");
+    println!("  {}\n", tr("example-production-channel-verified"));
 
     logger.shutdown()?;
     Ok(())
@@ -250,7 +302,7 @@ async fn show_health_check_after_init() -> Result<(), Box<dyn std::error::Error>
 ///
 /// 演示应用退出前的完整关闭流程。
 async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- Example 5: graceful shutdown sequence ---\n");
+    println!("{}\n", tr("example-production-example-5-graceful-shutdown"));
 
     let logger = LoggerManager::builder()
         .level("info")
@@ -263,17 +315,26 @@ async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
     for i in 1..=5 {
         tracing::info!(batch = i, "processing batch");
     }
-    println!("✓ 5 logs written into the channel");
+    println!(
+        "{}",
+        tr("example-production-5-logs-written-into-the-channel")
+    );
 
     // 关闭前检查
     let queued_before = logger.channel_len();
-    println!("  channel queue before shutdown: {} entries", queued_before);
+    println!(
+        "  {}",
+        tr_args(
+            "example-production-channel-queue-before-shutdown",
+            &[("queued_before", &queued_before)]
+        )
+    );
 
     logger.shutdown()?;
-    println!("✓ shutdown() completed");
-    println!("  - All logs persisted to sinks");
-    println!("  - Worker threads stopped");
-    println!("  - Resources released\n");
+    println!("{}", tr("example-production-shutdown-completed"));
+    println!("  {}", tr("example-production-all-logs-persisted-to-sinks"));
+    println!("  {}", tr("example-production-worker-threads-stopped"));
+    println!("  {}\n", tr("example-production-resources-released"));
 
     Ok(())
 }
@@ -282,13 +343,16 @@ async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// 演示配置初始化可能遇到的错误及处理方式。
 async fn show_error_handling() {
-    println!("--- Example 6: error handling ---\n");
+    println!("{}\n", tr("example-production-example-6-error-handling"));
 
-    println!("Scenario 1: load a nonexistent configuration file");
+    println!("{}", tr("example-production-scenario-1-load-a-nonexistent"));
     match LoggerManager::from_file("/nonexistent/config.toml").await {
-        Ok(_) => println!("  unexpected success"),
+        Ok(_) => println!("  {}", tr("example-production-unexpected-success")),
         Err(e) => {
-            println!("  ✓ expected error: {}", e);
+            println!(
+                "  {}",
+                tr_args("example-production-expected-error", &[("e", &e)])
+            );
             println!(
                 "  Handling: fall back to the default config or ask the user to check the path"
             );
@@ -296,52 +360,91 @@ async fn show_error_handling() {
     }
 
     // 场景 2：无效的日志级别（Builder 验证）
-    println!("\nScenario 2: an invalid log level");
+    println!(
+        "\n{}",
+        tr("example-production-scenario-2-an-invalid-log-level")
+    );
     match LoggerManager::builder()
         .level("invalid_level")
         .build()
         .await
     {
-        Ok(_) => println!("  unexpected success"),
+        Ok(_) => println!("  {}", tr("example-production-unexpected-success")),
         Err(e) => {
-            println!("  ✓ expected error: {}", e);
-            println!("  Handling: use a valid level (trace/debug/info/warn/error)");
+            println!(
+                "  {}",
+                tr_args("example-production-expected-error", &[("e", &e)])
+            );
+            println!("  {}", tr("example-production-handling-use-a-valid-level"));
         }
     }
 
-    println!("\nError handling advice:");
-    println!("  - Always handle LoggerManager initialization errors with ? or match");
-    println!("  - Give a meaningful error message when the config file fails to load");
-    println!("  - Consider a config fallback chain: env vars → config file → defaults\n");
+    println!("\n{}", tr("example-production-error-handling-advice"));
+    println!("  {}", tr("example-production-always-handle-loggermanager"));
+    println!(
+        "  {}",
+        tr("example-production-give-a-meaningful-error-message")
+    );
+    println!(
+        "  {}\n",
+        tr("example-production-consider-a-config-fallback")
+    );
 }
 
 /// 最佳实践建议
 fn show_best_practices() {
-    println!("--- Production best practices ---\n");
+    println!("{}\n", tr("example-production-production-best-practices"));
 
-    println!("1. Configuration management:");
-    println!("   - Keep configuration in a TOML file so it is version controlled");
-    println!("   - Inject secrets (such as the database password) through environment variables");
-    println!("   - Use a different configuration file per environment");
+    println!("{}", tr("example-production-1-configuration-management"));
+    println!(
+        "   {}",
+        tr("example-production-keep-configuration-in-a-toml")
+    );
+    println!("   {}", tr("example-production-inject-secrets-such-as-the"));
+    println!(
+        "   {}",
+        tr("example-production-use-a-different-configuration")
+    );
 
-    println!("\n2. File rotation:");
-    println!("   - Production must enable log rotation so the disk does not fill up");
-    println!("   - Recommended: daily rotation + 30 days of retention");
-    println!("   - Enable Zstd compression to save storage");
+    println!("\n{}", tr("example-production-2-file-rotation"));
+    println!("   {}", tr("example-production-production-must-enable-log"));
+    println!(
+        "   {}",
+        tr("example-production-recommended-daily-rotation-30")
+    );
+    println!(
+        "   {}",
+        tr("example-production-enable-zstd-compression-to-save")
+    );
 
-    println!("\n3. Performance tuning:");
-    println!("   - channel_capacity: size it for peak QPS (QPS × 10 is a good start)");
-    println!("   - worker_threads: match the CPU core count (2-8)");
-    println!("   - Watch channel_len / capacity and alert above 80%");
+    println!("\n{}", tr("example-production-3-performance-tuning"));
+    println!(
+        "   {}",
+        tr("example-production-channel-capacity-size-it-for")
+    );
+    println!(
+        "   {}",
+        tr("example-production-worker-threads-match-the-cpu")
+    );
+    println!(
+        "   {}",
+        tr("example-production-watch-channel-len-capacity-and")
+    );
 
-    println!("\n4. Monitoring integration:");
-    println!("   - Enable the HTTP server to expose /health and /metrics");
-    println!("   - Have Prometheus scrape the /metrics endpoint");
-    println!("   - Configure alert rules on logging system health");
+    println!("\n{}", tr("example-production-4-monitoring-integration"));
+    println!("   {}", tr("example-production-enable-the-http-server-to"));
+    println!("   {}", tr("example-production-have-prometheus-scrape-the"));
+    println!("   {}", tr("example-production-configure-alert-rules-on"));
 
-    println!("\n5. Security hardening:");
-    println!("   - Enable TLS on the production HTTP server");
-    println!("   - Configure an IP whitelist to restrict sources");
-    println!("   - Enable Bearer Token authentication");
-    println!("   - Use LogSanitizer to redact sensitive information");
+    println!("\n{}", tr("example-production-5-security-hardening"));
+    println!(
+        "   {}",
+        tr("example-production-enable-tls-on-the-production")
+    );
+    println!(
+        "   {}",
+        tr("example-production-configure-an-ip-whitelist-to")
+    );
+    println!("   {}", tr("example-production-enable-bearer-token"));
+    println!("   {}", tr("example-production-use-logsanitizer-to-redact"));
 }

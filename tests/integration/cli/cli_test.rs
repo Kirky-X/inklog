@@ -142,7 +142,6 @@ format = ""
             .assert()
             .success();
 
-        // 验证输出文件存在
         assert!(output_path.exists());
     }
 
@@ -152,7 +151,6 @@ format = ""
         let encrypted_path = temp_dir.path().join("encrypted.log.enc");
         let output_path = temp_dir.path().join("decrypted.log");
 
-        // 创建测试文件
         fs::write(&encrypted_path, b"some encrypted content").unwrap();
 
         let mut cmd = Command::cargo_bin("inklog-cli").unwrap();

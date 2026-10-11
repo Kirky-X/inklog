@@ -151,13 +151,15 @@ pub(crate) fn run_custom_sink_worker(
                             // 尝试各自再产生通知 → 指数自激放大（实测单条记录
                             // 放大到数十次尝试且持续增长）。内置 worker 的
                             // error sink 直写路径采用同款隔离。
+                            let mut args = crate::i18n::MsgArgs::new();
+                            args.set("name", &entry.name);
+                            args.set("attempt", attempt);
+                            args.set("max_attempts", max_attempts);
+                            args.set("err", &e);
                             let error_record = LogRecord::new(
                                 tracing::Level::ERROR,
                                 "inklog::custom_sink".to_string(),
-                                format!(
-                                    "custom sink '{}' write failed (attempt {attempt}/{max_attempts}): {e}",
-                                    entry.name
-                                ),
+                                crate::i18n::tr_args("log-custom_sink_write_failed", args),
                             );
                             let _ = runtime_handle
                                 .block_on(async { console_sink.write(&error_record).await });
@@ -693,7 +695,6 @@ impl LoggerManager {
             tokio::task::spawn_blocking(move || {
                 metrics_console.active_workers.inc();
                 loop {
-                    // Check for shutdown
                     if shutdown_console.try_recv().is_ok() {
                         // Drain with 5s timeout (console is fast)
                         let deadline = Instant::now() + Duration::from_secs(5);
@@ -777,7 +778,6 @@ impl LoggerManager {
                     let mut state = worker.create_initial_state(&mut create_sink);
 
                     loop {
-                        // Check for shutdown
                         if shutdown_file.try_recv().is_ok() {
                             // Drain with 30s timeout
                             worker.drain(
@@ -789,7 +789,6 @@ impl LoggerManager {
                             break;
                         }
 
-                        // Check for control messages
                         if let Ok(control_msg) = control_rx_file.try_recv() {
                             worker.handle_control_message(
                                 &mut state,
@@ -852,7 +851,6 @@ impl LoggerManager {
                     let mut state = worker.create_initial_state(&mut create_sink);
 
                     loop {
-                        // Check for shutdown
                         if shutdown_db.try_recv().is_ok() {
                             // Drain with 30s timeout
                             worker.drain(
@@ -864,7 +862,6 @@ impl LoggerManager {
                             break;
                         }
 
-                        // Check for control messages
                         if let Ok(control_msg) = control_rx_db.try_recv() {
                             worker.handle_control_message(
                                 &mut state,

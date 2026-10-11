@@ -94,7 +94,6 @@ impl DatabaseSink {
             .ok()
             .map(|s| Arc::new(s) as Arc<dyn LogSink + Send + Sync>);
 
-        // 使用配置参数或默认值
         let batch_size = config
             .as_ref()
             .map(|c| c.batch_size)

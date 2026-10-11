@@ -15,10 +15,12 @@
 //! ```
 
 use inklog::config::{ConsoleSinkConfig, DatabaseSinkConfig, FileSinkConfig, InklogConfig};
-use inklog_examples::common::{print_section, print_separator};
+use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 
 fn main() {
-    print_separator("inklog config inspection example");
+    print_separator(&tr(
+        "example-config-inspect-inklog-config-inspection-example",
+    ));
 
     show_sinks_enabled_all_disabled();
     show_sinks_enabled_console_only();
@@ -26,7 +28,10 @@ fn main() {
     show_logger_manager_load_usage();
     show_config_inspection_workflow();
 
-    println!("\nAll config inspection examples completed.");
+    println!(
+        "\n{}",
+        tr("example-config-inspect-all-config-inspection-examples")
+    );
 }
 
 /// 辅助函数：安全访问 `Option<ConsoleSinkConfig>`.enabled
@@ -46,7 +51,7 @@ fn db_enabled(c: &Option<DatabaseSinkConfig>) -> bool {
 
 /// 演示所有 Sink 禁用时 sinks_enabled() 返回空
 fn show_sinks_enabled_all_disabled() {
-    print_section("Example 1: all sinks disabled → sinks_enabled() returns empty");
+    print_section(&tr("example-config-inspect-example-1-all-sinks-disabled"));
 
     // 注意：InklogConfig::default() 的 console_sink 默认启用，直接取
     // sinks_enabled() 会得到 ["console"]；要得到空列表必须显式禁用全部 Sink
@@ -67,35 +72,70 @@ fn show_sinks_enabled_all_disabled() {
     };
     let sinks = config.sinks_enabled();
 
-    println!("All sinks explicitly disabled:");
     println!(
-        "  console_sink.enabled   = {}",
-        console_enabled(&config.console_sink)
+        "{}",
+        tr("example-config-inspect-all-sinks-explicitly-disabled")
     );
     println!(
-        "  file_sink.enabled      = {}",
-        file_enabled(&config.file_sink)
+        "  {}",
+        tr_args(
+            "example-config-inspect-console-sink-enabled",
+            &[("value", &(console_enabled(&config.console_sink)))]
+        )
     );
     println!(
-        "  database_sink.enabled  = {}",
-        db_enabled(&config.database_sink)
+        "  {}",
+        tr_args(
+            "example-config-inspect-file-sink-enabled",
+            &[("value", &(file_enabled(&config.file_sink)))]
+        )
     );
-    println!("\nsinks_enabled() = {:?}", sinks);
-    println!("Returned Vec length = {}", sinks.len());
+    println!(
+        "  {}",
+        tr_args(
+            "example-config-inspect-database-sink-enabled",
+            &[("value", &(db_enabled(&config.database_sink)))]
+        )
+    );
+    println!(
+        "\n{}",
+        tr_args(
+            "example-config-inspect-sinks-enabled",
+            &[("sinks", &format!("{:?}", sinks))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-inspect-returned-vec-length",
+            &[("value", &(sinks.len()))]
+        )
+    );
     assert!(
         sinks.is_empty(),
         "sinks_enabled() should be empty when everything is disabled"
     );
 
-    println!("\nComparison: console_sink in InklogConfig::default() is enabled by default");
+    println!(
+        "\n{}",
+        tr("example-config-inspect-comparison-console-sink-in")
+    );
     let default_sinks = InklogConfig::default().sinks_enabled();
-    println!("  default().sinks_enabled() = {:?}", default_sinks);
+    println!(
+        "  {}",
+        tr_args(
+            "example-config-inspect-default-sinks-enabled",
+            &[("default_sinks", &format!("{:?}", default_sinks))]
+        )
+    );
     assert_eq!(default_sinks, vec!["console"]);
 }
 
 /// 演示仅 Console Sink 启用
 fn show_sinks_enabled_console_only() {
-    print_section("Example 2: only the console sink enabled");
+    print_section(&tr(
+        "example-config-inspect-example-2-only-the-console-sink",
+    ));
 
     let config = InklogConfig {
         console_sink: Some(ConsoleSinkConfig {
@@ -106,26 +146,47 @@ fn show_sinks_enabled_console_only() {
     };
     let sinks = config.sinks_enabled();
 
-    println!("Config:");
+    println!("{}", tr("example-config-inspect-config"));
     println!(
-        "  console_sink.enabled   = {} ✓",
-        console_enabled(&config.console_sink)
+        "  {}",
+        tr_args(
+            "example-config-inspect-console-sink-enabled-2",
+            &[("value", &(console_enabled(&config.console_sink)))]
+        )
     );
     println!(
-        "  file_sink.enabled      = {}",
-        file_enabled(&config.file_sink)
+        "  {}",
+        tr_args(
+            "example-config-inspect-file-sink-enabled",
+            &[("value", &(file_enabled(&config.file_sink)))]
+        )
     );
     println!(
-        "  database_sink.enabled  = {}",
-        db_enabled(&config.database_sink)
+        "  {}",
+        tr_args(
+            "example-config-inspect-database-sink-enabled",
+            &[("value", &(db_enabled(&config.database_sink)))]
+        )
     );
-    println!("\nsinks_enabled() = {:?}", sinks);
-    println!("contains \"console\" = {}", sinks.contains(&"console"));
+    println!(
+        "\n{}",
+        tr_args(
+            "example-config-inspect-sinks-enabled",
+            &[("sinks", &format!("{:?}", sinks))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-inspect-contains-console",
+            &[("value", &(sinks.contains(&"console")))]
+        )
+    );
 }
 
 /// 演示多 Sink 启用
 fn show_sinks_enabled_multi_sink() {
-    print_section("Example 3: multiple sinks enabled (Console + File + Database)");
+    print_section(&tr("example-config-inspect-example-3-multiple-sinks"));
 
     let config = InklogConfig {
         console_sink: Some(ConsoleSinkConfig {
@@ -145,10 +206,13 @@ fn show_sinks_enabled_multi_sink() {
     };
     let sinks = config.sinks_enabled();
 
-    println!("Config:");
+    println!("{}", tr("example-config-inspect-config"));
     println!(
-        "  console_sink.enabled   = {} ✓",
-        console_enabled(&config.console_sink)
+        "  {}",
+        tr_args(
+            "example-config-inspect-console-sink-enabled-2",
+            &[("value", &(console_enabled(&config.console_sink)))]
+        )
     );
     let file_path = config
         .file_sink
@@ -156,47 +220,94 @@ fn show_sinks_enabled_multi_sink() {
         .map(|c| c.path.display().to_string())
         .unwrap_or_default();
     println!(
-        "  file_sink.enabled      = {} ✓ (path={})",
-        file_enabled(&config.file_sink),
-        file_path
+        "  {}",
+        tr_args(
+            "example-config-inspect-file-sink-enabled-path",
+            &[
+                ("value", &(file_enabled(&config.file_sink))),
+                ("file_path", &file_path)
+            ]
+        )
     );
     println!(
-        "  database_sink.enabled  = {} ✓",
-        db_enabled(&config.database_sink)
+        "  {}",
+        tr_args(
+            "example-config-inspect-database-sink-enabled-2",
+            &[("value", &(db_enabled(&config.database_sink)))]
+        )
     );
-    println!("\nsinks_enabled() = {:?}", sinks);
-    println!("Sink count = {} (expected 3)", sinks.len());
+    println!(
+        "\n{}",
+        tr_args(
+            "example-config-inspect-sinks-enabled",
+            &[("sinks", &format!("{:?}", sinks))]
+        )
+    );
+    println!(
+        "{}",
+        tr_args(
+            "example-config-inspect-sink-count-expected-3",
+            &[("value", &(sinks.len()))]
+        )
+    );
 
     let has_console = sinks.contains(&"console");
     let has_file = sinks.contains(&"file");
     let has_database = sinks.contains(&"database");
-    println!("\nVerification:");
+    println!("\n{}", tr("example-config-inspect-verification"));
     println!(
-        "  contains \"console\"  = {} → {}",
-        has_console,
-        if has_console { "✓" } else { "✗" }
+        "  {}",
+        tr_args(
+            "example-config-inspect-contains-console-2",
+            &[
+                ("has_console", &has_console),
+                ("value", &(if has_console { "✓" } else { "✗" }))
+            ]
+        )
     );
     println!(
-        "  contains \"file\"     = {} → {}",
-        has_file,
-        if has_file { "✓" } else { "✗" }
+        "  {}",
+        tr_args(
+            "example-config-inspect-contains-file",
+            &[
+                ("has_file", &has_file),
+                ("value", &(if has_file { "✓" } else { "✗" }))
+            ]
+        )
     );
     println!(
-        "  contains \"database\" = {} → {}",
-        has_database,
-        if has_database { "✓" } else { "✗" }
+        "  {}",
+        tr_args(
+            "example-config-inspect-contains-database",
+            &[
+                ("has_database", &has_database),
+                ("value", &(if has_database { "✓" } else { "✗" }))
+            ]
+        )
     );
 }
 
 /// 演示 LoggerManager::load() 的使用方式
 fn show_logger_manager_load_usage() {
-    print_section("Example 4: LoggerManager::load() usage");
+    print_section(&tr("example-config-inspect-example-4-loggermanager-load"));
 
-    println!("LoggerManager::load() flow:");
-    println!("  1. Call InklogConfig::load_sync() to search for the config file");
-    println!("     - Search paths (first existing file wins):");
-    println!("         1. $INKLOG_CONFIG_PATH (explicit env var, highest priority)");
-    println!("         2. ./inklog_config.toml (current directory)");
+    println!("{}", tr("example-config-inspect-loggermanager-load-flow"));
+    println!(
+        "  {}",
+        tr("example-config-inspect-1-call-inklogconfig-load-sync")
+    );
+    println!(
+        "     {}",
+        tr("example-config-inspect-search-paths-first-existing")
+    );
+    println!(
+        "         {}",
+        tr("example-config-inspect-1-inklog-config-path-explicit")
+    );
+    println!(
+        "         {}",
+        tr("example-config-inspect-2-inklog-config-toml-current")
+    );
     println!(
         "         3. ~/.config/inklog/config.toml (user config dir; XDG_CONFIG_HOME on Linux)"
     );
@@ -206,10 +317,16 @@ fn show_logger_manager_load_usage() {
     println!(
         "     - Returns Default::default() when no config file exists (console_sink enabled by default)"
     );
-    println!("  2. Call LoggerManager::with_config() with the loaded config");
-    println!("  3. Initialize all enabled sinks and the HTTP server");
+    println!(
+        "  {}",
+        tr("example-config-inspect-2-call-loggermanager-with")
+    );
+    println!(
+        "  {}",
+        tr("example-config-inspect-3-initialize-all-enabled-sinks")
+    );
 
-    println!("\nCode example:");
+    println!("\n{}", tr("example-config-inspect-code-example"));
     println!("  use inklog::LoggerManager;");
     println!();
     println!("  #![tokio::main]");
@@ -219,7 +336,7 @@ fn show_logger_manager_load_usage() {
     println!("      Ok(())");
     println!("  }}");
 
-    println!("\nCustom search paths:");
+    println!("\n{}", tr("example-config-inspect-custom-search-paths"));
     println!("  use inklog::InklogConfig;");
     println!();
     println!("  // Option 1: load from the default search paths");
@@ -230,7 +347,10 @@ fn show_logger_manager_load_usage() {
     println!();
     println!("  let logger = LoggerManager::with_config(config).await?;");
 
-    println!("\nNote: load() is an async method and must be called inside a tokio runtime.");
+    println!(
+        "\n{}",
+        tr("example-config-inspect-note-load-is-an-async-method")
+    );
     println!(
         "This example only shows usage and does not actually call load() (it would start the logger and hold resources)."
     );
@@ -238,47 +358,80 @@ fn show_logger_manager_load_usage() {
 
 /// 演示配置检查工作流
 fn show_config_inspection_workflow() {
-    print_section("Example 5: config inspection workflow");
+    print_section(&tr("example-config-inspect-example-5-config-inspection"));
 
-    println!("Recommended config inspection workflow:\n");
+    println!(
+        "{}\n",
+        tr("example-config-inspect-recommended-config-inspection")
+    );
 
-    println!("Step 1: load the config");
+    println!("{}", tr("example-config-inspect-step-1-load-the-config"));
     let config = InklogConfig::load_with_env_overrides().unwrap_or_else(|e| {
-        println!("  ⚠ Failed to load config: {}, using the default config", e);
+        println!(
+            "  {}",
+            tr_args(
+                "example-config-inspect-failed-to-load-config-using-the",
+                &[("e", &e)]
+            )
+        );
         InklogConfig::default()
     });
-    println!("  ✓ Config loaded");
+    println!("  {}", tr("example-config-inspect-config-loaded"));
 
-    println!("\nStep 2: check enabled sinks");
+    println!(
+        "\n{}",
+        tr("example-config-inspect-step-2-check-enabled-sinks")
+    );
     let sinks = config.sinks_enabled();
     if sinks.is_empty() {
-        println!("  ⚠ No sink enabled; logs will not be output");
+        println!(
+            "  {}",
+            tr("example-config-inspect-no-sink-enabled-logs-will-not")
+        );
     } else {
-        println!("  ✓ Enabled sinks: {:?}", sinks);
+        println!(
+            "  {}",
+            tr_args(
+                "example-config-inspect-enabled-sinks",
+                &[("sinks", &format!("{:?}", sinks))]
+            )
+        );
     }
 
-    println!("\nStep 3: verify config consistency");
+    println!(
+        "\n{}",
+        tr("example-config-inspect-step-3-verify-config-consistency")
+    );
     let db_enabled_flag = db_enabled(&config.database_sink);
     if db_enabled_flag && !sinks.contains(&"database") {
         println!(
             "  ✗ database_sink.enabled=true but sinks_enabled() does not contain \"database\""
         );
     } else {
-        println!("  ✓ Sink state is consistent");
+        println!(
+            "  {}",
+            tr("example-config-inspect-sink-state-is-consistent")
+        );
     }
 
-    println!("\nStep 4: choose the initialization method based on the config");
+    println!("\n{}", tr("example-config-inspect-step-4-choose-the"));
     if sinks.is_empty() {
-        println!("  → Use LoggerManager::new() (default console only)");
+        println!(
+            "  {}",
+            tr("example-config-inspect-use-loggermanager-new-default")
+        );
     } else if InklogConfig::load_with_env_overrides().is_ok() {
         println!(
             "  → Use LoggerManager::load() (auto-search config; falls back to defaults when no file is found)"
         );
     } else {
-        println!("  → Use LoggerManager::with_config() (explicit config)");
+        println!(
+            "  {}",
+            tr("example-config-inspect-use-loggermanager-with-config")
+        );
     }
 
-    println!("\nFull code example:");
+    println!("\n{}", tr("example-config-inspect-full-code-example"));
     println!("  fn inspect_config() -> Result<(), inklog::InklogError> {{");
     println!("      let config = InklogConfig::load_with_env_overrides()?;");
     println!("      let sinks = config.sinks_enabled();");

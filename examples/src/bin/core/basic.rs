@@ -20,11 +20,12 @@
 //! ```
 
 use inklog::LoggerManager;
+use inklog_examples::common::tr;
 use std::mem;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== inklog basic usage examples ===\n");
+    println!("{}\n", tr("example-basic-inklog-basic-usage-examples"));
 
     // 在 main 中创建并持有 logger，确保所有示例的 tracing 调用都有活跃 subscriber
     let _logger = LoggerManager::new().await?;
@@ -37,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     show_graceful_shutdown().await?;
     show_best_practices();
 
-    println!("\nAll basic examples completed.");
+    println!("\n{}", tr("example-basic-all-basic-examples-completed"));
     Ok(())
 }
 
@@ -49,12 +50,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// 注意：本示例的 logger 在 main() 中创建并保持存活，
 /// 确保后续示例的 tracing 调用有活跃的 subscriber。
 async fn show_default_initialization() -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- Example 1: default initialization ---\n");
+    println!("{}\n", tr("example-basic-example-1-default-initialization"));
 
     // logger 已在 main() 中创建，此处展示初始化模式
-    println!("✓ LoggerManager::new() initialized (logger is created in main)");
-    tracing::info!("log system started");
-    println!("✓ logging works\n");
+    println!("{}", tr("example-basic-loggermanager-new-initialized"));
+    tracing::info!("{}", tr("example-basic-log-system-started"));
+    println!("{}\n", tr("example-basic-logging-works"));
 
     Ok(())
 }
@@ -63,21 +64,21 @@ async fn show_default_initialization() -> Result<(), Box<dyn std::error::Error>>
 ///
 /// 演示 5 个标准日志级别的使用场景。
 fn show_log_levels() {
-    println!("--- Example 2: log levels ---\n");
+    println!("{}\n", tr("example-basic-example-2-log-levels"));
 
-    println!("5 standard log levels:");
-    tracing::trace!("TRACE - most detailed diagnostics; development only");
-    tracing::debug!("DEBUG - debugging information to help locate problems");
-    tracing::info!("INFO - routine runtime information marking important events");
-    tracing::warn!("WARN - potential issue that does not affect normal operation");
-    tracing::error!("ERROR - functionality failure that needs attention");
+    println!("{}", tr("example-basic-5-standard-log-levels"));
+    tracing::trace!("{}", tr("example-basic-trace-most-detailed-diagnostics"));
+    tracing::debug!("{}", tr("example-basic-debug-debugging-information-to"));
+    tracing::info!("{}", tr("example-basic-info-routine-runtime"));
+    tracing::warn!("{}", tr("example-basic-warn-potential-issue-that-does"));
+    tracing::error!("{}", tr("example-basic-error-functionality-failure"));
 
-    println!("\nLevel filtering rules (default info):");
-    println!("  trace → only tracing::trace! visible");
-    println!("  debug → debug and above visible");
-    println!("  info  → info/warn/error visible (default)");
-    println!("  warn  → warn/error visible");
-    println!("  error → only error visible");
+    println!("\n{}", tr("example-basic-level-filtering-rules-default"));
+    println!("  {}", tr("example-basic-trace-only-tracing-trace-visible"));
+    println!("  {}", tr("example-basic-debug-debug-and-above-visible"));
+    println!("  {}", tr("example-basic-info-info-warn-error-visible"));
+    println!("  {}", tr("example-basic-warn-warn-error-visible"));
+    println!("  {}", tr("example-basic-error-only-error-visible"));
     println!();
 }
 
@@ -85,7 +86,7 @@ fn show_log_levels() {
 ///
 /// 演示带结构化字段的日志记录，便于后续查询和分析。
 fn show_structured_logging() {
-    println!("--- Example 3: structured logging ---\n");
+    println!("{}\n", tr("example-basic-example-3-structured-logging"));
 
     // 用户操作日志
     tracing::info!(
@@ -94,7 +95,7 @@ fn show_structured_logging() {
         ip = "192.168.1.1",
         "user logged in successfully"
     );
-    println!("✓ user operation logged (user_id, action, ip)");
+    println!("{}", tr("example-basic-user-operation-logged-user-id"));
 
     // 请求处理日志
     tracing::info!(
@@ -105,7 +106,7 @@ fn show_structured_logging() {
         latency_ms = 42,
         "request completed"
     );
-    println!("✓ request logged (request_id, method, path, status, latency_ms)");
+    println!("{}", tr("example-basic-request-logged-request-id"));
 
     // 错误日志
     tracing::error!(
@@ -115,17 +116,17 @@ fn show_structured_logging() {
         max_retries = 5,
         "payment processing failed; retry limit reached"
     );
-    println!("✓ error logged (error_code, component, retry_count)\n");
+    println!("{}\n", tr("example-basic-error-logged-error-code"));
 }
 
 /// 示例 4：健康状态验证
 ///
 /// 演示如何检查 LoggerManager 的运行状态，确认系统健康。
 fn show_health_verification() {
-    println!("--- Example 4: health status check ---\n");
+    println!("{}\n", tr("example-basic-example-4-health-status-check"));
 
-    println!("Note: health status must be checked on a LoggerManager instance.");
-    println!("This example shows the API usage (it needs to hold a logger reference):\n");
+    println!("{}", tr("example-basic-note-health-status-must-be"));
+    println!("{}\n", tr("example-basic-this-example-shows-the-api"));
 
     println!(
         r#"  let logger = LoggerManager::new().await?;
@@ -154,10 +155,10 @@ fn show_health_verification() {
 /// 注意：由于 tracing 全局 subscriber 已在 main() 中设置，
 /// 此处展示配置模式代码，不再创建新的 LoggerManager。
 async fn show_config_initialization() -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- Example 5: custom configuration initialization ---\n");
+    println!("{}\n", tr("example-basic-example-5-custom-configuration"));
 
     // 方式 1：修改默认配置（代码展示）
-    println!("Approach 1: modify the default config");
+    println!("{}", tr("example-basic-approach-1-modify-the-default"));
     println!(
         r#"  let mut config = InklogConfig::default();
   config.global.level = "debug".to_string();
@@ -165,7 +166,7 @@ async fn show_config_initialization() -> Result<(), Box<dyn std::error::Error>> 
     );
 
     // 方式 2：Builder 模式（代码展示）
-    println!("\nApproach 2: Builder pattern");
+    println!("\n{}", tr("example-basic-approach-2-builder-pattern"));
     println!(
         r#"  let _logger = LoggerManager::builder()
       .level("info")
@@ -183,50 +184,50 @@ async fn show_config_initialization() -> Result<(), Box<dyn std::error::Error>> 
 ///
 /// 演示应用退出前如何正确关闭日志系统。
 async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- Example 6: graceful shutdown ---\n");
+    println!("{}\n", tr("example-basic-example-6-graceful-shutdown"));
 
     // 创建独立 logger 演示关闭流程
     let logger = LoggerManager::new().await?;
-    tracing::info!("application started");
-    tracing::info!("processing business logic...");
+    tracing::info!("{}", tr("example-basic-application-started"));
+    tracing::info!("{}", tr("example-basic-processing-business-logic"));
 
     logger.shutdown()?;
     // shutdown 已显式调用，用 mem::forget 阻止 Drop 再次关闭
     mem::forget(logger);
 
-    println!("✓ LoggerManager::shutdown() completed");
-    println!("  - All logs left in the channel have been written to sinks");
-    println!("  - All sinks are closed");
-    println!("  - Worker threads stopped\n");
+    println!("{}", tr("example-basic-loggermanager-shutdown-completed"));
+    println!("  {}", tr("example-basic-all-logs-left-in-the-channel"));
+    println!("  {}", tr("example-basic-all-sinks-are-closed"));
+    println!("  {}\n", tr("example-basic-worker-threads-stopped"));
 
     Ok(())
 }
 
 /// 最佳实践建议
 fn show_best_practices() {
-    println!("--- Best practices ---\n");
+    println!("{}\n", tr("example-basic-best-practices"));
 
-    println!("1. Where to initialize:");
-    println!("   - Initialize LoggerManager as early as possible in main()");
-    println!("   - Bind the variable with `let _logger = ...` so Drop does not close it early");
+    println!("{}", tr("example-basic-1-where-to-initialize"));
+    println!("   {}", tr("example-basic-initialize-loggermanager-as"));
+    println!("   {}", tr("example-basic-bind-the-variable-with-let"));
 
-    println!("\n2. Choosing the log level:");
-    println!("   - Development: debug or trace");
-    println!("   - Production: info (default) or warn");
-    println!("   - Troubleshooting: temporarily raise to debug, then restore");
+    println!("\n{}", tr("example-basic-2-choosing-the-log-level"));
+    println!("   {}", tr("example-basic-development-debug-or-trace"));
+    println!("   {}", tr("example-basic-production-info-default-or-warn"));
+    println!("   {}", tr("example-basic-troubleshooting-temporarily"));
 
-    println!("\n3. Structured fields:");
-    println!("   - Use tracing structured fields (key = value)");
-    println!("   - Avoid concatenating JSON strings into the message");
-    println!("   - Common fields: request_id, user_id, component, latency_ms");
+    println!("\n{}", tr("example-basic-3-structured-fields"));
+    println!("   {}", tr("example-basic-use-tracing-structured-fields"));
+    println!("   {}", tr("example-basic-avoid-concatenating-json"));
+    println!("   {}", tr("example-basic-common-fields-request-id-user"));
 
-    println!("\n4. Error logs:");
-    println!("   - error! only for failures that need human intervention");
-    println!("   - warn!  for exceptions that recover automatically");
-    println!("   - Include error_code and component for easier triage");
+    println!("\n{}", tr("example-basic-4-error-logs"));
+    println!("   {}", tr("example-basic-error-only-for-failures-that"));
+    println!("   {}", tr("example-basic-warn-for-exceptions-that"));
+    println!("   {}", tr("example-basic-include-error-code-and"));
 
-    println!("\n5. Shutdown sequence:");
-    println!("   - Call logger.shutdown() before the application exits");
-    println!("   - Call it from signal handling (SIGTERM / Ctrl+C)");
-    println!("   - shutdown() waits until all logs in the channel are written");
+    println!("\n{}", tr("example-basic-5-shutdown-sequence"));
+    println!("   {}", tr("example-basic-call-logger-shutdown-before-the"));
+    println!("   {}", tr("example-basic-call-it-from-signal-handling"));
+    println!("   {}", tr("example-basic-shutdown-waits-until-all-logs"));
 }

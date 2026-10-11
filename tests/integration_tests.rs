@@ -88,7 +88,6 @@ async fn test_file_sink_auto_recovery() {
     use std::time::Instant as RecoveryInstant;
     use tracing_subscriber::layer::SubscriberExt;
 
-    // Create a test directory
     let test_dir = "tests/temp_recovery";
     let _ = recovery_fs::create_dir_all(test_dir);
     let log_file = format!("{}/test_recovery.log", test_dir);
@@ -167,7 +166,6 @@ async fn test_file_sink_auto_recovery() {
         "logging pipeline must keep working after log file removal (written {before} -> {after})"
     );
 
-    // Check health status
     let health = manager.get_health_status();
     println!("Health status: {:?}", health);
 
@@ -1276,7 +1274,6 @@ async fn verify_database_sink_sqlite() {
 
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
 
-    // Create the logs table for verification
     let _ = create_logs_table(&url).await;
 
     let config = VerifyDatabaseSinkConfig {
@@ -1375,7 +1372,6 @@ async fn test_tracing_and_log_coexist() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_log_level_filtering() {
-    // 设置为 WARN 级别
     let _logger = LoggerManager::builder().level("warn").build().await;
 
     // 这些日志应该被过滤掉
@@ -1448,10 +1444,8 @@ async fn test_log_to_file() {
     // 等待异步 worker 处理
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // 验证文件存在
     assert!(log_file.exists(), "Log file should exist");
 
-    // 验证文件有内容
     let contents = std::fs::read_to_string(&log_file).unwrap_or_default();
     if contents.is_empty() {
         println!("Warning: Log file is empty, logger may not have initialized properly");
@@ -1616,7 +1610,6 @@ async fn test_memory_stability() {
         return;
     }
 
-    // 写入 1000 条测试日志
     for i in 0..1000 {
         log::info!(target: "memory_test", "Memory test message {}", i);
     }

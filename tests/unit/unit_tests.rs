@@ -61,7 +61,6 @@ async fn test_file_sink_rotation() {
             .expect("Failed to write log record");
     }
 
-    // Check if files created
     let entries = std::fs::read_dir(temp_dir.path()).expect("Failed to read temp directory");
     assert!(entries.count() >= 1);
 }

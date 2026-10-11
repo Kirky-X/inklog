@@ -301,7 +301,6 @@ async fn test_comprehensive_real_data_writing() {
         env::remove_var("INKLOG_ENCRYPTION_KEY");
     }
 
-    // 获取最终健康状态
     let final_health = logger.get_health_status();
     println!("final health status: {:?}", final_health);
 
@@ -393,7 +392,6 @@ async fn test_dynamic_configuration_changes() {
         ..Default::default()
     };
 
-    // 关闭第一个日志器
     drop(logger1);
 
     // 等待一小段时间
