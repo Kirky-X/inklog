@@ -120,7 +120,7 @@ cargo add inklog
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.7"
+inklog = "0.3.0-rc.9"
 ```
 
 ### 最小可运行示例
@@ -402,7 +402,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 
 | 状态 | 目标 | 说明 |
 |:----:|------|------|
-| 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.7 → 0.3.0 正式版 |
+| 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.9 → 0.3.0 正式版 |
 | 📋 | 工作区依赖传导同步 | trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0 |
 | ✅ | CI 测试矩阵按数据库后端分组 | docker 流水线按 sqlite/postgres/mysql/duckdb 四后端分组验证（duckdb 为 embedded 后端，无需容器服务） |
 | ✅ | 补齐 MySQL 集成测试环境 | MySQL 8 服务已入 docker/docker-compose.test.yml，CI mysql 分支可跑集成测试 |
@@ -452,9 +452,9 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 完整版本记录见 [docs/CHANGELOG.md](docs/CHANGELOG.md)（Keep a Changelog 格式，语义化版本）。
 
 ### 最近版本
-- **0.3.0-rc.7**（2026-10-08）：生产 API 收缩——删除测试专用公共函数（`decrypt_file`、`reset_ops_hub_for_tests`）；复杂热点抽辅助函数收敛，死委托删除并以特性隔离替代 `allow` 标记；治理记录与 specmark 目录移出跟踪；漏洞报告渠道统一
+- **0.3.0-rc.9**（2026-10-08）：生产 API 收缩——删除测试专用公共函数（`decrypt_file`、`reset_ops_hub_for_tests`）；复杂热点抽辅助函数收敛，死委托删除并以特性隔离替代 `allow` 标记；治理记录与 specmark 目录移出跟踪；漏洞报告渠道统一
 
-- **0.3.0-rc.7**（2026-10-07）：修复 `create_compressed_output` 在非 unix 且 zstd/gzip 均未启用时的 `E0433` 编译失败（limiteron 以 `default-features = false` 依赖时踩中）；CI 构建腿补零特性检查防回归
+- **0.3.0-rc.9**（2026-10-07）：修复 `create_compressed_output` 在非 unix 且 zstd/gzip 均未启用时的 `E0433` 编译失败（limiteron 以 `default-features = false` 依赖时踩中）；CI 构建腿补零特性检查防回归
 - **0.3.0-rc.6**（2026-10-06）：全出口 PII 掩码覆盖与脱敏正则加固（fancy-regex 环视）；ERROR/FATAL 兜底补发、fsync 崩溃一致性与文件权限 0600；审计链接入轮转管线与 `inklog-cli verify-chain`；服务身份静态字段注入；deferred-capabilities 四项（中文姓名掩码/FallbackJournal/CBFS 转正/真 OTel 链路上下文）；masking 检测面与 KV 脱敏 API；i18n feature 化；CI 数据库矩阵补齐 duckdb；
 - **0.3.0-rc.4**（2026-09-14，含原 rc.3 批次）：新增 `init_inklog_logger` 单例初始化、运行时级别热调（`set_level`）、动态 Sink 注册（`LoggerBuilder::add_sink`）、`trace_id`/`span_id` 追踪关联、`inklog-cli query` 日志检索、网络转发 Sink（TCP/UDP）、OTLP 导出 MVP、归档防篡改链与 `docs/PERFORMANCE.md` 首份性能基线；
 - **0.3.0-rc.2**（2026-09-03）：集成 trait-kit 0.5.0-rc.2 与 i18n 重构并升级版本号；默认公共 API 移除三个 Mock（BREAKING，外部测试消费者需启用 `test-utils`）；

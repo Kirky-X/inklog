@@ -122,7 +122,7 @@ Or declare it explicitly in `Cargo.toml` (`default = ["i18n", "cache"]`; core ca
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.7"
+inklog = "0.3.0-rc.9"
 ```
 
 ### Minimal Runnable Example
@@ -404,7 +404,7 @@ Phased goals compiled from the existing release plan (timing may adjust with the
 
 | Status | Goal | Notes |
 |:----:|------|------|
-| 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.7 → 0.3.0 stable release |
+| 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.9 → 0.3.0 stable release |
 | 📋 | Workspace dependency lockstep | trait-kit 0.5.0, oxcache 0.5.0, dbnexus 0.6.0 |
 | ✅ | CI test matrix grouped by database backend | The Docker pipeline validates the four mutually exclusive backends (sqlite/postgres/mysql/duckdb); duckdb is embedded and needs no container service |
 | ✅ | Provision the MySQL integration environment | A MySQL 8 service is provided in docker/docker-compose.test.yml; the CI mysql branch runs the integration tests |
@@ -454,9 +454,9 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 The full version history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md) (Keep a Changelog format, semantic versioning).
 
 ### Recent Releases
-- **0.3.0-rc.7** (2026-10-08): production API surface reduced — removed test-only public functions (`decrypt_file`, `reset_ops_hub_for_tests`); complexity hotspots converged via helper extraction, dead delegates removed with feature-gating replacing `allow` markers; governance records and the specmark directory moved out of git tracking; vulnerability reporting channels unified
+- **0.3.0-rc.9** (2026-10-08): production API surface reduced — removed test-only public functions (`decrypt_file`, `reset_ops_hub_for_tests`); complexity hotspots converged via helper extraction, dead delegates removed with feature-gating replacing `allow` markers; governance records and the specmark directory moved out of git tracking; vulnerability reporting channels unified
 
-- **0.3.0-rc.7** (2026-10-07): fix `E0433` in `create_compressed_output` on non-unix targets when neither zstd nor gzip is enabled (hit by limiteron with `default-features = false`); the CI build matrix now also checks the zero-feature build to prevent regressions
+- **0.3.0-rc.9** (2026-10-07): fix `E0433` in `create_compressed_output` on non-unix targets when neither zstd nor gzip is enabled (hit by limiteron with `default-features = false`); the CI build matrix now also checks the zero-feature build to prevent regressions
 - **0.3.0-rc.6** (2026-10-06): full egress PII masking coverage with hardened regex rules (fancy-regex lookaround); ERROR/FATAL fallback re-emission, fsync crash consistency and 0600 file permissions; audit chain wired into rotation with `inklog-cli verify-chain`; service identity static fields; deferred-capabilities four items (Chinese name masking / FallbackJournal / CBFS promotion / real OTel trace context); masking detection-face and KV-redaction APIs; i18n feature-gating; CI database matrix extended with duckdb;
 - **0.3.0-rc.4** (2026-09-14, including the original rc.3 batch): added `init_inklog_logger` singleton initialization, runtime level hot-reload (`set_level`), dynamic sink registration (`LoggerBuilder::add_sink`), `trace_id`/`span_id` correlation, `inklog-cli query` log search, network forwarding sinks (TCP/UDP), an OTLP export MVP, the tamper-evident archive chain, and the first performance baseline in `docs/PERFORMANCE.md` (version 0.3.0-rc.3 was skipped and never published; its content shipped with this release);
 - **0.3.0-rc.2** (2026-09-03): integrated trait-kit 0.5.0-rc.2 and the i18n refactor with a version bump; removed the three mocks from the default public API (BREAKING; external test consumers must enable `test-utils`);

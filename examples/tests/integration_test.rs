@@ -145,7 +145,7 @@ fn integration_template_render_pipeline() {
     // 4. 验证compact format包含级别 INFO 和消息
     let simple = results
         .iter()
-        .find(|(n, _)| n == "compact format")
+        .find(|(n, _)| n == "simple")
         .map(|(_, v)| v.as_str())
         .unwrap();
     assert!(simple.contains("INFO"));

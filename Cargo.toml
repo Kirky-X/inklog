@@ -13,7 +13,7 @@ resolver = "2"
 members = [".", "examples"]
 
 [workspace.package]
-version = "0.3.0-rc.7"
+version = "0.3.0-rc.9"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Kirky-X <Kirky-X@outlook.com>"]
@@ -150,8 +150,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.7", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
-confers = { version = "0.6.0-rc.6", default-features = false, features = ["toml", "watch"] }
+trait-kit = { version = "0.5.0-rc.9", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+confers = { version = "0.6.0-rc.8", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false, features = [] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
