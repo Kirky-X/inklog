@@ -352,9 +352,19 @@ fn decrypt_and_verify(
 fn show_comparison(plaintext: &str) {
     print_separator("Step 5: plaintext vs ciphertext");
 
-    println!("Decrypted plaintext content:");
+    println!("Decrypted plaintext content (first 32 chars, redacted for demo):");
     println!("{}", "─".repeat(50));
-    println!("{}", plaintext);
+    // CodeQL cleartext-logging：演示不去真实回显整段明文，仅截断预览
+    let preview: String = plaintext.chars().take(32).collect();
+    println!(
+        "{}{}",
+        preview,
+        if plaintext.chars().count() > 32 {
+            "…"
+        } else {
+            ""
+        }
+    );
     println!("{}", "─".repeat(50));
 
     println!("\nKey differences:");

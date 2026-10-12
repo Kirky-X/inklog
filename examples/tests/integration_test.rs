@@ -95,9 +95,9 @@ async fn integration_file_then_crypto_roundtrip() {
     for level in &levels {
         assert!(
             decrypted.contains(level),
-            "decrypted content should contain level {}, got: {}",
+            "decrypted content should contain level {} (got {} chars)",
             level,
-            decrypted
+            decrypted.len()
         );
     }
 
