@@ -13,6 +13,12 @@ yanked = "warn"
 # 0.3.0-rc.2 依赖升级后这 4 个 crate 已整体退出依赖图
 # (cargo deny --all-features 复核无命中),保留条目会触发
 # advisory-not-detected 告警,故此处不列;未来若重新入图再补回。
+ignore = [
+    # RUSTSEC-2024-0449（2026-10-12 入库）：unsafe-libyaml 2024-03 起归档无人维护，
+    # 经 limiteron/confers 的 serde_yaml_ng 传递入图；源头豁免与 serde-saphyr
+    # 迁移裁决在 limiteron 仓，此处随行豁免直至上游迁移完成。
+    "RUSTSEC-2024-0449",
+]
 
 [licenses]
 # 允许的宽松许可证;新增非宽松许可证需在此放行
@@ -32,10 +38,8 @@ allow = [
 confidence-threshold = 0.8
 unused-allowed-license = "warn"
 
-# 7 仓统一 license：MIT + Commons Clause v1.0（license-file 形态，见 base/CONFIG_BASELINE.md）。
-# cargo-deny 不识别 manifest 的 license-file 且 allow 不接受 LicenseRef-*，
-# 对本地工作区 crate 用 clarify 绑定 LICENSE 文件内容 hash（防篡改）并按文件内
-# MIT 主文识别放行；Commons Clause 商用限制由 LICENSE 文件本身承载。
+# 7 仓统一 license：纯 MIT（2026-10-12 用户裁决，manifest license = "MIT"，
+# LICENSE 文件已删除 Commons Clause 段）。
 # inklog 依赖闭包中的工作区 crate：inklog 自身 + oxcache/oxcache_macros/trait-kit/dbnexus。
 [[licenses.clarify]]
 name = "inklog"
