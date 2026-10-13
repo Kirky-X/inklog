@@ -38,7 +38,10 @@ crossbeam-channel = { version = "0.5", default-features = false, features = ["st
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf"] }
-dbnexus = { version = "0.6.0-rc.6", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+# 自研依赖精确钉（与 oxcache→inklog 的 `=钉` 同一策略）：inklog 只对
+# 实测对齐的版本承诺兼容，rc 阶段次版本号不承载兼容性。升级任一侧时
+# 双钉同步 bump 并跑全量测试。
+dbnexus = { version = "=0.6.0-rc.9", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 limiteron = { version = "0.3.0-rc.6", default-features = false, features = ["retry", "sync", "test-clock"] }
 
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥
@@ -164,7 +167,7 @@ axum-server = { version = "0.8", default-features = false, features = ["tls-rust
 is-terminal = { version = "0.4", default-features = false, features = [] }
 dirs = { version = "7.0", default-features = false, features = [] }
 parking_lot = { version = "0.12", default-features = false, features = [] }
-oxcache = { version = "0.5.0-rc.6", default-features = false, features = ["memory", "serialization"], optional = true }
+oxcache = { version = "=0.5.0-rc.8", default-features = false, features = ["memory", "serialization"], optional = true }
 zstd = { version = "0.14", default-features = false, features = [], optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
