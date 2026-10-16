@@ -155,6 +155,18 @@ docs/test.md
 docs/uat.md
 docs/archive/
 
+# --- 设计文档(不入库) ---
+docs/PRD.md
+docs/ADD.md
+docs/TRD.md
+docs/DDD.md
+docs/HUB_PROTOCOL.md
+docs/PRD/
+docs/ADD/
+docs/TRD/
+docs/DDD/
+docs/HUB_PROTOCOL/
+
 # --- Rust 构建副产物 ---
 *.pdb
 
