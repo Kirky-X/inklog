@@ -8,7 +8,7 @@
 
 **企业级 Rust 日志基础设施**
 
-[✨ 功能特性](#-功能特性) • [🚀 快速开始](#-快速开始) • [📚 文档](#-文档) • [💻 示例](#-示例) • [🤝 参与贡献](#-参与贡献)
+[✨ 功能特性](#功能特性) • [🚀 快速开始](#快速开始) • [📚 文档](#文档) • [💻 示例](#示例) • [🤝 参与贡献](#参与贡献)
 
 </div>
 
@@ -33,22 +33,22 @@
 <details open>
 <summary>📑 目录</summary>
 
-- [✨ 功能特性](#-功能特性)
-- [🚀 快速开始](#-快速开始)
-- [🎨 特性标志](#-特性标志)
-- [📚 文档](#-文档)
-- [💻 示例](#-示例)
-- [🏗️ 架构](#️-架构)
-- [🧪 测试](#-测试)
-- [📊 性能](#-性能)
-- [🔒 安全](#-安全)
-- [🗺️ 开发路线图](#️-开发路线图)
-- [🤝 参与贡献](#-参与贡献)
-- [📋 更新日志](#-更新日志)
-- [📄 许可证](#-许可证)
-- [🙏 致谢](#-致谢)
-- [📞 联系与支持](#-联系与支持)
-- [⭐ Star 历史](#-star-历史)
+- [✨ 功能特性](#功能特性)
+- [🚀 快速开始](#快速开始)
+- [🎨 特性标志](#特性标志)
+- [📚 文档](#文档)
+- [💻 示例](#示例)
+- [🏗️ 架构](#架构)
+- [🧪 测试](#测试)
+- [📊 性能](#性能)
+- [🔒 安全](#安全)
+- [🗺️ 开发路线图](#开发路线图)
+- [🤝 参与贡献](#参与贡献)
+- [📋 更新日志](#更新日志)
+- [📄 许可证](#许可证)
+- [🙏 致谢](#致谢)
+- [📞 联系与支持](#联系与支持)
+- [⭐ Star 历史](#star-历史)
 
 </details>
 
@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `sqlite` | ❌ | SQLite 数据库后端（经 dbnexus，rustls 运行时） |
 | `postgres` | ❌ | PostgreSQL 数据库后端（经 dbnexus） |
 | `mysql` | ❌ | MySQL 数据库后端（经 dbnexus） |
-| `duckdb` | ❌ | DuckDB 数据库后端（经 dbnexus） |
+| `duckdb` | ❌ | DuckDB 数据库后端（经 dbnexus）。🚫 暂不可用：上游 zip 全系 yank 致 libduckdb-sys（zip ^6）解析失败，请勿启用 |
 | `http` | ❌ | Axum HTTP 健康与指标端点（axum + axum-server，TLS 走 rustls） |
 | `cli` | ❌ | `inklog-cli` 命令行工具（clap + glob，隐含 `schema`） |
 | `schema` | ❌ | 配置 JSON Schema 导出（schemars derive + `InklogConfig::json_schema()`）；`cli` 隐式启用 |
@@ -187,6 +187,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `test-utils` | ❌ | 测试面 mock 导出（`MockCache` / `MockConfig` / `MockDatabaseAdapter`），不入 default 与任何生产组合 |
 
 > ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 互斥（经 dbnexus 强制，embedded 与 server-side 驱动不得混用），不适用 `--all-features`，请按后端分组启用。
+>
+> 🚫 **请勿启用 `duckdb` 特性**（2026-10-16 起）：上游 `zip` crate 在 crates.io 全系 yank（仅 9.0.3 可用），`duckdb` 链经 `libduckdb-sys`（锁定 `zip ^6`）无法完成依赖解析，从零启用会在依赖解析阶段直接报错。已提交 `Cargo.lock` 的存量项目不受影响。等待 duckdb-rs 上游发布适配 zip 9.x 的版本后解除，此前请改用 `sqlite` / `postgres` / `mysql` 后端。
 
 ---
 
@@ -536,6 +538,6 @@ inklog 的实现依赖这些优秀的开源项目：
 
 <sub>© 2026 Kirky.X🌠. 版权所有。</sub>
 
-**[⬆ 返回顶部](#-目录)**
+**[⬆ 返回顶部](#目录)**
 
 </div>

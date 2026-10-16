@@ -4,11 +4,11 @@
 
 [![CI Status](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![Version](https://img.shields.io/crates/v/inklog.svg)](https://crates.io/crates/inklog) [![Docs.rs](https://docs.rs/inklog/badge.svg)](https://docs.rs/inklog) [![Downloads](https://img.shields.io/crates/d/inklog.svg)](https://crates.io/crates/inklog) [![License](https://img.shields.io/crates/l/inklog.svg)](LICENSE) [![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org/) [![Coverage](https://codecov.io/gh/Kirky-X/inklog/branch/main/graph/badge.svg)](https://codecov.io/gh/Kirky-X/inklog)
 
-[中文](README.md) | **English**
+[Chinese](README.md) | **English**
 
 **Enterprise-grade Rust Logging Infrastructure**
 
-[✨ Features](#-features) • [🚀 Quick Start](#-quick-start) • [📚 Documentation](#-documentation) • [💻 Examples](#-examples) • [🤝 Contributing](#-contributing)
+[✨ Features](#features) • [🚀 Quick Start](#quick-start) • [📚 Documentation](#documentation) • [💻 Examples](#examples) • [🤝 Contributing](#contributing)
 
 </div>
 
@@ -31,24 +31,24 @@ Every log record travels a controlled path through capture, masking, and encrypt
 ## 📋 Table of Contents
 
 <details open>
-<summary>📑 目录</summary>
+<summary>📑 Contents</summary>
 
-- [✨ Features](#-features)
-- [🚀 Quick Start](#-quick-start)
-- [🎨 Feature Flags](#-feature-flags)
-- [📚 Documentation](#-documentation)
-- [💻 Examples](#-examples)
-- [🏗️ Architecture](#️-architecture)
-- [🧪 Testing](#-testing)
-- [📊 Performance](#-performance)
-- [🔒 Security](#-security)
-- [🗺️ Roadmap](#️-roadmap)
-- [🤝 Contributing](#-contributing)
-- [📋 Changelog](#-changelog)
-- [📄 License](#-license)
-- [🙏 Acknowledgments](#-acknowledgments)
-- [📞 Contact & Support](#-contact--support)
-- [⭐ Star History](#-star-history)
+- [✨ Features](#features)
+- [🚀 Quick Start](#quick-start)
+- [🎨 Feature Flags](#feature-flags)
+- [📚 Documentation](#documentation)
+- [💻 Examples](#examples)
+- [🏗️ Architecture](#architecture)
+- [🧪 Testing](#testing)
+- [📊 Performance](#performance)
+- [🔒 Security](#security)
+- [🗺️ Roadmap](#roadmap)
+- [🤝 Contributing](#contributing)
+- [📋 Changelog](#changelog)
+- [📄 License](#license)
+- [🙏 Acknowledgments](#acknowledgments)
+- [📞 Contact & Support](#contact-support)
+- [⭐ Star History](#star-history)
 
 </details>
 
@@ -168,7 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `sqlite` | ❌ | SQLite database backend (via dbnexus, rustls runtime) |
 | `postgres` | ❌ | PostgreSQL database backend (via dbnexus) |
 | `mysql` | ❌ | MySQL database backend (via dbnexus) |
-| `duckdb` | ❌ | DuckDB database backend (via dbnexus) |
+| `duckdb` | ❌ | DuckDB database backend (via dbnexus). 🚫 Currently unusable: upstream zip full-range yank breaks libduckdb-sys (zip ^6) resolution — do not enable |
 | `http` | ❌ | Axum health and metrics endpoints (axum + axum-server, TLS via rustls) |
 | `cli` | ❌ | `inklog-cli` command-line tool (clap + glob, implies `schema`) |
 | `schema` | ❌ | Config JSON Schema export (schemars derive + `InklogConfig::json_schema()`); implicitly enabled by `cli` |
@@ -189,6 +189,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `test-utils` | ❌ | Test-facing mock exports (`MockCache` / `MockConfig` / `MockDatabaseAdapter`); excluded from default and all production combinations |
 
 > ⚠️ **Database backend exclusivity**: `sqlite` / `postgres` / `mysql` / `duckdb` are mutually exclusive (enforced via dbnexus; embedded and server-side drivers must not be mixed). `--all-features` is not supported; enable features grouped by backend instead.
+>
+> 🚫 **Do not enable the `duckdb` feature** (since 2026-10-16): the upstream `zip` crate has been fully yanked on crates.io (only 9.0.3 remains). The `duckdb` chain resolves through `libduckdb-sys` (pinned to `zip ^6`), which can no longer be resolved — enabling this feature from scratch fails at dependency resolution. Existing projects with a committed `Cargo.lock` are unaffected. This will be lifted once duckdb-rs upstream publishes a release adapted to zip 9.x; until then use the `sqlite` / `postgres` / `mysql` backends instead.
 
 ---
 
@@ -538,6 +540,6 @@ If you find this project useful, please consider giving it a ⭐️!
 
 <sub>© 2026 Kirky.X🌠. All rights reserved.</sub>
 
-**[⬆ Back to Top](#-table-of-contents)**
+**[⬆ Back to Top](#table-of-contents)**
 
 </div>
