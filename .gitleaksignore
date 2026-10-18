@@ -21,3 +21,22 @@ tests/combinations/multi_sink_fallback_test.rs:generic-api-key:246
 # 文档片段，模块已整体移除，仅存在于历史提交）：
 src/config.rs:curl-auth-header:1379
 src/config.rs:curl-auth-header:1455
+
+# 2026-10-18 gitleaks 8.30.1 全历史复扫增量补充(src内联夹具/占位，逐条已核实非真实凭据)
+0a38712efa2ef82b54ebb21ee89655694ee6f8ef:src/sink/encryption.rs:generic-api-key:115
+1386b8c7043c305e987814f2b2cb90e64501702e:src/sink/file.rs:generic-api-key:1195
+2537333b7b707ad0905564efa5f9d5a1e9bea0f0:src/support/query.rs:generic-api-key:516
+36b05d4add28212977e82dcf911b68d90bdf3691:src/support/processing/secret_patterns.rs:jwt:313
+36b05d4add28212977e82dcf911b68d90bdf3691:src/support/processing/secret_patterns.rs:private-key:320
+36b05d4add28212977e82dcf911b68d90bdf3691:src/support/processing/secret_patterns.rs:slack-bot-token:316
+36b05d4add28212977e82dcf911b68d90bdf3691:src/support/processing/secret_patterns.rs:stripe-access-token:318
+36b05d4add28212977e82dcf911b68d90bdf3691:src/support/processing/secret_scan.rs:jwt:302
+4ce34d7734fb3a2f4d5d5898cd4af45b8f1d4bce:src/validation/sanitize.rs:generic-api-key:237
+5c136e06b9efaf3c68540a753c648a3324e478ab:src/support/processing/masking.rs:generic-api-key:1352
+7204cf7747ce7b44fe4ed0f6a31236eba3dcc5a1:src/support/io/sink/file.rs:generic-api-key:1236
+a24d7b3c9d318bb47801d07ea6d8ce5bdef88b76:src/masking.rs:generic-api-key:631
+a24d7b3c9d318bb47801d07ea6d8ce5bdef88b76:src/masking.rs:jwt:614
+b5979c9fbccda406ab929cb47e565614248f3367:src/support/io/sink/file.rs:generic-api-key:2331
+b5979c9fbccda406ab929cb47e565614248f3367:src/support/io/sink/file.rs:generic-api-key:2364
+c58d94ca5b8bd917106e1d79b65ab421e26a3fc1:src/support/query.rs:generic-api-key:701
+c58d94ca5b8bd917106e1d79b65ab421e26a3fc1:src/support/query.rs:generic-api-key:838
