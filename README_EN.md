@@ -8,7 +8,7 @@
 
 **Enterprise-grade Rust Logging Infrastructure**
 
-[✨ Features](#features) • [🚀 Quick Start](#quick-start) • [📚 Documentation](#documentation) • [💻 Examples](#examples) • [🤝 Contributing](#contributing)
+[✨ Features](#-features) • [🚀 Quick Start](#-quick-start) • [📚 Documentation](#-documentation) • [💻 Examples](#-examples) • [🤝 Contributing](#-contributing)
 
 </div>
 
@@ -33,22 +33,22 @@ Every log record travels a controlled path through capture, masking, and encrypt
 <details open>
 <summary>📑 Contents</summary>
 
-- [✨ Features](#features)
-- [🚀 Quick Start](#quick-start)
-- [🎨 Feature Flags](#feature-flags)
-- [📚 Documentation](#documentation)
-- [💻 Examples](#examples)
-- [🏗️ Architecture](#architecture)
-- [🧪 Testing](#testing)
-- [📊 Performance](#performance)
-- [🔒 Security](#security)
-- [🗺️ Roadmap](#roadmap)
-- [🤝 Contributing](#contributing)
-- [📋 Changelog](#changelog)
-- [📄 License](#license)
-- [🙏 Acknowledgments](#acknowledgments)
-- [📞 Contact & Support](#contact-support)
-- [⭐ Star History](#star-history)
+- [✨ Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [🎨 Feature Flags](#-feature-flags)
+- [📚 Documentation](#-documentation)
+- [💻 Examples](#-examples)
+- [🏗️ Architecture](#-architecture)
+- [🧪 Testing](#-testing)
+- [📊 Performance](#-performance)
+- [🔒 Security](#-security)
+- [🗺️ Roadmap](#-roadmap)
+- [🤝 Contributing](#-contributing)
+- [📋 Changelog](#-changelog)
+- [📄 License](#-license)
+- [🙏 Acknowledgments](#-acknowledgments)
+- [📞 Contact & Support](#-contact--support)
+- [⭐ Star History](#-star-history)
 
 </details>
 
@@ -540,6 +540,6 @@ If you find this project useful, please consider giving it a ⭐️!
 
 <sub>© 2026 Kirky.X🌠. All rights reserved.</sub>
 
-**[⬆ Back to Top](#table-of-contents)**
+**[⬆ Back to Top](#-table-of-contents)**
 
 </div>
