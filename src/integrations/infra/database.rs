@@ -212,8 +212,6 @@ impl DbNexusAdapter {
             warmup_retries: 3,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
-            failover_config: None,
-            replica_config: None,
             ..Default::default()
         };
 
