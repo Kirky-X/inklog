@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <details open>
 <summary>📑 目录</summary>
 
+- [Unreleased](#unreleased)
 - [0.3.0-rc.10](#030-rc10---2026-10-19)
 - [0.3.0-rc.9](#030-rc9---2026-10-10)
 - [0.3.0-rc.8](#030-rc8---2026-10-08)
@@ -28,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [0.0.0](#000---2025-12-30)
 
 </details>
+
+## [Unreleased]
+
+### Removed
+
+- **安全文档**：移除 `docs/SECURITY.md` 的「安全赏金计划」章节（含奖励金额表与排除范围清单）——当前不再设任何安全赏金计划。
 
 ## [0.3.0-rc.10] - 2026-10-19
 
@@ -481,7 +488,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - CI/CD工作流
 
 <!-- Links -->
-[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.7...HEAD
+[Unreleased]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.10...HEAD
 [0.3.0-rc.7]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.6...v0.3.0-rc.7
 [0.3.0-rc.6]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.5...v0.3.0-rc.6
 [0.3.0-rc.5]: https://github.com/Kirky-X/inklog/compare/v0.3.0-rc.4...v0.3.0-rc.5

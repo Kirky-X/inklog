@@ -2,7 +2,7 @@
 
 <img src="docs/assets/inklog.png" alt="inklog" width="240">
 
-[![CI Status](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![Version](https://img.shields.io/crates/v/inklog.svg)](https://crates.io/crates/inklog) [![Docs.rs](https://docs.rs/inklog/badge.svg)](https://docs.rs/inklog) [![Downloads](https://img.shields.io/crates/d/inklog.svg)](https://crates.io/crates/inklog) [![License](https://img.shields.io/crates/l/inklog.svg)](LICENSE) [![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org/) [![Coverage](https://codecov.io/gh/Kirky-X/inklog/branch/main/graph/badge.svg)](https://codecov.io/gh/Kirky-X/inklog)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.97.1+](https://img.shields.io/badge/Rustc-1.97.1+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![crates.io](https://img.shields.io/crates/v/inklog?style=for-the-badge)](https://crates.io/crates/inklog) [![docs.rs](https://img.shields.io/docsrs/inklog?style=for-the-badge)](https://docs.rs/inklog) [![downloads](https://img.shields.io/crates/d/inklog?style=for-the-badge)](https://crates.io/crates/inklog) [![CI](https://img.shields.io/github/actions/workflow/status/Kirky-X/inklog/ci.yml?branch=main&label=CI&style=for-the-badge)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![coverage](https://img.shields.io/codecov/c/github/Kirky-X/inklog?style=for-the-badge)](https://codecov.io/gh/Kirky-X/inklog) [![license](https://img.shields.io/crates/l/inklog?style=for-the-badge)](LICENSE)
 
 **中文** | [English](README_EN.md)
 
@@ -38,11 +38,11 @@
 - [🎨 特性标志](#-特性标志)
 - [📚 文档](#-文档)
 - [💻 示例](#-示例)
-- [🏗️ 架构](#-架构)
+- [🏗️ 架构](#️-架构)
 - [🧪 测试](#-测试)
 - [📊 性能](#-性能)
 - [🔒 安全](#-安全)
-- [🗺️ 开发路线图](#-开发路线图)
+- [🗺️ 开发路线图](#️-开发路线图)
 - [🤝 参与贡献](#-参与贡献)
 - [📋 更新日志](#-更新日志)
 - [📄 许可证](#-许可证)
@@ -112,20 +112,33 @@ inklog 是面向生产环境的日志基础设施：应用代码继续使用 `lo
 
 ### 安装
 
+<details>
+<summary>📄 代码 · bash</summary>
+
 ```bash
 cargo add inklog
 ```
 
+</details>
+
 或在 `Cargo.toml` 中显式声明（`default = ["i18n", "cache"]`，默认启用核心能力 + 国际化 + 缓存后端）：
+
+<details>
+<summary>📄 代码 · toml</summary>
 
 ```toml
 [dependencies]
 inklog = "0.3.0-rc.10"
 ```
 
+</details>
+
 ### 最小可运行示例
 
 出自 [`examples/src/bin/core/basic.rs`](examples/src/bin/core/basic.rs)：
+
+<details>
+<summary>📄 代码 · rust</summary>
 
 ```rust
 use inklog::LoggerManager;
@@ -145,6 +158,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+</details>
+
 ### 核心概念
 
 1. **初始化**：`LoggerManager` 负责安装全局 tracing subscriber 与 `log` crate 前端，进程内单例语义（`init_inklog_logger()` 提供便捷入口）。
@@ -158,6 +173,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## 🎨 特性标志
 
 `default = ["i18n", "cache"]`：默认组合为核心能力 + 国际化 + 缓存后端；下列其余 feature 按需显式启用（依据 `Cargo.toml` `[features]` 定义）。以 `default-features = false` 引入即同时关闭 i18n 与 cache，可裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退到内嵌英文文案表。
+
+<details>
+<summary>📋 表格</summary>
 
 | 标志 | 默认 | 说明 |
 |------|:----:|------|
@@ -186,6 +204,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `metrics-registry` | ❌ | 通用业务指标 registry（CounterVec / GaugeVec / HistogramVec + Prometheus 文本导出） |
 | `test-utils` | ❌ | 测试面 mock 导出（`MockCache` / `MockConfig` / `MockDatabaseAdapter`），不入 default 与任何生产组合 |
 
+</details>
+
 > ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 互斥（经 dbnexus 强制，embedded 与 server-side 驱动不得混用），不适用 `--all-features`，请按后端分组启用。
 >
 > 🚫 **请勿启用 `duckdb` 特性**（2026-10-16 起）：上游 `zip` crate 在 crates.io 全系 yank（仅 9.0.3 可用），`duckdb` 链经 `libduckdb-sys`（锁定 `zip ^6`）无法完成依赖解析，从零启用会在依赖解析阶段直接报错。已提交 `Cargo.lock` 的存量项目不受影响。等待 duckdb-rs 上游发布适配 zip 9.x 的版本后解除，此前请改用 `sqlite` / `postgres` / `mysql` 后端。
@@ -193,6 +213,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ---
 
 ## 📚 文档
+
+<details>
+<summary>📋 表格</summary>
 
 | 文档 | 说明 |
 |------|------|
@@ -206,15 +229,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [🤝 贡献指南](docs/CONTRIBUTING.md) | 开发环境、TDD 流程与代码风格约定 |
 | [📦 在线 API 文档](https://docs.rs/inklog) | docs.rs 自动生成的最新文档 |
 
+</details>
+
 ---
 
 ## 💻 示例
 
 [`examples/`](examples/) 是 workspace 内的独立 crate（`inklog-examples`），按目录分为 7 类共 40 个示例。在仓库根目录运行：
 
+<details>
+<summary>📄 代码 · bash</summary>
+
 ```bash
 cargo run --package inklog-examples --bin <名称>
 ```
+
+</details>
 
 #### 配置（config）
 
@@ -227,6 +257,9 @@ cargo run --package inklog-examples --bin <名称>
 
 #### 核心（core）
 
+<details>
+<summary>📋 表格</summary>
+
 | 示例 | 说明 | 特性要求 |
 |------|------|----------|
 | `basic` | 基础用法：初始化、级别、结构化字段、健康检查、优雅关闭 | 无 |
@@ -237,7 +270,12 @@ cargo run --package inklog-examples --bin <名称>
 | `error_handling` | 错误处理（Layer 0 零依赖） | 无 |
 | `i18n` | 国际化格式化 | 无 |
 
+</details>
+
 #### Sink 与输出（sinks）
+
+<details>
+<summary>📋 表格</summary>
 
 | 示例 | 说明 | 特性要求 |
 |------|------|----------|
@@ -250,6 +288,8 @@ cargo run --package inklog-examples --bin <名称>
 | `parquet_archive` | Parquet 归档 | `parquet` + 任一数据库后端 |
 | `partition_strategy` | 数据库分区策略 | 无 |
 
+</details>
+
 #### 数据库（database）
 
 | 示例 | 说明 | 特性要求 |
@@ -259,6 +299,9 @@ cargo run --package inklog-examples --bin <名称>
 | `di_example` | 依赖注入模式 | `sqlite`（经 required-features 强制） |
 
 #### 基础设施（infra）
+
+<details>
+<summary>📋 表格</summary>
 
 | 示例 | 说明 | 特性要求 |
 |------|------|----------|
@@ -273,6 +316,8 @@ cargo run --package inklog-examples --bin <名称>
 | `performance` | 性能演示 | 无 |
 | `rate_limiter` | 速率限制器（Layer 0 零依赖） | 无 |
 | `runtime_ops` | LoggerManager 运行时操作 API | 无 |
+
+</details>
 
 #### 网络（network）
 
@@ -317,6 +362,9 @@ Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重�
 
 ### 测试策略
 
+<details>
+<summary>📋 表格</summary>
+
 | 类型 | 位置 | 说明 |
 |------|------|------|
 | 单元测试 | `src/` 内联 `#[cfg(test)]` | 各模块边界与异常场景，Mock 经 cfg(test) 直接可见 |
@@ -326,9 +374,14 @@ Sink 写入失败经断路器（默认失败阈值 5 次、冷却 30 秒）重�
 | Docker 数据库集成 | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite 生命周期验证 |
 | 性能测试 | `tests/performance/` + `benches/` | 大容量、长时间运行测试与 criterion 基准 |
 
+</details>
+
 **测试规模**（HEAD 实测，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,712 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,317 个测试函数**；另有 criterion 基准函数 48 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个、`benches/secret_scan_bench.rs` 8 个，按 `.bench_function(` 注册用例计数；其中 1 个按 `otlp` feature 门控，`secret_scan_bench` 需 `secret-scan` feature），基线见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
 ### 运行命令（与 CI 一致）
+
+<details>
+<summary>📄 代码 · bash</summary>
 
 ```bash
 # CI 测试门禁（数据库后端互斥，不适用 --all-features）
@@ -346,9 +399,14 @@ cargo bench --bench inklog_bench
 cargo bench --bench secret_scan_bench --features secret-scan
 ```
 
+</details>
+
 > **本地化提示**：错误消息经 ICU/Fluent 按系统 locale 渲染。若测试断言英文消息文本，请设置 `INKLOG_LOCALE=en`（如 CI 或非英文系统环境）以固定输出语言。
 
 ### 代码质量门禁
+
+<details>
+<summary>📄 代码 · bash</summary>
 
 ```bash
 cargo fmt --all -- --check                    # 格式检查
@@ -356,6 +414,8 @@ cargo clippy --all-targets --features "sqlite http cli kit compression gzip parq
 cargo deny check                              # 依赖漏洞 / 许可证 / 重复依赖
 cargo audit                                   # 安全公告（lefthook pre-push）
 ```
+
+</details>
 
 ---
 
@@ -424,6 +484,9 @@ cargo audit                                   # 安全公告（lefthook pre-push
 | protobuf 编译器 | 含数据库 feature 的组合构建需要 `protoc` |
 | Git 钩子 | `bash scripts/install-pre-commit.sh` 安装 Python pre-commit 钩子（读 `.pre-commit-config.yaml`）；lefthook 用户执行 `lefthook install`（配置见 `lefthook.yml`） |
 
+<details>
+<summary>📄 代码 · bash</summary>
+
 ```bash
 git clone https://github.com/Kirky-X/inklog.git
 cd inklog
@@ -432,6 +495,8 @@ bash scripts/install-pre-commit.sh
 # 运行测试（与 CI 相同的 feature 组合）
 cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
 ```
+
+</details>
 
 ### 提交约定
 

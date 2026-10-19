@@ -2,9 +2,9 @@
 
 <img src="docs/assets/inklog.png" alt="inklog" width="240">
 
-[![CI Status](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml/badge.svg)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![Version](https://img.shields.io/crates/v/inklog.svg)](https://crates.io/crates/inklog) [![Docs.rs](https://docs.rs/inklog/badge.svg)](https://docs.rs/inklog) [![Downloads](https://img.shields.io/crates/d/inklog.svg)](https://crates.io/crates/inklog) [![License](https://img.shields.io/crates/l/inklog.svg)](LICENSE) [![Rust](https://img.shields.io/badge/rust-1.97.1%2B-orange.svg)](https://www.rust-lang.org/) [![Coverage](https://codecov.io/gh/Kirky-X/inklog/branch/main/graph/badge.svg)](https://codecov.io/gh/Kirky-X/inklog)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.97.1+](https://img.shields.io/badge/Rustc-1.97.1+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![crates.io](https://img.shields.io/crates/v/inklog?style=for-the-badge)](https://crates.io/crates/inklog) [![docs.rs](https://img.shields.io/docsrs/inklog?style=for-the-badge)](https://docs.rs/inklog) [![downloads](https://img.shields.io/crates/d/inklog?style=for-the-badge)](https://crates.io/crates/inklog) [![CI](https://img.shields.io/github/actions/workflow/status/Kirky-X/inklog/ci.yml?branch=main&label=CI&style=for-the-badge)](https://github.com/Kirky-X/inklog/actions/workflows/ci.yml) [![coverage](https://img.shields.io/codecov/c/github/Kirky-X/inklog?style=for-the-badge)](https://codecov.io/gh/Kirky-X/inklog) [![license](https://img.shields.io/crates/l/inklog?style=for-the-badge)](LICENSE)
 
-[Chinese](README.md) | **English**
+[中文](README.md) | **English**
 
 **Enterprise-grade Rust Logging Infrastructure**
 
@@ -38,11 +38,11 @@ Every log record travels a controlled path through capture, masking, and encrypt
 - [🎨 Feature Flags](#-feature-flags)
 - [📚 Documentation](#-documentation)
 - [💻 Examples](#-examples)
-- [🏗️ Architecture](#-architecture)
+- [🏗️ Architecture](#️-architecture)
 - [🧪 Testing](#-testing)
 - [📊 Performance](#-performance)
 - [🔒 Security](#-security)
-- [🗺️ Roadmap](#-roadmap)
+- [🗺️ Roadmap](#️-roadmap)
 - [🤝 Contributing](#-contributing)
 - [📋 Changelog](#-changelog)
 - [📄 License](#-license)
@@ -58,32 +58,30 @@ Every log record travels a controlled path through capture, masking, and encrypt
 
 inklog is logging infrastructure built for production: application code keeps using the standard `log` / `tracing` macros while inklog takes over subscription, masking, dispatch, and persistence. Everything below maps to real code in this repository and the [docs/](docs/USER_GUIDE.md) documentation.
 
-<table style="width:100%; border-collapse: collapse;">
+<table style="width:100%; border-collapse: collapse">
 <tr>
-<td width="50%" style="vertical-align:top; padding: 8px;">
-
-| Capability | Description |
-|------|------|
-| ⚡ **Async Pipeline** | Bounded Crossbeam channels + dedicated worker pool; non-blocking senders with backpressure when full |
-| 📁 **File Output** | Size- and time-based rotation, `BufWriter` buffering, optional compression and encryption |
-| 🗄️ **Database Output** | Batched inserts, connection pooling, partitioned tables via the dbnexus adapter for four backends |
-| 🎭 **Data Masking** | Sensitive field-name detection + regex rule set, with `fast-masking` multi-pattern acceleration |
-| 🎨 **Template Formatting** | Placeholders such as `{timestamp}` `{level}` `{message}` `{trace_id}` |
-| 🧩 **Dependency Injection** | `Cache` / `Config` / `Database` trait abstractions with swappable, mockable adapters |
-
-</td>
-<td width="50%" style="vertical-align:top; padding: 8px;">
-
-| Capability | Description |
-|------|------|
-| 🔁 **Reliability** | Circuit breaker, DB → File → Console three-level fallback, automatic recovery by a health-check thread |
-| 🔀 **Dynamic Sinks** | Register third-party sinks with `LoggerBuilder::add_sink`, one channel per sink; middleware chain, sampler, and token-bucket rate-limit decorators |
-| 🌡️ **Runtime Tuning** | `set_level` hot-reloads global and per-target levels via `tracing_subscriber::reload` |
-| 🔍 **Log Search** | `inklog-cli query` searches local logs by time, level, and keyword (auto decrypt/unpack) |
-| 🌐 **i18n** | Error messages rendered per system locale via Fluent + ICU (zh-CN / en) |
-| 📈 **Observability** | Prometheus export of health, channel usage, pool metrics, and write-latency histogram |
-
-</td>
+<td width="50%" style="vertical-align:top; padding: 12px">⚡ <b>Async Pipeline</b><br><span style="color:#64748B">Bounded Crossbeam channels + dedicated worker pool; non-blocking senders with backpressure when full</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📁 <b>File Output</b><br><span style="color:#64748B">Size- and time-based rotation, <code>BufWriter</code> buffering, optional compression and encryption</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🗄️ <b>Database Output</b><br><span style="color:#64748B">Batched inserts, connection pooling, partitioned tables via the dbnexus adapter for four backends</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🎭 <b>Data Masking</b><br><span style="color:#64748B">Sensitive field-name detection + regex rule set, with <code>fast-masking</code> multi-pattern acceleration</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🎨 <b>Template Formatting</b><br><span style="color:#64748B"><code>{timestamp}</code> <code>{level}</code> <code>{message}</code> <code>{trace_id}</code> placeholders</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧩 <b>Dependency Injection</b><br><span style="color:#64748B"><code>Cache</code> / <code>Config</code> / <code>Database</code> trait abstractions with swappable, mockable adapters</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🔁 <b>Reliability</b><br><span style="color:#64748B">Circuit breaker, DB → File → Console three-level fallback, automatic recovery by a health-check thread</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🔀 <b>Dynamic Sinks</b><br><span style="color:#64748B">Register third-party sinks with <code>LoggerBuilder::add_sink</code>, one channel per sink; middleware chain, sampler, and token-bucket rate-limit decorators</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🌡️ <b>Runtime Tuning</b><br><span style="color:#64748B"><code>set_level</code> hot-reloads global and per-target levels via <code>tracing_subscriber::reload</code></span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🔍 <b>Log Search</b><br><span style="color:#64748B"><code>inklog-cli query</code> searches local logs by time, level, and keyword (auto decrypt/unpack)</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🌐 <b>i18n</b><br><span style="color:#64748B">Error messages rendered per system locale via Fluent + ICU (zh-CN / en)</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📈 <b>Observability</b><br><span style="color:#64748B">Prometheus export of health, channel usage, pool metrics, and write-latency histogram</span></td>
 </tr>
 </table>
 
@@ -95,7 +93,7 @@ inklog is logging infrastructure built for production: application code keeps us
 - **Observability** (`src/support/observability/`): `Metrics`, `HealthStatus`, `SinkHealthMonitor`, fallback state
 - **Validation** (`src/validation/`): `PathValidator` path traversal protection, `LogSanitizer` log content sanitization
 - **Tamper-evident archival** (`src/support/audit_chain.rs`): HMAC-SHA256 archive chain against deletion, reordering, and forgery
-- **Integrations** (`src/integrations/`): `OxCacheAdapter`, `InklogConfigAdapter`, `DbNexusAdapter`, trait-kit `InklogModule`, dbnexus audit bridge, confers config loading with watch
+- **Integrations** (`src/integrations/`): `OxCacheAdapter`, `InklogConfigAdapter`, `DbNexusAdapter`, trait-kit `InklogModule`, dbnexus audit bridge, confers config loading with watch, confers audit bridge
 - **CLI** (`src/cli/`): five subcommands: `decrypt`, `generate`, `validate`, `query`, `verify-chain` (`verify-chain` validates the archive audit chain via `--manifest` + `--key-env`)
 
 </details>
@@ -114,20 +112,33 @@ inklog is logging infrastructure built for production: application code keeps us
 
 ### Installation
 
+<details>
+<summary>📄 Code · bash</summary>
+
 ```bash
 cargo add inklog
 ```
 
+</details>
+
 Or declare it explicitly in `Cargo.toml` (`default = ["i18n", "cache"]`; core capabilities plus internationalization and the cache backend are enabled by default):
+
+<details>
+<summary>📄 Code · toml</summary>
 
 ```toml
 [dependencies]
 inklog = "0.3.0-rc.10"
 ```
 
+</details>
+
 ### Minimal Runnable Example
 
 Taken from [`examples/src/bin/core/basic.rs`](examples/src/bin/core/basic.rs):
+
+<details>
+<summary>📄 Code · rust</summary>
 
 ```rust
 use inklog::LoggerManager;
@@ -147,6 +158,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+</details>
+
 ### Core Concepts
 
 1. **Initialization**: `LoggerManager` installs the global tracing subscriber and the `log` crate frontend with process-wide singleton semantics (`init_inklog_logger()` is the convenience entry point).
@@ -160,6 +173,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## 🎨 Feature Flags
 
 `default = ["i18n", "cache"]`: the default build contains core capabilities plus internationalization and the cache backend; every other feature below must be enabled explicitly (per the `Cargo.toml` `[features]` definition). Opting out via `default-features = false` disables both i18n and cache, which prunes the whole icu/fluent dependency tree (oxcache's icu/fluent deps are not optional), with `tr`/`tr_args` falling back to the embedded English message table.
+
+<details>
+<summary>📋 Table</summary>
 
 | Flag | Default | Description |
 |------|:----:|------|
@@ -188,6 +204,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `metrics-registry` | ❌ | General-purpose business metrics registry (CounterVec / GaugeVec / HistogramVec + Prometheus text export) |
 | `test-utils` | ❌ | Test-facing mock exports (`MockCache` / `MockConfig` / `MockDatabaseAdapter`); excluded from default and all production combinations |
 
+</details>
+
 > ⚠️ **Database backend exclusivity**: `sqlite` / `postgres` / `mysql` / `duckdb` are mutually exclusive (enforced via dbnexus; embedded and server-side drivers must not be mixed). `--all-features` is not supported; enable features grouped by backend instead.
 >
 > 🚫 **Do not enable the `duckdb` feature** (since 2026-10-16): the upstream `zip` crate has been fully yanked on crates.io (only 9.0.3 remains). The `duckdb` chain resolves through `libduckdb-sys` (pinned to `zip ^6`), which can no longer be resolved — enabling this feature from scratch fails at dependency resolution. Existing projects with a committed `Cargo.lock` are unaffected. This will be lifted once duckdb-rs upstream publishes a release adapted to zip 9.x; until then use the `sqlite` / `postgres` / `mysql` backends instead.
@@ -195,6 +213,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ---
 
 ## 📚 Documentation
+
+<details>
+<summary>📋 Table</summary>
 
 | Document | Description |
 |------|------|
@@ -208,15 +229,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [🤝 Contributing](docs/CONTRIBUTING.md) | Development environment, TDD workflow, and code style conventions |
 | [📦 Online API Docs](https://docs.rs/inklog) | Latest documentation auto-generated on docs.rs |
 
+</details>
+
 ---
 
 ## 💻 Examples
 
 [`examples/`](examples/) is a standalone workspace crate (`inklog-examples`) with 40 examples in 7 categories. Run from the repository root:
 
+<details>
+<summary>📄 Code · bash</summary>
+
 ```bash
 cargo run --package inklog-examples --bin <name>
 ```
+
+</details>
 
 #### Configuration (config)
 
@@ -229,6 +257,9 @@ cargo run --package inklog-examples --bin <name>
 
 #### Core (core)
 
+<details>
+<summary>📋 Table</summary>
+
 | Example | Description | Feature |
 |------|------|----------|
 | `basic` | Basic usage: init, levels, structured fields, health check, graceful shutdown | none |
@@ -239,7 +270,12 @@ cargo run --package inklog-examples --bin <name>
 | `error_handling` | Error handling (Layer 0, zero dependencies) | none |
 | `i18n` | Internationalized formatting | none |
 
+</details>
+
 #### Sinks & Output (sinks)
+
+<details>
+<summary>📋 Table</summary>
 
 | Example | Description | Feature |
 |------|------|----------|
@@ -252,6 +288,8 @@ cargo run --package inklog-examples --bin <name>
 | `parquet_archive` | Parquet archival | `parquet` + any database backend |
 | `partition_strategy` | Database partitioning strategies | none |
 
+</details>
+
 #### Database (database)
 
 | Example | Description | Feature |
@@ -261,6 +299,9 @@ cargo run --package inklog-examples --bin <name>
 | `di_example` | Dependency injection pattern | `sqlite` (enforced via required-features) |
 
 #### Infrastructure (infra)
+
+<details>
+<summary>📋 Table</summary>
 
 | Example | Description | Feature |
 |------|------|----------|
@@ -275,6 +316,8 @@ cargo run --package inklog-examples --bin <name>
 | `performance` | Performance demo | none |
 | `rate_limiter` | Rate limiter (Layer 0, zero dependencies) | none |
 | `runtime_ops` | LoggerManager runtime operations API | none |
+
+</details>
 
 #### Network (network)
 
@@ -319,6 +362,9 @@ Sink write failures go through the circuit breaker (default failure threshold 5,
 
 ### Test Strategy
 
+<details>
+<summary>📋 Table</summary>
+
 | Type | Location | Description |
 |------|------|------|
 | Unit tests | inline `#[cfg(test)]` in `src/` | Boundary and error scenarios per module; mocks visible via cfg(test) |
@@ -328,9 +374,14 @@ Sink write failures go through the circuit breaker (default failure threshold 5,
 | Docker database integration | `tests/docker/` + `docker/docker-compose.test.yml` | PostgreSQL / MySQL / SQLite lifecycle verification |
 | Performance tests | `tests/performance/` + `benches/` | Large-volume and long-running tests plus criterion benchmarks |
 
+</details>
+
 **Test suite size** (measured at HEAD, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,712 inline in `src/` + 564 in `tests/` + 41 in `examples/` for a total of **2,317 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature).
 
 ### Commands (matching CI)
+
+<details>
+<summary>📄 Code · bash</summary>
 
 ```bash
 # CI test gate (database backends are mutually exclusive; --all-features is unsupported)
@@ -348,9 +399,14 @@ cargo bench --bench inklog_bench
 cargo bench --bench secret_scan_bench --features secret-scan
 ```
 
+</details>
+
 > **Locale note**: error messages are localized via ICU/Fluent based on the system locale. If tests assert English message text, set `INKLOG_LOCALE=en` (e.g. in CI or non-English environments) to pin the output language.
 
 ### Quality Gates
+
+<details>
+<summary>📄 Code · bash</summary>
 
 ```bash
 cargo fmt --all -- --check                    # format check
@@ -358,6 +414,8 @@ cargo clippy --all-targets --features "sqlite http cli kit compression gzip parq
 cargo deny check                              # dependency advisories / licenses / duplicate crates
 cargo audit                                   # security advisories (lefthook pre-push)
 ```
+
+</details>
 
 ---
 
@@ -426,6 +484,9 @@ Contributions are welcome! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for 
 | Protobuf compiler | `protoc` is required to build combinations with database features |
 | Git hooks | install Python pre-commit hooks with `bash scripts/install-pre-commit.sh` (reads `.pre-commit-config.yaml`); lefthook users run `lefthook install` (config in `lefthook.yml`) |
 
+<details>
+<summary>📄 Code · bash</summary>
+
 ```bash
 git clone https://github.com/Kirky-X/inklog.git
 cd inklog
@@ -434,6 +495,8 @@ bash scripts/install-pre-commit.sh
 # Run tests (same feature combination as CI)
 cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
 ```
+
+</details>
 
 ### Commit Conventions
 
