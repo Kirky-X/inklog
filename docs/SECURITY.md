@@ -1120,7 +1120,7 @@ chown $(whoami):$(whoami) logs/*.enc
 ---
 
 **文档版本**: 2.1
-**维护者**: inklog Security Team
+**维护者**: Kirky.X
 **联系我们**: [Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
 
 *本文档遵循 CC BY-SA 4.0 许可协议*
