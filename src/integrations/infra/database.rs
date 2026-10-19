@@ -211,10 +211,10 @@ impl DbNexusAdapter {
             warmup_timeout: 30,
             warmup_retries: 3,
             cache_config: dbnexus::foundation::config::CacheConfig::default(),
-            sqlite_pragmas: None,
             retry_policy: Some(dbnexus::reliability::retry::RetryPolicy::default()),
             failover_config: None,
             replica_config: None,
+            ..Default::default()
         };
 
         // 使用 DbPool::with_config 创建连接池
