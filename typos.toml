@@ -1,8 +1,6 @@
-# typos 白名单 —— 仅登记「确为真词/真实标识符」的命中，不放宽任何门禁。
+# typos 白名单 —— 仅登记「确为真词 / 真实标识符 / 刻意测试数据」的命中，
+# 不放宽任何门禁：真正的拼写错误仍会由 typos 报告并阻断提交。
 #
-# 原则：只把 typos 对真实 crate 名、厂商名、图节点 ID、测试夹具字符串的误判
-# 逐条登记为「正确拼写即自身」（key == value 即 Status::Valid）；真正的拼写
-# 错误仍由 typos 报告并阻断提交。
 # 词条大小写不敏感（查找走 UniCase），故 `flate` 一条同时覆盖 `Flate`。
 [default.extend-words]
 # flate2 —— 真实 crate 名（纯 Rust gzip 后端）。typos 把 `flate2` 切成 `flate`，
@@ -20,3 +18,13 @@ ERRO = "ERRO"
 # byt —— src/support/io/sink/file.rs 测试夹具里刻意的 16 字节盐值字符串
 # `b"fixed-salt-16byt"`（字面量长度即 16 字节，改名会破坏夹具语义）。
 byt = "byt"
+# writeable —— ICU4X 组件 crate 的真实名字（无 r）。src/i18n/i18n_impl.rs 的
+# `use writeable::Writeable;` 是真实标识符，不是 `writable` 的拼写错误。
+writeable = "writeable"
+# Iz —— 测试注释中引用 base64 占位符 "MTIz..."（解码为重复数字序列）时的
+# 切词片段，出现在 tests/integration/comprehensive_validation_test.rs 与
+# tests/integration/verification/file_sink.rs；非 `Is` 的笔误。
+Iz = "Iz"
+# EXAMPL —— src/support/processing/secret_patterns.rs 中被截断的 AWS 文档示例
+# key `AKIAIOSFODNN7EXAMPL`（前缀过短用例），末尾少一个 E 是测试本意。
+EXAMPL = "EXAMPL"

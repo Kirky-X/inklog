@@ -531,7 +531,9 @@ The full version history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md) (Keep a
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE) with the additional [Commons Clause](LICENSE) condition: the software may not be sold without separate authorization. Copyright (c) 2026 Kirky.X🌠.
+This project is licensed under the [MIT](LICENSE) License.
+
+Copyright (c) 2026 Kirky.X🌠
 
 ---
 

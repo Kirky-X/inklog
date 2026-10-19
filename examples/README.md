@@ -85,4 +85,4 @@
 
 ## 许可证
 
-MIT + Commons Clause 许可证 — 商业使用需单独授权，参见项目根目录 [LICENSE](../LICENSE) 文件。
+本项目基于 [MIT](../LICENSE) 许可证发布。

@@ -531,7 +531,9 @@ cargo test --workspace --features "sqlite http cli kit compression gzip parquet 
 
 ## 📄 许可证
 
-本项目基于 [MIT License](LICENSE) 发布，附加 [Commons Clause](LICENSE) 条件：未经单独授权，不得销售本软件。版权所有 (c) 2026 Kirky.X🌠。
+本项目基于 [MIT](LICENSE) 许可证发布。
+
+Copyright (c) 2026 Kirky.X🌠
 
 ---
 
