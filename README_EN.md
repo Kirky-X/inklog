@@ -386,8 +386,8 @@ Reproduction steps are documented in the "Reproduction" section of [docs/PERFORM
 
 Please do **not** disclose security vulnerabilities publicly; report responsibly following [docs/SECURITY.md](docs/SECURITY.md):
 
-- **Preferred**: email [Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
-- **Alternative**: [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)
+- **Preferred**: [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories) ("Report a vulnerability" private channel)
+- **Alternative**: email [Kirky-X@outlook.com](mailto:Kirky-X@outlook.com) (handler: Kirky.X)
 - **Response targets and coordinated disclosure**: see [docs/SECURITY.md](docs/SECURITY.md) ("Vulnerability Reporting Process").
 
 ### Security Design
@@ -536,7 +536,7 @@ Database, cache, configuration, and lifecycle integrations are provided by the s
 
 If you find this project useful, please consider giving it a ⭐️!
 
-**Built with ❤️ by the Inklog Team**
+**Built with ❤️ by Kirky.X**
 
 <sub>© 2026 Kirky.X🌠. All rights reserved.</sub>
 

@@ -64,8 +64,7 @@ inklog 目前处于 0.x 预发布阶段（当前版本 **0.3.0-rc.10**），暂�
 
 **备选方式**：
 
-- 邮件：[Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)
-- PGP 密钥：(将在安全页面提供)
+- 邮件：[Kirky-X@outlook.com](mailto:Kirky-X@outlook.com)（受理人：Kirky.X；未发布 PGP 公钥，请勿以加密邮件预期）
 
 ### 报告内容
 
