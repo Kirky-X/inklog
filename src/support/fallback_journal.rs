@@ -2203,13 +2203,45 @@ mod tests {
 
     #[test]
     fn test_tcp_pusher_full_buffer_drops_oldest() {
+        // 投递线程在连接阶段会整批换出缓冲（`deliver_one_round`），push 与
+        // 换出竞争时本轮可能少丢；精确的「丢最旧」语义由下方 enqueue 单测
+        // 确定性覆盖，此处只断言容量上界与丢弃计数不超过入队溢出次数。
         let pusher = pusher("127.0.0.1:1".to_string(), 2);
         for i in 0..5 {
             pusher.push(format!("overflow-{i}").as_bytes()).unwrap();
         }
         wait_for_buffered_len(&pusher, 2, "bounded capacity must hold");
-        assert_eq!(pusher.dropped_total(), 3, "overflow must drop oldest");
+        assert!(
+            pusher.dropped_total() <= 3,
+            "overflow must not exceed push count"
+        );
         pusher.flush_pending();
+    }
+
+    #[test]
+    fn test_enqueue_overflow_drops_oldest() {
+        let mut buffer = std::collections::VecDeque::new();
+        assert_eq!(
+            TcpJournalPusher::enqueue(&mut buffer, 2, b"first\n".to_vec()),
+            0
+        );
+        assert_eq!(
+            TcpJournalPusher::enqueue(&mut buffer, 2, b"second\n".to_vec()),
+            0
+        );
+        assert_eq!(
+            TcpJournalPusher::enqueue(&mut buffer, 2, b"third\n".to_vec()),
+            1
+        );
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(
+            buffer.front().map(Vec::as_slice),
+            Some(b"second\n".as_slice())
+        );
+        assert_eq!(
+            buffer.back().map(Vec::as_slice),
+            Some(b"third\n".as_slice())
+        );
     }
 
     /// 对端不可达（connect 拒绝）：退避期投递线程不得持锁忙自旋——连续
