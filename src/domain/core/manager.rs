@@ -3173,15 +3173,17 @@ worker_threads = 1
 
     #[cfg(feature = "http")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial_test::serial]
     async fn test_build_with_deps_configures_http_server_from_provider() {
-        // 验证 Config trait 的 http_server.* 配置被正确应用到 InklogConfig.http_server
-        // 注意：with_dependencies 不启动 HTTP 服务器（只有 with_config 才启动），
-        // 所以本测试只验证配置构建，不实际启动 HTTP 服务
+        // 验证 Config trait 的 http_server.* 配置被正确应用到 InklogConfig.http_server。
+        // with_dependencies 会经 install_globals_and_start 启动 HTTP server，
+        // 固定端口会与并行测试/宿主机占用冲突，故取动态可用端口。
         use crate::integrations::MockConfig;
+        let port = find_available_http_port();
         let mock_config = MockConfig::new()
             .with_value("http_server.enabled", "true")
             .with_value("http_server.host", "127.0.0.1")
-            .with_value("http_server.port", "9090");
+            .with_value("http_server.port", &port.to_string());
 
         let deps = LoggerDependencies {
             cache: None,
