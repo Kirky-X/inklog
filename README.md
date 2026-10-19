@@ -482,7 +482,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 |------|------|
 | Rust 1.97.1 | 经 `rust-toolchain.toml` 固定 |
 | protobuf 编译器 | 含数据库 feature 的组合构建需要 `protoc` |
-| Git 钩子 | `bash scripts/install-pre-commit.sh` 安装 Python pre-commit 钩子（读 `.pre-commit-config.yaml`）；lefthook 用户执行 `lefthook install`（配置见 `lefthook.yml`） |
+| Git 钩子 | 执行 `lefthook install`（配置见 `lefthook.yml`）；或 `pip install pre-commit && pre-commit install`（读 `.pre-commit-config.yaml`） |
 
 <details>
 <summary>📄 代码 · bash</summary>
@@ -490,7 +490,7 @@ cargo audit                                   # 安全公告（lefthook pre-push
 ```bash
 git clone https://github.com/Kirky-X/inklog.git
 cd inklog
-bash scripts/install-pre-commit.sh
+lefthook install   # 或 pip install pre-commit && pre-commit install
 
 # 运行测试（与 CI 相同的 feature 组合）
 cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"

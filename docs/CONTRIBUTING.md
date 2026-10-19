@@ -58,8 +58,9 @@ cd inklog
 # 2. 添加上游仓库
 git remote add upstream https://github.com/Kirky-X/inklog.git
 
-# 3. 安装 Git 钩子（Python pre-commit 框架：rustfmt/clippy/cargo check/私钥扫描等门禁）
-bash scripts/install-pre-commit.sh
+# 3. 安装 Git 钩子（二选一：lefthook 或 Python pre-commit 框架）
+lefthook install
+# 或：pip install pre-commit && pre-commit install
 
 # 4. 创建功能分支
 git checkout -b feature/your-feature
@@ -82,7 +83,7 @@ git push origin feature/your-feature
 |------|------|------|
 | Rust | 1.97.1 | 仓库经 `rust-toolchain.toml` 固定，rustup 会自动安装 |
 | protobuf 编译器 | 最新稳定版 | 含数据库 feature 的组合构建需要 `protoc` |
-| pre-commit（或 lefthook） | 最新稳定版 | Git 钩子管理器：`bash scripts/install-pre-commit.sh` 安装 Python pre-commit（读 `.pre-commit-config.yaml`）；lefthook 用户执行 `lefthook install`（读 `lefthook.yml`） |
+| pre-commit（或 lefthook） | 最新稳定版 | Git 钩子管理器：`lefthook install`（读 `lefthook.yml`）；或 `pip install pre-commit && pre-commit install`（读 `.pre-commit-config.yaml`） |
 | Docker | 可选 | PostgreSQL / MySQL 容器级集成测试 |
 
 ### Rust 工具链
@@ -260,9 +261,9 @@ git commit -m "feat(<模块>): <描述>"
 ### 安装
 
 ```bash
-bash scripts/install-pre-commit.sh   # 安装 Python pre-commit 框架（pip install pre-commit + pre-commit install）
-# 或
 lefthook install                     # 启用 lefthook.yml 中的钩子
+# 或
+pip install pre-commit && pre-commit install   # 启用 .pre-commit-config.yaml
 ```
 
 ### 钩子内容
@@ -534,8 +535,7 @@ inklog/
 ├── tests/                  # 集成 / E2E / 组合 / docker / 性能测试
 ├── benches/                # criterion 基准（inklog_bench、rc4_pipeline_bench）
 ├── examples/               # inklog-examples crate（7 类 40 个示例）
-├── docs/                   # 文档（本目录）
-└── scripts/                # install-pre-commit.sh 等脚本
+└── docs/                   # 文档（本目录）
 ```
 
 ---

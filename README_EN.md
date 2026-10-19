@@ -482,7 +482,7 @@ Contributions are welcome! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for 
 |------|------|
 | Rust 1.97.1 | pinned by `rust-toolchain.toml` |
 | Protobuf compiler | `protoc` is required to build combinations with database features |
-| Git hooks | install Python pre-commit hooks with `bash scripts/install-pre-commit.sh` (reads `.pre-commit-config.yaml`); lefthook users run `lefthook install` (config in `lefthook.yml`) |
+| Git hooks | run `lefthook install` (config in `lefthook.yml`); or `pip install pre-commit && pre-commit install` (reads `.pre-commit-config.yaml`) |
 
 <details>
 <summary>📄 Code · bash</summary>
@@ -490,7 +490,7 @@ Contributions are welcome! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for 
 ```bash
 git clone https://github.com/Kirky-X/inklog.git
 cd inklog
-bash scripts/install-pre-commit.sh
+lefthook install   # or pip install pre-commit && pre-commit install
 
 # Run tests (same feature combination as CI)
 cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
