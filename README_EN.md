@@ -386,7 +386,7 @@ Reproduction steps are documented in the "Reproduction" section of [docs/PERFORM
 
 Please do **not** disclose security vulnerabilities publicly; report responsibly following [docs/SECURITY.md](docs/SECURITY.md):
 
-- **Preferred**: [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories) ("Report a vulnerability" private channel)
+- **Preferred**: [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/policy) ("Report a vulnerability" private channel)
 - **Alternative**: email [Kirky-X@outlook.com](mailto:Kirky-X@outlook.com) (handler: Kirky.X)
 - **Response targets and coordinated disclosure**: see [docs/SECURITY.md](docs/SECURITY.md) ("Vulnerability Reporting Process").
 

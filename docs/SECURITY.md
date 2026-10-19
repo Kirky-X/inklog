@@ -60,7 +60,7 @@ inklog 目前处于 0.x 预发布阶段（当前版本 **0.3.0-rc.10**），暂�
 
 **首选方式**：
 
-- [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/advisories)（仓库页 Security → Report a vulnerability）
+- [GitHub Security Advisories](https://github.com/Kirky-X/inklog/security/policy)（仓库页 Security → Report a vulnerability）
 
 **备选方式**：
 
@@ -126,7 +126,7 @@ inklog 目前处于 0.x 预发布阶段（当前版本 **0.3.0-rc.10**），暂�
 
 查看当前已知安全问题：
 
-- **GitHub Security Advisories**：<https://github.com/Kirky-X/inklog/security/advisories>
+- **GitHub Security Advisories**：<https://github.com/Kirky-X/inklog/security/policy>
 - **更新日志**：[CHANGELOG](CHANGELOG.md)
 
 订阅安全更新：在 GitHub 仓库点击 **Watch → Custom**，勾选 **Releases** 与 **Security alerts**。
