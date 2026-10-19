@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <details open>
 <summary>📑 目录</summary>
 
+- [0.3.0-rc.10](#030-rc10---2026-10-19)
 - [0.3.0-rc.9](#030-rc9---2026-10-10)
 - [0.3.0-rc.8](#030-rc8---2026-10-08)
 - [0.3.0-rc.7](#030-rc7---2026-10-07)
@@ -27,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [0.0.0](#000---2025-12-30)
 
 </details>
+
+## [0.3.0-rc.10] - 2026-10-19
+
+### Changed
+
+- **发布依赖传播**：自研上游钉升到刚发布版本——`dbnexus` `=0.6.0-rc.9` → `=0.6.0-rc.10`（精确钉）、`trait-kit` rc.9 → rc.10、`confers` rc.10 → rc.11；`oxcache` 保持 `=0.5.0-rc.8`、`limiteron` 保持 `0.3.0-rc.6`（反向可选边，断环约定）；examples `confers` 钉同步 rc.11
+
+### Internal
+
+- **CI 发布**：publish 凭证切换 crates.io trusted publishing（OIDC auth-action）+ 发布幂等三元组
+- **安全/仓库卫生**：gitleaks 降噪配置与误报指纹；gitignore 忽略设计文档；README 锚点修复
+
+---
 
 ## [0.3.0-rc.9] - 2026-10-10
 

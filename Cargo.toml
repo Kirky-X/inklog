@@ -13,7 +13,7 @@ resolver = "2"
 members = [".", "examples"]
 
 [workspace.package]
-version = "0.3.0-rc.9"
+version = "0.3.0-rc.10"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Kirky-X <Kirky-X@outlook.com>"]
@@ -41,7 +41,7 @@ fancy-regex = { version = "0.19", default-features = false, features = ["std", "
 # 自研依赖精确钉（与 oxcache→inklog 的 `=钉` 同一策略）：inklog 只对
 # 实测对齐的版本承诺兼容，rc 阶段次版本号不承载兼容性。升级任一侧时
 # 双钉同步 bump 并跑全量测试。
-dbnexus = { version = "=0.6.0-rc.9", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+dbnexus = { version = "=0.6.0-rc.10", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 limiteron = { version = "0.3.0-rc.6", default-features = false, features = ["retry", "sync", "test-clock"] }
 
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥
@@ -153,8 +153,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.9", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
-confers = { version = "0.6.0-rc.10", default-features = false, features = ["toml", "watch"] }
+trait-kit = { version = "0.5.0-rc.10", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+confers = { version = "0.6.0-rc.11", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false, features = [] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
