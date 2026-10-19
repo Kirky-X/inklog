@@ -829,9 +829,17 @@ static PASSPORT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// US Social Security Number
+///
+/// 覆盖三种形态：带横线 `NNN-NN-NNNN`、空格分隔 `NNN NN NNNN`、
+/// 紧凑 `NNNNNNNNN`。整条 alternation 由 `(?<![0-9A-Za-z])…(?![0-9A-Za-z])`
+/// 边界包裹，紧凑分支额外施 SSA 有效性守卫（组号 ∉ 000/666/900–999、
+/// 区号 ≠ 00、序列号 ≠ 0000），以独立 9 位边界 + 号段合法性限制误伤。
+/// 带横线/空格形态保持原语义不收窄，避免对既有行为回归。
 static SSN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?<![0-9A-Za-z])\d{3}-\d{2}-\d{4}(?![0-9A-Za-z])")
-        .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-ssn_invariant")))
+    Regex::new(
+        r"(?<![0-9A-Za-z])(?:\d{3}-\d{2}-\d{4}|\d{3} \d{2} \d{4}|(?!000|666|9\d\d)\d{3}(?!00)\d{2}(?!0000)\d{4})(?![0-9A-Za-z])",
+    )
+    .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("masking-ssn_invariant")))
 });
 
 /// Database connection string (password in URI)
@@ -2124,6 +2132,65 @@ mod tests {
         let result = masker.mask("SSN: 123-45-6789");
         assert!(!result.contains("123-45-6789"));
         assert!(result.contains("***-**-6789"));
+    }
+
+    #[test]
+    fn test_mask_ssn_spaced_form() {
+        let masker = DataMasker::new();
+        let result = masker.mask("SSN 123 45 6789");
+        assert!(!result.contains("123 45 6789"));
+        assert!(result.contains("***-**-6789"));
+    }
+
+    #[test]
+    fn test_mask_ssn_compact_form() {
+        let masker = DataMasker::new();
+        let result = masker.mask("SSN 123456789");
+        assert!(!result.contains("123456789"));
+        assert!(result.contains("***-**-6789"));
+    }
+
+    #[test]
+    fn test_mask_ssn_numeric_json_value() {
+        // 非敏感键下的数字形态 SSN 经数值路径串化后被紧凑分支掩码
+        let masker = DataMasker::new();
+        let mut value = serde_json::json!({ "ref": 123456789u64 });
+        masker.mask_value(&mut value);
+        assert_eq!(value["ref"], serde_json::json!("***-**-6789"));
+    }
+
+    #[test]
+    fn test_mask_ssn_compact_guard_rejects_invalid() {
+        let masker = DataMasker::new();
+        // 组号非法（000/666/900-999）、区号 00、序列号 0000 的紧凑 9 位不命中 SSN 掩码
+        for s in [
+            "000456789",
+            "666123450",
+            "900123450",
+            "123004567",
+            "123450000",
+        ] {
+            let result = masker.mask(s);
+            assert!(
+                !result.contains("***-**-"),
+                "非法紧凑号 {s} 不应命中 SSN 掩码"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mask_ssn_widening_no_new_false_positives() {
+        let masker = DataMasker::new();
+        // 已知安全形态不因本次 SSN 拓宽被新掩（隔离 SSN 掩码标记 ***-**- ）
+        for s in [
+            "1695000000000", // 13 位毫秒时间戳
+            "1234567890",    // 10 位数字串
+            "13812345678",   // 11 位手机号（由 phone 规则负责，非 SSN）
+            "e1a2b3c4d",     // 含字母 hex（git 短 SHA 形态）
+        ] {
+            let result = masker.mask(s);
+            assert!(!result.contains("***-**-"), "{s} 不应命中 SSN 掩码形态");
+        }
     }
 
     #[test]
