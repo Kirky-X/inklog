@@ -38,50 +38,36 @@ crossbeam-channel = { version = "0.5", default-features = false, features = ["st
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf"] }
-# 自研依赖精确钉（与 oxcache→inklog 的 `=钉` 同一策略）：inklog 只对
-# 实测对齐的版本承诺兼容，rc 阶段次版本号不承载兼容性。升级任一侧时
-# 双钉同步 bump 并跑全量测试。
+# 自研依赖精确钉（与 oxcache→inklog 的 `=钉` 同一策略）：inklog 只对实测对齐的版本承诺兼容，rc 阶段次版本号不承载兼容性
 dbnexus = { version = "=0.6.0-rc.10", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 limiteron = { version = "0.3.0-rc.6", default-features = false, features = ["retry", "sync", "test-clock"] }
 
-# docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥
-# （见 [features] 说明），全开必然编译失败。显式列举一组可共存的 feature——
-# 其中 sqlite 恰好满足 kit 的"至少一个驱动"编译期守卫。
+# docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥（见 [features] 说明），全开必然编译失败
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "zstd", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "confers-audit", "config-confers", "otel"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.lints.rust]
-# feature 名由 cargo 自动注册进 check-cfg，无需手工枚举——手工清单一旦与真实
-# feature 集合漂移，反而会把合法 feature 误报成 unexpected。docsrs 仅由上方
-# rustdoc-args 在 docs.rs 文档构建时注入，本地编译不出现，无需注册。
+# feature 名由 cargo 自动注册进 check-cfg，无需手工枚举——手工清单一旦与真实 feature 集合漂移，反而会把合法 feature 误报成 unexpected
 unexpected_cfgs = { level = "warn" }
 
 [lints]
 workspace = true
 
 [features]
-# i18n 与 cache 在 default 中：既有消费者（含隐式 default）的编译产物与 API 面不变；
-# 以 default-features=false 引入的组合（裁掉 icu/fluent 依赖树）改用
-# 内嵌英文文案表的 fallback 翻译路径。
+# i18n/cache 在 default 中；关闭两者时改用内嵌英文文案回退
 default = ["i18n", "cache"]
 # 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + sys-locale 检测。
 # 关闭后 crate::i18n 入口保留（tr/tr_args 回退到内嵌 en 文案表）。
 i18n = ["dep:icu", "dep:writeable", "dep:fluent-bundle", "dep:unic-langid", "dep:sys-locale"]
-# 缓存后端（oxcache 适配器 + ObjectPool）：oxcache 的 icu/fluent-bundle 依赖
-# 非可选，故要裁掉 icu/fluent 依赖树必须同时关闭 i18n 与 cache
-# （default-features=false 即两者皆关），此时 ObjectPool/OxCacheAdapter 不导出。
+# 缓存后端：裁 icu/fluent 依赖树必须同时关闭 i18n 与 cache，否则 ObjectPool 不导出
 cache = ["dep:oxcache"]
-# 测试面 mock 导出（MockCache/MockConfig/MockDatabaseAdapter）的门控 feature：
-# 不入 default 与任何生产组合；src 内联测试经 cfg(test) 直接可见，
-# 外部测试消费者需显式启用。
+# mock 导出：不入 default 与生产组合，仅外部测试消费者显式启用
 test-utils = []
 # JSON Schema 导出（schemars）：配置类型 derive JsonSchema + InklogConfig::json_schema
 # 与 SinkMetadata.config_schema 真实填充；cli 隐式启用（generate --schema）。
 schema = ["dep:schemars"]
-# ⚠️ 数据库后端 features（sqlite/postgres/mysql/duckdb）互斥：dbnexus 严格禁止
-# embedded 与 server-side 驱动混合（含 --all-features 全开）。多后端 crate 不适用
-# --all-features 验证，按后端分组启用 features 验证。
+# ⚠️ 数据库后端 features 互斥（embedded 与 server-side 不可混合，含 --all-features）
 sqlite = ["dep:dbnexus", "dbnexus/sqlite", "dbnexus/runtime-tokio-rustls", "database"]
 postgres = ["dep:dbnexus", "dbnexus/postgres", "dbnexus/runtime-tokio-rustls", "database"]
 mysql = ["dep:dbnexus", "dbnexus/mysql", "dbnexus/runtime-tokio-rustls", "database"]
@@ -103,18 +89,13 @@ metrics-registry = []
 # Deprecated 兼容别名：等价于 `zstd`，保留既有 `--features compression` 用法；
 # 新代码请直接启用 `zstd`。
 compression = ["zstd"]
-# Gzip compression backend (optional, pure-Rust flate2). FileSink falls back to
-# gzip for rotated-file compression when `compression` is off; without either
-# feature rotated files are left uncompressed.
+# Gzip compression backend (optional, pure-Rust flate2).
 gzip = ["dep:flate2"]
 # Parquet/Arrow export support for database sink archival.
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 # Aho-Corasick multi-pattern masking acceleration.
 fast-masking = ["dep:aho-corasick"]
-# Secret 出站脱敏门：SecretPatternRegistry 值形态正则表（sk-/PEM/AKIA 等裸
-# secret 形态）+ 值熵扫描 + 逐模式计数与超限 fail-closed（SecretScanGate /
-# DataMasker::mask_checked）+ 中文敏感键名组。关闭时上述公共 API 与行为
-# 均不出现，默认组合编译面不变。
+# Secret 出站脱敏：值形态正则 + 熵扫描 + 逐模式计数，超限 fail-closed
 secret-scan = []
 # dbnexus AuditStorage 端口适配器（审计事件 → inklog DB sink 落库）。
 # 不含数据库驱动，可与任一后端 feature 组合。
@@ -122,15 +103,11 @@ dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
 # confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
 # 级别/轮转参数（confers 依赖层级合法：inklog → confers）。
 config-confers = ["confers/toml", "confers/watch"]
-# confers 审计桥——实现 confers AuditSink 端口（audit 事件 → inklog 结构化
-# sink 落盘）。依赖方向同 config-confers；trait 随已发布的 confers 0.6.0-rc.5
-# 提供（本地 cargo registry 已发布源 src/impl_/audit.rs:259 在案）。
+# confers 审计桥——实现 confers AuditSink 端口（audit 事件 → inklog 结构化 sink 落盘）
 confers-audit = ["confers/audit"]
 # KMS 密钥提供者——confers AsyncKeyProvider 适配 + Vault transit MVP
 kms = ["confers/encryption", "confers/cloud-kms"]
-# 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主的
-# tracing-opentelemetry layer 写入）。宿主 otel 版本需与 inklog 对齐，未对齐
-# 时静默回退根 span 派生（deferred-capabilities C2）。
+# 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主的 tracing-opentelemetry layer 写入）
 otel = ["dep:opentelemetry"]
 # 网络转发 Sink——TCP（可 TLS，rustls 客户端）+ UDP，断线缓冲重连
 net-sink = ["dep:rustls"]
@@ -214,13 +191,7 @@ ctor = { version = "1.0.13", default-features = false, features = ["std", "proc_
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["fs"] }
 
-# ============================================================================
-# 测试目标显式注册
-# ============================================================================
-# tests/integration、tests/combinations、tests/performance 深目录聚合此前无
-# 编译入口（Cargo 仅自动发现顶层 *.rs 与 */main.rs），从未被 cargo test
-# 编译运行；此般注册复活。e2e_advanced 迁入 tests/e2e/ 目录承载
-# （e2e_* 不得裸放顶层），迁移后必须显式注册。
+# 测试目标显式注册：深目录之前无编译入口，从未被 cargo test 编译运行
 [[test]]
 name = "e2e_advanced"
 path = "tests/e2e/e2e_advanced.rs"
@@ -230,11 +201,7 @@ path = "tests/e2e/e2e_advanced.rs"
 [[test]]
 name = "integration"
 path = "tests/integration/mod.rs"
-# 子目录 API 需求：DatabaseSink 用例（batch/verification/comprehensive/additional）
-# 需 db 驱动；batch/verification/additional 经 MockDatabaseAdapter（DI）验证写入落库，
-# 需 test-utils；http/ 子目录需 http；cli/ 用 inklog-cli 二进制需 cli；
-# compression_ratio/ 需 compression；parquet/ 直用 arrow（仅 parquet feature
-# 启用时对测试目标可见，dev-deps 无 arrow）
+# 子目录依赖：DatabaseSink 用例需 db 驱动；写入落库用例需 test-utils；http/ 需 http
 required-features = ["sqlite", "http", "cli", "compression", "parquet", "test-utils"]
 
 [[test]]
@@ -279,6 +246,4 @@ strip = true
 [profile.bench]
 inherits = "release"
 
-# ============================================================================
 # 本地开发联调 [patch] 占位（当前无）
-# ============================================================================
