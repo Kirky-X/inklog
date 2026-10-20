@@ -13,7 +13,7 @@
 //! - 稳定性测试 (integration::stability)
 //! - 验证测试 (integration::verification)
 
-// ============ 通用集成测试 ============
+// 通用集成测试
 
 use inklog::LoggerManager;
 use inklog::sink::LogSink;
@@ -70,7 +70,7 @@ async fn test_load_from_file() {
     assert!(config.validate().is_ok());
 }
 
-// ============ 自动恢复集成测试 (integration::recovery) ============
+// 自动恢复集成测试 (integration::recovery)
 
 use inklog::LoggerManager as RecoveryLoggerManager;
 use std::fs as recovery_fs;
@@ -80,7 +80,7 @@ use std::time::Duration as RecoveryDuration;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_file_sink_auto_recovery() {
     // 全局 tracing 订阅者进程内仅首个 manager 能绑定（try_init 良性失败），
-    // 多 manager 并存的测试二进制中 builder().build() 的日志流向取决于
+    // 多 manager 并存的测试二进制中 builder.build 的日志流向取决于
     // 构建竞速——按本仓正典范式（log_native_test::test_log_to_file）改用
     // build_detached + 线程级 set_default，使事件确定性路由到本用例的 manager。
     use inklog::InklogConfig;
@@ -125,7 +125,6 @@ async fn test_file_sink_auto_recovery() {
         tracing_subscriber::registry().with(subscriber).with(filter),
     );
 
-    // Log some messages
     tracing::info!("Test message before failure");
     recovery_thread::sleep(RecoveryDuration::from_millis(100));
 
@@ -138,7 +137,6 @@ async fn test_file_sink_auto_recovery() {
     // Simulate file sink failure by removing the log file
     let _ = recovery_fs::remove_file(&log_file);
 
-    // Log more messages after removal
     for i in 0..5 {
         tracing::info!("Test message after file removal {}", i);
         recovery_thread::sleep(RecoveryDuration::from_millis(50));
@@ -169,7 +167,6 @@ async fn test_file_sink_auto_recovery() {
     let health = manager.get_health_status();
     println!("Health status: {:?}", health);
 
-    // Clean up
     let _ = manager.shutdown();
     let _ = recovery_fs::remove_dir_all(test_dir);
 }
@@ -187,14 +184,12 @@ async fn test_manual_sink_recovery() {
         .await
         .expect("Failed to create logger manager");
 
-    // Log initial message
     tracing::info!("Initial test message");
     recovery_thread::sleep(RecoveryDuration::from_millis(100));
 
     // Simulate failure by removing file
     let _ = recovery_fs::remove_file(&log_file);
 
-    // Log during failure
     tracing::info!("Message during failure");
     recovery_thread::sleep(RecoveryDuration::from_millis(100));
 
@@ -202,14 +197,11 @@ async fn test_manual_sink_recovery() {
     let recovery_result = manager.recover_sink("file");
     println!("Manual recovery result: {:?}", recovery_result);
 
-    // Wait for recovery
     recovery_thread::sleep(RecoveryDuration::from_millis(500));
 
-    // Log after manual recovery
     tracing::info!("Message after manual recovery");
     recovery_thread::sleep(RecoveryDuration::from_millis(100));
 
-    // Clean up
     let _ = recovery_fs::remove_dir_all(test_dir);
 
     assert!(recovery_result.is_ok());
@@ -228,7 +220,6 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
         .await
         .expect("Failed to create logger manager");
 
-    // Log initial message
     tracing::info!("Initial test message");
     recovery_thread::sleep(RecoveryDuration::from_millis(100));
 
@@ -245,20 +236,17 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
     let recovery_result = manager.trigger_recovery_for_unhealthy_sinks();
     println!("Bulk recovery result: {:?}", recovery_result);
 
-    // Wait for recovery
     recovery_thread::sleep(RecoveryDuration::from_millis(500));
 
-    // Log after bulk recovery
     tracing::info!("Message after bulk recovery");
     recovery_thread::sleep(RecoveryDuration::from_millis(100));
 
-    // Clean up
     let _ = recovery_fs::remove_dir_all(test_dir);
 
     assert!(recovery_result.is_ok());
 }
 
-// ============ 批量写入集成测试 (integration::batch) ============
+// 批量写入集成测试 (integration::batch)
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::DatabaseSinkConfig as BatchDatabaseSinkConfig;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
@@ -408,7 +396,7 @@ async fn test_database_timeout_flush_dbnexus() {
     sink.flush().await.expect("Failed to flush timeout logs");
 }
 
-// ============ 配置环境集成测试 (integration::config) ============
+// 配置环境集成测试 (integration::config)
 
 use inklog::InklogConfig as ConfigInklogConfig;
 use serial_test::serial as config_serial;
@@ -479,10 +467,9 @@ fn test_config_from_env_overrides() {
         std::env::set_var("INKLOG_FILE_SINK_COMPRESS", "true");
     }
 
-    // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
+    // 使用 load_with_env_overrides 应用环境变量覆盖（包括嵌套字段）
     let config = ConfigInklogConfig::load_with_env_overrides().unwrap();
 
-    // 验证环境变量覆盖生效
     assert_eq!(config.global.level, "debug");
 
     assert!(config.file_sink.is_some());
@@ -513,7 +500,7 @@ fn test_config_env_override_http_server() {
         std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
     }
 
-    // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
+    // 使用 load_with_env_overrides 应用环境变量覆盖（包括嵌套字段）
     let config = ConfigInklogConfig::load_with_env_overrides().unwrap();
 
     assert!(config.http_server.is_some());
@@ -537,14 +524,14 @@ fn test_config_env_override_performance() {
         std::env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "20000");
     }
 
-    // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
+    // 使用 load_with_env_overrides 应用环境变量覆盖（包括嵌套字段）
     let config = ConfigInklogConfig::load_with_env_overrides().unwrap();
 
     assert_eq!(config.performance.worker_threads, 8);
     assert_eq!(config.performance.channel_capacity, 20000);
 }
 
-// ============ HTTP 服务器集成测试 (integration::http) ============
+// HTTP 服务器集成测试 (integration::http)
 
 use inklog::InklogConfig as HttpInklogConfig;
 use inklog::config::{HttpErrorMode, HttpServerConfig};
@@ -682,7 +669,7 @@ async fn test_http_server_with_logger_manager() {
         std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
     }
 
-    // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
+    // 使用 load_with_env_overrides 应用环境变量覆盖（包括嵌套字段）
     let config = HttpInklogConfig::load_with_env_overrides().unwrap();
 
     assert!(config.http_server.is_some());
@@ -724,7 +711,7 @@ async fn test_http_metrics_path_configuration() {
         std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/status");
     }
 
-    // 使用 load_with_env_overrides() 应用环境变量覆盖（包括嵌套字段）
+    // 使用 load_with_env_overrides 应用环境变量覆盖（包括嵌套字段）
     let config = HttpInklogConfig::load_with_env_overrides().unwrap();
 
     let http = config
@@ -739,7 +726,7 @@ async fn test_http_metrics_path_configuration() {
 async fn test_http_server_disabled_by_default() {
     clear_inklog_env();
 
-    // 使用 load_sync() 自动应用环境变量覆盖（包括嵌套字段）
+    // 使用 load_sync 自动应用环境变量覆盖（包括嵌套字段）
     let config = HttpInklogConfig::load_sync().unwrap();
 
     assert!(
@@ -748,7 +735,7 @@ async fn test_http_server_disabled_by_default() {
     );
 }
 
-// ============ Parquet 集成测试 (integration::parquet) ============
+// Parquet 集成测试 (integration::parquet)
 
 // Parquet功能验证测试
 // 测试Parquet导出功能的正确性、性能和兼容性
@@ -784,7 +771,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 ))]
 use std::time::Instant;
 
-// ============ Test Data Helper Functions ============
+// Test Data Helper Functions
 
 /// Creates test log data with specified count
 #[cfg(all(
@@ -814,7 +801,7 @@ fn create_test_logs(count: usize) -> Vec<inklog::log_record::LogRecord> {
         .collect()
 }
 
-// ============ Parquet Verification Helper Functions ============
+// Parquet Verification Helper Functions
 
 /// Expected schema field names
 #[cfg(all(
@@ -910,7 +897,7 @@ fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ============ Parquet Tests ============
+// Parquet Tests
 
 #[test]
 #[cfg(all(
@@ -1076,7 +1063,7 @@ fn test_parquet_schema_compatibility() {
     verify_parquet_schema(&result).expect("Schema verification should pass");
 }
 
-// ============ 稳定性集成测试 (integration::stability) ============
+// 稳定性集成测试 (integration::stability)
 
 use inklog::LoggerManager as StabilityLoggerManager;
 use inklog::tracing::{error as stability_error, info as stability_info};
@@ -1126,7 +1113,7 @@ async fn test_long_running_stability() {
     );
 }
 
-// ============ 验证集成测试 (integration::verification) ============
+// 验证集成测试 (integration::verification)
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::DatabaseDriver as VerifyDatabaseDriver;
@@ -1150,7 +1137,7 @@ use std::path::PathBuf;
 use std::time::Duration as VerifyDuration;
 use tempfile::TempDir as VerifyTempDir;
 
-// ============ File Helper Functions ============
+// File Helper Functions
 
 /// Finds a file with the specified extension in a directory
 fn find_file_with_extension(dir: &VerifyTempDir, extension: &str) -> Option<PathBuf> {
@@ -1184,7 +1171,7 @@ fn verify_encrypted_file(file_path: &PathBuf) {
     );
 }
 
-// ============ Verification Tests ============
+// Verification Tests
 
 #[cfg(feature = "compression")]
 #[tokio::test(flavor = "multi_thread")]
@@ -1218,7 +1205,6 @@ async fn verify_file_sink_compression() {
             .expect("Failed to write log record during rotation");
     }
 
-    // Wait for background compression
     std::thread::sleep(VerifyDuration::from_millis(1000));
 
     let zst_path = find_file_with_extension(&temp_dir, "zst").expect("No compressed file found");
@@ -1297,7 +1283,6 @@ async fn verify_database_sink_sqlite() {
         .await
         .expect("Failed to write log record to database");
 
-    // Wait for background processing
     tokio::time::sleep(VerifyDuration::from_millis(500)).await;
 
     // Flush the sink
@@ -1333,7 +1318,7 @@ async fn create_logs_table(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-// ============ log crate 原生支持测试 ============
+// log crate 原生支持测试
 
 /// 测试 log crate 原生支持
 /// 验证用户可以直接使用 log::info! 等宏，无需 tracing_log 适配器
@@ -1441,7 +1426,6 @@ async fn test_log_to_file() {
     log::info!("This should go to file");
     log::warn!("This warning should also be in file");
 
-    // 等待异步 worker 处理
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     assert!(log_file.exists(), "Log file should exist");
@@ -1454,7 +1438,7 @@ async fn test_log_to_file() {
     let _ = logger.shutdown();
 }
 
-// ============ 集成测试：并发文件写入 ============
+// 集成测试：并发文件写入
 
 /// 测试多线程并发写入日志到文件
 /// 验证 LoggerManager 在多线程环境下正确处理文件写入
@@ -1555,7 +1539,7 @@ async fn test_concurrent_file_writes() {
     let _ = logger.shutdown();
 }
 
-// ============ 集成测试：内存稳定性 ============
+// 集成测试：内存稳定性
 
 /// 测试日志系统在连续大量写入时内存使用稳定
 /// 验证 LoggerManager 不会因 buffer 积累导致内存泄漏
@@ -1628,7 +1612,7 @@ async fn test_memory_stability() {
     let _ = logger.shutdown();
 }
 
-// ============ 降级 sink 自激循环回归测试 ============
+// 降级 sink 自激循环回归测试
 
 /// 降级 file sink 下 ops 事件回流不得形成自激循环。
 ///

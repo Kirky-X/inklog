@@ -47,7 +47,7 @@ fn main() {
 
 /// 示例 1：默认模板
 ///
-/// 使用 `LogTemplate::default()` 渲染标准格式。
+/// 使用 `LogTemplate::default` 渲染标准格式。
 fn default_template() {
     println!("{}\n", tr("example-template-example-1-default-template"));
 

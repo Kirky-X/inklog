@@ -187,9 +187,7 @@ pub(crate) fn run_custom_sink_worker(
     }
 }
 
-// ============================================================================
 // Extracted pure functions (testable without runtime/threads)
-// ============================================================================
 
 /// Check whether auto-recovery should be attempted based on consecutive
 /// failure count and elapsed time since the last failure.
@@ -680,12 +678,12 @@ impl LoggerManager {
 
         // database 依赖由调用方（build_detached，async 上下文）保证有效：DI 注入优先，
         // 未注入且 db sink 启用时由 build_detached 在当前 runtime 上创建默认 DbNexusAdapter。
-        // 核正：原先在此处经 Handle::current().block_on 同步创建——start_workers 在
+        // 核正：原先在此处经 Handle::current.block_on 同步创建——start_workers 在
         // runtime 线程上被调用时必然 panic（runtime-in-runtime），故上移至 async 层。
 
         // Thread 0: Console Sink (dedicated for lock-free hot path)
         // 每个 worker 拥有独立的 shutdown channel，确保广播信号能被每个 worker 接收
-        // （MPMC channel 的 send() 只能被一个 receiver 消费，共享 channel 会导致
+        // （MPMC channel 的 send 只能被一个 receiver 消费，共享 channel 会导致
         // 只有首个 worker 收到信号、其余 worker 死循环）
         let (shutdown_tx_console, shutdown_console) = bounded(1);
         let metrics_console = metrics.clone();
@@ -1041,9 +1039,7 @@ impl LoggerManager {
 mod tests {
     use super::*;
 
-    // ========================================================================
     // should_auto_recover
-    // ========================================================================
 
     #[test]
     fn test_should_auto_recover_low_failures() {
@@ -1082,9 +1078,7 @@ mod tests {
         ));
     }
 
-    // ========================================================================
     // should_attempt_recovery
-    // ========================================================================
 
     #[test]
     fn test_should_attempt_recovery_never() {
@@ -1106,9 +1100,7 @@ mod tests {
         assert!(should_attempt_recovery(Some(&old), Duration::from_secs(30)));
     }
 
-    // ========================================================================
     // 重试数值单源（limiteron retry：RetryPolicy / delay_for_attempt）
-    // ========================================================================
 
     #[test]
     fn test_factory_retry_backoff_sequence() {
@@ -1128,9 +1120,7 @@ mod tests {
         assert_eq!(write_max_attempts(), 3);
     }
 
-    // ========================================================================
     // classify_control_message
-    // ========================================================================
 
     #[test]
     fn test_classify_control_recover_matching() {
@@ -1150,9 +1140,7 @@ mod tests {
         ));
     }
 
-    // ========================================================================
     // update_adaptive_capacity
-    // ========================================================================
 
     #[test]
     fn test_update_adaptive_capacity_expand() {
@@ -1259,10 +1247,8 @@ mod tests {
         assert_eq!(new_cap, 50);
     }
 
-    // ========================================================================
     // Console worker 并发回归测试：多任务并发写 console sink 不死锁/不 panic，
     // 所有 worker 在 shutdown 广播后均能终止
-    // ========================================================================
 
     #[test]
     fn test_console_worker_concurrent_writes_terminate_without_deadlock() {
@@ -1368,11 +1354,9 @@ mod tests {
         assert_eq!(metrics.sink_errors(), 0, "console writes must not fail");
     }
 
-    // ========================================================================
     // 缺陷回归：file sink 工厂启动失败时 worker 不得空转/静默丢弃——
     // 降级期间的记录必须计为 failed、worker 保持存活持续重试，
     // 且 shutdown 语义不变。
-    // ========================================================================
 
     #[test]
     #[serial_test::serial]
@@ -1468,8 +1452,8 @@ mod tests {
             metrics.logs_dropped()
         );
         // 2) 记录发送端全部丢弃且通道排空后，worker 应在有限时间内退出
-        //    （即使工厂仍在失败）——而非空转驻留；tokio Runtime drop 会等待
-        //    blocking 任务，空转驻留会让整个测试进程永久挂死
+        // （即使工厂仍在失败）——而非空转驻留；tokio Runtime drop 会等待
+        // blocking 任务，空转驻留会让整个测试进程永久挂死
         let deadline = Instant::now() + Duration::from_secs(5);
         while !handles[1].is_finished() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
@@ -1501,10 +1485,8 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // 漂移修复回归：db worker 主循环写失败分支必须与 drain 路径一致地写
     // error.log（"Database sink error: ..."），重试耗尽后计 sink_error。
-    // ========================================================================
 
     /// 捕获写入内容的 error sink（验证 error.log 记录）。
     /// 仅 db worker 测试使用，随其 cfg 门控。
@@ -1641,7 +1623,7 @@ mod tests {
             metrics.sink_errors()
         );
         // 2) error.log 与 drain 路径一致：主循环失败分支写入 "Database sink error: ..."
-        //    （每次失败尝试各写一条，N 条记录 × 3 次尝试）
+        // （每次失败尝试各写一条，N 条记录 × 3 次尝试）
         let error_messages = captured.messages.lock().unwrap();
         assert!(
             error_messages.len() >= N as usize,
@@ -1677,9 +1659,7 @@ mod tests {
     }
 }
 
-// =========================================================================
 // 通用 SinkWorker（动态注册 sink）单元测试
-// =========================================================================
 
 #[cfg(test)]
 mod custom_sink_worker_tests {
@@ -1776,7 +1756,6 @@ mod custom_sink_worker_tests {
             .unwrap();
         }
 
-        // 等待消费
         let deadline = Instant::now() + Duration::from_secs(5);
         while sink.records.lock().len() < 3 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));

@@ -127,7 +127,6 @@ async fn show_builder_production_config() -> Result<(), Box<dyn std::error::Erro
     println!("  {}", tr("example-production-channel-10000"));
     println!("  {}\n", tr("example-production-workers-4"));
 
-    // 验证配置生效
     tracing::info!("{}", tr("example-production-production-log-system-started"));
     tracing::debug!("{}", tr("example-production-this-debug-log-is-not-emitted"));
     println!(
@@ -268,7 +267,6 @@ async fn show_health_check_after_init() -> Result<(), Box<dyn std::error::Error>
     // 验证健康状态可获取（状态取决于 Sink 初始化时机）
     println!("  {}", tr("example-production-health-status-retrieved"));
 
-    // 写入日志后再检查状态
     tracing::info!("{}", tr("example-production-health-check-log"));
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     let health2 = logger.get_health_status();
@@ -320,7 +318,6 @@ async fn show_graceful_shutdown() -> Result<(), Box<dyn std::error::Error>> {
         tr("example-production-5-logs-written-into-the-channel")
     );
 
-    // 关闭前检查
     let queued_before = logger.channel_len();
     println!(
         "  {}",

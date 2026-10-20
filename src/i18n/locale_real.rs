@@ -84,7 +84,7 @@ thread_local! {
 ///
 /// Resolution priority:
 /// 1. `INKLOG_LOCALE` environment variable
-/// 2. System locale via `sys-locale::get_locale()`
+/// 2. System locale via `sys-locale::get_locale`
 /// 3. Fallback to `"en"`
 ///
 /// This function is idempotent — subsequent calls after the first are no-ops.
@@ -532,7 +532,7 @@ mod tests {
             Some("信息")
         );
         // en_US.UTF-8 normalizes to en-US (no dedicated directory); the
-        // same fallback chain tr() uses then resolves it to en resources
+        // same fallback chain tr uses then resolves it to en resources
         let locale = normalize_locale("en_US.UTF-8");
         assert_eq!(locale, "en-US");
         let translated = format_message(&locale, "log_level-name_info", None)

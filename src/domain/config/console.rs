@@ -6,9 +6,7 @@ use super::global::default_true;
 use crate::support::processing::template::OutputFormat;
 use serde::{Deserialize, Serialize};
 
-// ============================================================================
 // ConsoleSinkConfig - Console output settings
-// ============================================================================
 
 /// Console sink configuration.
 ///

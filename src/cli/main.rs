@@ -11,7 +11,7 @@ mod validate;
 
 pub use cli_impl::run_cli;
 
-// clap about/help 文案经 i18n 动态生成（tr() 惰性初始化，跟随
+// clap about/help 文案经 i18n 动态生成（tr 惰性初始化，跟随
 // INKLOG_LOCALE / 系统语言检测；en 与未支持语言回退英文）。
 // 使用 doc comment 形式会被 clap 当作 help 文案，故说明一律用普通注释。
 #[derive(Parser, Debug)]
@@ -170,7 +170,7 @@ fn main() {
 
 // 测试进程固定 locale 为 en：与 CI（Linux，LANG 未设）行为一致。
 // bin 测试链接的是非 test 编译的 lib，lib 内的 cfg(test) 分支在此
-// 不生效；ctor 于 main() 之前设置文档化最高优先级 override
+// 不生效；ctor 于 main 之前设置文档化最高优先级 override
 // （INKLOG_LOCALE，见 i18n/locale_manager.rs），对全进程测试生效。
 #[cfg(test)]
 mod test_locale_init {

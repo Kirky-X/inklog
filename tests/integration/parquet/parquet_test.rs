@@ -11,7 +11,7 @@ use inklog::sink::database::convert_logs_to_parquet;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::time::Instant;
 
-// ============ Test Data Helper Functions ============
+// Test Data Helper Functions
 
 /// Creates test log data with specified count
 ///
@@ -49,7 +49,7 @@ fn create_test_logs(count: usize) -> Vec<inklog::LogRecord> {
         .collect()
 }
 
-// ============ Parquet Verification Helper Functions ============
+// Parquet Verification Helper Functions
 
 /// Expected schema field names
 const EXPECTED_FIELD_NAMES: &[&str] = &[
@@ -127,7 +127,7 @@ fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ============ Parquet Tests ============
+// Parquet Tests
 
 #[test]
 fn test_parquet_basic_conversion() {

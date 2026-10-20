@@ -70,8 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))),
         ..Default::default()
     };
-    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
-    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder。
     #[allow(deprecated)]
     let _logger = LoggerManager::with_dependencies(deps).await?;
     println!("   {}", tr("example-di-example-logger-created"));
@@ -88,7 +88,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )))
         .build()?;
 
-    // 获取共享的缓存实例
     let cache1 = container.cache();
     let cache2 = container.cache();
 
@@ -125,13 +124,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )))
         .build()?;
 
-    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
-    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder。
     #[allow(deprecated)]
     let _logger1 = container.create_logger().await?;
     println!("   {}", tr("example-di-example-logger-1-created"));
-    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
-    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder。
     #[allow(deprecated)]
     let _logger2 = container.create_logger().await?;
     println!("   {}", tr("example-di-example-logger-2-created"));
@@ -140,9 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tr("example-di-example-both-loggers-share-the-same")
     );
 
-    // ============================================================================
     // Mock 类型示例 - 用于测试
-    // ============================================================================
 
     println!(
         "\n{}\n",
@@ -280,8 +277,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .database(Arc::new(MockDatabaseAdapter::new()))
         .build()?;
 
-    // 该示例的职责即演示 container/with_dependencies 这组（已弃用的）DI 入口，
-    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder()。
+    // 该示例的职责即演示 container/with_dependencies 这组（已弃用）DI 入口，
+    // 供仍使用旧入口的下游参考；新代码请用 LoggerManager::builder。
     #[allow(deprecated)]
     let _logger = container.create_logger().await?;
     println!("   {}", tr("example-di-example-logger-created-with-mock"));

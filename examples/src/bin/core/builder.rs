@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //! Builder 模式配置示例
 //!
-//! 演示 LoggerManager::builder() 链式 API 的各种用法。
+//! 演示 LoggerManager::builder 链式 API 的各种用法。
 //!
 //! # 运行
 //! ```bash
@@ -15,8 +15,8 @@
 //! - 高级选项：展示日志级别、JSON 输出、性能参数等配置
 //! - 配置构建器展示：展示 Builder 的灵活性
 //!
-//! 各配置片段以字符串展示（不在本示例中实际初始化）；`LoggerManager::builder()`
-//! 本身没有限制，真实项目在 async 函数中调用 `build().await` 即生效。
+//! 各配置片段以字符串展示（不在本示例中实际初始化）；`LoggerManager::builder`
+//! 本身没有限制，真实项目在 async 函数中调用 `build.await` 即生效。
 
 use inklog_examples::common::print_section;
 use inklog_examples::common::{tr, tr_args};

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 //! Parquet 归档示例
 //!
-//! 演示 `inklog::ParquetConfig` 和 `convert_logs_to_parquet()` 的使用：
+//! 演示 `inklog::ParquetConfig` 和 `convert_logs_to_parquet` 的使用：
 //!
 //! 1. `ParquetConfig` 配置字段（compression_level, max_row_group_size 等）
-//! 2. `convert_logs_to_parquet()` 将 LogRecord 转为 Parquet 字节
+//! 2. `convert_logs_to_parquet` 将 LogRecord 转为 Parquet 字节
 //! 3. 数据库 Sink 的 Parquet 归档配置
 //!
 //! # 运行
@@ -220,7 +220,7 @@ fn show_parquet_config() {
     );
 }
 
-/// 演示 convert_logs_to_parquet() 实际调用
+/// 演示 convert_logs_to_parquet 实际调用
 #[cfg(all(
     feature = "parquet",
     any(feature = "sqlite", feature = "postgres", feature = "mysql")

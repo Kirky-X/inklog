@@ -47,9 +47,7 @@ use std::time::Duration;
 use tempfile::tempdir;
 use tracing::Level;
 
-// ============================================================================
 // CORE-007: LogLevel 解析 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod log_level_e2e {
@@ -124,9 +122,7 @@ mod log_level_e2e {
     }
 }
 
-// ============================================================================
 // CORE-003: ConsoleSink stderr 路由 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod console_sink_e2e {
@@ -223,9 +219,7 @@ mod console_sink_e2e {
     }
 }
 
-// ============================================================================
 // ROT-001~006: RotationStrategy E2E
-// ============================================================================
 
 #[cfg(test)]
 mod rotation_strategy_e2e {
@@ -470,7 +464,7 @@ mod rotation_strategy_e2e {
     fn test_rotation_strategy_names() {
         let size_strategy = SizeBasedRotation::new(1024);
         let time_strategy = TimeBasedRotation::new(3600, "hourly".to_string());
-        // name() 应返回非空字符串
+        // name 应返回非空字符串
         assert!(!size_strategy.name().is_empty());
         assert!(!time_strategy.name().is_empty());
     }
@@ -495,9 +489,7 @@ mod rotation_strategy_e2e {
     }
 }
 
-// ============================================================================
 // PIPE-002/003: SinkRegistry E2E
-// ============================================================================
 
 #[cfg(test)]
 mod sink_registry_e2e {
@@ -630,15 +622,13 @@ mod sink_registry_e2e {
     }
 }
 
-// ============================================================================
-// SEC-001~003: PathValidator / LogSanitizer / Encryption E2E
-// ============================================================================
+// ~003: PathValidator / LogSanitizer / Encryption E2E
 
 #[cfg(test)]
 mod security_e2e {
     use super::*;
 
-    // ---------- PathValidator ----------
+    // PathValidator
 
     #[test]
     fn test_path_validator_default_allows_safe_relative_paths() {
@@ -763,7 +753,7 @@ mod security_e2e {
         );
     }
 
-    // ---------- LogSanitizer ----------
+    // LogSanitizer
 
     #[test]
     fn test_log_sanitizer_default_removes_control_chars() {
@@ -931,7 +921,7 @@ mod security_e2e {
         assert!(!result.contains('\t'));
     }
 
-    // ---------- Encryption (不使用 env var，避免 unsafe set_var) ----------
+    // Encryption (不使用 env var，避免 unsafe set_var)
 
     #[test]
     fn test_derive_key_from_password_deterministic_with_same_salt() {
@@ -999,9 +989,7 @@ mod security_e2e {
     }
 }
 
-// ============================================================================
-// SEC-004: DataMasker PII 脱敏 E2E
-// ============================================================================
+// : DataMasker PII 脱敏 E2E
 
 #[cfg(test)]
 mod data_masker_e2e {
@@ -1035,7 +1023,6 @@ mod data_masker_e2e {
             !result.contains("110101199001011234"),
             "id_card should be masked"
         );
-        // 验证掩码后保留后 4 位
         assert!(result.contains("1234"), "last 4 digits should be preserved");
     }
 
@@ -1062,7 +1049,6 @@ mod data_masker_e2e {
             !result.contains("6222021234567890123"),
             "bank_card should be masked"
         );
-        // 验证掩码后保留后 4 位
         assert!(result.contains("0123"), "last 4 digits should be preserved");
     }
 
@@ -1242,9 +1228,7 @@ mod data_masker_e2e {
     }
 }
 
-// ============================================================================
 // CORE-009: LogRecord mask_sensitive_fields E2E
-// ============================================================================
 
 #[cfg(test)]
 mod log_record_masking_e2e {
@@ -1397,9 +1381,7 @@ mod log_record_masking_e2e {
     }
 }
 
-// ============================================================================
 // ERR-001~003: InklogError safe_message E2E
-// ============================================================================
 
 #[cfg(test)]
 mod inklog_error_e2e {
@@ -1570,9 +1552,7 @@ mod inklog_error_e2e {
     }
 }
 
-// ============================================================================
 // CORE-008: LogTemplate 渲染 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod log_template_e2e {
@@ -1711,9 +1691,7 @@ mod log_template_e2e {
     }
 }
 
-// ============================================================================
 // REL-001~003: CircuitBreaker 状态转换 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod circuit_breaker_e2e {
@@ -1871,9 +1849,7 @@ mod circuit_breaker_e2e {
     }
 }
 
-// ============================================================================
 // PERF-001: ObjectPool 全局便捷函数 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod object_pool_e2e {
@@ -1979,9 +1955,7 @@ mod object_pool_e2e {
     }
 }
 
-// ============================================================================
 // CFG-004: InklogConfig validate 边界 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod config_validation_e2e {
@@ -2052,8 +2026,8 @@ mod config_validation_e2e {
     #[test]
     fn test_config_sinks_disabled() {
         let config = InklogConfig::default();
-        // InklogConfig::default() 启用 console_sink（default_console_sink），
-        // 所以 sinks_enabled() 应返回 ["console"]，不为空
+        // InklogConfig::default 启用 console_sink（default_console_sink），
+        // 所以 sinks_enabled 应返回 ["console"]，不为空
         let sinks = config.sinks_enabled();
         assert!(
             !sinks.is_empty(),
@@ -2122,9 +2096,7 @@ mod config_validation_e2e {
     }
 }
 
-// ============================================================================
 // REL-004~006: SinkHealthMonitor 降级/恢复 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod sink_health_monitor_e2e {
@@ -2294,9 +2266,7 @@ mod sink_health_monitor_e2e {
     }
 }
 
-// ============================================================================
 // OBS-001~003: Metrics 指标 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod metrics_e2e {
@@ -2504,9 +2474,7 @@ mod metrics_e2e {
     }
 }
 
-// ============================================================================
 // PIPE-001: FileSink 写入 E2E
-// ============================================================================
 
 #[cfg(test)]
 mod file_sink_e2e {
@@ -2634,9 +2602,7 @@ mod file_sink_e2e {
     }
 }
 
-// ============================================================================
 // compression feature: 压缩策略 E2E
-// ============================================================================
 
 #[cfg(feature = "compression")]
 #[cfg(test)]
@@ -2954,9 +2920,7 @@ mod compression_e2e {
     }
 }
 
-// ============================================================================
 // i18n: LogI18nFormatter E2E
-// ============================================================================
 
 // LogI18nFormatter 是 ICU4X 面，仅 i18n feature 下存在
 #[cfg(all(test, feature = "i18n"))]
@@ -3166,9 +3130,7 @@ mod i18n_e2e {
     }
 }
 
-// ============================================================================
 // CORE-009: LogAdapter (log crate 桥接) E2E
-// ============================================================================
 
 #[cfg(test)]
 mod log_adapter_e2e {
@@ -3214,9 +3176,7 @@ mod log_adapter_e2e {
     }
 }
 
-// ============================================================================
 // 多组件集成 E2E：tracing → FileSink → 文件验证
-// ============================================================================
 
 #[cfg(test)]
 mod multi_component_e2e {
@@ -3368,7 +3328,6 @@ mod multi_component_e2e {
             h.await.expect("task should not panic");
         }
 
-        // 验证每个文件都有内容
         for i in 0..3 {
             let path = temp.path().join(format!("concurrent_{}.log", i));
             let content = std::fs::read_to_string(&path).expect("read file");
@@ -3440,9 +3399,7 @@ mod multi_component_e2e {
     }
 }
 
-// ============================================================================
 // 动态 Sink 注册 e2e —— 自定义内存 sink 零核心改动接入
-// ============================================================================
 
 mod custom_sink_e2e {
     use super::*;
@@ -3544,9 +3501,7 @@ mod custom_sink_e2e {
     }
 }
 
-// ============================================================================
 // 内部审计事件流 —— publish_ops_event 经统一 sink 通道落 sink
-// ============================================================================
 
 mod ops_event_e2e {
     use super::*;

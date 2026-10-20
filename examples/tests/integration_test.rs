@@ -82,7 +82,6 @@ async fn integration_file_then_crypto_roundtrip() {
     unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
     encrypt_log_file(plain_str, enc_str, "LOG_ENCRYPTION_KEY").expect("encryption failed");
 
-    // 3. 验证加密文件存在且文件头正确
     assert!(enc_path.exists());
     let header = parse_encrypted_format(enc_str).expect("parse failed");
     assert!(header.is_valid_magic());

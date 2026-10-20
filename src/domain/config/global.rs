@@ -12,9 +12,7 @@ pub(crate) fn default_true() -> bool {
     true
 }
 
-// ============================================================================
 // GlobalConfig - Global logger settings
-// ============================================================================
 
 /// Global logger configuration.
 ///

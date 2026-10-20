@@ -32,7 +32,7 @@ fn percentile_upper_bound_us(latency_distribution: &[u64], percentile: f64) -> u
     bounds[bounds.len() - 1]
 }
 
-// === FileSink 额外测试 ===
+// FileSink 额外测试
 
 #[test]
 fn test_file_sink_special_characters() {
@@ -163,7 +163,7 @@ fn test_file_sink_with_fields() {
     assert!(result.is_ok());
 }
 
-// === DatabaseSink 额外测试 ===
+// DatabaseSink 额外测试
 
 fn make_test_db_config(name: &str, enabled: bool) -> inklog::config::DatabaseSinkConfig {
     inklog::config::DatabaseSinkConfig {
@@ -262,7 +262,7 @@ async fn test_database_sink_write_single() {
     assert_eq!(mock_db.record_count(), 1);
 }
 
-// === ConsoleSink 额外测试 ===
+// ConsoleSink 额外测试
 
 #[test]
 fn test_console_sink_disabled() {
@@ -361,7 +361,7 @@ fn test_console_sink_different_levels() {
     }
 }
 
-// === LoggerManager 额外测试 ===
+// LoggerManager 额外测试
 
 #[tokio::test]
 async fn test_manager_console_only() {
@@ -431,7 +431,7 @@ async fn test_manager_get_metrics() {
 // LoggerManager 无 reset/logger API（生命周期由 shutdown 管理），原用例裁撤
 #[tokio::test]
 async fn test_manager_invalid_level() {
-    // 核正：builder 对非法 level 延迟校验（validation_errors 机制），build() 时
+    // 核正：builder 对非法 level 延迟校验（validation_errors 机制），build 时
     // 统一报 ConfigError——无效 level 应构建失败（fail-fast），原断言 is_ok 与
     // 真实行为相反
     let manager = LoggerManager::builder()
@@ -566,7 +566,7 @@ async fn test_manager_block_strategy_high_load_sampling() {
             let subscriber = subscriber.clone();
             let filter = filter.clone();
             std::thread::spawn(move || {
-                // 核正：Layered 组合体不支持 Clone，子线程以 Registry::default()
+                // 核正：Layered 组合体不支持 Clone，子线程以 Registry::default
                 // 重新组装（subscriber/filter 均可 Clone，共享同一组 channel）
                 let registry = tracing_subscriber::registry().with(subscriber).with(filter);
                 tracing::subscriber::with_default(registry, || {
@@ -733,7 +733,7 @@ async fn test_manager_adaptive_channel_capacity_and_health_link() {
     let _ = manager.shutdown();
 }
 
-// === Builder 额外测试 ===
+// Builder 额外测试
 
 // LoggerBuilder 字段私有：永真断言改为构建成功验证；
 // 无 backpressure_timeout_ms/batch_size 方法，对应用例裁撤
@@ -783,7 +783,7 @@ async fn test_builder_worker_threads() {
     assert!(manager.is_ok());
 }
 
-// === 降级场景测试 ===
+// 降级场景测试
 
 #[tokio::test]
 async fn test_fallback_console_always_available() {
@@ -902,7 +902,7 @@ async fn test_fallback_trigger_recovery() {
     assert!(result.is_ok());
 }
 
-// === 配置解析测试 ===
+// 配置解析测试
 
 #[test]
 fn test_config_default_values() {
@@ -935,7 +935,7 @@ fn test_database_sink_default() {
     assert!(config.pool_size > 0);
 }
 
-// === 工具函数测试 ===
+// 工具函数测试
 
 #[test]
 fn test_parse_size_various_formats() {
@@ -992,11 +992,11 @@ fn test_circuit_breaker_reset() {
     assert_eq!(cb.state(), inklog::CircuitState::Closed);
 }
 
-// === 模板测试 ===
+// 模板测试
 
 #[test]
 fn test_log_template_render() {
-    // LogTemplate 无 Default/builder：经 new() 解析占位符后渲染验证
+    // LogTemplate 无 Default/builder：经 new 解析占位符后渲染验证
     let template = inklog::LogTemplate::new("[{level}] {message}");
     let record = inklog::LogRecord::default();
     let output = template.render(&record);
@@ -1013,7 +1013,7 @@ fn test_log_template_builder() {
     assert!(output.contains(&record.message));
 }
 
-// === 掩码测试 ===
+// 掩码测试
 
 #[test]
 fn test_masking_sensitive_data() {
@@ -1029,7 +1029,7 @@ fn test_masking_no_match() {
     assert_eq!(masked, "normal message");
 }
 
-// === 日志记录测试 ===
+// 日志记录测试
 
 #[test]
 fn test_log_record_creation() {
@@ -1069,7 +1069,7 @@ fn test_log_record_with_fields() {
     assert!(record.fields.contains_key("key"));
 }
 
-// === 指标测试 ===
+// 指标测试
 
 #[test]
 fn test_metrics_creation() {
@@ -1093,7 +1093,7 @@ fn test_metrics_accumulation() {
     assert_eq!(metrics.logs_written(), 2);
 }
 
-// === 错误类型测试 ===
+// 错误类型测试
 
 #[test]
 fn test_error_display() {

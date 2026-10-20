@@ -4,9 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ============================================================================
 // DatabaseDriver - Supported database drivers
-// ============================================================================
 
 /// Supported database drivers for the database sink.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -55,9 +53,7 @@ impl std::fmt::Display for DatabaseDriver {
     }
 }
 
-// ============================================================================
 // PartitionStrategy - Database table partitioning strategy
-// ============================================================================
 
 /// Database table partitioning strategy for log storage optimization.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -98,9 +94,7 @@ impl std::fmt::Display for PartitionStrategy {
     }
 }
 
-// ============================================================================
 // ParquetConfig - Parquet export configuration
-// ============================================================================
 
 /// Parquet export configuration for database sink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,9 +138,7 @@ impl Default for ParquetConfig {
     }
 }
 
-// ============================================================================
 // ArchiveFormat - Database archive export format
-// ============================================================================
 
 /// Supported archive formats for database log export.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -162,7 +154,7 @@ pub enum ArchiveFormat {
 impl std::str::FromStr for ArchiveFormat {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase()
+        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase
         if s.eq_ignore_ascii_case("json") {
             Ok(ArchiveFormat::Json)
         } else if s.eq_ignore_ascii_case("parquet") {
@@ -188,9 +180,7 @@ impl std::fmt::Display for ArchiveFormat {
     }
 }
 
-// ============================================================================
 // DatabaseSinkConfig - Database sink settings
-// ============================================================================
 
 /// Database sink configuration for persistent log storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -515,9 +505,7 @@ mod tests {
         assert_eq!(config.parquet_config.compression_level, 3);
     }
 
-    // ============================================================================
     // DatabaseSinkConfig 序列化/反序列化含新字段测试
-    // ============================================================================
 
     #[test]
     fn test_config_default_has_new_fields() {

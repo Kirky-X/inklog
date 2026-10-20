@@ -127,7 +127,6 @@ fn show_from_str_parsing() {
         }
     }
 
-    // 验证解析结果
     assert_eq!(OutputFormat::from_str("text").unwrap(), OutputFormat::Text);
     assert_eq!(OutputFormat::from_str("json").unwrap(), OutputFormat::Json);
     assert_eq!(OutputFormat::from_str("JSON").unwrap(), OutputFormat::Json);
@@ -237,7 +236,6 @@ fn show_json_format_rendering() {
         tr("example-output-format-supports-nested-structured")
     );
 
-    // 验证 JSON 合法性
     let parsed: Value = serde_json::from_str(&json_line).unwrap();
     assert_eq!(parsed["level"], "INFO");
     assert_eq!(parsed["message"], "user logged in");

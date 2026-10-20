@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tracing_subscriber::prelude::*;
 
-// ============ Benchmark Helper Functions ============
+// Benchmark Helper Functions
 
 /// Creates a Tokio runtime for benchmarks
 fn create_benchmark_runtime() -> Runtime {
@@ -33,7 +33,7 @@ fn create_benchmark_runtime() -> Runtime {
 /// Sets up a file-based logger for benchmarking
 ///
 /// `console_sink: None` 在 manager 语义下是"默认启用"（取
-/// `ConsoleSinkConfig::default()`，enabled=true），会让每个"file 基准"同时
+/// `ConsoleSinkConfig::default`，enabled=true），会让每个"file 基准"同时
 /// 向 stdout 写每条记录（默认参数下一次全量运行产生数百 MB 输出并引入
 /// console worker 干扰）。显式关闭以对齐函数名与本文档的基准口径。
 async fn setup_file_logger(log_path: &Path, channel_capacity: usize) -> (LoggerManager, impl Drop) {
@@ -115,7 +115,7 @@ async fn setup_console_logger() -> (LoggerManager, impl Drop) {
 /// Sets up a no-op logger (no sinks) for benchmarking pure overhead
 ///
 /// 两个 `None` 在 manager 语义下都是"默认启用"：console 取
-/// `ConsoleSinkConfig::default()`（enabled=true），file 取
+/// `ConsoleSinkConfig::default`（enabled=true），file 取
 /// `is_none_or(|cfg| cfg.enabled)`=true。若不显式关闭，本基准会向 stdout 洪泛
 /// 输出（实测全量约 145 万行）并启用默认路径 `logs/app.log` 的 file 通道——
 /// "no-op 对照"名不副实：stdout 洪泛阻塞 console worker，teardown 需排水巨量
@@ -328,13 +328,12 @@ fn bench_memory_usage(c: &mut Criterion) {
     group.finish();
 }
 
-// ============ Parquet 转换性能测试 ============
+// Parquet 转换性能测试
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 fn bench_parquet_conversion(c: &mut Criterion) {
     let mut group = c.benchmark_group("parquet_conversion");
     group.measurement_time(Duration::from_secs(10));
 
-    // 生成测试日志数据
     fn generate_test_logs(count: usize) -> Vec<LogRecord> {
         let mut rng = rand::rng();
         (0..count)
@@ -409,7 +408,7 @@ fn bench_parquet_conversion(c: &mut Criterion) {
     group.finish();
 }
 
-// ============ 模板渲染性能测试 ============
+// 模板渲染性能测试
 
 fn bench_template_rendering(c: &mut Criterion) {
     let mut group = c.benchmark_group("template_rendering");
@@ -438,7 +437,7 @@ fn bench_template_rendering(c: &mut Criterion) {
     group.finish();
 }
 
-// ============ 敏感信息脱敏性能测试 ============
+// 敏感信息脱敏性能测试
 
 fn bench_masking(c: &mut Criterion) {
     let mut group = c.benchmark_group("masking");
@@ -469,7 +468,7 @@ fn bench_masking(c: &mut Criterion) {
     group.finish();
 }
 
-// ============ Backpressure Benchmark ============
+// Backpressure Benchmark
 
 fn bench_backpressure(c: &mut Criterion) {
     let rt = create_benchmark_runtime();
@@ -514,7 +513,7 @@ fn bench_backpressure(c: &mut Criterion) {
     group.finish();
 }
 
-// ============ Concurrency Benchmark ============
+// Concurrency Benchmark
 
 fn bench_concurrency(c: &mut Criterion) {
     let rt = create_benchmark_runtime();
@@ -543,7 +542,6 @@ fn bench_concurrency(c: &mut Criterion) {
                 })
                 .count();
 
-            // Wait for completion
             manager.shutdown().expect("Benchmark setup failed");
 
             assert_eq!(result, 1000);
@@ -609,7 +607,7 @@ criterion_group!(
 criterion_group!(dbnexus_benches, bench_parquet_conversion);
 criterion_main!(benches);
 
-// ============ Object Pool Performance Benchmark ============
+// Object Pool Performance Benchmark
 
 fn bench_object_pool(c: &mut Criterion) {
     use inklog::{get_log_record, get_string_buffer, put_log_record, put_string_buffer};
@@ -669,7 +667,7 @@ fn bench_object_pool(c: &mut Criterion) {
     group.finish();
 }
 
-// ============ Zero-Allocation Hot Path Validation ============
+// Zero-Allocation Hot Path Validation
 
 fn bench_zero_allocation(c: &mut Criterion) {
     use inklog::{get_log_record, put_log_record};

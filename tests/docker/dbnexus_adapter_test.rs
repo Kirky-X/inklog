@@ -146,7 +146,7 @@ async fn test_dbnexus_adapter_insert_batch_nonexistent_table() {
         None => return,
     };
 
-    // 注意：with_table_name 内部调用 ensure_table_exists()，表会被自动创建。
+    // 注意：with_table_name 内部调用 ensure_table_exists，表会被自动创建。
     // 因此 insert_batch 可能成功（表已存在）或失败（取决于 dbnexus 权限配置）。
     // 本测试验证两种情况都不 panic，且错误路径返回合理错误信息。
     let adapter = DbNexusAdapter::with_table_name(&url, 2, "nonexistent_table_xyz")
@@ -167,13 +167,13 @@ async fn test_dbnexus_adapter_insert_batch_nonexistent_table() {
             err_msg
         );
     }
-    // 如果 result.is_ok()，说明 ensure_table_exists 成功建表后写入正常，也是可接受的行为。
+    // 如果 result.is_ok，说明 ensure_table_exists 成功建表后写入正常，也是可接受的行为。
 }
 
 #[tokio::test]
 #[serial]
 async fn test_dbnexus_adapter_connection_failure_invalid_url() {
-    // 无效 URL 应在 new() 阶段失败
+    // 无效 URL 应在 new 阶段失败
     let result = DbNexusAdapter::new("invalid://not-a-real-db", 1).await;
     let err = match result {
         Ok(_) => panic!("an invalid URL should make new() fail, but it succeeded"),
@@ -219,7 +219,7 @@ async fn test_dbnexus_adapter_pool_accessor() {
     };
 
     let adapter = DbNexusAdapter::new(&url, 2).await.expect("new() failed");
-    // pool() 访问器应返回非空引用（通过 is_healthy 间接验证）
+    // pool 访问器应返回非空引用（通过 is_healthy 间接验证）
     let _pool_ref = adapter.pool();
     assert!(adapter.is_healthy().await);
 }

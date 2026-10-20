@@ -236,14 +236,13 @@ async fn latency_analysis() -> Result<(), Box<dyn std::error::Error>> {
     let count = 500;
     let mut produce_instants = Vec::with_capacity(count);
 
-    // 记录每条日志的产生时刻
     for i in 0..count {
         let produce_at = Instant::now();
         tracing::info!(iteration = i, "Latency test");
         produce_instants.push(produce_at);
     }
 
-    // 以 shutdown()/flush 全部完成作为持久化终点：
+    // 以 shutdown/flush 全部完成作为持久化终点：
     // 端到端延迟 = 持久化完成时刻 - 该条日志产生时刻。
     // 异步 Sink 中单条日志的落盘时刻不可观测，
     // 用全量 flush 的终点作为每条日志"从产生到持久化"的度量（上界），

@@ -126,24 +126,20 @@ async fn test_comprehensive_real_data_writing() {
 
     println!("\n=== Phase 1: writing different kinds of log data ===");
 
-    // 1. 写入大量日志触发轮转
     for i in 0..2000 {
         tracing::info!(target: "rotation_test", "rotation test message {} - large data: {}", i, "x".repeat(200));
     }
 
-    // 2. 写入敏感数据测试掩码
     for i in 0..500 {
         tracing::warn!(target: "masking_test", "sensitive data test - user email: user{}@example.com, phone: {}",
                 i, "13812345678");
     }
 
-    // 3. 写入加密数据
     for i in 0..1000 {
         tracing::error!(target: "encryption_test", "encryption test - secret data: {}",
                 format!("secret_data_{}", i));
     }
 
-    // 4. 写入数据库数据
     for i in 0..500 {
         tracing::debug!(target: "database_test", "database test - batch data {}",
                 format!("db_batch_{}", i));
@@ -174,7 +170,6 @@ async fn test_comprehensive_real_data_writing() {
         "the log file should contain a large amount of data"
     );
 
-    // 验证健康监控状态
     let health = logger.get_health_status();
     println!("health status: {:?}", health);
     assert!(
@@ -211,7 +206,6 @@ async fn test_comprehensive_real_data_writing() {
         })
         .collect();
 
-    // 等待所有线程完成
     for handle in handles {
         handle.await.unwrap();
     }
@@ -224,7 +218,7 @@ async fn test_comprehensive_real_data_writing() {
 
     // 验证并发写入后的状态：spawn 完成只保证记录进入异步通道，落盘由
     // file sink worker 按批次/间隔异步完成——轮询等待增长而非立即断言
-    // （break 即证明 len > metadata.len()，无需循环后重复断言）
+    // （break 即证明 len > metadata.len，无需循环后重复断言）
     let concurrent_deadline = Instant::now() + Duration::from_secs(10);
     let concurrent_len = loop {
         let len = std::fs::metadata(&log_path).unwrap().len();
@@ -377,7 +371,7 @@ async fn test_dynamic_configuration_changes() {
         tracing::info!(target: "dynamic_test", "initial config - message {}", i);
     }
 
-    // 修改配置并重新创建日志器（在实际应用中，这应该是无缝的）
+    // 修改配置并重新创建日志器（在实际应用中，这应该是无缝）
     let updated_config = InklogConfig {
         file_sink: Some(FileSinkConfig {
             enabled: true,
@@ -394,7 +388,6 @@ async fn test_dynamic_configuration_changes() {
 
     drop(logger1);
 
-    // 等待一小段时间
     sleep(Duration::from_millis(500)).await;
 
     // 创建新日志器（模拟配置热更新；guard2 遮蔽 guard1，日志切换到新 logger）
@@ -416,7 +409,6 @@ async fn test_dynamic_configuration_changes() {
             .with(filter2),
     );
 
-    // 写入新配置下的日志
     for i in 0..100 {
         tracing::warn!(target: "dynamic_test", "updated config - warning message {}", i);
     }
@@ -425,7 +417,6 @@ async fn test_dynamic_configuration_changes() {
     let _ = logger2.shutdown();
     drop(_guard2);
 
-    // 验证新配置生效
     let final_content = std::fs::read_to_string(&log_path).unwrap();
 
     // 应该包含debug级别的消息

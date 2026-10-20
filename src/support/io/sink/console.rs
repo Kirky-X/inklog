@@ -58,7 +58,7 @@ impl ConsoleSink {
         }
     }
 
-    /// 注入自定义 masker（如经 DataMasker::builder() 构建的 literal 规则，
+    /// 注入自定义 masker（如经 DataMasker::builder 构建的 literal 规则，
     /// fast-masking feature 下走 AC 加速路径）。
     pub fn with_masker(mut self, masker: DataMasker) -> Self {
         self.masker = Some(masker);
@@ -197,7 +197,7 @@ impl LogSink for ConsoleSink {
     ///
     /// The writer lock only guards a short, synchronous critical section;
     /// never hold it across an `.await`. A poisoned lock is recovered via
-    /// `into_inner()` so flush still succeeds after a panicking writer.
+    /// `into_inner` so flush still succeeds after a panicking writer.
     async fn flush(&self) -> Result<(), InklogError> {
         // Flush stdout writer
         let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
@@ -290,7 +290,6 @@ mod tests {
         unsafe {
             env::set_var("TERM", "dumb");
         }
-        // Ensure no other conflicting envs
         unsafe {
             env::remove_var("CLICOLOR_FORCE");
         }
@@ -421,9 +420,7 @@ mod tests {
         assert!(colored.contains("test message"));
     }
 
-    // ========================================================================
     // Test helpers
-    // ========================================================================
 
     /// A Write implementation that buffers output for inspection in tests.
     #[derive(Default, Clone)]
@@ -482,9 +479,7 @@ mod tests {
         (sink, writer)
     }
 
-    // ========================================================================
     // apply_color: cover remaining branches (WARN, DEBUG, TRACE, lowercase)
-    // ========================================================================
 
     #[test]
     fn test_apply_color_warn() {
@@ -521,9 +516,7 @@ mod tests {
     // ANSI 转义码不在此断言：本 crate 刻意不启用 owo-colors 的 supports-colors
     // feature（见 Cargo.toml 注释），无法稳定控制颜色输出开关。
 
-    // ========================================================================
     // write_record: cover use_color true/false, all level branches, errors
-    // ========================================================================
 
     #[test]
     fn test_write_record_without_color() {
@@ -588,7 +581,7 @@ mod tests {
 
     #[test]
     fn test_write_record_with_color_unknown_level() {
-        // Covers the `_ => record.level.clone()` fallback arm in write_record's
+        // Covers the `_ => record.level.clone` fallback arm in write_record's
         // level_colored match.
         let sink = get_sink();
         let mut buf: Vec<u8> = Vec::new();
@@ -627,9 +620,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // should_colorize: cover CLICOLOR_FORCE=0 and is_stderr=true branches
-    // ========================================================================
 
     #[test]
     #[serial]
@@ -699,9 +690,7 @@ mod tests {
         }
     }
 
-    // ========================================================================
     // LogSink::write: masking, stderr/stdout routing, color interaction
-    // ========================================================================
 
     #[tokio::test]
     async fn test_log_sink_write_stdout_no_masking() {
@@ -795,7 +784,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_sink_write_stderr_level_writes_to_stderr_not_stdout() {
-        // is_stderr=true in write() routes to io::stderr(), so the stdout
+        // is_stderr=true in write routes to io::stderr, so the stdout
         // TestWriter should remain empty.
         let config = ConsoleSinkConfig {
             enabled: true,
@@ -847,7 +836,7 @@ mod tests {
     #[tokio::test]
     async fn test_log_sink_write_case_insensitive_stderr_match() {
         // stderr_levels contains lowercase "error"; record level "ERROR"
-        // should still match after to_lowercase().
+        // should still match after to_lowercase.
         let config = ConsoleSinkConfig {
             enabled: true,
             colored: false,
@@ -863,9 +852,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // LogSink trait: flush, is_healthy, shutdown
-    // ========================================================================
 
     #[tokio::test]
     async fn test_log_sink_flush_succeeds() {
@@ -911,9 +898,7 @@ mod tests {
         assert!(writer.output().contains("before poison"));
     }
 
-    // ========================================================================
     // Clone impl: config preserved, writer shared via Arc
-    // ========================================================================
 
     #[test]
     fn test_console_sink_clone_preserves_config() {
@@ -956,9 +941,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // Debug impl: only config and template fields
-    // ========================================================================
 
     #[test]
     fn test_console_sink_debug_format() {
@@ -973,9 +956,7 @@ mod tests {
         assert!(!debug_str.contains("masker"));
     }
 
-    // ========================================================================
     // write_record with color: INFO 级别（覆盖 writeln! 着色分支，行 62）
-    // ========================================================================
 
     #[test]
     fn test_write_record_with_color_info() {
@@ -995,9 +976,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // write_record with color: 错误路径（覆盖行 62 writeln! 失败分支）
-    // ========================================================================
 
     #[test]
     fn test_write_record_with_color_propagates_write_error() {

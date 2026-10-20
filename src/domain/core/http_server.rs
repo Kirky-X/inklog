@@ -466,9 +466,7 @@ mod tests {
         assert!(!flag.load(Ordering::Relaxed));
     }
 
-    // ========================================================================
     // 修复（Strict 形同虚设）：bind 失败按 HttpErrorMode 传播
-    // ========================================================================
 
     #[test]
     fn test_bind_failure_outcome_strict_propagates_error() {

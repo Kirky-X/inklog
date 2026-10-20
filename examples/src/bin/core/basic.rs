@@ -6,7 +6,7 @@
 //!
 //! # 内容
 //!
-//! 1. `LoggerManager::new()` 默认初始化
+//! 1. `LoggerManager::new` 默认初始化
 //! 2. 不同日志级别的使用（trace/debug/info/warn/error）
 //! 3. 结构化日志（带字段）
 //! 4. 健康状态验证
@@ -44,15 +44,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 示例 1：默认初始化
 ///
-/// 使用 `LoggerManager::new()` 以默认配置启动日志系统。
+/// 使用 `LoggerManager::new` 以默认配置启动日志系统。
 /// 默认配置仅启用 Console Sink，日志级别为 info。
 ///
-/// 注意：本示例的 logger 在 main() 中创建并保持存活，
+/// 注意：本示例的 logger 在 main 中创建并保持存活，
 /// 确保后续示例的 tracing 调用有活跃的 subscriber。
 async fn show_default_initialization() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}\n", tr("example-basic-example-1-default-initialization"));
 
-    // logger 已在 main() 中创建，此处展示初始化模式
+    // logger 已在 main 中创建，此处展示初始化模式
     println!("{}", tr("example-basic-loggermanager-new-initialized"));
     tracing::info!("{}", tr("example-basic-log-system-started"));
     println!("{}\n", tr("example-basic-logging-works"));
@@ -152,7 +152,7 @@ fn show_health_verification() {
 ///
 /// 演示使用 `InklogConfig` 自定义配置初始化日志系统。
 ///
-/// 注意：由于 tracing 全局 subscriber 已在 main() 中设置，
+/// 注意：由于 tracing 全局 subscriber 已在 main 中设置，
 /// 此处展示配置模式代码，不再创建新的 LoggerManager。
 async fn show_config_initialization() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}\n", tr("example-basic-example-5-custom-configuration"));

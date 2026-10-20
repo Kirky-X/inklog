@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(mock_db.stored_count(), 1);
     }
 
-    /// 测试 new() 方法（不传 config，使用默认配置）
+    /// 测试 new 方法（不传 config，使用默认配置）
     #[tokio::test(flavor = "multi_thread")]
     async fn test_database_sink_new_without_config() {
         let mock_db = Arc::new(MockDatabaseAdapter::new());
@@ -236,7 +236,6 @@ mod tests {
         let mock_db = Arc::new(MockDatabaseAdapter::new());
         let sink = DatabaseSink::new(mock_db.clone()).unwrap();
 
-        // 写入包含邮箱的记录
         let record = LogRecord {
             message: "User email: test@example.com".to_string(),
             ..Default::default()
@@ -421,15 +420,13 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ========================================================================
     // adjust_batch_size 覆盖：成功率达到阈值时触发批大小调整
     // 覆盖行 156, 158-160, 165-166, 171-173
-    // ========================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_adjust_batch_size_grows_on_high_success_and_low_latency() {
         // 写入 100 条记录（batch_size=10），触发 10 次 flush 成功。
-        // 第 10 次 flush 后 write_latencies.len()=10，adjust_batch_size 执行实际逻辑。
+        // 第 10 次 flush 后 write_latencies.len=10，adjust_batch_size 执行实际逻辑。
         // success_rate=1.0 >= 0.95 且 avg_latency < 50ms → current_batch_size 翻倍
         let mock_db = Arc::new(MockDatabaseAdapter::new());
         let config = DatabaseSinkConfig {
@@ -460,10 +457,8 @@ mod tests {
         assert!(metrics.db_batch_records_total() > 0);
     }
 
-    // ========================================================================
     // adjust_batch_size 覆盖：高延迟触发缩减分支
     // 覆盖行 167-168
-    // ========================================================================
 
     /// 慢速数据库：每次 insert_batch sleep 250ms，使 avg_latency > 200ms
     struct SlowDatabase;
@@ -507,17 +502,15 @@ mod tests {
         let _ = before;
     }
 
-    // ========================================================================
     // circuit_breaker open 后走 fallback_sink 分支
     // 覆盖行 200-201, 203
-    // ========================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_circuit_breaker_open_routes_to_fallback_sink() {
         // FailingDatabase 触发 3 次 flush 失败 → circuit_breaker open
         // fallback 成功时不重入队（每轮 10 条重新缓冲后才触发下一次 flush），
         // 因此需要 30 条记录才能累积 3 次 flush 失败。
-        // 第 31 条 write：can_execute()=false → 走 fallback_sink → 返回 Ok
+        // 第 31 条 write：can_execute=false → 走 fallback_sink → 返回 Ok
         let failing_db = Arc::new(FailingDatabase);
         let config = DatabaseSinkConfig {
             batch_size: 10,
@@ -539,7 +532,7 @@ mod tests {
             "circuit breaker should be open after 3 flush failures"
         );
 
-        // 第 31 条：circuit_breaker.can_execute()=false → fallback_sink → Ok
+        // 第 31 条：circuit_breaker.can_execute=false → fallback_sink → Ok
         let record = LogRecord {
             message: "after circuit open".to_string(),
             ..Default::default()
@@ -552,10 +545,8 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // 缓冲写入不得喂 success 给断路器：否则 flush 失败计数被清零，
     // 持续缓冲写入可无限阻止熔断打开
-    // ========================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_buffered_writes_do_not_reset_circuit_breaker() {
@@ -590,9 +581,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // 熔断开启走 fallback 时必须写入脱敏后的记录（而非原始记录）
-    // ========================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_circuit_open_fallback_receives_masked_record() {
@@ -660,9 +649,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // flush 失败时整批交给 fallback；fallback 成功则不重入队（避免重复提交）
-    // ========================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_flush_failure_fallback_success_no_requeue() {
@@ -707,9 +694,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // 缓冲上限：超限丢弃最旧记录，递增 dropped 指标并累计计数
-    // ========================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_buffer_overflow_drops_oldest_and_increments_dropped_metric() {
@@ -759,10 +744,8 @@ mod tests {
         assert_eq!(metrics.logs_dropped(), 1);
     }
 
-    // ========================================================================
     // flush_inner 失败时更新 metrics
     // 覆盖行 279-280
-    // ========================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_flush_failure_updates_sink_error_metrics() {
@@ -790,11 +773,9 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // adjust_batch_size 直接单元测试
     // 通过构造 DatabaseSinkInner 直接调用 adjust_batch_size，
     // 覆盖所有分支：早返回、增长、缩减、上限、下限、中间区、零总操作数
-    // ========================================================================
 
     /// 构造测试用 DatabaseSinkInner，避免依赖真实数据库
     fn make_test_inner(batch_size: usize) -> DatabaseSinkInner {

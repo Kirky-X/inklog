@@ -13,9 +13,7 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
-// ============================================================================
 // validate 子命令
-// ============================================================================
 
 #[test]
 fn test_cli_validate_nonexistent_config() {
@@ -69,9 +67,7 @@ level = "invalid_level"
         .stderr(predicate::str::contains("Invalid log level"));
 }
 
-// ============================================================================
 // generate 子命令
-// ============================================================================
 
 #[test]
 fn test_cli_generate_minimal_config() {
@@ -127,9 +123,7 @@ fn test_cli_generate_env_example() {
     assert!(content.contains("INKLOG_LEVEL"));
 }
 
-// ============================================================================
 // decrypt 子命令
-// ============================================================================
 
 #[test]
 fn test_cli_decrypt_nonexistent_input() {
@@ -204,9 +198,7 @@ fn test_cli_decrypt_success() {
     );
 }
 
-// ============================================================================
 // 无参数 / 错误处理
-// ============================================================================
 
 #[test]
 fn test_cli_no_args_fails() {
@@ -216,9 +208,7 @@ fn test_cli_no_args_fails() {
         .stderr(predicate::str::contains("Usage").or(predicate::str::contains("usage")));
 }
 
-// ============================================================================
 // query 子命令 —— 检索、--json 与退出码契约
-// ============================================================================
 
 #[test]
 fn test_cli_query_exit_code_0_with_matches() {

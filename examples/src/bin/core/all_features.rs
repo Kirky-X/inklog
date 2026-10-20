@@ -8,7 +8,7 @@
 //!
 //! 1. 数据脱敏（DataMasker）：内置规则 + 自定义规则 + 验证
 //! 2. 日志模板（LogTemplate）：多种格式渲染 + 验证
-//! 3. 日志级别控制：级别过滤 + `set_level()` 运行时热调
+//! 3. 日志级别控制：级别过滤 + `set_level` 运行时热调
 //! 4. 结构化日志：带字段的日志记录（字段经 `{fields}` 占位符落屏）
 //! 5. 路径验证（PathValidator）：安全路径检查
 //! 6. 对象池（ObjectPool）：高性能对象复用
@@ -16,7 +16,7 @@
 //! 8. 最佳实践与使用建议
 //!
 //! 全局 tracing subscriber 在首个 `LoggerManager` 构建时安装，进程内只安装一次；
-//! 因此本示例全程只保留一个 LoggerManager，级别切换用 `set_level()` 热调，
+//! 因此本示例全程只保留一个 LoggerManager，级别切换用 `set_level` 热调，
 //! 而不是重建 logger（重复构建的 logger 收不到 tracing 记录）。
 //!
 //! # 运行
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 全局 tracing subscriber 只安装一次：这里构建唯一的 LoggerManager，并让它
     // 存活到功能 3、4 演示结束。重复构建第二个 logger 不会接管全局订阅者，
-    // 其记录会静默丢失——切换级别请用 set_level() 热调。
+    // 其记录会静默丢失——切换级别请用 set_level 热调。
     let logger = LoggerManager::builder()
         .level("debug")
         .console(true)
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     show_log_levels(&logger).await?;
     show_structured_logging().await;
 
-    // shutdown() 会等待 channel 中的日志全部写出
+    // shutdown 会等待 channel 中的日志全部写出
     logger.shutdown()?;
 
     show_path_validation();
@@ -232,8 +232,8 @@ fn show_log_template() {
 
 /// 功能 3：日志级别控制
 ///
-/// 演示级别过滤与 `set_level()` 运行时热调。全局 tracing subscriber 在首个
-/// `LoggerManager` 构建时安装且进程内只安装一次，切换级别必须用 `set_level()`
+/// 演示级别过滤与 `set_level` 运行时热调。全局 tracing subscriber 在首个
+/// `LoggerManager` 构建时安装且进程内只安装一次，切换级别必须用 `set_level`
 /// 热调同一实例；重建 LoggerManager 不会接管全局订阅者，其记录会静默丢失。
 async fn show_log_levels(logger: &LoggerManager) -> Result<(), Box<dyn std::error::Error>> {
     println!(
@@ -249,7 +249,7 @@ async fn show_log_levels(logger: &LoggerManager) -> Result<(), Box<dyn std::erro
     tracing::debug!("{}", tr("example-all-features-debug-emitted"));
     tracing::info!("{}", tr("example-all-features-info-emitted"));
     // 控制台 sink 经 worker 异步写出，短暂等待让记录落屏；
-    // 生产代码无需 sleep，shutdown() 会等待队列排空
+    // 生产代码无需 sleep，shutdown 会等待队列排空
     tokio::time::sleep(Duration::from_millis(100)).await;
     println!(
         "  {}\n",
@@ -285,7 +285,7 @@ async fn show_log_levels(logger: &LoggerManager) -> Result<(), Box<dyn std::erro
 
 /// 功能 4：结构化日志
 ///
-/// 演示带结构化字段的日志记录。字段随记录进入 sink，由 main() 中配置的
+/// 演示带结构化字段的日志记录。字段随记录进入 sink，由 main 中配置的
 /// `{fields}` 占位符渲染为 `key=value`。
 async fn show_structured_logging() {
     println!(
@@ -328,7 +328,7 @@ async fn show_structured_logging() {
         "payment processing failed"
     );
 
-    // 等待异步 worker 把记录写到控制台（生产代码由 shutdown() 排空队列）
+    // 等待异步 worker 把记录写到控制台（生产代码由 shutdown 排空队列）
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     println!(

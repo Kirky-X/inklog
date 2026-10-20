@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_generate_config_to_directory() {
-        // 覆盖 -18: output_path.is_dir() 为 true 的分支
+        // 覆盖 -18: output_path.is_dir 为 true 的分支
         let dir = tempdir().unwrap();
         let result = generate_config(dir.path(), "file");
         assert!(result.is_ok());
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_generate_env_example_to_directory() {
-        // 覆盖 -243: output_path.is_dir() 为 true 的分支
+        // 覆盖 -243: output_path.is_dir 为 true 的分支
         let dir = tempdir().unwrap();
         let result = generate_env_example(dir.path());
         assert!(result.is_ok());

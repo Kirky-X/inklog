@@ -5,7 +5,7 @@
 //! 演示从 TOML 配置文件加载 InklogConfig，使用临时目录自动清理：
 //! - 创建临时 TOML 配置文件并展示其格式
 //! - `InklogConfig::from_str` 同步解析（不启动 logger）
-//! - `InklogConfig::from_search_paths` 演示 `LoggerManager::load()` 的搜索路径
+//! - `InklogConfig::from_search_paths` 演示 `LoggerManager::load` 的搜索路径
 //! - `LoggerManager::from_file` 加载配置并初始化 logger
 //!
 //! # 运行

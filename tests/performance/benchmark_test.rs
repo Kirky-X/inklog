@@ -19,7 +19,7 @@ mod performance_test {
     use tempfile::TempDir;
     use tracing_subscriber::layer::SubscriberExt;
 
-    // === 吞吐量测试 ===
+    // 吞吐量测试
 
     #[tokio::test]
     async fn test_log_throughput_single_thread() {
@@ -165,7 +165,7 @@ mod performance_test {
         );
     }
 
-    // === 延迟测试 ===
+    // 延迟测试
 
     #[tokio::test]
     async fn test_log_latency() {
@@ -221,7 +221,7 @@ mod performance_test {
         );
     }
 
-    // === 内存使用测试 ===
+    // 内存使用测试
 
     #[tokio::test]
     async fn test_memory_usage_during_burst() {
@@ -272,7 +272,7 @@ mod performance_test {
             tracing::info!(target: "memory_test", "Burst test message #{}", i);
         }
 
-        // 核正：原断言 `log_path.exists() || burst_size > 0` 恒真无意义；
+        // 核正：原断言 `log_path.exists || burst_size > 0` 恒真无意义；
         // shutdown drain 确保 50000 条全部落盘后按真实行为固化断言
         let _ = _logger.shutdown();
         assert!(
@@ -285,7 +285,7 @@ mod performance_test {
         println!("Memory burst test completed successfully");
     }
 
-    // === 批处理性能测试 ===
+    // 批处理性能测试
 
     #[tokio::test]
     async fn test_batch_write_performance() {
@@ -328,7 +328,6 @@ mod performance_test {
                     tracing::info!(target: "batch_performance", "Batch test message #{}", i);
                 }
 
-                // 等待批次完成
                 tokio::time::sleep(Duration::from_millis(200)).await;
 
                 let elapsed = start.elapsed();
@@ -349,7 +348,7 @@ mod performance_test {
         }
     }
 
-    // === 并发连接池测试 ===
+    // 并发连接池测试
 
     #[tokio::test]
     async fn test_connection_pool_performance() {
@@ -428,7 +427,7 @@ mod performance_test {
         }
     }
 
-    // === 长期稳定性测试 ===
+    // 长期稳定性测试
 
     #[tokio::test]
     async fn test_sustained_load() {

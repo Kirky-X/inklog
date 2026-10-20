@@ -7,13 +7,13 @@
 //!
 //! # 功能演示
 //!
-//! - `CircuitBreaker::new()` 创建断路器（指定失败阈值、超时、成功阈值）
-//! - `CircuitBreaker::with_config()` + `CircuitBreakerConfig` 配置式构建
+//! - `CircuitBreaker::new` 创建断路器（指定失败阈值、超时、成功阈值）
+//! - `CircuitBreaker::with_config` + `CircuitBreakerConfig` 配置式构建
 //! - 失败计数触发 Closed → Open 转换
-//! - 超时后通过 `can_execute()` 触发 Open → HalfOpen 转换
+//! - 超时后通过 `can_execute` 触发 Open → HalfOpen 转换
 //! - 半开状态下成功次数累积触发 HalfOpen → Closed 恢复
 //! - 半开状态下失败立即回退 HalfOpen → Open
-//! - `reset()` 手动重置断路器
+//! - `reset` 手动重置断路器
 //!
 //! # 状态机
 //!
@@ -21,7 +21,7 @@
 //!          失败次数 >= failure_threshold
 //!   Closed ─────────────────────────────► Open
 //!      ▲                                     │
-//!      │                                     │ 超时后 can_execute()
+//!      │                                     │ 超时后 can_execute
 //!      │ HalfOpen 累计成功 >= success_threshold│
 //!      │                                     ▼
 //!      └──────────── Closed ◄── HalfOpen
@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     show_reset();
 
-    // 8. 真实场景模拟：用 can_execute() 守护操作
+    // 8. 真实场景模拟：用 can_execute 守护操作
     show_realistic_usage().await;
 
     println!(
@@ -543,7 +543,7 @@ fn show_with_config() {
     assert_eq!(cb.state(), CircuitState::Closed);
 }
 
-/// 展示 reset() 手动重置
+/// 展示 reset 手动重置
 fn show_reset() {
     print_separator(&tr("example-circuit-breaker-7-manual-reset-with-reset"));
 
@@ -595,7 +595,7 @@ fn show_reset() {
     assert!(cb.can_execute());
 }
 
-/// 展示真实场景：用 can_execute() 守护操作并记录结果
+/// 展示真实场景：用 can_execute 守护操作并记录结果
 async fn show_realistic_usage() {
     print_separator(&tr(
         "example-circuit-breaker-8-realistic-simulation-guarding",

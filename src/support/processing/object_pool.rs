@@ -11,25 +11,25 @@
 //! # Construction Patterns
 //!
 //! This module supports two construction patterns:
-//! - `new()` - Creates pool with default configuration (async, returns Result)
-//! - `with_config()` - Creates pool with custom configuration (async, returns Result)
+//! - `new` - Creates pool with default configuration (async, returns Result)
+//! - `with_config` - Creates pool with custom configuration (async, returns Result)
 //!
 //! # Usage Examples
 //!
 //! ```no_run
 //! use inklog::ObjectPool;
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Pattern 1: new() - Default configuration
-//! let pool1 = ObjectPool::<String, i32>::new().await?;
+//! # async fn example -> Result<, Box<dyn std::error::Error>> {
+//! // Pattern 1: new - Default configuration
+//! let pool1 = ObjectPool::<String, i32>::new.await?;
 //!
-//! // Pattern 2: with_config() - Custom configuration
+//! // Pattern 2: with_config - Custom configuration
 //! use inklog::ObjectPoolConfig;
 //! let pool2 = ObjectPool::<String, i32>::with_config(ObjectPoolConfig {
 //!     max_capacity: 2048,
 //!     ttl_secs: None,
 //! }).await?;
-//! # Ok(())
+//! # Ok()
 //! # }
 //! ```
 
@@ -115,7 +115,7 @@ where
     /// Create a new object pool with full configuration
     ///
     /// Errors are propagated as `InklogError::CacheError`; no silent
-    /// `Cache::default()` fallback is used.
+    /// `Cache::default` fallback is used.
     pub async fn with_config(config: ObjectPoolConfig) -> Result<Self, InklogError> {
         let mut builder = Cache::builder();
         builder = builder.capacity(config.max_capacity as u64);
@@ -169,11 +169,11 @@ where
 
     /// Get the approximate number of items that have been put into the pool.
     ///
-    /// Note: This count tracks the number of `put()` calls and may over-count
+    /// Note: This count tracks the number of `put` calls and may over-count
     /// if the underlying oxcache evicts entries (TTL expiry, capacity pressure).
     /// It is an approximation, not an exact count of current cache contents.
     /// In particular it only ever increments: it does **not** decrement when
-    /// entries are evicted or removed, so after an eviction `len()` over-counts
+    /// entries are evicted or removed, so after an eviction `len` over-counts
     /// permanently.
     pub fn len(&self) -> usize {
         self.stats.total_items.load(Ordering::Relaxed)
@@ -185,9 +185,7 @@ where
     }
 }
 
-// ============================================================================
 // Thread-Local Object Pool (High Performance)
-// ============================================================================
 
 /// High-performance thread-local pool for LogRecord.
 ///
@@ -306,9 +304,7 @@ thread_local! {
         std::cell::RefCell::new(Vec::with_capacity(1024));
 }
 
-// ============================================================================
 // Global Convenience Functions
-// ============================================================================
 
 static GLOBAL_LOG_RECORD_POOL: LazyLock<ThreadLocalLogRecordPool> =
     LazyLock::new(|| ThreadLocalLogRecordPool::new(1024));
@@ -354,9 +350,7 @@ struct PoolStats {
 mod tests {
     use super::*;
 
-    // ============================================================================
     // ObjectPool async 测试
-    // ============================================================================
 
     #[cfg(feature = "cache")]
     #[tokio::test]
@@ -435,13 +429,13 @@ mod tests {
     #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_object_pool_is_empty() {
-        // 覆盖 is_empty() 方法 (行 162-163) 和 get() 内部 cache 访问 (行 128)
+        // 覆盖 is_empty 方法 (行 162-163) 和 get 内部 cache 访问 (行 128)
         let pool = ObjectPool::<String, i32>::new().await.expect("build");
         // 新池应为空
         assert!(pool.is_empty());
         assert_eq!(pool.len(), 0);
 
-        // get 触发 .cache.get() 路径（行 128）
+        // get 触发 .cache.get 路径（行 128）
         let result = pool.get(&"missing".to_string()).await.expect("get");
         assert_eq!(result, None);
 
@@ -451,9 +445,7 @@ mod tests {
         assert_eq!(value, Some(42));
     }
 
-    // ============================================================================
     // ObjectPoolConfig 测试
-    // ============================================================================
 
     #[test]
     fn test_object_pool_config_default() {
@@ -472,9 +464,7 @@ mod tests {
         assert_eq!(config.ttl_secs, Some(60));
     }
 
-    // ============================================================================
     // ThreadLocalLogRecordPool 测试
-    // ============================================================================
 
     #[test]
     fn test_thread_local_log_record_pool() {
@@ -531,9 +521,7 @@ mod tests {
         assert!(!pool.is_empty());
     }
 
-    // ============================================================================
     // ThreadLocalStringPool 测试
-    // ============================================================================
 
     #[test]
     fn test_thread_local_string_pool() {
@@ -622,9 +610,7 @@ mod tests {
         assert!(!pool.is_empty());
     }
 
-    // ============================================================================
     // 全局便捷函数测试
-    // ============================================================================
 
     #[test]
     fn test_global_log_record_functions() {
@@ -655,9 +641,7 @@ mod tests {
         let _ = s2.capacity();
     }
 
-    // ============================================================================
     // 并发测试
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_thread_local_pool_concurrent_isolation() {
@@ -690,7 +674,7 @@ mod tests {
 
     #[test]
     fn test_string_pool_clears_string_on_put() {
-        // put() must clear string contents before pooling to prevent data leaks
+        // put must clear string contents before pooling to prevent data leaks
         let pool = super::ThreadLocalStringPool::new(10);
         let mut s = pool.get();
         s.push_str("sensitive data");

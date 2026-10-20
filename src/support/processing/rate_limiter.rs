@@ -7,7 +7,7 @@
 //!
 //! 算法内核委托 limiteron [`TokenBucketLimiter`]（手写 `Mutex<f64>` 桶与
 //! 补充公式已删除）：`new(rate)` 映射 `TokenBucketLimiter::new(rate, rate)`
-//! （桶满 rate、每秒补 rate）；同步 `try_acquire()` 经
+//! （桶满 rate、每秒补 rate）；同步 `try_acquire` 经
 //! `futures::executor::block_on` 桥接异步 `allow(1)`；拒绝计数
 //! [`RateLimiter::dropped_count`] 由 inklog 自持（limiteron 无诊断字段）。
 
@@ -18,7 +18,7 @@ use limiteron::limiters::{Limiter, TokenBucketLimiter};
 /// Token bucket rate limiter for controlling log throughput.
 ///
 /// 容量 = 速率 = `rate`：桶满 `rate`、每秒补 `rate`（与既有
-/// `Mutex<f64>` 实现语义等价）。`try_acquire()` 为 O(1) 同步决策点。
+/// `Mutex<f64>` 实现语义等价）。`try_acquire` 为 O(1) 同步决策点。
 pub struct RateLimiter {
     limiter: TokenBucketLimiter,
     dropped_count: AtomicU64,

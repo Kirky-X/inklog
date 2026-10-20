@@ -7,13 +7,13 @@
 //!
 //! # 功能演示
 //!
-//! - `Metrics::new()` 创建指标收集器并采集各类计数器
+//! - `Metrics::new` 创建指标收集器并采集各类计数器
 //! - `Histogram` 延迟分布（P50/P95/P99）
 //! - `GaugeF64` 浮点指标（pool_hit_rate）
 //! - `SinkStatus` 状态转换：NotStarted → Healthy → Degraded → Unhealthy → Healthy
 //! - `SinkHealthMonitor` 智能降级与自动恢复
 //! - `HealthStatus` 整体健康快照
-//! - `Metrics::export_prometheus()` Prometheus 格式导出
+//! - `Metrics::export_prometheus` Prometheus 格式导出
 //!
 //! # 运行
 //!
@@ -907,7 +907,7 @@ fn show_prometheus_export() {
     for us in [50u64, 120, 350, 800, 1500, 4500] {
         metrics.record_latency(Duration::from_micros(us));
     }
-    // 设置 gauge 指标（active_workers 由内部 worker 维护，此处只设置可公开写入的）
+    // 设置 gauge 指标（active_workers 由内部 worker 维护，此处只设置可公开写入）
     metrics.set_db_batch_size(128);
     metrics.add_db_batch_records_total(128);
     metrics.set_pool_hit_rate(92.5);

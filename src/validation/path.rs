@@ -146,7 +146,7 @@ impl PathValidator {
         }
 
         if let Some(ref base_dir) = self.config.base_dir {
-            // TOCTOU caveat: `canonicalize()` resolves symlinks at validation
+            // TOCTOU caveat: `canonicalize` resolves symlinks at validation
             // time only. When it fails, falling back to the raw (unchecked)
             // path widens the validate-then-use window — the filesystem may
             // change between this check and the actual file operation.
@@ -163,7 +163,7 @@ impl PathValidator {
             #[cfg_attr(not(windows), allow(unused_mut))]
             let mut inside_base = canonical_path.starts_with(&canonical_base);
             if !inside_base {
-                // Windows：canonicalize() 返回 `\\?\` verbatim 前缀，而 canonicalize 失败
+                // Windows：canonicalize 返回 `\\?\` verbatim 前缀，而 canonicalize 失败
                 // 时回退的原始路径没有此前缀，导致 starts_with 误判——比较前对齐两侧前缀。
                 // 无 verbatim 前缀时上方标准 starts_with 比较即为权威结果，直接落到底部判定。
                 #[cfg(windows)]
@@ -188,12 +188,12 @@ impl PathValidator {
     ///
     /// # Behavior
     ///
-    /// This method first calls `validate()` which strictly rejects paths
+    /// This method first calls `validate` which strictly rejects paths
     /// containing `..` (parent directory) traversal components. Only paths
     /// that pass validation are then sanitized.
     ///
-    /// Since `validate()` already rejects all traversal attempts, the
-    /// `sanitize()` step here primarily serves to normalize path separators
+    /// Since `validate` already rejects all traversal attempts, the
+    /// `sanitize` step here primarily serves to normalize path separators
     /// and remove any redundant components from already-safe paths. It will
     /// **not** "fix" a traversal path — those are always rejected.
     pub fn validate_and_sanitize(&self, path: &Path) -> ValidationResult {
@@ -221,7 +221,7 @@ impl PathValidator {
     ///
     /// Sanitization alone performs **no base-directory check**. For security
     /// sensitive use cases always use
-    /// [`validate_and_sanitize()`](Self::validate_and_sanitize), which rejects
+    /// [`validate_and_sanitize`](Self::validate_and_sanitize), which rejects
     /// traversal paths outright.
     ///
     /// # Errors
@@ -472,7 +472,7 @@ mod tests {
         let validator = PathValidator::new();
         // This path has no ".." so it passes validation, then sanitize removes parent dirs
         let result = validator.validate_and_sanitize(Path::new("foo/../bar"));
-        // Wait - "foo/../bar" contains ".." so it will be rejected by validate()
+        // Wait - "foo/../bar" contains ".." so it will be rejected by validate
         assert!(!result.valid);
     }
 
@@ -534,8 +534,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_symlink_detection_with_real_symlink() {
-        // Fixed: std::fs::symlink_metadata() does NOT follow symlinks, so
-        // metadata.file_type().is_symlink() correctly detects symlinks.
+        // Fixed: std::fs::symlink_metadata does NOT follow symlinks, so
+        // metadata.file_type.is_symlink correctly detects symlinks.
         // 仅 unix 平台语义（Windows 无普通用户 symlink 权限）。
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let target_file = temp_dir.path().join("target.log");
@@ -635,17 +635,15 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // canonicalize 失败分支（行 139、143）
-    // ========================================================================
 
     #[test]
     fn test_base_dir_validation_path_canonicalize_fails() {
-        // 覆盖行 139：path.canonicalize() 失败时回退到 path.to_path_buf()
+        // 覆盖行 139：path.canonicalize 失败时回退到 path.to_path_buf
         // 构造一个存在的 base_dir，但 path 本身不存在（canonicalize 失败）
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let base_dir = temp_dir.path().to_path_buf();
-        // path 不存在 → canonicalize 失败 → 走 Err 分支使用 path.to_path_buf()
+        // path 不存在 → canonicalize 失败 → 走 Err 分支使用 path.to_path_buf
         // 注意：path 不含 ".." 且不在 deny_components 中，因此能通过前面的检查
         let nonexistent_path = base_dir.join("nonexistent_subdir").join("app.log");
 
@@ -670,7 +668,7 @@ mod tests {
 
     #[test]
     fn test_base_dir_validation_base_dir_canonicalize_fails() {
-        // 覆盖行 143：base_dir.canonicalize() 失败时回退到 base_dir.clone()
+        // 覆盖行 143：base_dir.canonicalize 失败时回退到 base_dir.clone
         // 构造一个不存在的 base_dir，但 path 存在且为相对路径
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         // base_dir 指向不存在的路径
@@ -687,8 +685,8 @@ mod tests {
         };
         let validator = PathValidator::with_config(config);
         let result = validator.validate(relative_path);
-        // relative_path.canonicalize() 会失败（相对路径不存在）
-        // base_dir.canonicalize() 也会失败（不存在）
+        // relative_path.canonicalize 会失败（相对路径不存在）
+        // base_dir.canonicalize 也会失败（不存在）
         // 两者都回退到原路径，relative_path 不 starts_with nonexistent_base（绝对路径）
         // 因此返回 invalid "Path is outside base directory"
         // 关键：覆盖了 base_dir canonicalize 的 Err 分支

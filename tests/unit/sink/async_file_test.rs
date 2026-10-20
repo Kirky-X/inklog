@@ -13,7 +13,7 @@ mod async_file_test {
     use tempfile::TempDir;
     use inklog::tokio::time::{timeout, Duration};
 
-    // === 异步文件配置测试 ===
+    // 异步文件配置测试
 
     #[test]
     fn test_async_file_config_defaults() {
@@ -49,13 +49,12 @@ mod async_file_test {
 
     #[test]
     fn test_compression_strategy_variants() {
-        // 验证所有压缩策略变体
         let _ = CompressionStrategy::None;
         let _ = CompressionStrategy::Single;
         let _ = CompressionStrategy::Batch;
     }
 
-    // === AsyncFileSink 创建测试 ===
+    // AsyncFileSink 创建测试
 
     #[tokio::test]
     async fn test_async_file_sink_new() {

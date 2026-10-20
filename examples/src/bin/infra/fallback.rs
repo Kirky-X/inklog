@@ -20,9 +20,9 @@
 //!
 //! ## 示例内容
 //!
-//! 1. **multi_sink_config()**: 配置多个 Sink（Console + File）
-//! 2. **simulate_failure()**: 模拟primary sink 故障场景
-//! 3. **fallback_demo()**: 演示degraded到 File Sink
+//! 1. **multi_sink_config**: 配置多个 Sink（Console + File）
+//! 2. **simulate_failure**: 模拟primary sink 故障场景
+//! 3. **fallback_demo**: 演示degraded到 File Sink
 
 use async_trait::async_trait;
 use inklog::LogTemplate;
@@ -131,7 +131,7 @@ impl LogSink for FailingSink {
     }
 
     async fn flush(&self) -> Result<(), inklog::InklogError> {
-        // 参照 write() 的模式：锁内只 clone 出 sink 的 Arc 句柄，
+        // 参照 write 的模式：锁内只 clone 出 sink 的 Arc 句柄，
         // 释放锁之后再执行异步 I/O，避免持有 tokio Mutex 期间 await
         //（持锁 await 会阻塞其他尝试获取锁的任务，甚至造成死锁）
         let sink = {
@@ -154,7 +154,7 @@ impl LogSink for FailingSink {
     }
 
     async fn shutdown(&self) -> Result<(), inklog::InklogError> {
-        // 同 flush()：锁内 clone Arc，锁外执行异步 I/O
+        // 同 flush：锁内 clone Arc，锁外执行异步 I/O
         let sink = {
             let inner = self.inner.lock().await;
             inner.as_ref().cloned()
@@ -292,7 +292,6 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         )
     );
 
-    // 6. 清理
     cleanup_files(&log_path, "inklog_example_multi_sink")?;
 
     println!("\n{}", tr("example-fallback-multi-sink-setup-completed"));
@@ -462,7 +461,6 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         println!("  {}", line);
     }
 
-    // 8. 清理
     cleanup_files(&backup_path, "inklog_example_fallback_backup")?;
 
     println!(
@@ -720,7 +718,6 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("  {}", line);
     }
 
-    // 6. 清理
     cleanup_files(&primary_path, "inklog_example_primary")?;
     cleanup_files(&fallback_path, "inklog_example_fallback")?;
 

@@ -12,21 +12,21 @@ use crate::error::InklogError;
 ///
 /// 本类型不做跨线程共享：不含内部同步，多线程需要各自的
 /// [`DataMasker`](super::masking::DataMasker) 时按既有模式把规则快照
-/// 克隆进各自的 masker（`DataMasker::builder().with_registry(registry)`）。
+/// 克隆进各自的 masker（`DataMasker::builder.with_registry(registry)`）。
 ///
 /// # Example
 ///
 /// ```rust
 /// use inklog::MaskRuleRegistry;
 ///
-/// let mut registry = MaskRuleRegistry::with_builtins();
-/// assert!(registry.active_rules().len() >= 21);
+/// let mut registry = MaskRuleRegistry::with_builtins;
+/// assert!(registry.active_rules.len >= 21);
 ///
 /// // 禁用某规则
 /// registry.set_enabled("email", false);
 ///
 /// // 获取活跃规则（按优先级排序）
-/// let active = registry.active_rules();
+/// let active = registry.active_rules;
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct MaskRuleRegistry {
@@ -62,7 +62,7 @@ impl MaskRuleRegistry {
         }
         self.rules.push(rule);
         // 内部存储保持 priority 升序（稳定排序，同优先级保留注册顺序），
-        // 作为 rules() 有序快照的不变量；active_rules() 自行排序，不受影响
+        // 作为 rules 有序快照的不变量；active_rules 自行排序，不受影响
         self.rules.sort_by_key(|r| r.priority());
         Ok(())
     }
@@ -95,9 +95,9 @@ impl MaskRuleRegistry {
         active
     }
 
-    /// 全量规则快照（含已禁用的），按 priority 升序排列。
+    /// 全量规则快照（含已禁用），按 priority 升序排列。
     ///
-    /// 与 [`active_rules()`](Self::active_rules) 的差别：本方法不过滤
+    /// 与 [`active_rules`](Self::active_rules) 的差别：本方法不过滤
     /// `enabled`，适合规则清单导出、诊断展示等需要看到禁用项的场景。
     pub fn rules(&self) -> &[MaskRule] {
         &self.rules
@@ -106,7 +106,7 @@ impl MaskRuleRegistry {
     /// 从既有规则集合构造注册中心。
     ///
     /// 规则按 priority 升序（稳定排序）重排为内部存储；不做重名查重，
-    /// 重名约束由调用方保证（如 [`load_from_toml()`](Self::load_from_toml)
+    /// 重名约束由调用方保证（如 [`load_from_toml`](Self::load_from_toml)
     /// 的输出已满足）——重名规则的后果是检测面按名归因不可区分
     /// （[`MaskMatch`](super::masking::MaskMatch).rule 同名），debug 构建
     /// 下直接断言暴露违约。
@@ -125,7 +125,7 @@ impl MaskRuleRegistry {
         Self { rules }
     }
 
-    /// 返回注册中心所有规则的数量（含禁用的）。
+    /// 返回注册中心所有规则的数量（含禁用）。
     pub fn len(&self) -> usize {
         self.rules.len()
     }
@@ -147,7 +147,7 @@ impl MaskRuleRegistry {
     /// enabled = true
     /// ```
     ///
-    /// 重复的 `name` 与 [`register()`](Self::register) 的查重语义对齐：
+    /// 重复的 `name` 与 [`register`](Self::register) 的查重语义对齐：
     /// 跳过后出现的定义并记录 `tracing::warn`，首个定义生效。
     ///
     /// # Errors
@@ -371,7 +371,7 @@ pattern = "\\bNAMELESS-\\d+\\b"
 
     #[test]
     fn test_load_from_toml_skips_duplicate_names() {
-        // 与 register() 的查重语义对齐：重复 name 跳过后者（首个定义生效）
+        // 与 register 的查重语义对齐：重复 name 跳过后者（首个定义生效）
         let toml_str = r#"
 [[masking_rules]]
 name = "dup_rule"
@@ -405,10 +405,10 @@ pattern = "\\bOTHER-\\d+\\b"
         let total = registry.len();
         assert!(registry.set_enabled("email", false));
 
-        // rules() 是全量快照：禁用的规则仍在，len 不变
+        // rules 是全量快照：禁用的规则仍在，len 不变
         assert_eq!(registry.rules().len(), total);
         assert!(registry.rules().iter().any(|r| r.name() == "email"));
-        // active_rules() 只含已启用的
+        // active_rules 只含已启用的
         assert_eq!(registry.active_rules().len(), total - 1);
     }
 

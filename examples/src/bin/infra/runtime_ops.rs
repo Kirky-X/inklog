@@ -4,12 +4,12 @@
 //!
 //! 演示 `LoggerManager` 的运行时监控和运维操作：
 //!
-//! 1. `get_health_status()` - 获取整体健康状态
-//! 2. `effective_channel_capacity()` - 查看有效 Channel 容量
-//! 3. `channel_len()` - 查看当前 Channel 队列长度
-//! 4. `recover_sink()` - 手动恢复故障 Sink
-//! 5. `trigger_recovery_for_unhealthy_sinks()` - 批量恢复不健康 Sink
-//! 6. `shutdown()` - 优雅关闭
+//! 1. `get_health_status` - 获取整体健康状态
+//! 2. `effective_channel_capacity` - 查看有效 Channel 容量
+//! 3. `channel_len` - 查看当前 Channel 队列长度
+//! 4. `recover_sink` - 手动恢复故障 Sink
+//! 5. `trigger_recovery_for_unhealthy_sinks` - 批量恢复不健康 Sink
+//! 6. `shutdown` - 优雅关闭
 //!
 //! # 运行
 //!
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// 演示 get_health_status() 获取健康状态
+/// 演示 get_health_status 获取健康状态
 fn show_health_status() {
     print_section(&tr("example-runtime-ops-example-1-get-health-status"));
 

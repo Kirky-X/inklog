@@ -11,7 +11,7 @@ mod cli_test {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    // === Generate 命令测试 ===
+    // Generate 命令测试
 
     #[tokio::test]
     async fn test_generate_default_config() {
@@ -55,7 +55,7 @@ mod cli_test {
         assert!(content.contains("level = \"debug\""));
     }
 
-    // === Validate 命令测试 ===
+    // Validate 命令测试
 
     #[tokio::test]
     async fn test_validate_valid_config() {
@@ -116,7 +116,7 @@ format = ""
             .failure();
     }
 
-    // === Decrypt 命令测试 ===
+    // Decrypt 命令测试
 
     #[tokio::test]
     async fn test_decrypt_valid_encrypted_file() {
@@ -165,7 +165,7 @@ format = ""
             .failure();
     }
 
-    // === CLI 帮助测试 ===
+    // CLI 帮助测试
 
     #[tokio::test]
     async fn test_cli_help() {
@@ -206,7 +206,7 @@ format = ""
             .stdout(predicates::str::contains("Decrypt"));
     }
 
-    // === CLI 版本测试 ===
+    // CLI 版本测试
 
     #[tokio::test]
     async fn test_cli_version() {

@@ -51,10 +51,10 @@ use tracing_subscriber::prelude::*;
 /// use inklog::{LoggerManager, InklogConfig};
 ///
 /// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let config = InklogConfig::default();
+/// async fn main -> Result<, Box<dyn std::error::Error>> {
+///     let config = InklogConfig::default;
 ///     let _logger = LoggerManager::with_config(config).await?;
-///     Ok(())
+///     Ok()
 /// }
 /// ```
 pub struct LoggerManager {
@@ -193,7 +193,7 @@ type CustomChannel = (
 
 impl LoggerManager {
     pub async fn new() -> Result<Self, InklogError> {
-        // 经过 DI 路径创建默认实例，行为与 builder().build() 一致
+        // 经过 DI 路径创建默认实例，行为与 builder.build 一致
         Self::build_with_deps(LoggerDependencies::default()).await
     }
 
@@ -212,7 +212,7 @@ impl LoggerManager {
     ///
     /// # Deprecated
     ///
-    /// DI 入口已收敛：请改用 [`LoggerManager::builder()`]（唯一推荐入口），
+    /// DI 入口已收敛：请改用 [`LoggerManager::builder`]（唯一推荐入口），
     /// 本方法仅为兼容保留，行为为直接转发到内部构建逻辑。
     #[deprecated(since = "0.3.0", note = "use LoggerManager::builder() instead")]
     pub async fn with_dependencies(deps: LoggerDependencies) -> Result<Self, InklogError> {
@@ -378,10 +378,10 @@ impl LoggerManager {
     /// use inklog::{LoggerManager, InklogConfig};
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let config = InklogConfig::default();
+    /// async fn main -> Result<, Box<dyn std::error::Error>> {
+    ///     let config = InklogConfig::default;
     ///     let _logger = LoggerManager::with_config(config).await?;
-    ///     Ok(())
+    ///     Ok()
     /// }
     /// ```
     pub async fn with_config(config: InklogConfig) -> Result<Self, InklogError> {
@@ -965,7 +965,7 @@ impl LoggerManager {
             #[cfg(feature = "database")]
             db_sink_factory: Box::new({
                 // 核正：factory 在 spawn_blocking 线程上执行，该线程无 reactor context，
-                // Handle::current() 必 panic（worker 静默死亡、记录永不消费）——
+                // Handle::current 必 panic（worker 静默死亡、记录永不消费）——
                 // 与 file worker 同款做法：在 build_detached（async 上下文）clone
                 // runtime handle 进闭包使用
                 let runtime_handle = tokio::runtime::Handle::current();
@@ -1035,9 +1035,9 @@ impl LoggerManager {
     /// use inklog::LoggerManager;
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// async fn main -> Result<, Box<dyn std::error::Error>> {
     ///     let _logger = LoggerManager::from_file("config.toml").await?;
-    ///     Ok(())
+    ///     Ok()
     /// }
     /// ```
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
@@ -1070,9 +1070,9 @@ impl LoggerManager {
     /// use inklog::LoggerManager;
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let _logger = LoggerManager::load().await?;
-    ///     Ok(())
+    /// async fn main -> Result<, Box<dyn std::error::Error>> {
+    ///     let _logger = LoggerManager::load.await?;
+    ///     Ok()
     /// }
     /// ```
     pub async fn load() -> Result<Self, InklogError> {
@@ -1259,7 +1259,6 @@ impl LoggerManager {
             }
         }
 
-        // 关闭HTTP服务器
         #[cfg(feature = "http")]
         {
             if let Ok(mut handle_guard) = self.http_server_handle.lock()
@@ -1286,7 +1285,7 @@ impl LoggerManager {
 
         // Use a timeout-based poll to avoid deadlocks
         // Each handle gets up to 5 seconds to complete
-        // tokio::task::JoinHandle has no sync .join(); is_finished() confirms completion
+        // tokio::task::JoinHandle has no sync .join; is_finished confirms completion
         for handle in handles {
             let start = Instant::now();
             let mut backoff = Duration::from_millis(10);
@@ -1316,14 +1315,14 @@ impl LoggerManager {
     }
 }
 
-/// 资源释放兜底：调用方未显式 `shutdown()` 时也确保 worker 线程退出。
+/// 资源释放兜底：调用方未显式 `shutdown` 时也确保 worker 线程退出。
 ///
-/// 历史缺陷：原实现无 `Drop`，测试若忘记调用 `shutdown()`，4 个 worker 线程
-/// 会因全局 subscriber 持有 `sender.clone()` 永不 disconnect 而死循环，
+/// 历史缺陷：原实现无 `Drop`，测试若忘记调用 `shutdown`，4 个 worker 线程
+/// 会因全局 subscriber 持有 `sender.clone` 永不 disconnect 而死循环，
 /// 最终导致进程挂起（tarpaulin 单元测试运行后 PID 不退出）。
 impl Drop for LoggerManager {
     fn drop(&mut self) {
-        // shutdown() 幂等：已 shutdown 时 worker_handles 已 take 为空，会快速返回
+        // shutdown 幂等：已 shutdown 时 worker_handles 已 take 为空，会快速返回
         let _ = self.shutdown();
     }
 }
@@ -1343,9 +1342,7 @@ mod tests {
     use chrono::Utc;
     use serial_test::serial;
 
-    // ============================================================================
     // LoggerBuilder 测试 - 验证配置传播
-    // ============================================================================
 
     #[test]
     fn test_builder_new_returns_default() {
@@ -1382,7 +1379,7 @@ mod tests {
 
     #[test]
     fn test_builder_console_disabled_keeps_some_but_disabled() {
-        // 默认 InklogConfig 的 console_sink 是 Some(ConsoleSinkConfig::default())
+        // 默认 InklogConfig 的 console_sink 是 Some(ConsoleSinkConfig::default)
         // console(false) 应设置 enabled=false，但保持 Some
         let builder = LoggerBuilder::new().console(false);
         let console = builder
@@ -1518,9 +1515,7 @@ mod tests {
         assert_eq!(builder.config.performance.worker_threads, 4);
     }
 
-    // ============================================================================
     // LoggerDependencies 测试
-    // ============================================================================
 
     #[test]
     fn test_logger_dependencies_default_all_none() {
@@ -1537,9 +1532,7 @@ mod tests {
         assert!(debug_str.contains("config"));
     }
 
-    // ============================================================================
     // LoggerManager 生命周期测试 (async)
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_logger_manager_new_creates_instance() {
@@ -1568,7 +1561,7 @@ mod tests {
         // （publish_internal：轮转/压缩失败、worker 降级恢复）会写入本
         // 实例通道，且 file worker 因默认相对路径不可写进入降级模式不
         // 消费主通道，「新建无积压」的同步断言在并发下不成立。关闭后
-        // 实例不进广播面，断言确定。与 new() 走同一 build_with_deps 路径。
+        // 实例不进广播面，断言确定。与 new 走同一 build_with_deps 路径。
         let config = InklogConfig {
             file_sink: Some(FileSinkConfig {
                 enabled: false,
@@ -1739,7 +1732,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_manager_cache_getter_returns_injected_instance() {
-        // cache()/database() getter 应返回与注入实例共享底层数据的 Arc
+        // cache/database getter 应返回与注入实例共享底层数据的 Arc
         use crate::integrations::MockCache;
         let cache: Arc<dyn Cache> = Arc::new(MockCache::new());
         let deps = LoggerDependencies {
@@ -1840,9 +1833,7 @@ mod tests {
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // LoggerBuilder 额外配置传播测试 - 覆盖 None 分支
-    // ============================================================================
 
     #[test]
     fn test_builder_console_stderr_levels_with_existing_console() {
@@ -1886,7 +1877,7 @@ mod tests {
 
     #[test]
     fn test_builder_file_max_size_without_file_creates_new() {
-        // 不先调用 file()，直接设置 max_size → None 分支
+        // 不先调用 file，直接设置 max_size → None 分支
         let builder = LoggerBuilder::new().file_max_size("50MB");
         let file = builder
             .config
@@ -1929,9 +1920,7 @@ mod tests {
         assert_eq!(file.keep_files, 3);
     }
 
-    // ============================================================================
     // LoggerBuilder HTTP 配置测试 - 覆盖 None 分支与 error_mode 分支
-    // ============================================================================
 
     #[cfg(feature = "http")]
     #[test]
@@ -2025,7 +2014,7 @@ mod tests {
     #[cfg(feature = "http")]
     #[test]
     fn test_builder_http_error_mode_unknown_falls_back_to_default() {
-        // 未知模式 → _ 分支 → HttpErrorMode::default() (Strict)
+        // 未知模式 → _ 分支 → HttpErrorMode::default (Strict)
         let builder = LoggerBuilder::new()
             .enable_http_server(true)
             .http_error_mode("invalid-mode");
@@ -2045,9 +2034,7 @@ mod tests {
         assert!(matches!(http.error_mode, crate::HttpErrorMode::Warn));
     }
 
-    // ============================================================================
     // LoggerBuilder 特性门控方法测试
-    // ============================================================================
 
     #[cfg(feature = "database")]
     #[test]
@@ -2071,9 +2058,7 @@ mod tests {
         assert!(builder.deps.database.is_some());
     }
 
-    // ============================================================================
     // LoggerBuilder 依赖注入方法测试
-    // ============================================================================
 
     #[test]
     fn test_builder_cache_injects_dep() {
@@ -2089,13 +2074,11 @@ mod tests {
         assert!(builder.deps.config.is_some());
     }
 
-    // ============================================================================
-    // LoggerManager build() 混合模式测试 - 覆盖 has_deps 与 adapter 创建分支
-    // ============================================================================
+    // LoggerManager build 混合模式测试 - 覆盖 has_deps 与 adapter 创建分支
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_builder_build_with_cache_injection_mixed_mode() {
-        // 注入 cache 但不注入 config → has_deps=true, deps.config.is_none() 分支
+        // 注入 cache 但不注入 config → has_deps=true, deps.config.is_none 分支
         // 应创建 InklogConfigAdapter 包装 self.config
         use crate::integrations::MockCache;
         let manager = LoggerManager::builder()
@@ -2112,7 +2095,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_builder_build_with_config_injection() {
-        // 注入 config → has_deps=true, deps.config.is_some() 分支（不创建 adapter）
+        // 注入 config → has_deps=true, deps.config.is_some 分支（不创建 adapter）
         use crate::integrations::MockConfig;
         let manager = LoggerManager::builder()
             .config(Arc::new(MockConfig::new()))
@@ -2123,9 +2106,7 @@ mod tests {
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // LoggerManager recover_sink / from_file 测试
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_logger_manager_recover_sink_on_live_manager() {
@@ -2151,7 +2132,7 @@ mod tests {
     }
 
     // 注：未测试 recover_sink 在 shutdown 后返回 Err 的分支。
-    // shutdown() 用 5s 超时 join worker，超时则 detach；而 FileSink::shutdown()
+    // shutdown 用 5s 超时 join worker，超时则 detach；而 FileSink::shutdown
     // 自身有 5s 计时器超时，导致 file worker 常无法在 5s 内退出而被 detach，
     // 仍持有 control_rx 使 recover_sink 返回 Ok。该 Err 分支非确定性，无法稳定测试。
 
@@ -2194,10 +2175,8 @@ worker_threads = 1
         assert!(result.is_err(), "from_file with invalid toml should error");
     }
 
-    // ============================================================================
     // tracing::Level → log::LevelFilter match 覆盖 (lines 410-416)
     // 现有测试仅覆盖 DEBUG，补充 TRACE/WARN/ERROR 分支
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_manager_with_config_trace_level() {
@@ -2260,9 +2239,7 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // enable_http_server(false) 当 http_server 已存在 (line 1883 分支)
-    // ============================================================================
 
     #[cfg(feature = "http")]
     #[test]
@@ -2279,10 +2256,8 @@ worker_threads = 1
         assert!(!http.enabled, "http.enabled should be false after disable");
     }
 
-    // ============================================================================
     // File sink worker 写入路径 (lines 1042-1236)
     // 通过发送记录 + shutdown drain 覆盖 worker 接收/写入/排空逻辑
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_manager_file_sink_writes_record_to_file() {
@@ -2314,7 +2289,7 @@ worker_threads = 1
             .expect("Failed to send record to file worker");
 
         // 给 file worker 时间通过正常 recv_timeout 路径处理记录
-        // （避免与 sink.shutdown() 的 5s 超时产生竞争）
+        // （避免与 sink.shutdown 的 5s 超时产生竞争）
         std::thread::sleep(Duration::from_millis(300));
         let _ = manager.shutdown();
 
@@ -2368,10 +2343,8 @@ worker_threads = 1
         }
     }
 
-    // ============================================================================
     // recover_sink 控制通道 (lines 1128-1150)
     // 验证 control channel 接受不同 sink 名（包括未知名）
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_recover_sink_multiple_commands_to_live_manager() {
@@ -2396,10 +2369,8 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // console worker 写入路径 (lines 961-1033)
     // 通过 console_sender 发送记录，shutdown 后验证不 panic
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_manager_console_sink_processes_record() {
@@ -2436,13 +2407,11 @@ worker_threads = 1
         // （console 输出到 stdout，无法直接验证内容，但 worker 不 panic 即为成功）
     }
 
-    // ============================================================================
     // HTTP 服务器 start_http_server 测试
     //
     // start_http_server 内部的 auth_middleware / subtle_constant_time_compare /
     // parse_cidr / health_status_getter / 路由 handler 均为局部函数和闭包，
     // 无法直接单元测试，因此通过启动真实 HTTP 服务器并发送请求来覆盖。
-    // ============================================================================
 
     /// 查找可用的本地端口用于 HTTP 测试（TOCTOU 风险在串行测试中可接受）
     #[cfg(feature = "http")]
@@ -2522,7 +2491,7 @@ worker_threads = 1
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[serial_test::serial]
     async fn test_with_config_http_warn_mode_continues_on_startup_error() {
-        // 使用无效主机名触发 start_http_server 中 addr.parse() 失败
+        // 使用无效主机名触发 start_http_server 中 addr.parse 失败
         // Warn 模式应记录警告但继续返回 Ok(manager)
         let config = InklogConfig {
             http_server: Some(crate::HttpServerConfig {
@@ -2545,7 +2514,7 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    /// Strict 模式：无效主机名导致 addr.parse() 失败时，错误应传播给调用者
+    /// Strict 模式：无效主机名导致 addr.parse 失败时，错误应传播给调用者
     #[cfg(feature = "http")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[serial_test::serial]
@@ -3073,14 +3042,12 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // build_with_deps 通过 Config trait 应用配置测试 (lines 235-300)
     //
     // 这组测试覆盖 build_with_deps 中通过 Config trait 实现加载配置的分支，
     // 包括 global、file_sink、http_server、performance 配置的应用。
     // 之前测试仅覆盖了 cache/database 注入路径，未覆盖 config_provider 提供时的
     // 配置加载逻辑。
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_applies_global_config_from_provider() {
@@ -3234,10 +3201,8 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // build_with_deps 注入 database 测试 (lines 336-340)
     // 需要 dbnexus feature
-    // ============================================================================
 
     #[cfg(feature = "database")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3258,14 +3223,12 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // build_detached 直接调用测试 (lines 832-884)
     //
     // build_detached 是 with_config/with_dependencies 的底层实现，
     // 返回 (manager, subscriber, filter) 三元组。
     // 直接调用可覆盖其内部逻辑：metrics 创建、channel 创建、subscriber 创建、
     // filter 解析、kit 注册等。
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_detached_console_only_config_does_not_panic() {
@@ -3336,7 +3299,7 @@ worker_threads = 1
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_detached_invalid_level_falls_back_to_info() {
-        // 验证 build_detached 中 level.parse() 失败时回退到 INFO
+        // 验证 build_detached 中 level.parse 失败时回退到 INFO
         let config = InklogConfig {
             global: crate::GlobalConfig {
                 level: "invalid_level".to_string(),
@@ -3401,12 +3364,10 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // file worker FileSink::new 失败分支测试 (line 910)
     //
     // 当 FileSink::new 失败时，file worker 应跳过整个 file_config 分支，
     // manager 仍能正常创建和 shutdown。
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_file_worker_skips_when_file_sink_new_fails() {
@@ -3438,13 +3399,11 @@ worker_threads = 1
         assert!(result.is_ok(), "shutdown should succeed");
     }
 
-    // ============================================================================
     // file worker 控制消息处理测试 (lines 991-1013)
     //
     // 通过 recover_sink 发送 RecoverSink("file") 命令，验证 file worker
     // 能处理控制消息而不死锁或 panic。同时验证 recover_sink 在 control channel
     // 满（容量 10）时的错误路径。
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_file_worker_recovers_after_recover_sink_command() {
@@ -3559,12 +3518,10 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // build_detached 创建 error_sink 测试 (lines 475-480)
     //
     // build_detached 会创建 error_sink（FileSink）用于记录系统错误。
     // 验证 error_sink 创建失败时不影响 manager 构建。
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_detached_creates_error_sink() {
@@ -3593,12 +3550,10 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // error sink 延迟创建测试
     //
     // 默认 error sink 指向相对路径 logs/error.log；一次性命令构建 manager
     // 后未发生任何 error 级事件即退出时，不得遗留该文件。
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[serial]
@@ -3634,12 +3589,10 @@ worker_threads = 1
         std::env::set_current_dir(original_cwd).unwrap();
     }
 
-    // ============================================================================
     // LoggerDependencies Debug 实现测试 (lines 118-131)
     //
     // 验证 LoggerDependencies 的 Debug 实现包含 cache/config/database 字段
     // （database 字段仅在 dbnexus feature 下存在）
-    // ============================================================================
 
     #[cfg(feature = "database")]
     #[test]
@@ -3666,12 +3619,10 @@ worker_threads = 1
         );
     }
 
-    // ============================================================================
     // build_with_deps 同时注入 cache 和 config 测试 (lines 332-345)
     //
     // 验证同时注入 cache 和 config 时，两者都被注册到 kit。
     // 之前测试只单独注入 cache 或 config，未覆盖同时注入的路径。
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_build_with_deps_injects_both_cache_and_config() {
@@ -3693,9 +3644,7 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
     // build_with_deps 同时注入 cache/config/database 测试 (lines 332-345, dbnexus)
-    // ============================================================================
 
     #[cfg(feature = "database")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3717,9 +3666,7 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    // ============================================================================
-    // LoggerManager::load() 测试 (L589-592)
-    // ============================================================================
+    // LoggerManager::load 测试 (L589-592)
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[serial_test::serial]
@@ -3767,9 +3714,7 @@ worker_threads = 1
         }
     }
 
-    // ============================================================================
     // LoggerBuilder 分支覆盖 (L1693-1694, L1701-1702)
-    // ============================================================================
 
     #[test]
     fn test_builder_console_when_none_creates_config() {
@@ -3812,9 +3757,7 @@ worker_threads = 1
         );
     }
 
-    // ============================================================================
     // trigger_recovery_for_unhealthy_sinks 成功路径 (L1567-1568)
-    // ============================================================================
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_trigger_recovery_recovers_unhealthy_sink() {
@@ -3849,9 +3792,7 @@ worker_threads = 1
     }
 }
 
-// ============================================================================
 // 运行时级别热调 —— 指令集 upsert/重建 + reload 换装过滤行为
-// ============================================================================
 
 #[cfg(test)]
 mod set_level_tests {

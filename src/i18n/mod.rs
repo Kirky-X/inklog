@@ -20,7 +20,7 @@
 //! use inklog::i18n::LogI18nFormatter;
 //!
 //! // Use the current system locale
-//! let fmt = LogI18nFormatter::new_default()?;
+//! let fmt = LogI18nFormatter::new_default?;
 //!
 //! // Or specify a locale explicitly
 //! let fmt = LogI18nFormatter::new("en-US")?;
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn test_new_default() {
-        // new_default() should create a formatter using the current system locale
+        // new_default should create a formatter using the current system locale
         let current = current_locale();
         let fmt = LogI18nFormatter::new_default();
         assert!(

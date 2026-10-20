@@ -21,7 +21,7 @@
 /// use inklog::infrastructure::Config;
 ///
 /// fn example(config: &dyn Config) {
-///     let level = config.get_string("log.level").unwrap_or("info".to_string());
+///     let level = config.get_string("log.level").unwrap_or("info".to_string);
 ///     let port = config.get_int("server.port").unwrap_or(8080) as u16;
 ///     let debug = config.get_bool("debug").unwrap_or(false);
 /// }
@@ -72,9 +72,7 @@ pub trait Config: Send + Sync {
     fn get_float(&self, key: &str) -> Option<f64>;
 }
 
-// ============================================================================
 // InklogConfigAdapter - InklogConfig 配置适配器实现
-// ============================================================================
 
 use crate::InklogConfig;
 use crate::InklogError;
@@ -116,14 +114,14 @@ use crate::InklogError;
 /// ```ignore
 /// use inklog::infrastructure::config::{Config, InklogConfigAdapter};
 ///
-/// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let config = InklogConfigAdapter::new()?;
+/// fn main -> Result<, Box<dyn std::error::Error>> {
+///     let config = InklogConfigAdapter::new?;
 ///
 ///     let level = config.get_string("global.level");
 ///     let port = config.get_int("http_server.port");
 ///     let enabled = config.get_bool("file_sink.enabled");
 ///
-///     Ok(())
+///     Ok()
 /// }
 /// ```
 pub struct InklogConfigAdapter {
@@ -173,7 +171,7 @@ impl InklogConfigAdapter {
     /// use inklog::config::InklogConfig;
     /// use inklog::infrastructure::config::InklogConfigAdapter;
     ///
-    /// let inklog_config = InklogConfig::default();
+    /// let inklog_config = InklogConfig::default;
     /// let adapter = InklogConfigAdapter::from_config(inklog_config);
     /// ```
     pub fn from_config(config: InklogConfig) -> Self {
@@ -419,9 +417,7 @@ impl Config for InklogConfigAdapter {
     }
 }
 
-// ============================================================================
 // MockConfig - 单元测试用的 Mock 实现
-// ============================================================================
 
 #[cfg(any(test, feature = "test-utils"))]
 use parking_lot::RwLock;
@@ -439,18 +435,18 @@ use std::collections::HashMap;
 /// use inklog::infrastructure::config::{Config, MockConfig};
 ///
 /// // 创建带初始值的配置
-/// let config = MockConfig::new()
+/// let config = MockConfig::new
 ///     .with_value("level", "debug")
 ///     .with_value("port", "8080")
 ///     .with_value("enabled", "true");
 ///
-/// assert_eq!(config.get_string("level"), Some("debug".to_string()));
+/// assert_eq!(config.get_string("level"), Some("debug".to_string));
 /// assert_eq!(config.get_int("port"), Some(8080));
 /// assert_eq!(config.get_bool("enabled"), Some(true));
 ///
 /// // 运行时修改
 /// config.set("level", "info");
-/// assert_eq!(config.get_string("level"), Some("info".to_string()));
+/// assert_eq!(config.get_string("level"), Some("info".to_string));
 /// ```
 #[cfg(any(test, feature = "test-utils"))]
 pub struct MockConfig {
@@ -528,9 +524,7 @@ mod tests {
     use super::*;
     use crate::InklogConfig;
 
-    // ============================================================================
     // InklogConfigAdapter 测试
-    // ============================================================================
 
     #[test]
     fn test_inklog_config_adapter_from_default_config() {
@@ -669,9 +663,7 @@ mod tests {
         assert_eq!(adapter.get_int("http_server.port"), Some(9090));
     }
 
-    // ============================================================================
     // MockConfig 测试
-    // ============================================================================
 
     #[test]
     fn test_mock_config_new() {
@@ -781,19 +773,17 @@ mod tests {
         assert!((0..10).contains(&final_value.unwrap()));
     }
 
-    // ============================================================================
     // InklogConfigAdapter 补充测试 - 覆盖剩余 get_string 分支
-    // ============================================================================
 
     #[test]
     fn test_adapter_inner_and_inner_mut() {
         let config = InklogConfig::default();
         let mut adapter = InklogConfigAdapter::from_config(config);
 
-        // inner() 返回底层配置引用
+        // inner 返回底层配置引用
         assert_eq!(adapter.inner().global.level, "info");
 
-        // inner_mut() 返回可变引用
+        // inner_mut 返回可变引用
         adapter.inner_mut().global.level = "debug".to_string();
         assert_eq!(adapter.inner().global.level, "debug");
     }
@@ -815,7 +805,7 @@ mod tests {
 
     #[test]
     fn test_adapter_default() {
-        // Default impl 调用 new()，失败时回退到 from_config(default)
+        // Default impl 调用 new，失败时回退到 from_config(default)
         let adapter = InklogConfigAdapter::default();
         // 应该至少能获取到默认配置值
         assert_eq!(adapter.get_string("global.level"), Some("info".to_string()));
@@ -823,7 +813,7 @@ mod tests {
 
     #[test]
     fn test_adapter_default_falls_back_when_load_fails() {
-        // INKLOG_CONFIG_PATH 指向非法 TOML 时 new() 失败，
+        // INKLOG_CONFIG_PATH 指向非法 TOML 时 new 失败，
         // Default 须回退到默认配置并以 warn 告知
         static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _lock = ENV_MUTEX.lock().unwrap();

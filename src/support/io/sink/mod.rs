@@ -225,7 +225,7 @@ mod tests {
         // DummySink only implements LogSink, not Rotatable or DiskCheckable
         let sink = DummySink;
         assert!(sink.is_healthy());
-        // sink.start_rotation_timer(); // This would not compile - correct!
-        // sink.check_disk_space(); // This would not compile - correct!
+        // sink.start_rotation_timer; // This would not compile - correct!
+        // sink.check_disk_space; // This would not compile - correct!
     }
 }

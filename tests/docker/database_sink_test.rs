@@ -199,7 +199,7 @@ async fn test_database_sink_default_config() {
         None => return,
     };
 
-    // 使用 new()（默认配置，无 config 参数）
+    // 使用 new（默认配置，无 config 参数）
     let adapter = setup_adapter(&url).await;
     let db: Arc<dyn DatabaseTrait> = Arc::new(adapter);
     let sink = DatabaseSink::new(db).expect("new() should succeed");

@@ -300,7 +300,6 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
         sink.flush().await?;
     }
 
-    // 等待压缩完成
     print_section(&tr("example-file-wait-for-compression-to-finish"));
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 

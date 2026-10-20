@@ -11,7 +11,7 @@ mod masking_test {
     use serde_json::json;
     use std::collections::HashMap;
 
-    // === 邮箱脱敏测试 ===
+    // 邮箱脱敏测试
 
     #[test]
     fn test_email_masking() {
@@ -43,7 +43,7 @@ mod masking_test {
         assert!(result.contains("**@**.***"));
     }
 
-    // === 电话脱敏测试 ===
+    // 电话脱敏测试
 
     #[test]
     fn test_phone_masking() {
@@ -72,7 +72,7 @@ mod masking_test {
         assert!(result.contains("***-****-****"));
     }
 
-    // === 身份证脱敏测试 ===
+    // 身份证脱敏测试
 
     #[test]
     fn test_id_card_masking() {
@@ -89,7 +89,7 @@ mod masking_test {
         }
     }
 
-    // === 银行卡脱敏测试 ===
+    // 银行卡脱敏测试
 
     #[test]
     fn test_bank_card_masking() {
@@ -111,7 +111,7 @@ mod masking_test {
         assert_eq!(luhn_invalid, "***REDACTED_CC***");
     }
 
-    // === JWT 令牌脱敏测试 ===
+    // JWT 令牌脱敏测试
 
     #[test]
     fn test_jwt_masking() {
@@ -124,7 +124,7 @@ mod masking_test {
         assert!(result.contains("***REDACTED_JWT***"));
     }
 
-    // === AWS 密钥脱敏测试 ===
+    // AWS 密钥脱敏测试
 
     #[test]
     fn test_aws_key_masking() {
@@ -144,7 +144,7 @@ mod masking_test {
         }
     }
 
-    // === API 密钥脱敏测试 ===
+    // API 密钥脱敏测试
 
     #[test]
     fn test_api_key_masking() {
@@ -162,7 +162,7 @@ mod masking_test {
         }
     }
 
-    // === 敏感字段名检测测试 ===
+    // 敏感字段名检测测试
 
     #[test]
     fn test_sensitive_field_detection() {
@@ -222,7 +222,7 @@ mod masking_test {
         }
     }
 
-    // === JSON 值脱敏测试 ===
+    // JSON 值脱敏测试
 
     #[test]
     fn test_json_value_masking() {
@@ -280,7 +280,7 @@ mod masking_test {
         assert_eq!(arr[1]["email"], "**@**.***");
     }
 
-    // === HashMap 脱敏测试 ===
+    // HashMap 脱敏测试
 
     #[test]
     fn test_hashmap_masking() {
@@ -297,7 +297,7 @@ mod masking_test {
         assert_eq!(map["name"], "John");
     }
 
-    // === 组合脱敏测试 ===
+    // 组合脱敏测试
 
     #[test]
     fn test_multiple_sensitive_data_types() {
@@ -322,7 +322,7 @@ mod masking_test {
         assert!(result.contains("**@**.***") || result.contains("***REDACTED***"));
     }
 
-    // === 性能测试 ===
+    // 性能测试
 
     #[test]
     fn test_masking_performance() {
@@ -344,7 +344,7 @@ mod masking_test {
         assert!(elapsed.as_secs() < 5, "Masking too slow: {:?}", elapsed);
     }
 
-    // === 边界条件测试 ===
+    // 边界条件测试
 
     #[test]
     fn test_empty_string_masking() {
@@ -620,7 +620,7 @@ mod masking_test {
         );
     }
 
-    // === MaskRuleRegistry 测试 ===
+    // MaskRuleRegistry 测试
 
     #[test]
     fn test_registry_with_builtins() {
@@ -703,12 +703,12 @@ pattern = "\\bTEST\\b"
         assert_eq!(rules[1].priority(), 100); // default
     }
 
-    // === DataMaskerBuilder 测试 ===
+    // DataMaskerBuilder 测试
 
     #[test]
     fn test_builder_default() {
         let masker = DataMasker::builder().build();
-        // Should behave like DataMasker::new()
+        // Should behave like DataMasker::new
         let result = masker.mask("test@example.com");
         assert_eq!(result, "**@**.***");
     }
@@ -758,7 +758,7 @@ pattern = "\\bTEST\\b"
         assert_eq!(masker.mask("#FF0000"), "#******");
     }
 
-    // === with_registry 测试 ===
+    // with_registry 测试
 
     #[test]
     fn test_builder_with_registry() {
@@ -825,7 +825,7 @@ pattern = "\\bTEST\\b"
         assert_eq!(result, "***-****-****");
     }
 
-    // === MAC 地址优先级测试 (design.md §5) ===
+    // MAC 地址优先级测试 (design.md §5)
 
     #[test]
     fn test_mac_address_priority_before_ipv6() {
@@ -850,7 +850,7 @@ pattern = "\\bTEST\\b"
         );
     }
 
-    // === IPv4 负面测试 ===
+    // IPv4 负面测试
 
     #[test]
     fn test_ipv4_invalid_address_not_matched() {

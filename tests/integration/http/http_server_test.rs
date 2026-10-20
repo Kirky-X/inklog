@@ -3,15 +3,15 @@
 //! HTTP 服务器配置与错误模式测试。
 //!
 //! 覆盖 `HttpServerConfig` 的 `auth`/`ip_whitelist`/`tls` 字段（以
-//! `..Default::default()` 补齐）、`HttpErrorMode` 的 `Warn`/`Strict` 两态
+//! `..Default::default` 补齐）、`HttpErrorMode` 的 `Warn`/`Strict` 两态
 //! （默认 `Strict`），以及环境变量覆盖经公开入口
-//! `InklogConfig::load_with_env_overrides()`（变量名 `INKLOG_HTTP_SERVER_*`）。
+//! `InklogConfig::load_with_env_overrides`（变量名 `INKLOG_HTTP_SERVER_*`）。
 use inklog::InklogConfig;
 use inklog::config::{HttpErrorMode, HttpServerConfig};
 use serial_test::serial;
 
 fn clear_inklog_env() {
-    // 先收集再删除，避免在 env::vars() 迭代期间修改环境变量（UB 隐患）
+    // 先收集再删除，避免在 env::vars 迭代期间修改环境变量（UB 隐患）
     let keys: Vec<String> = std::env::vars()
         .map(|(key, _)| key)
         .filter(|key| key.starts_with("INKLOG_"))

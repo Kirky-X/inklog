@@ -5,7 +5,7 @@
 //! 演示基于 crossbeam channel 的高性能文件 sink，使用临时目录自动清理：
 //! - `ChannelBufferedConfig` 配置项（channel_capacity / flush_batch_size 等）
 //! - `BackpressureStrategy` 三种背压策略：`Block` / `DropOldest` / `DropNewest`
-//! - `ChannelBufferedFileSink::metrics()` 运行时统计
+//! - `ChannelBufferedFileSink::metrics` 运行时统计
 //! - 写入 → flush → shutdown → 验证文件内容
 //!
 //! # 运行

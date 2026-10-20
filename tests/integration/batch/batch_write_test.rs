@@ -20,7 +20,7 @@ use inklog::{MockDatabaseAdapter, log_record::LogRecord};
 use std::sync::Arc;
 use tempfile::TempDir;
 
-// ============ Test Helper Functions ============
+// Test Helper Functions
 
 fn make_record(message: &str) -> LogRecord {
     LogRecord::new(
@@ -52,7 +52,7 @@ fn create_test_database_sink(
     (temp_dir, sink, mock_db)
 }
 
-// ============ Tests ============
+// Tests
 
 #[tokio::test]
 async fn test_database_batch_write() {

@@ -72,7 +72,7 @@ impl LogAdapter {
     }
 
     /// 共享级别指令集（manager 的 level_state）：启用后 log 门面在
-    /// `enabled()` 中按 per-target 指令过滤，与 tracing 侧 EnvFilter 语义对齐。
+    /// `enabled` 中按 per-target 指令过滤，与 tracing 侧 EnvFilter 语义对齐。
     pub(crate) fn with_level_state(
         mut self,
         state: Arc<std::sync::Mutex<crate::domain::core::manager::LevelDirectives>>,
@@ -196,7 +196,7 @@ impl LogLogger {
     /// 只能调用一次，多次调用会返回错误。
     ///
     /// # Returns
-    /// `Ok(())` 如果安装成功，`Err(...)` 如果已经安装过 logger。
+    /// `Ok()` 如果安装成功，`Err(...)` 如果已经安装过 logger。
     pub fn install(self) -> Result<(), log::SetLoggerError> {
         let max_level = self.max_level;
         log::set_boxed_logger(Box::new(self))?;
@@ -242,7 +242,7 @@ mod tests {
     fn test_log_facade_bridges_tracing_span_context() {
         use crossbeam_channel::unbounded;
 
-        // adapter.log() 经 enabled() 受进程级 max_level 门禁：本测试自持
+        // adapter.log 经 enabled 受进程级 max_level 门禁：本测试自持
         // Info 阈值，不依赖其它测试先行设置（搭便车在串行化后必然翻车）
         log::set_max_level(log::LevelFilter::Info);
         let (console_tx, console_rx) = unbounded();
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_per_target_filter_via_shared_level_state() {
-        // enabled() 先过进程级 max_level 门禁：本测试自持 Info 阈值，
+        // enabled 先过进程级 max_level 门禁：本测试自持 Info 阈值，
         // 不依赖其它测试先行设置（初始 Off 时 Level::Info 一律被拒）
         log::set_max_level(log::LevelFilter::Info);
         // per-target 指令对 log 门面生效：myapp=warn 时 myapp 的 info 被丢弃
@@ -363,9 +363,7 @@ mod tests {
         assert_eq!(log_record.line, Some(42));
     }
 
-    // ========================================================================
-    // 修复：log 入口绕过脱敏（注入面）
-    // ========================================================================
+    // log 入口绕过脱敏（注入面）
 
     #[test]
     fn test_record_to_log_record_sanitizes_message_and_target() {
@@ -590,7 +588,7 @@ mod tests {
         let metrics = Arc::new(Metrics::new());
 
         let adapter = LogAdapter::new(console_tx, async_tx, metrics);
-        // flush() is a no-op with channel-based design — just verify it doesn't panic
+        // flush is a no-op with channel-based design — just verify it doesn't panic
         adapter.flush();
     }
 
@@ -756,13 +754,11 @@ mod tests {
         let adapter = LogAdapter::new(console_tx, async_tx, metrics);
         let logger = LogLogger::new(adapter, LevelFilter::Info);
 
-        // flush() is a no-op, just verify it doesn't panic
+        // flush is a no-op, just verify it doesn't panic
         logger.flush();
     }
 
-    // ========================================================================
     // LogLogger::install - 覆盖行 153-154（成功路径）与错误路径
-    // ========================================================================
 
     #[test]
     #[serial_test::serial]
@@ -771,7 +767,6 @@ mod tests {
         // 注意：在并行测试环境中，全局 logger 可能已被其他测试（如 manager.rs 的测试）设置。
         // 本测试验证：第二次 install 必然返回 Err(SetLoggerError)。
         //
-        // 如果第一次 install 成功（全局 logger 未被占用），则覆盖行 153-154（set_max_level + Ok(())）。
         // 如果第一次 install 失败（全局 logger 已被占用），则跳过行 153-154 覆盖，但仍验证第二次失败。
 
         let (console_tx1, _cr1) = bounded(10);

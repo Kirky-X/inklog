@@ -211,13 +211,11 @@ impl FileSink {
             inner: Arc::new(RwLock::new(inner)),
         };
 
-        // 初始化轮转时间
         {
             let mut inner = sink.inner.write();
             sink.update_next_rotation_time_inner(&mut inner);
         }
 
-        // 打开日志文件
         {
             let mut inner = sink.inner.write();
             if let Err(e) = sink.open_file_inner(&mut inner) {
@@ -687,7 +685,7 @@ impl FileSink {
                 Some(next_naive.and_utc())
             }
             "monthly" => {
-                // 修复：原实现误写为“明天零点”，导致 monthly 实际每天轮转。
+                // 原实现误写为“明天零点”，导致 monthly 实际每天轮转。
                 // 正确语义为“下个月同日的零点”；`checked_add_months` 在月末
                 // 溢出时钳制到次月最后一天（如 1 月 31 日 → 2 月 28 日）。
                 let next_date = now
@@ -939,7 +937,7 @@ impl FileSink {
 
         // Sync estimated size with actual file position to prevent drift
         if let Some(file) = &inner.current_file {
-            // Use metadata() instead of stream_position() to avoid borrow conflicts
+            // Use metadata instead of stream_position to avoid borrow conflicts
             if let Ok(meta) = file.get_ref().metadata() {
                 inner.current_size = meta.len();
             }
@@ -970,16 +968,14 @@ impl FileSink {
             crate::i18n::tr_args("log-file_rotating", args)
         });
 
-        // 关闭当前文件
         let _ = inner.current_file.take();
 
         // 重命名当前日志文件
-        // 修复：`%Y%m%d_%H%M%S` 为秒级精度，同秒二次轮转会静默覆盖既有轮转
+        // `%Y%m%d_%H%M%S` 为秒级精度，同秒二次轮转会静默覆盖既有轮转
         // 产物。目标已存在时追加 `.1`、`.2` … 序号后缀，保证永不覆盖。
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let new_path = resolve_rotation_target(&self.config.path, &timestamp);
 
-        // 尝试重命名
         if self.config.path.exists()
             && let Err(e) = fs::rename(&self.config.path, &new_path)
         {
@@ -988,7 +984,6 @@ impl FileSink {
                 args.set("err", &e);
                 crate::i18n::tr_args("sink-file-rename_failed", args)
             });
-            // 尝试复制后删除
             if fs::copy(&self.config.path, &new_path).is_ok() {
                 if let Err(e) = fs::remove_file(&self.config.path) {
                     let mut args = crate::i18n::MsgArgs::new();
@@ -1003,10 +998,8 @@ impl FileSink {
             }
         }
 
-        // 更新序列号
         inner.sequence += 1;
 
-        // 更新轮转时间
         inner.last_rotation = Instant::now();
         self.update_next_rotation_time_inner(inner);
         inner.current_size = 0;
@@ -1222,8 +1215,8 @@ pub(crate) fn encrypt_file_v2(
     })?;
 
     // 生成加密安全的随机 nonce
-    // 使用 rand::rng() 获取线程本地 RNG，该 RNG 从 SysRng 定期种子化
-    // rand::rng() 返回 ThreadRng，它是密码学安全的
+    // 使用 rand::rng 获取线程本地 RNG，该 RNG 从 SysRng 定期种子化
+    // rand::rng 返回 ThreadRng，它是密码学安全的
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from(nonce_bytes);
@@ -1572,7 +1565,7 @@ impl LogSink for FileSink {
             !inner.circuit_breaker.can_execute()
         };
         if circuit_open {
-            // 修复：熔断打开时记录不能静默吞掉——降级失败/无 fallback 时
+            // 熔断打开时记录不能静默吞掉——降级失败/无 fallback 时
             // 记录已终态丢失，必须 error + stderr + 置不健康。
             let fallback = self.inner.read().fallback_sink.clone();
             match fallback {
@@ -1596,7 +1589,7 @@ impl LogSink for FileSink {
 
         // 检查磁盘空间（sync，不持有锁）
         if !self.check_disk_space()? {
-            // 修复：磁盘不足且无法降级时记录不能静默吞掉
+            // 磁盘不足且无法降级时记录不能静默吞掉
             warn!("{}", crate::i18n::tr("sink-low_disk_space_check"));
             let fallback = self.inner.read().fallback_sink.clone();
             match fallback {
@@ -1630,7 +1623,6 @@ impl LogSink for FileSink {
                 record.clone()
             };
 
-            // 添加到批量缓冲区
             let record_len = masked_record.timestamp.to_rfc3339().len()
                 + masked_record.level.len()
                 + masked_record.target.len()
@@ -1774,7 +1766,6 @@ impl Drop for FileSink {
         {
             let mut inner = self.inner.write();
             let _ = self.flush_batch_inner(&mut inner);
-            // Close current file handle
             if let Some(mut file) = inner.current_file.take() {
                 let _ = file.flush();
             }
@@ -1821,9 +1812,9 @@ impl Drop for FileSink {
         }
 
         // Fallback sink: best-effort cleanup only.
-        // Async shutdown() already calls `sink.shutdown().await` (line 994-999).
+        // Async shutdown already calls `sink.shutdown.await` (line 994-999).
         // In Drop we cannot `.await`; rely on `Arc` drop + fallback sink's own Drop impl.
-        // If caller forgets to call `shutdown()`, fallback sink resources are reclaimed
+        // If caller forgets to call `shutdown`, fallback sink resources are reclaimed
         // when the last `Arc` is dropped (Sink's own Drop handles file close etc.).
         {
             let mut inner = self.inner.write();
@@ -1986,7 +1977,6 @@ mod tests {
             output_format: Default::default(),
         };
 
-        // Create test files
         let old_file = dir.path().join("test_old.log");
         std::fs::write(&old_file, "old content").unwrap();
 
@@ -2016,7 +2006,6 @@ mod tests {
         assert!(key_result.is_ok());
         assert_eq!(key_result.unwrap().len(), 32);
 
-        // Clean up
         unsafe {
             std::env::remove_var("TEST_KEY");
         }
@@ -2230,7 +2219,7 @@ mod tests {
 
     #[test]
     fn test_file_sink_new_default() {
-        // FileSinkConfig::default() 的 path 为空 PathBuf，测试需显式提供路径。
+        // FileSinkConfig::default 的 path 为空 PathBuf，测试需显式提供路径。
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,
@@ -2355,7 +2344,7 @@ mod tests {
         (key_bytes, key_b64)
     }
 
-    // ==================== parse_size 边界测试 ====================
+    // parse_size 边界测试
 
     #[test]
     fn test_parse_size_tb() {
@@ -2379,7 +2368,7 @@ mod tests {
         assert_eq!(FileSink::parse_size("-100"), None);
     }
 
-    // ==================== calculate_next_rotation_time 测试 ====================
+    // calculate_next_rotation_time 测试
 
     #[test]
     fn test_calculate_next_rotation_time_hourly() {
@@ -2439,7 +2428,7 @@ mod tests {
         assert_eq!(next.second(), 0);
     }
 
-    // ==================== update_next_rotation_time_inner 测试 ====================
+    // update_next_rotation_time_inner 测试
 
     #[test]
     fn test_update_next_rotation_time_inner_sets_value() {
@@ -2457,7 +2446,7 @@ mod tests {
         assert!(inner.next_rotation_time.is_some());
     }
 
-    // ==================== should_rotate_by_time_inner 测试 ====================
+    // should_rotate_by_time_inner 测试
 
     #[test]
     fn test_should_rotate_by_time_inner_no_next_time() {
@@ -2528,7 +2517,7 @@ mod tests {
         assert!(result);
     }
 
-    // ==================== open_file_inner 测试 ====================
+    // open_file_inner 测试
 
     #[test]
     fn test_open_file_inner_creates_nested_directory() {
@@ -2568,7 +2557,7 @@ mod tests {
         assert_eq!(inner.current_size, existing.len() as u64);
     }
 
-    // ==================== flush_batch_inner 测试 ====================
+    // flush_batch_inner 测试
 
     #[test]
     fn test_flush_batch_inner_empty_buffer_noop() {
@@ -2629,7 +2618,7 @@ mod tests {
         assert!(inner.current_size > initial_size);
     }
 
-    // ==================== check_rotation_inner 测试 ====================
+    // check_rotation_inner 测试
 
     #[test]
     fn test_check_rotation_inner_no_rotation_needed() {
@@ -2676,7 +2665,7 @@ mod tests {
         assert_eq!(inner.sequence, 1); // 已轮转
     }
 
-    // ==================== rotate_inner 测试 ====================
+    // rotate_inner 测试
 
     #[test]
     fn test_rotate_inner_renames_original_file() {
@@ -2760,7 +2749,7 @@ mod tests {
         assert!(inner.next_rotation_time.is_some());
     }
 
-    // ==================== compress_file 测试 ====================
+    // compress_file 测试
 
     #[test]
     #[cfg(feature = "zstd")]
@@ -3014,7 +3003,7 @@ mod tests {
         }
     }
 
-    // ==================== encrypt_file 测试 ====================
+    // encrypt_file 测试
 
     #[test]
     #[serial]
@@ -3188,7 +3177,7 @@ mod tests {
         }
     }
 
-    // ==================== 审计加固测试 ====================
+    // 审计加固测试
 
     #[cfg(unix)]
     #[test]
@@ -3460,7 +3449,7 @@ mod tests {
         rt.block_on(sink.shutdown()).unwrap();
     }
 
-    // ==================== perform_cleanup 测试 ====================
+    // perform_cleanup 测试
 
     #[test]
     fn test_perform_cleanup_removes_excess_by_total_size() {
@@ -3566,12 +3555,11 @@ mod tests {
             max_total_size: "1GB".to_string(),
             ..Default::default()
         };
-        // parent 目录不存在 → read_dir 失败，但 perform_cleanup 优雅降级为 Ok(())
         let result = FileSink::perform_cleanup(&config, &log_path);
         assert!(result.is_ok());
     }
 
-    // ==================== Clone / Debug / is_healthy / flush / shutdown 测试 ====================
+    // Clone / Debug / is_healthy / flush / shutdown 测试
 
     #[test]
     fn test_file_sink_clone_produces_independent_instance() {
@@ -3693,7 +3681,7 @@ mod tests {
         assert!(content.contains("Shutdown test"));
     }
 
-    // ==================== LogSink::write 测试 ====================
+    // LogSink::write 测试
 
     #[tokio::test]
     async fn test_write_multiple_records_all_persisted() {
@@ -3914,7 +3902,7 @@ mod tests {
         sink.shutdown().await.unwrap();
     }
 
-    // ==================== rotation_time 分支覆盖测试 ====================
+    // rotation_time 分支覆盖测试
 
     #[tokio::test]
     async fn test_file_sink_new_with_weekly_rotation() {
@@ -3976,7 +3964,7 @@ mod tests {
         sink.shutdown().await.unwrap();
     }
 
-    // ==================== get_encryption_key 错误路径测试 ====================
+    // get_encryption_key 错误路径测试
 
     #[test]
     #[serial]
@@ -4013,7 +4001,7 @@ mod tests {
         }
     }
 
-    // ==================== get_disk_space_info 错误路径测试 ====================
+    // get_disk_space_info 错误路径测试
 
     #[test]
     fn test_get_disk_space_info_nonexistent_path() {
@@ -4029,7 +4017,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ==================== perform_cleanup 边界测试 ====================
+    // perform_cleanup 边界测试
 
     #[test]
     fn test_perform_cleanup_with_empty_directory() {
@@ -4077,7 +4065,7 @@ mod tests {
         assert!(!old_file.exists(), "expired file should be removed");
     }
 
-    // ==================== compress_file 测试 ====================
+    // compress_file 测试
 
     #[test]
     #[cfg(feature = "zstd")]
@@ -4129,7 +4117,7 @@ mod tests {
         );
     }
 
-    // ==================== encrypt_file 测试 ====================
+    // encrypt_file 测试
 
     #[test]
     #[serial]
@@ -4231,7 +4219,7 @@ mod tests {
         }
     }
 
-    // ==================== compress_file with encryption 测试 ====================
+    // compress_file with encryption 测试
 
     #[test]
     #[serial]
@@ -4274,7 +4262,7 @@ mod tests {
         }
     }
 
-    // ==================== rotate_inner 测试 ====================
+    // rotate_inner 测试
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
@@ -4349,7 +4337,7 @@ mod tests {
         assert!(has_zst, "compressed rotated file (.zst) should exist");
     }
 
-    // ==================== rotate_inner encrypt-only 分支测试 ====================
+    // rotate_inner encrypt-only 分支测试
 
     #[tokio::test]
     #[serial]
@@ -4401,7 +4389,7 @@ mod tests {
         }
     }
 
-    // ==================== compress_file 加密失败回退测试 ====================
+    // compress_file 加密失败回退测试
 
     #[test]
     #[serial]
@@ -4461,7 +4449,7 @@ mod tests {
         }
     }
 
-    // ==================== open_file_inner 错误路径测试 ====================
+    // open_file_inner 错误路径测试
 
     #[test]
     fn test_open_file_inner_create_dir_failure_returns_error() {
@@ -4491,7 +4479,7 @@ mod tests {
         assert!(inner.current_file.is_none());
     }
 
-    // ==================== FileSink::new open_file_inner 失败测试 ====================
+    // FileSink::new open_file_inner 失败测试
 
     #[test]
     fn test_file_sink_new_open_file_failure_returns_error() {
@@ -4514,7 +4502,7 @@ mod tests {
         );
     }
 
-    // ==================== check_rotation_inner 时间触发轮转测试 ====================
+    // check_rotation_inner 时间触发轮转测试
 
     #[test]
     fn test_check_rotation_inner_by_time_triggers_rotation() {
@@ -4542,7 +4530,7 @@ mod tests {
         assert_eq!(inner.sequence, 1, "rotation should be triggered by time");
     }
 
-    // ==================== should_rotate_by_time_inner weekly 分支测试 ====================
+    // should_rotate_by_time_inner weekly 分支测试
 
     #[test]
     fn test_should_rotate_by_time_inner_weekly_date_change() {
@@ -4569,7 +4557,7 @@ mod tests {
         );
     }
 
-    // ==================== flush_batch_inner 写入错误测试 ====================
+    // flush_batch_inner 写入错误测试
 
     #[test]
     fn test_flush_batch_inner_write_error_records_failure_and_reopens() {
@@ -4649,7 +4637,7 @@ mod tests {
         );
     }
 
-    // ==================== CircuitBreaker 打开时使用 fallback sink 测试 ====================
+    // CircuitBreaker 打开时使用 fallback sink 测试
 
     /// 简单的 mock LogSink，用于测试 fallback 路径
     struct MockFallbackSink {
@@ -4735,7 +4723,7 @@ mod tests {
         );
     }
 
-    // ==================== rotation 失败使用 fallback sink 测试 ====================
+    // rotation 失败使用 fallback sink 测试
 
     #[tokio::test]
     async fn test_write_with_rotation_failure_uses_fallback_sink() {
@@ -4779,7 +4767,7 @@ mod tests {
         );
     }
 
-    // ==================== shutdown 完整流程测试 ====================
+    // shutdown 完整流程测试
 
     #[tokio::test]
     async fn test_shutdown_with_active_timers_completes_successfully() {
@@ -4803,7 +4791,6 @@ mod tests {
         let result = sink.shutdown().await;
         assert!(result.is_ok(), "shutdown should complete successfully");
 
-        // 验证数据已被刷盘
         let content = std::fs::read_to_string(&log_path).unwrap();
         for i in 0..3 {
             assert!(
@@ -4813,7 +4800,7 @@ mod tests {
         }
     }
 
-    // ==================== Drop trait 测试 ====================
+    // Drop trait 测试
 
     #[tokio::test]
     async fn test_drop_does_not_panic_with_active_timers() {
@@ -4839,7 +4826,7 @@ mod tests {
         assert!(log_path.exists(), "log file should exist after drop");
     }
 
-    // ==================== perform_cleanup keep_files 边界测试 ====================
+    // perform_cleanup keep_files 边界测试
 
     #[test]
     fn test_perform_cleanup_with_keep_files_boundary() {
@@ -4867,7 +4854,7 @@ mod tests {
         let result = FileSink::perform_cleanup(&config, &temp_dir.path().join("keep_test.log"));
         assert!(result.is_ok());
 
-        // 验证：4 个过期文件，keep_files=2，应保留最新的 2 个（删除 2 个最旧的）
+        // 验证：4 个过期文件，keep_files=2，应保留最新的 2 个（删除 2 个最旧）
         let remaining: Vec<_> = std::fs::read_dir(temp_dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -4921,7 +4908,7 @@ mod tests {
         assert!(log_path.exists(), "active log file must never be deleted");
     }
 
-    // ==================== parse_size 大数边界测试 ====================
+    // parse_size 大数边界测试
 
     #[test]
     fn test_parse_size_large_values() {
@@ -4937,7 +4924,7 @@ mod tests {
         assert_eq!(FileSink::parse_size("1TB"), Some(1024_u64.pow(4)));
     }
 
-    // ==================== validate_key_entropy 边界测试 ====================
+    // validate_key_entropy 边界测试
 
     #[test]
     fn test_validate_key_entropy_single_byte_repeated() {
@@ -4979,7 +4966,7 @@ mod tests {
         );
     }
 
-    // ==================== open_file_inner: OpenOptions 失败分支 (-322) ====================
+    // open_file_inner: OpenOptions 失败分支 (-322)
 
     #[test]
     fn test_open_file_inner_fails_when_path_is_directory() {
@@ -4987,7 +4974,7 @@ mod tests {
         // 当 path 指向一个已存在的目录时，open(create+append) 会失败
         let temp_dir = tempdir().unwrap();
         let dir_as_path = temp_dir.path().to_path_buf();
-        // dir_as_path 是目录，OpenOptions::new().create(true).append(true).open(dir) 会失败
+        // dir_as_path 是目录，OpenOptions::new.create(true).append(true).open(dir) 会失败
 
         let config = FileSinkConfig {
             enabled: true,
@@ -5005,7 +4992,7 @@ mod tests {
         assert!(inner.current_file.is_none());
     }
 
-    // ==================== compress_file: File::create 失败分支 (-644) ====================
+    // compress_file: File::create 失败分支 (-644)
 
     #[test]
     #[cfg(unix)]
@@ -5053,7 +5040,7 @@ mod tests {
         }
     }
 
-    // ==================== encrypt_file: File::create 失败分支 (-717) ====================
+    // encrypt_file: File::create 失败分支 (-717)
 
     #[test]
     #[serial]
@@ -5112,7 +5099,7 @@ mod tests {
         }
     }
 
-    // ==================== rotate_inner: rename 失败 fallback 分支 (-758) ====================
+    // rotate_inner: rename 失败 fallback 分支 (-758)
 
     #[test]
     #[cfg(unix)]
@@ -5160,11 +5147,11 @@ mod tests {
         }
     }
 
-    // ==================== shutdown: fallback_sink.shutdown() 调用 (-1014) ====================
+    // shutdown: fallback_sink.shutdown 调用 (-1014)
 
     #[tokio::test]
     async fn test_shutdown_calls_fallback_sink_shutdown() {
-        // 覆盖：当 fallback_sink 存在时，shutdown() 应调用其 shutdown()
+        // 覆盖：当 fallback_sink 存在时，shutdown 应调用其 shutdown
         let temp_dir = tempdir().unwrap();
         let config = FileSinkConfig {
             enabled: true,
@@ -5183,7 +5170,7 @@ mod tests {
             inner.fallback_sink = Some(Arc::new(mock_sink));
         }
 
-        // 调用 shutdown——应触发 fallback_sink.shutdown()
+        // 调用 shutdown——应触发 fallback_sink.shutdown
         let result = sink.shutdown().await;
         assert!(result.is_ok(), "shutdown should succeed");
 
@@ -5194,9 +5181,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // vuln-0002: FileSink 路径遍历防护测试
-    // ========================================================================
     //
     // PathValidator 默认配置拒绝：
     // - 含 ".." 的路径（路径遍历）
@@ -5427,7 +5412,7 @@ mod tests {
         assert!(log_path.exists(), "log file should exist on disk");
     }
 
-    // ==================== Rotatable / DiskCheckable trait impl 测试 ====================
+    // Rotatable / DiskCheckable trait impl 测试
 
     #[test]
     fn test_rotatable_trait_start_and_stop_rotation_timer() {
@@ -5491,7 +5476,6 @@ mod tests {
             ..Default::default()
         };
         let sink = create_test_file_sink(config);
-        // Open the file first
         {
             let mut inner = sink.inner.write();
             sink.open_file_inner(&mut inner).unwrap();
@@ -5520,11 +5504,9 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // 缺陷修复回归测试
-    // ========================================================================
 
-    // ---- 缺陷 #2: monthly 轮转实际每天轮转 ----
+    // 缺陷 #2: monthly 轮转实际每天轮转
 
     #[test]
     fn test_calculate_next_rotation_time_monthly_july_31_is_august_31() {
@@ -5560,7 +5542,7 @@ mod tests {
         assert_eq!((next.hour(), next.minute(), next.second()), (0, 0, 0));
     }
 
-    // ---- 缺陷 #3: 轮转文件名秒级精度覆盖 ----
+    // 缺陷 #3: 轮转文件名秒级精度覆盖
 
     #[test]
     fn test_resolve_rotation_target_avoids_collision_with_sequence_suffix() {
@@ -5764,7 +5746,7 @@ mod tests {
         );
     }
 
-    // ---- 缺陷 #4: 打开日志文件未用 O_NOFOLLOW ----
+    // 缺陷 #4: 打开日志文件未用 O_NOFOLLOW
 
     #[cfg(unix)]
     #[test]
@@ -5792,7 +5774,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&real_file).unwrap(), "real content");
     }
 
-    // ---- 缺陷 #5: 断路器/磁盘不足路径静默吞日志 ----
+    // 缺陷 #5: 断路器/磁盘不足路径静默吞日志
 
     #[test]
     fn test_mark_write_lost_sets_unhealthy_and_recovers_on_successful_flush() {
@@ -5892,7 +5874,7 @@ mod tests {
         assert_eq!(sink.lost_records.load(Ordering::Relaxed), 1);
     }
 
-    // ---- 缺陷 #1（Critical）: 密码模式加密文件无法解密（v2 头 + 盐） ----
+    // 缺陷 #1（Critical）: 密码模式加密文件无法解密（v2 头 + 盐）
 
     #[test]
     #[serial]

@@ -87,7 +87,6 @@ mod complex_features {
             tracing_subscriber::registry().with(subscriber).with(filter),
         );
 
-        // 写入加密数据
         for i in 0..500 {
             tracing::info!(target: "complex_test", "Encrypted message {}", i);
         }
@@ -139,7 +138,6 @@ mod complex_features {
             );
         }
 
-        // 验证健康状态
         let health = logger.get_health_status();
         assert!(health.sinks.contains_key("file"));
         assert!(health.sinks.contains_key("database"));

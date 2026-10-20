@@ -29,15 +29,15 @@
 //! ```rust
 //! use inklog::InklogError;
 //!
-//! fn example() -> Result<(), InklogError> {
+//! fn example -> Result<, InklogError> {
 //!     // 配置错误
-//!     Err(InklogError::ConfigError("Invalid log level".to_string()))
+//!     Err(InklogError::ConfigError("Invalid log level".to_string))
 //! }
 //!
 //! // 使用 ? 操作符传播错误
-//! fn read_config() -> Result<(), InklogError> {
+//! fn read_config -> Result<, InklogError> {
 //!     let content = std::fs::read_to_string("config.toml")?;
-//!     Ok(())
+//!     Ok()
 //! }
 //! ```
 

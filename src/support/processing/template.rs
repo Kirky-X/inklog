@@ -101,14 +101,14 @@ impl FromStr for OutputFormat {
 ///
 /// // Render a log record
 /// let record = LogRecord {
-///     timestamp: Utc::now(),
-///     level: "INFO".to_string(),
-///     target: "my_app::api".to_string(),
-///     message: "Request processed".to_string(),
-///     fields: HashMap::new(),
+///     timestamp: Utc::now,
+///     level: "INFO".to_string,
+///     target: "my_app::api".to_string,
+///     message: "Request processed".to_string,
+///     fields: HashMap::new,
 ///     file: None,
 ///     line: None,
-///     thread_id: "main".to_string(),
+///     thread_id: "main".to_string,
 ///     trace_id: None,
 ///     span_id: None,
 /// };
@@ -119,8 +119,8 @@ impl FromStr for OutputFormat {
 ///
 /// # Performance
 ///
-/// Template parsing happens once during [`LogTemplate::new()`], and the parsed
-/// placeholder structure is reused for all subsequent [`render()`](LogTemplate::render)
+/// Template parsing happens once during [`LogTemplate::new`], and the parsed
+/// placeholder structure is reused for all subsequent [`render`](LogTemplate::render)
 /// calls, making rendering efficient for high-throughput logging scenarios.
 #[derive(Debug, Clone)]
 pub struct LogTemplate {
@@ -318,14 +318,14 @@ impl LogTemplate {
     ///
     /// let template = LogTemplate::new("[{level}] {message}");
     /// let record = LogRecord {
-    ///     timestamp: Utc::now(),
-    ///     level: "INFO".to_string(),
-    ///     target: "my_module".to_string(),
-    ///     message: "Task completed".to_string(),
-    ///     fields: HashMap::new(),
+    ///     timestamp: Utc::now,
+    ///     level: "INFO".to_string,
+    ///     target: "my_module".to_string,
+    ///     message: "Task completed".to_string,
+    ///     fields: HashMap::new,
     ///     file: None,
     ///     line: None,
-    ///     thread_id: "main".to_string(),
+    ///     thread_id: "main".to_string,
     ///     trace_id: None,
     ///     span_id: None,
     /// };
@@ -764,9 +764,7 @@ mod tests {
     }
 }
 
-// ============================================================================
 // 追踪 ID 占位符渲染
-// ============================================================================
 
 #[cfg(test)]
 mod trace_placeholder_tests {

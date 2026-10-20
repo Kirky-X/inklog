@@ -3,14 +3,14 @@
 //! 环境变量覆盖配置测试。
 //!
 //! 核正：`apply_env_overrides` 为私有关联函数，公开入口是
-//! `InklogConfig::load_with_env_overrides()`；且实际读取的环境变量名为
+//! `InklogConfig::load_with_env_overrides`；且实际读取的环境变量名为
 //! `INKLOG_GLOBAL_*` / `INKLOG_FILE_SINK_*` / `INKLOG_HTTP_SERVER_*` /
 //! `INKLOG_PERFORMANCE_*` 前缀（与实现一致），非旧用例假设的短前缀名。
 use inklog::InklogConfig;
 use serial_test::serial;
 
 fn clear_all_inklog_env_vars() {
-    // 先收集再删除，避免在 env::vars() 迭代期间修改环境变量（UB 隐患）
+    // 先收集再删除，避免在 env::vars 迭代期间修改环境变量（UB 隐患）
     let keys: Vec<String> = std::env::vars()
         .map(|(key, _)| key)
         .filter(|key| key.starts_with("INKLOG_"))

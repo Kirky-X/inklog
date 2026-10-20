@@ -7,9 +7,7 @@ use crate::support::processing::template::OutputFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// ============================================================================
 // FileSinkConfig - File output settings
-// ============================================================================
 
 /// File sink configuration.
 ///

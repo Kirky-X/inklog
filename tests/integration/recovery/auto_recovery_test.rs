@@ -18,7 +18,6 @@ async fn test_file_sink_auto_recovery() {
         .await
         .expect("Failed to create logger manager");
 
-    // Log some messages
     tracing::info!("Test message before failure");
     thread::sleep(Duration::from_millis(100));
 
@@ -34,7 +33,6 @@ async fn test_file_sink_auto_recovery() {
     // Wait for auto-recovery to trigger
     thread::sleep(Duration::from_secs(2));
 
-    // Log messages after potential recovery
     tracing::info!("Test message after recovery");
     thread::sleep(Duration::from_millis(100));
 
@@ -57,14 +55,12 @@ async fn test_manual_sink_recovery() {
         .await
         .expect("Failed to create logger manager");
 
-    // Log initial message
     tracing::info!("Initial test message");
     thread::sleep(Duration::from_millis(100));
 
     // Simulate failure by removing file
     let _ = fs::remove_file(&log_file);
 
-    // Log during failure
     tracing::info!("Message during failure");
     thread::sleep(Duration::from_millis(100));
 
@@ -72,14 +68,11 @@ async fn test_manual_sink_recovery() {
     let recovery_result = manager.recover_sink("file");
     println!("Manual recovery result: {:?}", recovery_result);
 
-    // Wait for recovery
     thread::sleep(Duration::from_millis(500));
 
-    // Log after manual recovery
     tracing::info!("Message after manual recovery");
     thread::sleep(Duration::from_millis(100));
 
-    // Clean up
     let _ = fs::remove_dir_all(test_dir);
 
     assert!(recovery_result.is_ok());
@@ -98,7 +91,6 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
         .await
         .expect("Failed to create logger manager");
 
-    // Log initial message
     tracing::info!("Initial test message");
     thread::sleep(Duration::from_millis(100));
 
@@ -115,14 +107,11 @@ async fn test_bulk_recovery_for_unhealthy_sinks() {
     let recovery_result = manager.trigger_recovery_for_unhealthy_sinks();
     println!("Bulk recovery result: {:?}", recovery_result);
 
-    // Wait for recovery
     thread::sleep(Duration::from_millis(500));
 
-    // Log after bulk recovery
     tracing::info!("Message after bulk recovery");
     thread::sleep(Duration::from_millis(100));
 
-    // Clean up
     let _ = fs::remove_dir_all(test_dir);
 
     assert!(recovery_result.is_ok());

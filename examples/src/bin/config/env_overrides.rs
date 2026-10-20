@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //! 环境变量覆盖加载示例
 //!
-//! 演示 `InklogConfig::load_with_env_overrides()` 的使用：
+//! 演示 `InklogConfig::load_with_env_overrides` 的使用：
 //!
 //! 1. 设置 INKLOG_* 环境变量覆盖配置
 //! 2. 加载配置并验证覆盖生效
@@ -71,7 +71,7 @@ fn show_supported_env_vars() {
     println!("  INKLOG_DATABASE_SINK_URL=postgres://user:pass@host/db");
 }
 
-/// 演示 load_with_env_overrides() 实际调用
+/// 演示 load_with_env_overrides 实际调用
 fn show_load_with_env_overrides() {
     print_section(&tr("example-env-overrides-example-2-calling-load-with-env"));
 

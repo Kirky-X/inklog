@@ -4,9 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ============================================================================
 // ChannelStrategy - Adaptive channel sizing strategy
-// ============================================================================
 
 /// Channel sizing strategy for log buffer management.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -23,7 +21,7 @@ pub enum ChannelStrategy {
 impl std::str::FromStr for ChannelStrategy {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase()
+        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase
         if s.eq_ignore_ascii_case("fixed") {
             Ok(ChannelStrategy::Fixed)
         } else if s.eq_ignore_ascii_case("adaptive") {
@@ -49,9 +47,7 @@ impl std::fmt::Display for ChannelStrategy {
     }
 }
 
-// ============================================================================
 // PerformanceConfig - Performance tuning parameters
-// ============================================================================
 
 /// Performance tuning configuration for log channel and worker management.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

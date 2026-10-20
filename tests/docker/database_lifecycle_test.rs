@@ -109,8 +109,8 @@ async fn test_lifecycle_concurrent_writes() {
 
     // 用 `tokio::spawn` 替代 `std::thread::spawn`：
     // 1. AGENTS.md 禁止 `std::thread`（用 tokio tasks）
-    // 2. `DatabaseSink::write` 内部用 `tokio::task::block_in_place` + `Handle::current()`，
-    //    `std::thread::spawn` 创建的线程无 tokio runtime 上下文，会 panic
+    // 2. `DatabaseSink::write` 内部用 `tokio::task::block_in_place` + `Handle::current`，
+    // `std::thread::spawn` 创建的线程无 tokio runtime 上下文，会 panic
     //    ("there is no reactor running")
     let handle = tokio::spawn(async move {
         for i in 0..10 {

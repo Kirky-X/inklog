@@ -920,14 +920,12 @@ port = 99999
         assert!(result.is_err());
     }
 
-    // ========================================================================
     // get_table 分支覆盖（任务 7.9）
-    // 覆盖 as_table() 返回 None（值存在但非 table）、双重命名等场景
-    // ========================================================================
+    // 覆盖 as_table 返回 None（值存在但非 table）、双重命名等场景
 
     #[test]
     fn test_get_table_console_value_not_a_table_falls_through_to_console_sink() {
-        // 覆盖 get_table 中 config.get(name) 返回 Some 但 as_table() 返回 None 的分支
+        // 覆盖 get_table 中 config.get(name) 返回 Some 但 as_table 返回 None 的分支
         // console = "string" 使 get_table("console") 返回 None
         // .or(get_table("console_sink")) 取到 [console_sink] 表
         let content = r#"
@@ -1001,7 +999,7 @@ port = 8080
 
     #[test]
     fn test_get_table_both_naming_conventions_present_prefers_first() {
-        // 覆盖 .or() 短路：当 console 和 console_sink 都存在时，应使用 console
+        // 覆盖 .or 短路：当 console 和 console_sink 都存在时，应使用 console
         // 通过让 console 含无效配置（enabled 非布尔）来验证优先使用 console
         let content = r#"
 [console]
@@ -1022,7 +1020,7 @@ enabled = true
 
     #[test]
     fn test_get_table_both_file_naming_conventions_prefers_first() {
-        // 覆盖 file/file_sink 的 .or() 短路：file 优先
+        // 覆盖 file/file_sink 的 .or 短路：file 优先
         let content = r#"
 [file]
 enabled = "invalid"
@@ -1070,9 +1068,7 @@ console_sink = "string2"
         );
     }
 
-    // ========================================================================
     // validate_sections: 双 sink 警告分支（行 386-400）
-    // ========================================================================
 
     #[test]
     fn test_validate_sections_dual_sink_file_disabled_warning() {
@@ -1118,13 +1114,11 @@ enabled = true
         assert!(result.is_ok());
     }
 
-    // ========================================================================
     // 类型错误与边界值覆盖
-    // ========================================================================
 
     #[test]
     fn test_validate_global_config_level_not_string() {
-        // 覆盖 global.level 为非字符串时 as_str() 返回 None 的分支（unwrap_or("")）
+        // 覆盖 global.level 为非字符串时 as_str 返回 None 的分支（unwrap_or("")）
         // 空字符串不在 valid_levels 中，应返回错误
         let content = r#"
 [global]
@@ -1143,7 +1137,7 @@ level = 123
 
     #[test]
     fn test_validate_global_config_format_not_string() {
-        // 覆盖 global.format 为非字符串时 as_str() 返回 None 的分支
+        // 覆盖 global.format 为非字符串时 as_str 返回 None 的分支
         // 该分支不会触发错误（仅当 format_str 非空时才检查）
         let content = r#"
 [global]
@@ -1192,7 +1186,7 @@ colored = "yes"
 
     #[test]
     fn test_validate_console_sink_stderr_levels_not_array() {
-        // 覆盖 console_sink.stderr_levels 非数组时 as_array() 返回 None 的分支
+        // 覆盖 console_sink.stderr_levels 非数组时 as_array 返回 None 的分支
         // 该分支不会触发错误（仅当 levels 是数组时才迭代）
         let content = r#"
 [console]
@@ -1398,7 +1392,7 @@ enabled = "yes"
 
     #[test]
     fn test_validate_database_sink_driver_not_string() {
-        // driver 非字符串时 as_str() 返回 None，应触发错误
+        // driver 非字符串时 as_str 返回 None，应触发错误
         let content = r#"
 [database]
 driver = 123
@@ -1665,17 +1659,17 @@ level = "INFO"
         }
     }
 
-    // ==================== check_prerequisites 集成测试 ====================
+    // check_prerequisites 集成测试
 
     #[test]
     fn test_check_prerequisites_runs_without_panic() {
-        // 覆盖 check_prerequisites() 全部检查分支（rustc/cargo 版本、openssl/zstd
+        // 覆盖 check_prerequisites 全部检查分支（rustc/cargo 版本、openssl/zstd
         // 可选依赖、系统/本地/示例配置存在性）；各项结果取决于运行环境，
         // 验证其不 panic 即可。
         let _ = check_prerequisites();
     }
 
-    // ==================== validate_file_sink encrypt 分支测试 ====================
+    // validate_file_sink encrypt 分支测试
 
     #[test]
     fn test_validate_file_sink_encrypt_without_key_env() {

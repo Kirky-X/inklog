@@ -336,7 +336,7 @@ mod tests {
             .collect()
     }
 
-    // ---- 命中样本：每条内置模式至少一个正样本 ----
+    // 命中样本：每条内置模式至少一个正样本
 
     #[test]
     fn test_openai_sk_hit() {
@@ -414,7 +414,7 @@ mod tests {
         );
     }
 
-    // ---- 误报样本：形近但非 secret 的文本不得命中 ----
+    // 误报样本：形近但非 secret 的文本不得命中
 
     #[test]
     fn test_sk_prefix_misses() {
@@ -474,7 +474,7 @@ mod tests {
         assert!(hit_names(text).is_empty(), "unterminated PEM must not hit");
     }
 
-    // ---- scan 面行为 ----
+    // scan 面行为
 
     #[test]
     fn test_scan_reports_exact_byte_spans() {
@@ -505,7 +505,7 @@ mod tests {
         assert!(registry.scan("nothing sensitive here").is_empty());
     }
 
-    // ---- 注册中心管理面 ----
+    // 注册中心管理面
 
     #[test]
     fn test_default_registry_is_empty() {
@@ -566,7 +566,7 @@ mod tests {
         assert!(format!("{p:?}").contains("SecretPattern"));
     }
 
-    // ---- 扩展形态表：with_extended ----
+    // 扩展形态表：with_extended
 
     fn extended() -> SecretPatternRegistry {
         SecretPatternRegistry::with_extended()
@@ -615,7 +615,7 @@ mod tests {
         assert!(names.contains(&"pk_key".to_string()), "{names:?}");
     }
 
-    // ---- 统一替换出口：scan_and_replace ----
+    // 统一替换出口：scan_and_replace
 
     #[test]
     fn test_scan_and_replace_replaces_and_reports() {

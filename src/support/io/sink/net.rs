@@ -16,11 +16,11 @@
 //! # Example
 //! ```ignore
 //! let tcp = TcpSink::new(TcpSinkConfig {
-//!     addr: "127.0.0.1:5170".into(),
+//!     addr: "127.0.0.1:5170".into,
 //!     tls: None,
-//!     ..Default::default()
+//!     ..Default::default
 //! })?;
-//! LoggerManager::builder().add_sink(Arc::new(tcp)).build().await?;
+//! LoggerManager::builder.add_sink(Arc::new(tcp)).build.await?;
 //! ```
 
 use std::collections::VecDeque;

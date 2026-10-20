@@ -29,9 +29,9 @@ use crate::integrations::infra::database::DbNexusAdapter;
 /// trait-kit `AsyncKit` module that constructs an inklog `Database` impl.
 ///
 /// Depends on `DbNexusModule` (registered first via topological sort).
-/// Register with `AsyncKit::register::<InklogModule>()`, then
-/// `kit.build().await` and retrieve the capability with
-/// `kit.require::<InklogModule>()`.
+/// Register with `AsyncKit::register::<InklogModule>`, then
+/// `kit.build.await` and retrieve the capability with
+/// `kit.require::<InklogModule>`.
 ///
 /// The returned `Arc<dyn Database + Send + Sync>` wraps a `DbNexusAdapter`
 /// that proxies `insert_batch` / `is_healthy` through the dbnexus
@@ -48,7 +48,7 @@ use crate::integrations::infra::database::DbNexusAdapter;
 ///
 /// Implements `AsyncHealthCheck`:
 /// - `check`: returns `Healthy` when the database capability is present in the kit.
-///   For detailed async runtime connectivity checks, use `Database::is_healthy()` directly.
+///   For detailed async runtime connectivity checks, use `Database::is_healthy` directly.
 pub struct InklogModule;
 
 impl ModuleMeta for InklogModule {
@@ -118,10 +118,10 @@ impl AsyncLifecycle for InklogModule {
 impl AsyncHealthCheck for InklogModule {
     fn check(_cap: &Self::Capability) -> HealthStatus {
         // Capability presence confirms the database adapter was successfully built
-        // and the underlying connection pool was established during build().
+        // and the underlying connection pool was established during build.
         //
         // Detailed async runtime connectivity checks should use
-        // `Database::is_healthy()` directly (e.g. from the HTTP health endpoint).
+        // `Database::is_healthy` directly (e.g. from the HTTP health endpoint).
         HealthStatus::Healthy
     }
 }
@@ -136,7 +136,7 @@ mod tests {
         assert_eq!(InklogModule::NAME, "inklog");
     }
 
-    /// #2: `InklogModule::dependencies()` declares
+    /// #2: `InklogModule::dependencies` declares
     /// a dependency on `DbNexusModule`.
     #[test]
     fn inklog_module_meta_dependencies() {
@@ -213,9 +213,7 @@ mod tests {
         );
     }
 
-    // ========================================================================
     // AsyncHealthCheck tests
-    // ========================================================================
 
     /// AsyncHealthCheck::check returns Healthy for a valid database capability.
     #[cfg(feature = "sqlite")]
@@ -250,9 +248,7 @@ mod tests {
         assert_eq!(status, HealthStatus::Healthy);
     }
 
-    // ========================================================================
     // AsyncLifecycle tests
-    // ========================================================================
 
     /// on_ready succeeds when DbNexusModule is registered and accessible.
     #[cfg(feature = "sqlite")]
@@ -280,7 +276,7 @@ mod tests {
             .expect("register InklogModule");
         // register_lifecycle enables on_ready/on_shutdown hooks
         kit.register_lifecycle::<InklogModule>();
-        // build() invokes on_ready internally — should not error
+        // build invokes on_ready internally — should not error
         let built = kit
             .build()
             .await
@@ -314,7 +310,7 @@ mod tests {
             .expect("register InklogModule");
         kit.register_lifecycle::<InklogModule>();
         let built = kit.build().await.expect("build");
-        // shutdown_async() drains async on_shutdown hooks (one-shot) in
+        // shutdown_async drains async on_shutdown hooks (one-shot) in
         // reverse topological order — AsyncKit's counterpart of Kit::shutdown
         built.shutdown_async().await;
     }
@@ -357,9 +353,7 @@ mod tests {
         built.shutdown_async().await;
     }
 
-    // ========================================================================
     // BuildObserver integration tests
-    // ========================================================================
 
     /// Build with InklogBuildObserver — observer receives build events.
     #[cfg(feature = "sqlite")]
@@ -394,9 +388,7 @@ mod tests {
         assert!(db.is_healthy().await);
     }
 
-    // ========================================================================
     // AsyncScope integration tests
-    // ========================================================================
 
     /// create_inklog_scope + populate + require round-trip.
     #[cfg(feature = "sqlite")]
@@ -407,7 +399,6 @@ mod tests {
 
         use super::super::{create_inklog_scope, populate_inklog_scope};
 
-        // Build with main kit first
         let mut kit = AsyncKit::new();
         kit.set_config(OxcacheConfig::default());
         kit.set_config(DbConfig {

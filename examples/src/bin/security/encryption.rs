@@ -116,7 +116,6 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
 
     let sink = inklog::sink::file::FileSink::new(config)?;
 
-    // 创建测试日志内容
     let plaintext = r#"2026-03-19T10:30:00.000Z [INFO] encryption - this is an encrypted log message
 2026-03-19T10:30:00.001Z [INFO] encryption - sensitive data is protected automatically
 2026-03-19T10:30:00.002Z [WARN] encryption - this is a warning log and it is encrypted too
@@ -150,7 +149,7 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
 ///
 /// # 返回值
 ///
-/// 返回 Ok(()) 表示成功，否则返回错误
+/// 返回 Ok() 表示成功，否则返回错误
 fn encrypt_log_file(
     plaintext_path: &str,
     encrypted_path: &str,
@@ -204,7 +203,7 @@ fn encrypt_log_file(
 ///
 /// # 返回值
 ///
-/// 返回 Ok(()) 表示成功，否则返回错误
+/// 返回 Ok() 表示成功，否则返回错误
 fn parse_encrypted_format(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     print_separator("Step 3: parse the encrypted file format");
 

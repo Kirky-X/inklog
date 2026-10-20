@@ -12,7 +12,7 @@ mod circuit_breaker_test {
     use inklog::tokio::sync::Mutex;
     use inklog::tokio::time::timeout;
 
-    // === 熔断器状态测试 ===
+    // 熔断器状态测试
 
     #[test]
     fn test_circuit_breaker_initial_state() {
@@ -48,7 +48,6 @@ mod circuit_breaker_test {
 
         assert_eq!(breaker.failure_count(), 0);
 
-        // 记录失败
         for i in 1..=3 {
             let result: Result<(), ()> = Err(());
             breaker.record_result(result);
@@ -62,7 +61,6 @@ mod circuit_breaker_test {
 
         assert_eq!(breaker.success_count(), 0);
 
-        // 记录成功
         for i in 1..=3 {
             let result: Result<(), ()> = Ok(());
             breaker.record_result(result);
@@ -74,20 +72,18 @@ mod circuit_breaker_test {
     fn test_circuit_breaker_reset_on_success() {
         let breaker = CircuitBreaker::new(3, Duration::from_secs(60));
 
-        // 记录一些失败
         for _ in 0..2 {
             let result: Result<(), ()> = Err(());
             breaker.record_result(result);
         }
         assert_eq!(breaker.failure_count(), 2);
 
-        // 记录成功应该重置失败计数
         let result: Result<(), ()> = Ok(());
         breaker.record_result(result);
         assert_eq!(breaker.failure_count(), 0);
     }
 
-    // === 熔断器保护测试 ===
+    // 熔断器保护测试
 
     #[tokio::test]
     async fn test_circuit_breaker_allows_calls_in_closed_state() {
@@ -141,7 +137,6 @@ mod circuit_breaker_test {
             guard.record_result(Err(()));
         }
 
-        // 等待半开转换
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // 半开状态应该允许一个测试调用
@@ -152,7 +147,7 @@ mod circuit_breaker_test {
         }
     }
 
-    // === 熔断器配置测试 ===
+    // 熔断器配置测试
 
     #[test]
     fn test_circuit_breaker_config() {
@@ -169,7 +164,7 @@ mod circuit_breaker_test {
         assert_eq!(breaker.failure_threshold(), 1);
     }
 
-    // === 熔断器并发测试 ===
+    // 熔断器并发测试
 
     #[tokio::test]
     async fn test_circuit_breaker_concurrent_calls() {
@@ -205,7 +200,7 @@ mod circuit_breaker_test {
         assert_eq!(success_count.load(Ordering::SeqCst), 100);
     }
 
-    // === 熔断器错误处理测试 ===
+    // 熔断器错误处理测试
 
     #[tokio::test]
     async fn test_circuit_breaker_error_types() {
@@ -226,7 +221,7 @@ mod circuit_breaker_test {
         assert_eq!(breaker.state(), CircuitBreakerState::Open);
     }
 
-    // === 熔断器恢复测试 ===
+    // 熔断器恢复测试
 
     #[tokio::test]
     async fn test_circuit_breaker_recovery_on_success() {
@@ -239,7 +234,6 @@ mod circuit_breaker_test {
             guard.record_result(Err(()));
         }
 
-        // 等待半开状态
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // 在半开状态记录成功应该关闭熔断器
@@ -266,7 +260,6 @@ mod circuit_breaker_test {
             guard.record_result(Err(()));
         }
 
-        // 等待半开状态
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // 在半开状态记录失败应该重新打开

@@ -6,9 +6,9 @@
 //!
 //! ## 功能演示
 //!
-//! - **start_http_server()**: 启动随机端口 HTTP 服务器
-//! - **health_endpoint()**: 健康检查端点 `/health`（JSON 格式）
-//! - **metrics_endpoint()**: 指标端点 `/metrics`（Prometheus 格式）
+//! - **start_http_server**: 启动随机端口 HTTP 服务器
+//! - **health_endpoint**: 健康检查端点 `/health`（JSON 格式）
+//! - **metrics_endpoint**: 指标端点 `/metrics`（Prometheus 格式）
 //!
 //! ## 运行
 //!
@@ -94,11 +94,11 @@ use std::time::Duration;
 ///
 /// ```rust,no_run
 /// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let (port, shutdown) = start_http_server().await?;
+/// async fn main -> Result<, Box<dyn std::error::Error>> {
+///     let (port, shutdown) = start_http_server.await?;
 ///     println!("HTTP 服务器运行在端口 {}", port);
 ///     // ... 使用服务器 ...
-///     Ok(())
+///     Ok()
 /// }
 /// ```
 async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> {
@@ -181,7 +181,6 @@ async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> 
                         }
                     }
                 }
-                // 检查 shutdown 信号
                 _ = &mut shutdown_rx => {
                     println!("\n{}", tr("example-http-shutdown-signal-received"));
                     break;
@@ -447,7 +446,6 @@ async fn health_endpoint(port: u16) -> Result<()> {
 
     print_section(&tr("example-http-send-a-get-health-request"));
 
-    // 发送 HTTP 请求
     let url = format!("http://127.0.0.1:{}/health", port);
     println!(
         "{}\n",
@@ -622,7 +620,6 @@ fn find_available_port() -> Result<u16> {
     use std::net::TcpListener;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    // 尝试多个随机端口
     for _ in 0..100 {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -646,7 +643,6 @@ async fn main() -> Result<()> {
 
     let (port, shutdown) = start_http_server().await?;
 
-    // 等待服务器完全启动
     sleep(Duration::from_millis(100)).await;
 
     health_endpoint(port).await?;

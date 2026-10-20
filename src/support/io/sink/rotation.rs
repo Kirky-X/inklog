@@ -162,7 +162,7 @@ impl TimeBasedRotation {
 
     /// Create from a string identifier (hourly, daily, weekly, monthly).
     pub fn from_interval_string(interval: &str) -> Result<Self, String> {
-        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase()
+        // Use eq_ignore_ascii_case to avoid heap allocation from to_lowercase
         let trimmed = interval.trim();
         let (secs, name) = if trimmed.eq_ignore_ascii_case("hourly") {
             (3600, "hourly")

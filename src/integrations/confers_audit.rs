@@ -39,7 +39,7 @@ const DEFAULT_CHANNEL_CAPACITY: usize = 1024;
 /// use inklog::integrations::ConfersAuditSink;
 ///
 /// let bridge = ConfersAuditSink::new(my_inklog_sink);
-/// let mut writer = AuditWriter::builder().enabled(true).build();
+/// let mut writer = AuditWriter::builder.enabled(true).build;
 /// writer.add_sink(Arc::new(bridge));
 /// ```
 pub struct ConfersAuditSink {

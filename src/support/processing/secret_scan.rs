@@ -12,7 +12,7 @@
 //!   不扫描即不可证安全）时返回 `Err`，脱敏输出不可用（防疑似密钥风暴
 //!   落盘）。两个出口共用计数器，Err 时计数已更新可查。
 //!
-//! 层位：经 `DataMasker::builder().with_secret_scan()` 挂到 sink 写出前的
+//! 层位：经 `DataMasker::builder.with_secret_scan` 挂到 sink 写出前的
 //! 掩码点（与 encryption / ring_buffered_file 同层），`DataMasker::mask`
 //! 保持失败放行语义（向后兼容），fail-closed 由 `DataMasker::mask_checked`
 //! 显式选择。
@@ -313,7 +313,7 @@ mod tests {
         gate().with_entropy(EntropyScanner::new())
     }
 
-    // ---- mask：替换 + 计数（失败放行） ----
+    // mask：替换 + 计数（失败放行）
 
     #[test]
     fn test_mask_replaces_and_counts_per_pattern() {
@@ -418,7 +418,7 @@ mod tests {
         assert_eq!(g.total_hits(), 0);
     }
 
-    // ---- 熵扫描接入 ----
+    // 熵扫描接入
 
     #[test]
     fn test_entropy_replacement_and_counter() {
@@ -441,7 +441,7 @@ mod tests {
         assert!(g.hit_count(HIGH_ENTROPY_PATTERN).is_none());
     }
 
-    // ---- mask_checked：fail-closed ----
+    // mask_checked：fail-closed
 
     #[test]
     fn test_mask_checked_ok_under_limit() {
@@ -506,7 +506,7 @@ mod tests {
         }
     }
 
-    // ---- scan 检测面 ----
+    // scan 检测面
 
     #[test]
     fn test_scan_reports_without_counting() {
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(g.scan(&text).len(), 1);
     }
 
-    // ---- 计数器查询面 ----
+    // 计数器查询面
 
     #[test]
     fn test_hit_counts_includes_zero_count_patterns() {
@@ -556,7 +556,7 @@ mod tests {
         );
     }
 
-    // ---- 配置面 ----
+    // 配置面
 
     #[test]
     fn test_match_limit_accessor() {

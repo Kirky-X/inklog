@@ -28,7 +28,7 @@ mod encryption_file {
         (temp_dir, log_path)
     }
 
-    // === 密钥管理测试 ===
+    // 密钥管理测试
 
     #[test]
     #[serial]
@@ -85,7 +85,7 @@ mod encryption_file {
         }
     }
 
-    // === 加密文件 Sink 测试 ===
+    // 加密文件 Sink 测试
 
     #[tokio::test]
     #[serial]
@@ -136,7 +136,6 @@ mod encryption_file {
             tracing_subscriber::registry().with(subscriber).with(filter),
         );
 
-        // 写入日志消息
         tracing::info!("Encrypted test message 1");
         tracing::info!("Encrypted test message 2");
         tracing::info!("Sensitive data: secret_value_12345");
@@ -147,7 +146,6 @@ mod encryption_file {
             .shutdown()
             .expect("failed to shut down the logging service");
 
-        // 验证文件存在且非空
         assert!(log_path.exists());
         let metadata = fs::metadata(&log_path).unwrap();
         assert!(metadata.len() > 0);
@@ -290,7 +288,7 @@ mod encryption_file {
         assert!(result.is_ok() || result.is_err());
     }
 
-    // === 加密配置验证测试 ===
+    // 加密配置验证测试
 
     #[test]
     fn test_encryption_config_validation() {

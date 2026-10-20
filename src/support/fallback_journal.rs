@@ -533,7 +533,7 @@ impl JournalCrypto {
 /// nonce(12) + 长度(4) + ciphertext，明文为一行 JSON）。
 ///
 /// **nonce 唯一性策略（实现前固化）**：随机 96-bit/段，CSPRNG
-/// （`rand::rng()`，OS 定期重播种）生成；同 key 跨段、跨文件不重复由
+/// （`rand::rng`，OS 定期重播种）生成；同 key 跨段、跨文件不重复由
 /// 单测断言（96-bit 随机空间下生日碰撞概率可忽略）。
 ///
 /// **显性失败约束**：[`FallbackJournal::with_crypto`] 在 key 缺失/无效时
@@ -1182,13 +1182,11 @@ mod tests {
         assert_eq!(skipped, 0);
     }
 
-    // ========================================================================
     // journal 加密与推送（R-inklog-002）
     // nonce 唯一性策略（实现前固化）：随机 96-bit/段，CSPRNG 生成；
     // 单测以同 key 跨段/跨文件收集 nonce 断言无重复。
     // key 来源优先级：env > 配置文件；配置文件 key unix 权限必须 0600。
     // 显式启用加密而 key 缺失/无效：构造期显性失败（Err），禁止静默明文。
-    // ========================================================================
 
     use base64::{Engine as _, engine::general_purpose};
     use serial_test::serial;
@@ -1570,7 +1568,7 @@ mod tests {
         assert_eq!(records.len(), 1);
 
         // 仅 key file（不注入 env）：解密失败 → skipped（证明写入用的是 env key）。
-        // 注意：上方 env_reader.replay() 已清空文件，此处 spill 重建头后
+        // 注意：上方 env_reader.replay 已清空文件，此处 spill 重建头后
         // 仅 1 段（密钥材料在 writer 实例内缓存，仍为 env key）。
         unsafe {
             std::env::remove_var("INKLOG_TEST_JKEY_PRIO");
@@ -1940,9 +1938,7 @@ mod tests {
         }
     }
 
-    // ------------------------------------------------------------------
     // TcpJournalPusher：断线缓冲 + 自动重连 + 满则丢最旧（net-sink 范式）
-    // ------------------------------------------------------------------
 
     /// 后台 TCP 服务端：收集收到的行；首个连接可按阈值断开模拟对端重启。
     struct PushTestServer {

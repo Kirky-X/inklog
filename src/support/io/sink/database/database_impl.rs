@@ -37,7 +37,7 @@ pub(super) const MAX_BUFFER_SIZE: usize = 65536;
 pub(super) const MAX_DB_WORKER_LIMIT: usize = 4;
 
 /// Compute the effective upper bound for database worker threads/connections.
-/// Returns `min(num_cpus::get().max(1), MAX_DB_WORKER_LIMIT)`.
+/// Returns `min(num_cpus::get.max(1), MAX_DB_WORKER_LIMIT)`.
 pub(crate) fn effective_db_worker_limit() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
@@ -80,7 +80,7 @@ impl DatabaseSink {
     /// # 架构说明
     ///
     /// 此方法用于测试场景，允许传入配置参数。
-    /// 在生产环境中，应使用 `new()` 方法遵循 DI 架构。
+    /// 在生产环境中，应使用 `new` 方法遵循 DI 架构。
     pub fn new_with_config(
         database: Arc<dyn crate::integrations::infra::Database>,
         config: Option<crate::DatabaseSinkConfig>,

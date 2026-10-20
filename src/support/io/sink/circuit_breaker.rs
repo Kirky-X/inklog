@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(cb.state(), CircuitState::Open);
 
         std::thread::sleep(std::time::Duration::from_millis(150));
-        // Must call can_execute() to trigger Open -> HalfOpen transition
+        // Must call can_execute to trigger Open -> HalfOpen transition
         assert!(cb.can_execute());
         assert_eq!(cb.state(), CircuitState::HalfOpen);
 

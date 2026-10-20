@@ -34,7 +34,7 @@ use inklog::{ConsoleSinkConfig, FileSinkConfig, InklogConfig, LoggerManager};
 #[allow(unused_imports)]
 use tempfile::TempDir;
 
-// ============ 配置单元测试 (unit::config) ============
+// 配置单元测试 (unit::config)
 
 #[cfg(not(any(
     feature = "sqlite",
@@ -67,7 +67,7 @@ fn test_builder() {
         .build();
 }
 
-// ============ 输出端单元测试 (unit::sink) ============
+// 输出端单元测试 (unit::sink)
 
 #[cfg(not(any(
     feature = "sqlite",
@@ -119,8 +119,8 @@ async fn test_file_sink_rotation() {
     assert!(entries.count() >= 1);
 }
 
-// ============ 归档单元测试 (unit::archive) ============
+// 归档单元测试 (unit::archive)
 // (归档单元测试的具体实现待补充)
 
-// ============ CLI 单元测试 (unit::cli) ============
+// CLI 单元测试 (unit::cli)
 // (CLI 单元测试的具体实现待补充)

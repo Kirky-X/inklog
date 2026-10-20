@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-//! 配置 inspect 示例：sinks_enabled() + LoggerManager::load()
+//! 配置 inspect 示例：sinks_enabled + LoggerManager::load
 //!
-//! 演示 `InklogConfig::sinks_enabled()` 和 `LoggerManager::load()` 的使用：
+//! 演示 `InklogConfig::sinks_enabled` 和 `LoggerManager::load` 的使用：
 //!
-//! 1. `sinks_enabled()` 返回已启用的 Sink 列表
-//! 2. `LoggerManager::load()` 从搜索路径自动加载配置并初始化
+//! 1. `sinks_enabled` 返回已启用的 Sink 列表
+//! 2. `LoggerManager::load` 从搜索路径自动加载配置并初始化
 //! 3. 配置检查工作流
 //!
 //! # 运行
@@ -49,12 +49,12 @@ fn db_enabled(c: &Option<DatabaseSinkConfig>) -> bool {
     c.as_ref().is_some_and(|c| c.enabled)
 }
 
-/// 演示所有 Sink 禁用时 sinks_enabled() 返回空
+/// 演示所有 Sink 禁用时 sinks_enabled 返回空
 fn show_sinks_enabled_all_disabled() {
     print_section(&tr("example-config-inspect-example-1-all-sinks-disabled"));
 
-    // 注意：InklogConfig::default() 的 console_sink 默认启用，直接取
-    // sinks_enabled() 会得到 ["console"]；要得到空列表必须显式禁用全部 Sink
+    // 注意：InklogConfig::default 的 console_sink 默认启用，直接取
+    // sinks_enabled 会得到 ["console"]；要得到空列表必须显式禁用全部 Sink
     let config = InklogConfig {
         console_sink: Some(ConsoleSinkConfig {
             enabled: false,
@@ -287,7 +287,7 @@ fn show_sinks_enabled_multi_sink() {
     );
 }
 
-/// 演示 LoggerManager::load() 的使用方式
+/// 演示 LoggerManager::load 的使用方式
 fn show_logger_manager_load_usage() {
     print_section(&tr("example-config-inspect-example-4-loggermanager-load"));
 

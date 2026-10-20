@@ -8,7 +8,7 @@ use super::query::QueryArgs;
 use super::{Cli, Commands, decrypt, generate, query, validate};
 
 /// 展开 anyhow 因果链为单行错误信息：每层 `InklogError` 走本地化文案，
-/// 其余层按 Display 原样。避免 `to_string()` 只取最外层而吞掉底层明细
+/// 其余层按 Display 原样。避免 `to_string` 只取最外层而吞掉底层明细
 /// （如密钥长度、密码长度诊断）。
 pub(super) fn format_error_chain(e: &anyhow::Error) -> String {
     e.chain()
@@ -259,9 +259,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
     }
 }
 
-// ============================================================================
 // 全子命令 --json + 稳定退出码（0/1/2）契约单测
-// ============================================================================
 
 /// `verify-chain`：重算 HMAC 链并核对 manifest 完整性。
 ///

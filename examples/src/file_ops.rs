@@ -65,7 +65,7 @@ pub fn create_log_record(level: &str, message: &str, target: &str) -> LogRecord 
 /// 把多个级别的日志按顺序写入 sink，并 flush。
 ///
 /// 每个级别生成一条记录，消息使用 `format!("this is a {} level log", level)`。
-/// 返回写入的记录数（等于 `levels.len()`），便于调用方做完整性检查。
+/// 返回写入的记录数（等于 `levels.len`），便于调用方做完整性检查。
 pub async fn write_level_records(sink: &dyn LogSink, levels: &[&str]) -> Result<usize> {
     let mut written = 0;
     for level in levels {

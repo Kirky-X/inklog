@@ -14,11 +14,11 @@
 //! let mut chain = ArchiveChain::new(b"archive-chain-key");
 //! chain.append(r#"{"kind":"rotate","file":"app.001.log"}"#);
 //! chain.append(r#"{"kind":"rotate","file":"app.002.log"}"#);
-//! assert!(chain.verify());
+//! assert!(chain.verify);
 //!
 //! // 篡改任一事件 → 校验失败
-//! let mut entries = chain.entries().to_vec();
-//! entries[0].event = r#"{"kind":"rotate","file":"evil.log"}"#.to_string();
+//! let mut entries = chain.entries.to_vec;
+//! entries[0].event = r#"{"kind":"rotate","file":"evil.log"}"#.to_string;
 //! assert!(!ArchiveChain::verify_entries(&entries, b"archive-chain-key"));
 //! ```
 
@@ -235,7 +235,6 @@ mod tests {
         chain.append(&event("b", "2"));
         chain.append(&event("c", "3"));
 
-        // 删除中间条目
         let mut entries = chain.entries().to_vec();
         entries.remove(1);
         assert!(

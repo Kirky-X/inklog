@@ -5,8 +5,8 @@
 //! 演示 `inklog::InklogError` 和 `inklog::InklogResult` 的使用：
 //!
 //! 1. 所有错误变体的构造与 Display
-//! 2. `safe_message()` 敏感数据自动脱敏
-//! 3. `localized_message()` 国际化错误消息
+//! 2. `safe_message` 敏感数据自动脱敏
+//! 3. `localized_message` 国际化错误消息
 //! 4. 便捷构造方法（`database_error`、`encryption_error`）
 //! 5. From trait 自动转换（io::Error、serde_json::Error、toml::Error）
 //! 6. 实际错误处理模式
@@ -130,7 +130,7 @@ fn show_display_trait() {
     println!("\n  ✓ Display format: \"{{prefix}}: {{detail}}\"");
 }
 
-/// 展示 safe_message() 敏感数据脱敏
+/// 展示 safe_message 敏感数据脱敏
 fn show_safe_message() {
     print_section(&tr("example-error-handling-3-safe-message-sensitive-data"));
 
@@ -234,7 +234,7 @@ fn show_safe_message() {
     );
 }
 
-/// 展示 localized_message() 国际化
+/// 展示 localized_message 国际化
 fn show_localized_message() {
     print_section(&tr("example-error-handling-4-localized-message"));
 

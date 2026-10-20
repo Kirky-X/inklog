@@ -175,7 +175,6 @@ async fn test_log_to_file() {
 
     let _ = logger.shutdown();
 
-    // 验证文件存在且有内容
     assert!(log_file.exists());
     let contents = std::fs::read_to_string(&log_file).unwrap();
     assert!(

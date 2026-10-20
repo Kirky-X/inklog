@@ -96,7 +96,6 @@ fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
         ));
     }
 
-    // 验证文件名部分不含路径遍历
     if let Some(file_name) = output_path.file_name() {
         let name_str = file_name.to_string_lossy();
         if name_str.contains('\0') || name_str.contains('/') || name_str.contains('\\') {
@@ -149,7 +148,6 @@ fn validate_output_path(output_path: &Path, base_dir: &Path) -> Result<()> {
 
 /// 验证 glob 模式是否安全
 fn validate_glob_pattern(pattern: &str) -> Result<()> {
-    // 检查绝对路径
     if pattern.starts_with('/') || pattern.starts_with('\\') {
         return Err(anyhow!(
             "{}",
@@ -157,7 +155,6 @@ fn validate_glob_pattern(pattern: &str) -> Result<()> {
         ));
     }
 
-    // 检查路径遍历
     if pattern.contains("..") || pattern.contains("~") {
         return Err(anyhow!(
             "{}",
@@ -179,7 +176,6 @@ fn validate_glob_pattern(pattern: &str) -> Result<()> {
         return Err(anyhow!("{}", inklog::i18n::tr("cli-decrypt-err-glob-abs")));
     }
 
-    // 检查组件
     for component in path.components() {
         match component {
             std::path::Component::ParentDir => {

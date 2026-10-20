@@ -23,13 +23,13 @@
 //! ```rust
 //! use inklog::Metrics;
 //!
-//! let metrics = Metrics::new();
+//! let metrics = Metrics::new;
 //!
 //! // 记录日志写入
-//! metrics.inc_logs_written();
+//! metrics.inc_logs_written;
 //!
 //! // 记录错误
-//! metrics.inc_sink_error();
+//! metrics.inc_sink_error;
 //!
 //! // 更新 Sink 健康状态
 //! metrics.update_sink_health("console", true, None);
@@ -298,19 +298,19 @@ pub struct HealthStatus {
 /// Health monitoring metrics collector.
 ///
 /// This struct provides the following accessor methods for reading counter values:
-/// - [`logs_written()`](struct.Metrics.html#method.logs_written) - Total logs successfully written
-/// - [`logs_dropped()`](struct.Metrics.html#method.logs_dropped) - Total logs dropped
-/// - [`channel_blocked()`](struct.Metrics.html#method.channel_blocked) - Total channel blocking events
-/// - [`sink_errors()`](struct.Metrics.html#method.sink_errors) - Total sink errors
+/// - [`logs_written`](struct.Metrics.html#method.logs_written) - Total logs successfully written
+/// - [`logs_dropped`](struct.Metrics.html#method.logs_dropped) - Total logs dropped
+/// - [`channel_blocked`](struct.Metrics.html#method.channel_blocked) - Total channel blocking events
+/// - [`sink_errors`](struct.Metrics.html#method.sink_errors) - Total sink errors
 ///
 /// # Example
 ///
 /// ```rust
 /// use inklog::Metrics;
 ///
-/// let metrics = Metrics::new();
-/// metrics.inc_logs_written();
-/// assert_eq!(metrics.logs_written(), 1);
+/// let metrics = Metrics::new;
+/// metrics.inc_logs_written;
+/// assert_eq!(metrics.logs_written, 1);
 /// ```
 #[derive(Debug)]
 pub struct Metrics {
@@ -912,7 +912,7 @@ impl Default for FallbackConfig {
 /// use inklog::SinkHealthMonitor;
 /// use inklog::FallbackConfig;
 ///
-/// let config = FallbackConfig::default();
+/// let config = FallbackConfig::default;
 /// let monitor = SinkHealthMonitor::new(config);
 ///
 /// // 检查并可能触发降级
@@ -1580,7 +1580,6 @@ mod sink_health_monitor_tests {
 
         assert!(monitor.is_any_in_fallback());
 
-        // 重置
         monitor.reset();
 
         assert!(!monitor.is_any_in_fallback());
@@ -2348,9 +2347,7 @@ mod metrics_tests {
     }
 }
 
-// ============================================================================
 // 原生直方图导出
-// ============================================================================
 
 #[cfg(test)]
 mod histogram_export_tests {

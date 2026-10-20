@@ -22,11 +22,11 @@ use async_trait::async_trait;
 /// ```ignore
 /// use inklog::infrastructure::Cache;
 ///
-/// async fn example(cache: &dyn Cache) -> Result<(), Box<dyn std::error::Error>> {
-///     cache.set("key", "value".to_string()).await?;
+/// async fn example(cache: &dyn Cache) -> Result<, Box<dyn std::error::Error>> {
+///     cache.set("key", "value".to_string).await?;
 ///     let value = cache.get("key").await?;
-///     assert_eq!(value, Some("value".to_string()));
-///     Ok(())
+///     assert_eq!(value, Some("value".to_string));
+///     Ok()
 /// }
 /// ```
 #[async_trait]
@@ -53,7 +53,7 @@ pub trait Cache: Send + Sync {
     ///
     /// # 返回
     ///
-    /// 成功返回 `Ok(())`，失败返回 `Err(InklogError)`
+    /// 成功返回 `Ok()`，失败返回 `Err(InklogError)`
     async fn set(&self, key: &str, value: String) -> Result<(), InklogError>;
 
     /// 删除缓存值
@@ -85,9 +85,7 @@ pub trait Cache: Send + Sync {
     async fn exists(&self, key: &str) -> Result<bool, InklogError>;
 }
 
-// ============================================================================
 // OxCacheAdapter - oxcache 适配器实现
-// ============================================================================
 
 #[cfg(feature = "cache")]
 use oxcache::Cache as OxCache;
@@ -107,14 +105,14 @@ use std::collections::HashMap;
 /// use inklog::infrastructure::cache::{Cache, OxCacheAdapter};
 ///
 /// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let cache = OxCacheAdapter::new()?;
+/// async fn main -> Result<, Box<dyn std::error::Error>> {
+///     let cache = OxCacheAdapter::new?;
 ///
-///     cache.set("user:1", "Alice".to_string()).await?;
+///     cache.set("user:1", "Alice".to_string).await?;
 ///     let name = cache.get("user:1").await?;
-///     assert_eq!(name, Some("Alice".to_string()));
+///     assert_eq!(name, Some("Alice".to_string));
 ///
-///     Ok(())
+///     Ok()
 /// }
 /// ```
 #[cfg(feature = "cache")]
@@ -143,7 +141,7 @@ impl OxCacheAdapter {
     /// 使用构建器创建适配器
     ///
     /// 提供更细粒度的配置选项，如 TTL、容量等。
-    /// 必须在 async 上下文中调用 `build().await`。
+    /// 必须在 async 上下文中调用 `build.await`。
     ///
     /// # 示例
     ///
@@ -151,12 +149,12 @@ impl OxCacheAdapter {
     /// use std::time::Duration;
     /// use inklog::infrastructure::cache::OxCacheAdapter;
     ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let cache = OxCacheAdapter::builder()
+    /// # async fn example -> Result<, Box<dyn std::error::Error>> {
+    /// let cache = OxCacheAdapter::builder
     ///     .ttl(Duration::from_secs(3600))
-    ///     .build()
+    ///     .build
     ///     .await?;
-    /// # Ok(())
+    /// # Ok()
     /// # }
     /// ```
     pub fn builder() -> OxCacheAdapterBuilder {
@@ -236,13 +234,12 @@ impl OxCacheAdapterBuilder {
     ///
     /// 将配置的 TTL 和容量应用到 oxcache 后端。
     /// 必须在 async 上下文中调用，因为 oxcache 0.2.0 的
-    /// `CacheBuilder::build()` 是异步方法。
+    /// `CacheBuilder::build` 是异步方法。
     ///
     /// # 错误
     ///
     /// - `InklogError::CacheError` - oxcache 构建失败
     pub async fn build(self) -> Result<OxCacheAdapter, InklogError> {
-        // Validate builder parameters
         if let Some(ttl) = self.ttl
             && ttl.is_zero()
         {
@@ -271,9 +268,7 @@ impl OxCacheAdapterBuilder {
     }
 }
 
-// ============================================================================
 // MockCache - 单元测试 Mock 实现
-// ============================================================================
 
 /// Mock 缓存实现，用于单元测试
 ///
@@ -286,16 +281,16 @@ impl OxCacheAdapterBuilder {
 /// use inklog::infrastructure::cache::{Cache, MockCache};
 ///
 /// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let cache = MockCache::new();
+/// async fn main -> Result<, Box<dyn std::error::Error>> {
+///     let cache = MockCache::new;
 ///
-///     cache.set("key", "value".to_string()).await?;
-///     assert_eq!(cache.get("key").await?, Some("value".to_string()));
+///     cache.set("key", "value".to_string).await?;
+///     assert_eq!(cache.get("key").await?, Some("value".to_string));
 ///
 ///     // 带延迟的 Mock
 ///     let delayed_cache = MockCache::with_delay(100);
-///     delayed_cache.set("slow", "op".to_string()).await?;
-///     Ok(())
+///     delayed_cache.set("slow", "op".to_string).await?;
+///     Ok()
 /// }
 /// ```
 #[cfg(any(test, feature = "test-utils"))]
@@ -315,7 +310,7 @@ impl MockCache {
     /// # 示例
     ///
     /// ```ignore
-    /// let cache = MockCache::new();
+    /// let cache = MockCache::new;
     /// ```
     pub fn new() -> Self {
         Self {
@@ -393,9 +388,7 @@ impl Cache for MockCache {
 mod tests {
     use super::*;
 
-    // ============================================================================
     // OxCacheAdapter 测试
-    // ============================================================================
 
     #[cfg(feature = "cache")]
     #[tokio::test]
@@ -451,7 +444,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[tokio::test]
     async fn test_oxcache_adapter_builder_default() {
-        // builder().build() 不带配置应等价于 new()
+        // builder.build 不带配置应等价于 new
         let cache = OxCacheAdapter::builder()
             .build()
             .await
@@ -489,9 +482,7 @@ mod tests {
         assert!(cache.exists("ckey").await.expect("exists failed"));
     }
 
-    // ============================================================================
     // MockCache 测试
-    // ============================================================================
 
     #[tokio::test]
     async fn test_mock_cache_basic_operations() {
@@ -606,7 +597,6 @@ mod tests {
             handles.push(handle);
         }
 
-        // 等待所有写入完成
         for handle in handles {
             handle.await.unwrap();
         }
@@ -617,9 +607,7 @@ mod tests {
         }
     }
 
-    // ============================================================================
     // Default 实现测试 - 覆盖 MockCache::default
-    // ============================================================================
 
     #[tokio::test]
     async fn test_mock_cache_default_equals_new() {
@@ -639,9 +627,7 @@ mod tests {
         );
     }
 
-    // ============================================================================
     // MockCache with_delay 覆盖 delete/exists 延迟分支
-    // ============================================================================
 
     #[tokio::test]
     async fn test_mock_cache_with_delay_delete_measures_delay() {
@@ -684,9 +670,7 @@ mod tests {
         );
     }
 
-    // ============================================================================
     // OxCacheAdapter TTL 过期与边界场景测试
-    // ============================================================================
 
     #[cfg(feature = "cache")]
     #[tokio::test]
@@ -709,7 +693,6 @@ mod tests {
             Some("expiring_value".to_string())
         );
 
-        // 等待 TTL 过期
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         // 过期后应返回 None

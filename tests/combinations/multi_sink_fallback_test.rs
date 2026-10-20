@@ -16,7 +16,7 @@ mod multi_sink_fallback {
     use tempfile::TempDir;
     use tracing_subscriber::layer::SubscriberExt;
 
-    // === 降级状态机测试（SinkHealthMonitor） ===
+    // 降级状态机测试（SinkHealthMonitor）
 
     #[test]
     fn test_monitor_initial_state() {
@@ -147,7 +147,7 @@ mod multi_sink_fallback {
         assert_eq!(config.max_retries, 5);
     }
 
-    // === 文件到数据库降级测试 ===
+    // 文件到数据库降级测试
 
     // 建真实 logger 的用例必须串行：logger 构建会向进程级 OPS_EVENT_HUB 注册
     // 通道且不注销，降级风暴的 ops 广播会写入并行测试的 sink（曾有加密文件
@@ -221,7 +221,6 @@ mod multi_sink_fallback {
         tracing::info!("Testing fallback from file to database");
         tracing::warn!("This should be logged via fallback mechanism");
 
-        // 等待处理
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         // 验证日志仍然被记录（通过降级路径）
@@ -231,7 +230,7 @@ mod multi_sink_fallback {
         let _ = logger.shutdown();
     }
 
-    // === 数据库到文件降级测试 ===
+    // 数据库到文件降级测试
 
     #[tokio::test]
     #[serial]
@@ -299,7 +298,7 @@ mod multi_sink_fallback {
         );
     }
 
-    // === 所有 Sink 不可用时的处理 ===
+    // 所有 Sink 不可用时的处理
 
     #[tokio::test]
     #[serial]
@@ -358,7 +357,7 @@ mod multi_sink_fallback {
         );
     }
 
-    // === 并发降级场景测试 ===
+    // 并发降级场景测试
 
     #[tokio::test]
     #[serial]
@@ -444,7 +443,6 @@ mod multi_sink_fallback {
             handle.await.unwrap();
         }
 
-        // 验证所有消息被处理
         assert_eq!(counter.load(Ordering::SeqCst), 100);
 
         tracing::info!("Concurrent fallback test completed");

@@ -29,13 +29,13 @@
 //!     cache: &dyn Cache,
 //!     config: &dyn Config,
 //!     db: &dyn Database,
-//! ) -> Result<(), Box<dyn std::error::Error>> {
+//!) -> Result<, Box<dyn std::error::Error>> {
 //!     // 从配置获取参数
 //!     let batch_size = config.get_int("batch.size").unwrap_or(100);
 //!
 //!     // 检查数据库健康状态
-//!     if !db.is_healthy().await {
-//!         return Err("Database unhealthy".into());
+//!     if !db.is_healthy.await {
+//!         return Err("Database unhealthy".into);
 //!     }
 //!
 //!     // 使用缓存
@@ -43,14 +43,14 @@
 //!         println!("Last sync: {}", cached);
 //!     }
 //!
-//!     Ok(())
+//!     Ok()
 //! }
 //!
 //! // 使用具体实现
 //! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let cache = OxCacheAdapter::new()?;
-//!     let config = InklogConfigAdapter::new()?;
+//! async fn main -> Result<, Box<dyn std::error::Error>> {
+//!     let cache = OxCacheAdapter::new?;
+//!     let config = InklogConfigAdapter::new?;
 //!     let db = DbNexusAdapter::new("postgres://localhost/logs", 10).await?;
 //!
 //!     process_logs(&cache, &config, &db).await
@@ -79,16 +79,12 @@ pub use config::InklogConfigAdapter;
 #[cfg(feature = "database")]
 pub use database::DbNexusAdapter;
 
-// ============================================================================
 // 构建器导出
-// ============================================================================
 #[cfg(feature = "cache")]
 pub use cache::OxCacheAdapterBuilder;
 
-// ============================================================================
 // Mock 实现导出（仅测试面可见：src 内联测试经 cfg(test)；外部消费者显式
 // 启用 test-utils feature——生产 feature 组合均不携带，生产二进制不含 mock）
-// ============================================================================
 #[cfg(any(test, feature = "test-utils"))]
 pub use cache::MockCache;
 #[cfg(any(test, feature = "test-utils"))]

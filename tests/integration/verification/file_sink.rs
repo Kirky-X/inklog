@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 
-// ============ File Helper Functions ============
+// File Helper Functions
 
 /// Finds a file with the specified extension in a directory
 fn find_file_with_extension(dir: &TempDir, extension: &str) -> Option<PathBuf> {
@@ -49,7 +49,7 @@ fn verify_encrypted_file(file_path: &PathBuf) {
     );
 }
 
-// ============ Verification Tests ============
+// Verification Tests
 
 #[test]
 fn verify_file_sink_compression() {
@@ -79,7 +79,6 @@ fn verify_file_sink_compression() {
             .expect("Failed to write log record during rotation");
     }
 
-    // Wait for background compression
     std::thread::sleep(Duration::from_millis(1000));
 
     let zst_path = find_file_with_extension(&temp_dir, "zst").expect("No compressed file found");

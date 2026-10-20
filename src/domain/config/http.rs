@@ -4,9 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ============================================================================
 // HttpServerConfig - HTTP health/metrics server settings
-// ============================================================================
 
 /// HTTP server configuration for health checks and metrics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,9 +60,7 @@ impl Default for HttpServerConfig {
     }
 }
 
-// ============================================================================
 // HttpAuthConfig - HTTP authentication
-// ============================================================================
 
 /// HTTP authentication configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,9 +85,7 @@ impl Default for HttpAuthConfig {
     }
 }
 
-// ============================================================================
 // TlsConfig - TLS configuration
-// ============================================================================
 
 /// TLS configuration for the HTTP server.
 ///
@@ -132,9 +126,7 @@ impl TlsConfig {
     }
 }
 
-// ============================================================================
 // HttpErrorMode - HTTP server error handling mode
-// ============================================================================
 
 /// HTTP server error handling mode.
 ///

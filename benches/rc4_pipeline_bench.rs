@@ -29,9 +29,7 @@ fn sample_record(message: &str) -> LogRecord {
     record
 }
 
-// ============================================================================
 // 写入路径：模板渲染（text）与脱敏（masking）
-// ============================================================================
 
 fn bench_write_path(c: &mut Criterion) {
     let mut group = c.benchmark_group("write_path");
@@ -55,9 +53,7 @@ fn bench_write_path(c: &mut Criterion) {
     group.finish();
 }
 
-// ============================================================================
 // 序列化路径：LogRecord JSON / OTLP 批量体
-// ============================================================================
 
 fn bench_serialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("serialization");
@@ -88,9 +84,7 @@ fn bench_serialization(c: &mut Criterion) {
     group.finish();
 }
 
-// ============================================================================
 // 加密路径：PBKDF2 派生与 AES-256-GCM roundtrip
-// ============================================================================
 
 fn bench_encryption(c: &mut Criterion) {
     use aes_gcm::aead::Aead;

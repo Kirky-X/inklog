@@ -17,16 +17,14 @@ use super::performance::PerformanceConfig;
 use super::rate_limit::RateLimitConfig;
 use super::sampling::SamplingConfig;
 
-// ============================================================================
 // InklogConfig - Root configuration struct
-// ============================================================================
 
 /// Root configuration for inklog logger.
 ///
 /// # Loading
 ///
 /// Configuration can be loaded from:
-/// - TOML files (via `from_search_paths()`)
+/// - TOML files (via `from_search_paths`)
 /// - Environment variables (prefix `INKLOG_`)
 /// - Defaults (lowest priority)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,7 +393,7 @@ fn interpret_env_value(
     }
 }
 
-/// 路径类 env 值的安全判定：含 `ParentDir` 组件或 NUL 字节时返回 `Some(())`。
+/// 路径类 env 值的安全判定：含 `ParentDir` 组件或 NUL 字节时返回 `Some()`。
 fn unsafe_path_reason(raw: &str) -> Option<()> {
     let has_traversal = std::path::PathBuf::from(raw)
         .components()
@@ -404,7 +402,7 @@ fn unsafe_path_reason(raw: &str) -> Option<()> {
 }
 
 /// 推断值须为目标无符号整型可容纳的整数字面量（否则按「不可解析」保留现值——
-/// 与旧实现 `parse().unwrap_or(current)` 的静默回退一致）。
+/// 与旧实现 `parse.unwrap_or(current)` 的静默回退一致）。
 fn fit_uint<T>(inferred: &confers::types::ConfigValue) -> Option<T>
 where
     T: TryFrom<i64> + TryFrom<u64>,
@@ -773,10 +771,10 @@ impl InklogConfig {
 
     /// Normalize configuration values by auto-correcting invalid settings.
     ///
-    /// Unlike `validate()` which returns errors, this method adjusts values
-    /// in-place with warnings. Call before `validate()` to auto-fix common
+    /// Unlike `validate` which returns errors, this method adjusts values
+    /// in-place with warnings. Call before `validate` to auto-fix common
     /// misconfigurations. Problems that cannot be auto-corrected are logged
-    /// here and surface as errors from `validate()`.
+    /// here and surface as errors from `validate`.
     pub fn normalize(&mut self) {
         fn warn_validation(err: String) {
             let mut args = crate::i18n::MsgArgs::new();
@@ -807,7 +805,7 @@ impl InklogConfig {
     /// Checks for common misconfigurations and returns a descriptive error
     /// for the first problem found.
     pub fn validate(&self) -> Result<(), InklogError> {
-        // --- Performance ---
+        // Performance
         if self.performance.channel_capacity == 0 {
             return Err(InklogError::ConfigError(crate::i18n::tr(
                 "config-channel_capacity_zero",
@@ -834,14 +832,14 @@ impl InklogConfig {
             )));
         }
 
-        // --- Global identity fields ---
+        // Global identity fields
         // 身份字段是本加载链的硬校验出口（normalize 只 warn）：空白值/控制
         // 字符在此以 Err 拒绝加载
         self.global
             .validate_identity()
             .map_err(InklogError::ConfigError)?;
 
-        // --- Global log level ---
+        // Global log level
         if !crate::LogLevel::is_valid_level(&self.global.level) {
             let mut args = crate::i18n::MsgArgs::new();
             args.set("level", self.global.level.clone());
@@ -852,7 +850,7 @@ impl InklogConfig {
             )));
         }
 
-        // --- File sink ---
+        // File sink
         if let Some(ref file) = self.file_sink
             && file.enabled
         {
@@ -869,7 +867,7 @@ impl InklogConfig {
             file.validate().map_err(InklogError::ConfigError)?;
         }
 
-        // --- Database sink ---
+        // Database sink
         if let Some(ref db) = self.database_sink
             && db.enabled
             && db.driver != DatabaseDriver::SQLite
@@ -881,7 +879,7 @@ impl InklogConfig {
             )));
         }
 
-        // --- HTTP server ---
+        // HTTP server
         if let Some(ref http) = self.http_server
             && http.enabled
         {
@@ -911,7 +909,7 @@ impl InklogConfig {
             }
         }
 
-        // --- Console sink stderr_levels ---
+        // Console sink stderr_levels
         if let Some(ref console) = self.console_sink
             && let Some(invalid) = console.invalid_stderr_levels().first()
         {
@@ -924,10 +922,10 @@ impl InklogConfig {
             )));
         }
 
-        // --- Sampling policy ---
+        // Sampling policy
         self.sampling.validate()?;
 
-        // --- Per-target rate limit quota groups ---
+        // Per-target rate limit quota groups
         self.rate_limit.validate()?;
 
         Ok(())
@@ -1303,9 +1301,9 @@ mod tests {
         config.global.fallback_max_retries = 0;
         config.performance.expand_threshold_percent = 200;
         config.normalize();
-        // global.validate() should reset retries
+        // global.validate should reset retries
         assert_eq!(config.global.fallback_max_retries, 1);
-        // performance.validate() should clamp
+        // performance.validate should clamp
         assert_eq!(config.performance.expand_threshold_percent, 100);
     }
 
@@ -1626,7 +1624,7 @@ level = "debug"
             batch_size: 0,
             ..Default::default()
         });
-        // normalize should call db.validate() without panic
+        // normalize should call db.validate without panic
         config.normalize();
     }
 

@@ -5,8 +5,8 @@
 //! 演示 `inklog::RateLimiter` 令牌桶算法的使用：
 //!
 //! Example 1: creating the rate limiter（指定每秒令牌数）
-//! 2. `try_acquire()` 获取令牌（允许/拒绝）
-//! 3. `dropped_count()` 统计被限流的日志数
+//! 2. `try_acquire` 获取令牌（允许/拒绝）
+//! 3. `dropped_count` 统计被限流的日志数
 //! Example 4: automatic token refill（等待后恢复）
 //! 5. 与日志写入结合的限流模式
 //!

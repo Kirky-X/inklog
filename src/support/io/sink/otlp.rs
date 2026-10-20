@@ -13,10 +13,10 @@
 //! # Example
 //! ```ignore
 //! let sink = OtlpSink::new(OtlpConfig {
-//!     endpoint: "http://otel-collector:4318/v1/logs".into(),
-//!     ..Default::default()
+//!     endpoint: "http://otel-collector:4318/v1/logs".into,
+//!     ..Default::default
 //! })?;
-//! LoggerManager::builder().add_sink(Arc::new(sink)).build().await?;
+//! LoggerManager::builder.add_sink(Arc::new(sink)).build.await?;
 //! ```
 
 use std::sync::Mutex;

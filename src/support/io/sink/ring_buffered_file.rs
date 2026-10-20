@@ -34,7 +34,7 @@ pub enum BackpressureStrategy {
 
 /// 轮转参数（size/time 任一触发即轮转）。
 ///
-/// **时间语义为滚动间隔近似**：自上次轮转起算（`last_rotation.elapsed()`），
+/// **时间语义为滚动间隔近似**：自上次轮转起算（`last_rotation.elapsed`），
 /// 与 FileSink 的日历对齐不同（FileSink daily = 次日零点、monthly = 次月
 /// 同日零点，见 `calculate_next_rotation_time`）。能力矩阵与文档按
 /// 「滚动近似」如实标注，不宣称一致。
@@ -438,7 +438,7 @@ impl ChannelBufferedFileSink {
             }
 
             // Drain remaining messages from the channel before exiting.
-            // Use try_recv() to avoid blocking after shutdown flag is set.
+            // Use try_recv to avoid blocking after shutdown flag is set.
             // R-inklog-003：drain 与主循环同一轮转判定与 current_file_bytes
             // 记账——此前 drain 绕过 rotation_due，shutdown 时通道积压可无限
             // 越过 max_size（size 轮转断言偶发失败、活动文件超限的根因）。
@@ -794,7 +794,7 @@ impl ChannelBufferedFileSink {
 
     /// Block 策略的 async 写入路径。
     ///
-    /// 用 `try_send` + 短退避重试代替阻塞式 `sender.send()`：channel 满时
+    /// 用 `try_send` + 短退避重试代替阻塞式 `sender.send`：channel 满时
     /// 让出线程休眠 1ms 后重试，避免卡死 tokio worker 线程。channel 断开
     /// （sink 关闭中）时不计为丢弃，返回 false。
     async fn write_blocking(&self, record: &LogRecord) -> bool {
@@ -1430,11 +1430,9 @@ mod tests {
         sink.shutdown().await.unwrap();
     }
 
-    // ========================================================================
     // try_write 错误分支覆盖
     // Disconnected（channel 断开）在三种策略下都不计入 dropped_count，
     // 写入返回 false；DropOldest retry 失败仍计入丢弃。
-    // ========================================================================
 
     /// 辅助函数：创建 sink 并 shutdown，返回可变的 sink 以便替换内部字段
     async fn make_shutdown_sink(
@@ -1542,9 +1540,9 @@ mod tests {
     async fn test_try_write_drop_oldest_retry_failure() {
         // 覆盖 DropOldest 策略下重试 try_send 失败的分支（行 247-248）
         // 使用 capacity=0 的 rendezvous channel：
-        //   - try_send 总是返回 Full（无缓冲区）
-        //   - try_recv 总是返回 Empty（无数据可收）
-        // 因此 try_recv.is_ok() 为 false，不增加 dropped_count
+        // - try_send 总是返回 Full（无缓冲区）
+        // - try_recv 总是返回 Empty（无数据可收）
+        // 因此 try_recv.is_ok 为 false，不增加 dropped_count
         // 重试 try_send 仍返回 Full，命中 Err(_) 分支
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("drop_oldest_retry.log");
@@ -1708,9 +1706,7 @@ mod tests {
         assert!(data.contains("drain-second-4"));
     }
 
-    // ========================================================================
     // IO 线程 write_all 错误路径（行 169）- 仅 Linux，使用 /dev/full
-    // ========================================================================
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
@@ -1743,7 +1739,6 @@ mod tests {
         let record = make_record(&large_msg);
         sink.write(&record).await.expect("write should not error");
 
-        // 等待 IO 线程处理
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let m = sink.metrics();
@@ -1758,11 +1753,9 @@ mod tests {
         let _ = sink.shutdown().await;
     }
 
-    // ========================================================================
     // R-inklog-003：CBFS 高级能力（轮转 size/time、压缩、加密、审计链、
     // 保留清理）。manager 回落判定相应收窄后，此处为唯一文件写路径行为
     // 基准（FileSink 仅保留 fsync/JSON 出站/磁盘空间守卫）。
-    // ========================================================================
 
     /// 隔离保留清理干扰的测试配置：retention 拉满（3650 天 / 100 个 /
     /// 30 天周期），轮转产物不会被清理线程误删。
@@ -2202,12 +2195,10 @@ mod tests {
         sink.shutdown().await.unwrap();
     }
 
-    // ========================================================================
     // 新旧路径行为对拍（R-inklog-003）：同一批记录经 FileSink 与 CBFS
     // 落盘后（level, target, message) 三元组集合一致。
     // 注：两侧时间戳渲染格式不同（FileSink rfc3339 / 模板毫秒 UTC），
     // 对拍剥离时间戳；格式语义差异由模板文档承载。
-    // ========================================================================
 
     #[tokio::test]
     async fn test_parity_file_sink_vs_cbfs() {
