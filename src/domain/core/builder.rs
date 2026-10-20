@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// 用于依赖注入模式，允许外部提供缓存、配置和数据库实现。
 /// 所有字段都是可选的，未提供的依赖将使用默认实现；但结构体字面量必须列出全部
 /// 字段（无 `#[serde(default)]` 之类的机制），无第三方 sink 时 `custom_sinks` 置
-/// `Vec::new`，也可用 `..Default::default` 兜底。本示例标 `ignore`（Mock 类型随
+/// `Vec::new()`，也可用 `..Default::default()` 兜底。本示例标 `ignore`（Mock 类型随
 /// `test-utils` 特性门控，不参与 doctest 编译），字段形状以本结构体定义为准。
 ///
 /// 入口已收敛：`LoggerManager::with_dependencies` 自 0.3.0 起弃用，生产代码请用
@@ -31,16 +31,16 @@ use std::sync::Arc;
 /// use inklog::infrastructure::{MockCache, MockConfig};
 ///
 /// #[tokio::main]
-/// async fn main -> Result<, Box<dyn std::error::Error>> {
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let deps = LoggerDependencies {
-///         cache: Some(Arc::new(MockCache::new)),
-///         config: Some(Arc::new(MockConfig::new)),
-///         custom_sinks: Vec::new,
+///         cache: Some(Arc::new(MockCache::new())),
+///         config: Some(Arc::new(MockConfig::new())),
+///         custom_sinks: Vec::new(),
 ///         #[cfg(feature = "database")]
 ///         database: None,
 ///     };
 ///     let logger = LoggerManager::with_dependencies(deps).await?;
-///     Ok()
+///     Ok(())
 /// }
 /// ```
 #[derive(Default)]
@@ -507,40 +507,40 @@ mod tests {
 /// Logger 构建器，支持链式配置和依赖注入
 ///
 /// 支持两种配置模式：
-/// 1. **纯配置模式**：通过 `.level`, `.file` 等方法配置
-/// 2. **依赖注入模式**：通过 `.cache`, `.config`, `.database` 注入实现
+/// 1. **纯配置模式**：通过 `.level()`, `.file()` 等方法配置
+/// 2. **依赖注入模式**：通过 `.cache()`, `.config()`, `.database()` 注入实现
 /// 3. **混合模式**：同时使用配置和依赖注入
 ///
 /// # 示例
 ///
 /// ## 纯配置模式
 /// ```ignore
-/// let logger = LoggerManager::builder
+/// let logger = LoggerManager::builder()
 ///     .level("debug")
 ///     .file("logs/app.log")
-///     .build.await?;
+///     .build().await?;
 /// ```
 ///
 /// ## 依赖注入模式
 /// ```ignore
-/// let logger = LoggerManager::builder
-///     .cache(Arc::new(MockCache::new))
-///     .config(Arc::new(MockConfig::new))
-///     .build.await?;
+/// let logger = LoggerManager::builder()
+///     .cache(Arc::new(MockCache::new()))
+///     .config(Arc::new(MockConfig::new()))
+///     .build().await?;
 /// ```
 ///
 /// ## 混合模式
 /// ```ignore
-/// let logger = LoggerManager::builder
+/// let logger = LoggerManager::builder()
 ///     .level("debug")
-///     .cache(Arc::new(MockCache::new))  // 使用自定义缓存，其他用配置
-///     .build.await?;
+///     .cache(Arc::new(MockCache::new()))  // 使用自定义缓存，其他用配置
+///     .build().await?;
 /// ```
 #[derive(Default)]
 pub struct LoggerBuilder {
     pub(crate) config: InklogConfig,
     pub(crate) deps: LoggerDependencies,
-    /// Accumulated validation errors for deferred reporting at `build` time.
+    /// Accumulated validation errors for deferred reporting at `build()` time.
     pub(crate) validation_errors: Vec<String>,
     /// 是否通过 `with_driver` 显式设置过数据库 driver
     /// （用于与 URL scheme 推断结果做冲突校验）
@@ -555,7 +555,7 @@ impl LoggerBuilder {
 
     /// 设置全局日志级别。
     ///
-    /// 非法级别会记录 validation error（`build` 时统一返回 `Err`），
+    /// 非法级别会记录 validation error（`build()` 时统一返回 `Err`），
     /// 且不会写入配置——配置字段保持原值/默认值。
     pub fn level(mut self, level: impl Into<String>) -> Self {
         let level_str = level.into();
@@ -671,7 +671,7 @@ impl LoggerBuilder {
     /// 显式设置数据库 driver。
     ///
     /// 若与已配置 URL 的 scheme 推断结果冲突，会记录 validation error
-    /// （`build` 时统一返回 `Err`）。
+    /// （`build()` 时统一返回 `Err`）。
     #[cfg(feature = "database")]
     pub fn with_driver(mut self, driver: crate::DatabaseDriver) -> Self {
         if let Some(ref db) = self.config.database_sink
@@ -797,7 +797,7 @@ impl LoggerBuilder {
 
     /// Console sink 输出 JSON（`OutputFormat::Json`）。
     ///
-    /// 与 `format`（渲染模板，如 `"{timestamp} [{level}] {message}"`）正交：
+    /// 与 `format()`（渲染模板，如 `"{timestamp} [{level}] {message}"`）正交：
     /// `output_format = Json` 时 sink 输出结构化 JSON 行，模板仅作非 JSON
     /// 场景的渲染。运维采集（Filebeat/Loki 等）按 JSON 行解析时启用。
     pub fn console_json(mut self, json: bool) -> Self {
@@ -916,9 +916,9 @@ impl LoggerBuilder {
     ///
     /// # Example
     /// ```ignore
-    /// let _logger = LoggerManager::builder
+    /// let _logger = LoggerManager::builder()
     ///     .enable_http_server(true)
-    ///     .build
+    ///     .build()
     ///     .await?;
     /// ```
     #[cfg(feature = "http")]
@@ -956,7 +956,7 @@ impl LoggerBuilder {
     /// # Arguments
     /// * `port` - 监听端口号 (1-65535)
     ///
-    /// 非法端口（0）会记录 validation error（`build` 时统一返回 `Err`），
+    /// 非法端口（0）会记录 validation error（`build()` 时统一返回 `Err`），
     /// 且不会写入配置——配置字段保持原值/默认值。
     #[cfg(feature = "http")]
     pub fn http_port(mut self, port: u16) -> Self {
@@ -1054,9 +1054,9 @@ impl LoggerBuilder {
     /// use std::sync::Arc;
     /// use inklog::infrastructure::MockCache;
     ///
-    /// let logger = LoggerManager::builder
-    ///     .cache(Arc::new(MockCache::new))
-    ///     .build.await?;
+    /// let logger = LoggerManager::builder()
+    ///     .cache(Arc::new(MockCache::new()))
+    ///     .build().await?;
     /// ```
     pub fn cache(mut self, cache: Arc<dyn Cache>) -> Self {
         self.deps.cache = Some(cache);
@@ -1076,9 +1076,9 @@ impl LoggerBuilder {
     /// use std::sync::Arc;
     /// use inklog::infrastructure::MockConfig;
     ///
-    /// let logger = LoggerManager::builder
-    ///     .config(Arc::new(MockConfig::new))
-    ///     .build.await?;
+    /// let logger = LoggerManager::builder()
+    ///     .config(Arc::new(MockConfig::new()))
+    ///     .build().await?;
     /// ```
     pub fn config(mut self, config: Arc<dyn Config>) -> Self {
         self.deps.config = Some(config);
@@ -1098,9 +1098,9 @@ impl LoggerBuilder {
     /// use std::sync::Arc;
     /// use inklog::infrastructure::MockDatabaseAdapter;
     ///
-    /// let logger = LoggerManager::builder
-    ///     .with_database(Arc::new(MockDatabaseAdapter::new))
-    ///     .build.await?;
+    /// let logger = LoggerManager::builder()
+    ///     .with_database(Arc::new(MockDatabaseAdapter::new()))
+    ///     .build().await?;
     /// ```
     #[cfg(feature = "database")]
     pub fn with_database(mut self, database: Arc<dyn Database>) -> Self {
@@ -1126,9 +1126,9 @@ impl LoggerBuilder {
     /// ```ignore
     /// use std::sync::Arc;
     ///
-    /// let logger = LoggerManager::builder
-    ///     .add_sink(Arc::new(MyWebhookSink::new))
-    ///     .build
+    /// let logger = LoggerManager::builder()
+    ///     .add_sink(Arc::new(MyWebhookSink::new()))
+    ///     .build()
     ///     .await?;
     /// ```
     pub fn add_sink(mut self, sink: Arc<dyn crate::support::io::sink::AsyncSink>) -> Self {

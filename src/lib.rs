@@ -24,14 +24,14 @@
 //! use inklog::{LoggerManager, InklogConfig};
 //!
 //! #[tokio::main]
-//! async fn main -> Result<, Box<dyn std::error::Error>> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // 使用默认配置初始化
-//!     let _logger = LoggerManager::new.await?;
+//!     let _logger = LoggerManager::new().await?;
 //!
 //!     // 使用 tracing 宏记录日志
 //!     tracing::info!("Hello, inklog!");
 //!
-//!     Ok()
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -39,22 +39,22 @@
 //!
 //! ```rust,no_run
 //! # #[cfg(not(feature = "http"))]
-//! # fn main {}
+//! # fn main() {}
 //! # #[cfg(feature = "http")]
 //! #[tokio::main]
-//! async fn main -> Result<, Box<dyn std::error::Error>> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     use inklog::LoggerManager;
 //!
-//!     let _logger = LoggerManager::builder
+//!     let _logger = LoggerManager::builder()
 //!         .level("debug")
 //!         .console(true)
 //!         .file("logs/app.log")
 //!         .enable_http_server(true)
 //!         .http_port(9090)
-//!         .build
+//!         .build()
 //!         .await?;
 //!
-//!     Ok()
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -64,14 +64,14 @@
 //! use inklog::LoggerManager;
 //!
 //! #[tokio::main]
-//! async fn main -> Result<, Box<dyn std::error::Error>> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // 从指定文件加载
 //!     let _logger = LoggerManager::from_file("config.toml").await?;
 //!
 //!     // 或自动搜索配置文件
-//!     // let _logger = LoggerManager::load.await?;
+//!     // let _logger = LoggerManager::load().await?;
 //!
-//!     Ok()
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -83,26 +83,26 @@
 //! use inklog::integrations::{OxCacheAdapter, InklogConfigAdapter};
 //!
 //! #[tokio::main]
-//! async fn main -> Result<, Box<dyn std::error::Error>> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // 方式 1: 使用依赖注入容器
-//!     let container = InklogContainer::new?;
-//!     let logger = container.create_logger.await?;
+//!     let container = InklogContainer::new()?;
+//!     let logger = container.create_logger().await?;
 //!
 //!     // 方式 2: 使用 Builder 模式注入依赖
-//!     let logger = LoggerManager::builder
-//!         .cache(Arc::new(OxCacheAdapter::new?))
-//!         .config(Arc::new(InklogConfigAdapter::new?))
-//!         .build.await?;
+//!     let logger = LoggerManager::builder()
+//!         .cache(Arc::new(OxCacheAdapter::new()?))
+//!         .config(Arc::new(InklogConfigAdapter::new()?))
+//!         .build().await?;
 //!
 //!     // 方式 3: 使用 with_dependencies
 //!     let deps = LoggerDependencies {
-//!         cache: Some(Arc::new(OxCacheAdapter::new?)),
-//!         config: Some(Arc::new(InklogConfigAdapter::new?)),
-//!         ..Default::default
+//!         cache: Some(Arc::new(OxCacheAdapter::new()?)),
+//!         config: Some(Arc::new(InklogConfigAdapter::new()?)),
+//!         ..Default::default()
 //!     };
 //!     let logger = LoggerManager::with_dependencies(deps).await?;
 //!
-//!     Ok()
+//!     Ok(())
 //! }
 //! ```
 //!

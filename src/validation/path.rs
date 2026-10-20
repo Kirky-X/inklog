@@ -188,12 +188,12 @@ impl PathValidator {
     ///
     /// # Behavior
     ///
-    /// This method first calls `validate` which strictly rejects paths
+    /// This method first calls `validate()` which strictly rejects paths
     /// containing `..` (parent directory) traversal components. Only paths
     /// that pass validation are then sanitized.
     ///
-    /// Since `validate` already rejects all traversal attempts, the
-    /// `sanitize` step here primarily serves to normalize path separators
+    /// Since `validate()` already rejects all traversal attempts, the
+    /// `sanitize()` step here primarily serves to normalize path separators
     /// and remove any redundant components from already-safe paths. It will
     /// **not** "fix" a traversal path — those are always rejected.
     pub fn validate_and_sanitize(&self, path: &Path) -> ValidationResult {
@@ -221,7 +221,7 @@ impl PathValidator {
     ///
     /// Sanitization alone performs **no base-directory check**. For security
     /// sensitive use cases always use
-    /// [`validate_and_sanitize`](Self::validate_and_sanitize), which rejects
+    /// [`validate_and_sanitize()`](Self::validate_and_sanitize), which rejects
     /// traversal paths outright.
     ///
     /// # Errors

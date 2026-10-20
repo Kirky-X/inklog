@@ -4,7 +4,7 @@
 //!
 //! `InklogBuildObserver` implements trait-kit's `BuildObserver` trait to
 //! log module build events via `tracing`. Register it with
-//! `AsyncKit::with_observer` to get visibility into the DI build process.
+//! `AsyncKit::with_observer()` to get visibility into the DI build process.
 
 use std::time::Duration;
 
@@ -23,10 +23,10 @@ use trait_kit::prelude::BuildObserver;
 /// use inklog::integrations::kit::InklogBuildObserver;
 /// use trait_kit::prelude::*;
 ///
-/// let mut kit = AsyncKit::new;
+/// let mut kit = AsyncKit::new();
 /// kit.with_observer(InklogBuildObserver);
-/// kit.register::<InklogModule>.unwrap;
-/// let built = kit.build.await.unwrap;
+/// kit.register::<InklogModule>().unwrap();
+/// let built = kit.build().await.unwrap();
 /// ```
 pub struct InklogBuildObserver;
 

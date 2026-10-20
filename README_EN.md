@@ -128,7 +128,7 @@ Or declare it explicitly in `Cargo.toml` (`default = ["i18n", "cache"]`; core ca
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.10"
+inklog = "0.3.0-rc.11"
 ```
 
 </details>

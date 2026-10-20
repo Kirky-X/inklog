@@ -34,7 +34,7 @@ pub enum BackpressureStrategy {
 
 /// 轮转参数（size/time 任一触发即轮转）。
 ///
-/// **时间语义为滚动间隔近似**：自上次轮转起算（`last_rotation.elapsed`），
+/// **时间语义为滚动间隔近似**：自上次轮转起算（`last_rotation.elapsed()`），
 /// 与 FileSink 的日历对齐不同（FileSink daily = 次日零点、monthly = 次月
 /// 同日零点，见 `calculate_next_rotation_time`）。能力矩阵与文档按
 /// 「滚动近似」如实标注，不宣称一致。
@@ -794,7 +794,7 @@ impl ChannelBufferedFileSink {
 
     /// Block 策略的 async 写入路径。
     ///
-    /// 用 `try_send` + 短退避重试代替阻塞式 `sender.send`：channel 满时
+    /// 用 `try_send` + 短退避重试代替阻塞式 `sender.send()`：channel 满时
     /// 让出线程休眠 1ms 后重试，避免卡死 tokio worker 线程。channel 断开
     /// （sink 关闭中）时不计为丢弃，返回 false。
     async fn write_blocking(&self, record: &LogRecord) -> bool {

@@ -22,11 +22,11 @@ use async_trait::async_trait;
 /// ```ignore
 /// use inklog::infrastructure::Cache;
 ///
-/// async fn example(cache: &dyn Cache) -> Result<, Box<dyn std::error::Error>> {
-///     cache.set("key", "value".to_string).await?;
+/// async fn example(cache: &dyn Cache) -> Result<(), Box<dyn std::error::Error>> {
+///     cache.set("key", "value".to_string()).await?;
 ///     let value = cache.get("key").await?;
-///     assert_eq!(value, Some("value".to_string));
-///     Ok()
+///     assert_eq!(value, Some("value".to_string()));
+///     Ok(())
 /// }
 /// ```
 #[async_trait]
@@ -53,7 +53,7 @@ pub trait Cache: Send + Sync {
     ///
     /// # 返回
     ///
-    /// 成功返回 `Ok()`，失败返回 `Err(InklogError)`
+    /// 成功返回 `Ok(())`，失败返回 `Err(InklogError)`
     async fn set(&self, key: &str, value: String) -> Result<(), InklogError>;
 
     /// 删除缓存值
@@ -105,14 +105,14 @@ use std::collections::HashMap;
 /// use inklog::infrastructure::cache::{Cache, OxCacheAdapter};
 ///
 /// #[tokio::main]
-/// async fn main -> Result<, Box<dyn std::error::Error>> {
-///     let cache = OxCacheAdapter::new?;
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let cache = OxCacheAdapter::new()?;
 ///
-///     cache.set("user:1", "Alice".to_string).await?;
+///     cache.set("user:1", "Alice".to_string()).await?;
 ///     let name = cache.get("user:1").await?;
-///     assert_eq!(name, Some("Alice".to_string));
+///     assert_eq!(name, Some("Alice".to_string()));
 ///
-///     Ok()
+///     Ok(())
 /// }
 /// ```
 #[cfg(feature = "cache")]
@@ -141,7 +141,7 @@ impl OxCacheAdapter {
     /// 使用构建器创建适配器
     ///
     /// 提供更细粒度的配置选项，如 TTL、容量等。
-    /// 必须在 async 上下文中调用 `build.await`。
+    /// 必须在 async 上下文中调用 `build().await`。
     ///
     /// # 示例
     ///
@@ -149,12 +149,12 @@ impl OxCacheAdapter {
     /// use std::time::Duration;
     /// use inklog::infrastructure::cache::OxCacheAdapter;
     ///
-    /// # async fn example -> Result<, Box<dyn std::error::Error>> {
-    /// let cache = OxCacheAdapter::builder
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let cache = OxCacheAdapter::builder()
     ///     .ttl(Duration::from_secs(3600))
-    ///     .build
+    ///     .build()
     ///     .await?;
-    /// # Ok()
+    /// # Ok(())
     /// # }
     /// ```
     pub fn builder() -> OxCacheAdapterBuilder {
@@ -234,7 +234,7 @@ impl OxCacheAdapterBuilder {
     ///
     /// 将配置的 TTL 和容量应用到 oxcache 后端。
     /// 必须在 async 上下文中调用，因为 oxcache 0.2.0 的
-    /// `CacheBuilder::build` 是异步方法。
+    /// `CacheBuilder::build()` 是异步方法。
     ///
     /// # 错误
     ///
@@ -281,16 +281,16 @@ impl OxCacheAdapterBuilder {
 /// use inklog::infrastructure::cache::{Cache, MockCache};
 ///
 /// #[tokio::main]
-/// async fn main -> Result<, Box<dyn std::error::Error>> {
-///     let cache = MockCache::new;
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let cache = MockCache::new();
 ///
-///     cache.set("key", "value".to_string).await?;
-///     assert_eq!(cache.get("key").await?, Some("value".to_string));
+///     cache.set("key", "value".to_string()).await?;
+///     assert_eq!(cache.get("key").await?, Some("value".to_string()));
 ///
 ///     // 带延迟的 Mock
 ///     let delayed_cache = MockCache::with_delay(100);
-///     delayed_cache.set("slow", "op".to_string).await?;
-///     Ok()
+///     delayed_cache.set("slow", "op".to_string()).await?;
+///     Ok(())
 /// }
 /// ```
 #[cfg(any(test, feature = "test-utils"))]
@@ -310,7 +310,7 @@ impl MockCache {
     /// # 示例
     ///
     /// ```ignore
-    /// let cache = MockCache::new;
+    /// let cache = MockCache::new();
     /// ```
     pub fn new() -> Self {
         Self {

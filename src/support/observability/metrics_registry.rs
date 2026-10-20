@@ -23,14 +23,14 @@
 //! ```
 //! use inklog::support::observability::metrics_registry::MetricsRegistry;
 //!
-//! let registry = MetricsRegistry::new;
+//! let registry = MetricsRegistry::new();
 //! let requests = registry.register_counter_vec(
 //!     "business_requests_total",
 //!     "Business requests by endpoint",
 //!     &["endpoint"],
 //!);
-//! requests.child(&["/api/v1/login"]).inc;
-//! let text = registry.export_prometheus;
+//! requests.child(&["/api/v1/login"]).inc();
+//! let text = registry.export_prometheus();
 //! assert!(text.contains("business_requests_total{endpoint=\"/api/v1/login\"} 1"));
 //! ```
 

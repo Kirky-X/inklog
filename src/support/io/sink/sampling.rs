@@ -20,9 +20,9 @@
 //! use inklog::LogTemplate;
 //! use std::sync::Arc;
 //!
-//! let sampler = Sampler::new("info", 10, vec!["critical".to_string]).unwrap;
+//! let sampler = Sampler::new("info", 10, vec!["critical".to_string()]).unwrap();
 //! let inner: Arc<dyn inklog::LogSink> = Arc::new(ConsoleSink::new(
-//!     Default::default,
+//!     Default::default(),
 //!     LogTemplate::new("{timestamp} [{level}] {message}"),
 //!));
 //! let sink: Arc<dyn inklog::LogSink> = Arc::new(SamplingSink::new(inner, Arc::new(sampler)));

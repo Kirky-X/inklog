@@ -29,9 +29,9 @@ use crate::integrations::infra::database::DbNexusAdapter;
 /// trait-kit `AsyncKit` module that constructs an inklog `Database` impl.
 ///
 /// Depends on `DbNexusModule` (registered first via topological sort).
-/// Register with `AsyncKit::register::<InklogModule>`, then
-/// `kit.build.await` and retrieve the capability with
-/// `kit.require::<InklogModule>`.
+/// Register with `AsyncKit::register::<InklogModule>()`, then
+/// `kit.build().await` and retrieve the capability with
+/// `kit.require::<InklogModule>()`.
 ///
 /// The returned `Arc<dyn Database + Send + Sync>` wraps a `DbNexusAdapter`
 /// that proxies `insert_batch` / `is_healthy` through the dbnexus
@@ -48,7 +48,7 @@ use crate::integrations::infra::database::DbNexusAdapter;
 ///
 /// Implements `AsyncHealthCheck`:
 /// - `check`: returns `Healthy` when the database capability is present in the kit.
-///   For detailed async runtime connectivity checks, use `Database::is_healthy` directly.
+///   For detailed async runtime connectivity checks, use `Database::is_healthy()` directly.
 pub struct InklogModule;
 
 impl ModuleMeta for InklogModule {
@@ -136,7 +136,7 @@ mod tests {
         assert_eq!(InklogModule::NAME, "inklog");
     }
 
-    /// #2: `InklogModule::dependencies` declares
+    /// #2: `InklogModule::dependencies()` declares
     /// a dependency on `DbNexusModule`.
     #[test]
     fn inklog_module_meta_dependencies() {

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 //! Per-request scoped dependency isolation for inklog.
 //!
-//! Provides `create_inklog_scope` — a helper that creates an `AsyncScope`
+//! Provides `create_inklog_scope()` — a helper that creates an `AsyncScope`
 //! for per-request capability isolation. After building modules with the
 //! main `AsyncKit`, insert capabilities into the scope with
 //! `scope.insert::<InklogModule>(db_cap)`. Each request handler retrieves
-//! the capability via `scope.require::<InklogModule>`.
+//! the capability via `scope.require::<InklogModule>()`.
 
 use std::sync::Arc;
 
@@ -19,13 +19,13 @@ use crate::integrations::infra::Database;
 /// After building with the main `AsyncKit`, insert the database capability:
 ///
 /// ```rust,ignore
-/// let built = kit.build.await?;
-/// let db = built.require::<InklogModule>?;
+/// let built = kit.build().await?;
+/// let db = built.require::<InklogModule>()?;
 ///
 /// // Per request:
-/// let scope = create_inklog_scope;
+/// let scope = create_inklog_scope();
 /// scope.insert::<InklogModule>(db);
-/// let request_db = scope.require::<InklogModule>?;
+/// let request_db = scope.require::<InklogModule>()?;
 /// ```
 #[must_use]
 pub fn create_inklog_scope() -> AsyncScope {
@@ -35,7 +35,7 @@ pub fn create_inklog_scope() -> AsyncScope {
 /// Populate an `AsyncScope` with the inklog database capability.
 ///
 /// Convenience function that inserts the `Arc<dyn Database + Send + Sync>`
-/// into the scope so it can be retrieved with `scope.require::<InklogModule>`.
+/// into the scope so it can be retrieved with `scope.require::<InklogModule>()`.
 pub fn populate_inklog_scope(scope: &AsyncScope, db: Arc<dyn Database + Send + Sync>) {
     scope.insert::<super::InklogModule>(db);
 }

@@ -29,12 +29,12 @@ use tracing::{Event, Level};
 ///
 /// `LogRecord` instances are pooled using the global thread-local pool (see
 /// [`crate::get_log_record`]) to reduce memory allocations in the hot path.
-/// Use [`reset`](Self::reset) to reuse instances.
+/// Use [`reset()`](Self::reset) to reuse instances.
 ///
 /// # Sensitive Data
 ///
 /// The struct includes built-in support for masking sensitive information through
-/// [`mask_sensitive_fields`](Self::mask_sensitive_fields). This should be called
+/// [`mask_sensitive_fields()`](Self::mask_sensitive_fields). This should be called
 /// by sinks before persisting logs to external storage.
 ///
 /// # Example
@@ -45,8 +45,8 @@ use tracing::{Event, Level};
 ///
 /// let record = LogRecord::new(
 ///     Level::INFO,
-///     "myapp::service".to_string,
-///     "User logged in successfully".to_string,
+///     "myapp::service".to_string(),
+///     "User logged in successfully".to_string(),
 ///);
 ///
 /// assert_eq!(record.level, "INFO");
@@ -119,13 +119,13 @@ impl LogRecord {
     ///
     /// This method is used in conjunction with the object pool to recycle
     /// `LogRecord` instances, avoiding memory allocations in the hot path.
-    /// After calling `reset`, the record will have default values suitable
+    /// After calling `reset()`, the record will have default values suitable
     /// for populating with new log data.
     ///
     /// # Performance
     ///
     /// This method clears all fields and resets the timestamp to the current time.
-    /// It uses `clear` and `push_str` on String fields to reuse existing capacity.
+    /// It uses `clear()` and `push_str()` on String fields to reuse existing capacity.
     ///
     /// # Example
     ///
@@ -135,15 +135,15 @@ impl LogRecord {
     ///
     /// let mut record = LogRecord::new(
     ///     Level::INFO,
-    ///     "module".to_string,
-    ///     "message".to_string,
+    ///     "module".to_string(),
+    ///     "message".to_string(),
     ///);
     ///
-    /// record.reset;
+    /// record.reset();
     ///
     /// assert_eq!(record.level, "INFO");
-    /// assert!(record.target.is_empty);
-    /// assert!(record.message.is_empty);
+    /// assert!(record.target.is_empty());
+    /// assert!(record.message.is_empty());
     /// ```
     pub fn reset(&mut self) {
         self.timestamp = Utc::now();
@@ -179,14 +179,14 @@ impl LogRecord {
     ///
     /// let record = LogRecord::new(
     ///     Level::WARN,
-    ///     "myapp::cache".to_string,
-    ///     "Cache miss for key: user_123".to_string,
+    ///     "myapp::cache".to_string(),
+    ///     "Cache miss for key: user_123".to_string(),
     ///);
     ///
     /// assert_eq!(record.level, "WARN");
     /// assert_eq!(record.target, "myapp::cache");
     /// assert_eq!(record.message, "Cache miss for key: user_123");
-    /// assert!(!record.thread_id.is_empty);
+    /// assert!(!record.thread_id.is_empty());
     /// ```
     pub fn new(level: Level, target: String, message: String) -> Self {
         Self {
@@ -219,9 +219,9 @@ impl LogRecord {
     ///
     /// For performance reasons, this method does **NOT** automatically mask
     /// sensitive fields. Callers must either call
-    /// [`mask_sensitive_fields`](Self::mask_sensitive_fields) themselves
+    /// [`mask_sensitive_fields()`](Self::mask_sensitive_fields) themselves
     /// before persisting the record, or use the masking constructor
-    /// [`from_event_masked`](Self::from_event_masked) instead.
+    /// [`from_event_masked()`](Self::from_event_masked) instead.
     ///
     /// # Arguments
     ///
@@ -274,17 +274,17 @@ impl LogRecord {
 
     /// Creates a log record from a tracing event with sensitive data masked.
     ///
-    /// Convenience constructor equivalent to [`from_event`](Self::from_event)
-    /// followed by [`mask_sensitive_fields`](Self::mask_sensitive_fields):
+    /// Convenience constructor equivalent to [`from_event()`](Self::from_event)
+    /// followed by [`mask_sensitive_fields()`](Self::mask_sensitive_fields):
     /// email addresses, phone numbers, ID/bank card numbers and values of
     /// sensitive field names (password, token, api_key, …) are masked before
     /// the record is returned.
     ///
     /// # Performance
     ///
-    /// This method has the object-pooling behavior of [`from_event`](Self::from_event)
+    /// This method has the object-pooling behavior of [`from_event()`](Self::from_event)
     /// plus the cost of running the masking pipeline (regex matching over the
-    /// message and all field values). Use [`from_event`](Self::from_event) in
+    /// message and all field values). Use [`from_event()`](Self::from_event) in
     /// hot paths where masking is applied later at the sink layer.
     ///
     /// # Arguments
@@ -456,7 +456,7 @@ impl LogRecord {
     ///
     /// This method should be called by sinks before persisting logs to external
     /// storage (files, databases). It is intentionally NOT called in
-    /// [`from_event`](Self::from_event) for performance reasons, and because
+    /// [`from_event()`](Self::from_event) for performance reasons, and because
     /// console output may not require masking.
     ///
     /// # Performance
@@ -474,20 +474,20 @@ impl LogRecord {
     ///
     /// let mut record = LogRecord::new(
     ///     Level::INFO,
-    ///     "auth".to_string,
-    ///     "Login attempt: user@example.com".to_string,
+    ///     "auth".to_string(),
+    ///     "Login attempt: user@example.com".to_string(),
     ///);
     /// record.fields.insert(
-    ///     "password".to_string,
-    ///     Value::String("secret123".to_string),
+    ///     "password".to_string(),
+    ///     Value::String("secret123".to_string()),
     ///);
     ///
-    /// record.mask_sensitive_fields;
+    /// record.mask_sensitive_fields();
     ///
     /// assert_eq!(record.message, "Login attempt: **@**.***");
     /// assert_eq!(
-    ///     record.fields.get("password").unwrap,
-    ///     &Value::String("***MASKED***".to_string)
+    ///     record.fields.get("password").unwrap(),
+    ///     &Value::String("***MASKED***".to_string())
     ///);
     /// ```
     pub fn mask_sensitive_fields(&mut self) {

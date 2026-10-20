@@ -11,10 +11,10 @@
 //! # Example
 //! ```ignore
 //! let watcher = ConfersConfigWatcher::spawn(
-//!     "inklog_config.toml".into,
+//!     "inklog_config.toml".into(),
 //!     |values| tracing::info!(level = %values.level, "config reloaded"),
 //!).await?;
-//! assert_eq!(watcher.current.level, "info");
+//! assert_eq!(watcher.current().level, "info");
 //! ```
 
 use std::path::PathBuf;

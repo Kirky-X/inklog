@@ -42,7 +42,7 @@
 //! ```rust
 //! use inklog::masking::DataMasker;
 //!
-//! let masker = DataMasker::new;
+//! let masker = DataMasker::new();
 //!
 //! // 脱敏日志消息
 //! let message = "User login: email=test@example.com";
@@ -170,7 +170,7 @@ static NAME_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
 /// ```ignore
 /// use inklog::masking::DataMasker;
 ///
-/// let masker = DataMasker::new;
+/// let masker = DataMasker::new();
 ///
 /// // Mask by pattern
 /// let mut email = serde_json::json!("user@example.com");
@@ -193,7 +193,7 @@ pub struct DataMasker {
     /// Aho-Corasick fast path for literal-pattern rules.
     #[cfg(feature = "fast-masking")]
     ac_masker: Option<super::masking_ac::AcMasker>,
-    /// secret-scan 出站门（`builder.with_secret_scan` 注入；None = 不参与）。
+    /// secret-scan 出站门（`builder().with_secret_scan` 注入；None = 不参与）。
     #[cfg(feature = "secret-scan")]
     secret_gate: Option<super::secret_scan::SecretScanGate>,
 }
@@ -380,7 +380,7 @@ impl DataMasker {
     /// 但挂有 secret-scan 门时，单条输入内任一模式命中数超过门限、或输入
     /// 超过掩码上限（不扫描即不可证安全）即返回 `Err`，脱敏输出不可用。
     /// Ok 路径与 `mask` 共用规则管线尾段（门产物继续过 fast-masking 与
-    /// 规则集，PII 不漏）。未挂门时退化为 `mask`（永远 `Ok`）。
+    /// 规则集，PII 不漏）。未挂门时退化为 `mask()`（永远 `Ok`）。
     ///
     /// 与 `mask` 的分叉点：超大输入在 `mask` 原样放行（fail-open，向后
     /// 兼容），在 `mask_checked` 拒绝（fail-closed）。
@@ -604,9 +604,9 @@ pub fn secret_scan_masker() -> DataMasker {
 /// ```rust
 /// use inklog::DataMasker;
 ///
-/// let masker = DataMasker::builder
+/// let masker = DataMasker::builder()
 ///     .disable_builtin("email")
-///     .build;
+///     .build();
 /// ```
 pub struct DataMaskerBuilder {
     extra_rules: Vec<MaskRule>,
@@ -649,7 +649,7 @@ impl DataMaskerBuilder {
     /// Use a custom [`MaskRuleRegistry`](super::masking_registry::MaskRuleRegistry) as the rule source instead of builtins.
     ///
     /// When set, the registry's rules replace the default built-in rules.
-    /// `add_rule` and `disable_builtin` still apply on top.
+    /// `add_rule()` and `disable_builtin()` still apply on top.
     pub fn with_registry(mut self, registry: super::masking_registry::MaskRuleRegistry) -> Self {
         self.custom_registry = Some(registry);
         self.use_builtins = false;
@@ -665,7 +665,7 @@ impl DataMaskerBuilder {
     /// Build the [`DataMasker`] with all configured rules sorted by priority.
     ///
     /// When the `fast-masking` feature is enabled, literal-pattern rules are
-    /// extracted into an [`AcMasker`](super::masking_ac::AcMasker) for single-pass
+    /// extracted into an `AcMasker` for single-pass
     /// acceleration; remaining regex rules stay in the sequential path.
     pub fn build(self) -> DataMasker {
         let mut rules = if let Some(registry) = self.custom_registry {
@@ -1371,8 +1371,8 @@ impl MaskRule {
 ///     .pattern(r"\b\d{3}-\d{4}\b")
 ///     .replacement("***-****")
 ///     .priority(50)
-///     .build
-///     .unwrap;
+///     .build()
+///     .unwrap();
 /// ```
 pub struct MaskRuleBuilder {
     name: String,

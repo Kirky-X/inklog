@@ -20,7 +20,7 @@
 //! use inklog::i18n::LogI18nFormatter;
 //!
 //! // Use the current system locale
-//! let fmt = LogI18nFormatter::new_default?;
+//! let fmt = LogI18nFormatter::new_default()?;
 //!
 //! // Or specify a locale explicitly
 //! let fmt = LogI18nFormatter::new("en-US")?;

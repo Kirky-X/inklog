@@ -14,14 +14,14 @@
 //! # Example
 //! ```ignore
 //! let provider = vault_transit_provider(&VaultTransitConfig {
-//!     vault_addr: "https://vault.internal:8200".into,
-//!     transit_key: "inklog-master".into,
+//!     vault_addr: "https://vault.internal:8200".into(),
+//!     transit_key: "inklog-master".into(),
 //!     ciphertext: std::env::var("INKLOG_VAULT_CIPHERTEXT")?,
-//!     token: std::env::var("VAULT_TOKEN").ok,
+//!     token: std::env::var("VAULT_TOKEN").ok(),
 //!     namespace: None,
 //!     allow_http: false,
 //! })?;
-//! let key = provider.get_key.await?;
+//! let key = provider.get_key().await?;
 //! ```
 
 use std::sync::Arc;

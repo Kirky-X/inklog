@@ -33,7 +33,7 @@ impl LogLevel {
     /// 从字符串解析日志级别（大小写不敏感）
     ///
     /// Uses case-insensitive ASCII comparison to avoid heap allocation
-    /// from `to_uppercase`.
+    /// from `to_uppercase()`.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         // Case-insensitive ASCII matching without allocation
@@ -91,7 +91,7 @@ impl LogLevel {
 
     /// Returns the translated log level name for the current locale.
     ///
-    /// Unlike [`as_str`](Self::as_str) which always returns English uppercase
+    /// Unlike [`as_str()`](Self::as_str) which always returns English uppercase
     /// names (e.g. "INFO"), this method returns the locale-aware translation.
     pub fn localized_name(&self) -> String {
         match self {

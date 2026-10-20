@@ -33,13 +33,13 @@ use async_trait::async_trait;
 ///
 /// async fn example(db: &dyn Database) {
 ///     let records = vec![
-///         LogRecord::new(Level::INFO, "module".to_string, "message".to_string),
+///         LogRecord::new(Level::INFO, "module".to_string(), "message".to_string()),
 ///     ];
 ///
-///     let count = db.insert_batch(&records).await.unwrap;
+///     let count = db.insert_batch(&records).await.unwrap();
 ///     assert_eq!(count, 1);
 ///
-///     if db.is_healthy.await {
+///     if db.is_healthy().await {
 ///         println!("Database is healthy");
 ///     }
 /// }
@@ -106,13 +106,13 @@ use crate::domain::config::database::DatabaseDriver;
 /// use inklog::infrastructure::database::{Database, DbNexusAdapter};
 ///
 /// #[tokio::main]
-/// async fn main -> Result<, Box<dyn std::error::Error>> {
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let db = DbNexusAdapter::new("postgres://user:pass@localhost/logs", 10).await?;
 ///
-///     let healthy = db.is_healthy.await;
+///     let healthy = db.is_healthy().await;
 ///     println!("Database healthy: {}", healthy);
 ///
-///     Ok()
+///     Ok(())
 /// }
 /// ```
 #[cfg(feature = "database")]
@@ -175,7 +175,7 @@ impl DbNexusAdapter {
     /// 创建带完整配置的适配器
     ///
     /// 支持自定义权限配置文件路径和管理员角色名。
-    /// 构造完成后自动调用 `ensure_table_exists` 创建日志表。
+    /// 构造完成后自动调用 `ensure_table_exists()` 创建日志表。
     ///
     /// # 参数
     ///
@@ -269,7 +269,7 @@ impl DbNexusAdapter {
     ///
     /// # 参数
     ///
-    /// * `pool` - dbnexus 连接池 trait 对象（通常来自 `kit.require::<DbNexusModule>`）
+    /// * `pool` - dbnexus 连接池 trait 对象（通常来自 `kit.require::<DbNexusModule>()`）
     /// * `table_name` - 日志表名称
     ///
     /// # Warning

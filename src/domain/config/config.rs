@@ -24,7 +24,7 @@ use super::sampling::SamplingConfig;
 /// # Loading
 ///
 /// Configuration can be loaded from:
-/// - TOML files (via `from_search_paths`)
+/// - TOML files (via `from_search_paths()`)
 /// - Environment variables (prefix `INKLOG_`)
 /// - Defaults (lowest priority)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -393,7 +393,7 @@ fn interpret_env_value(
     }
 }
 
-/// 路径类 env 值的安全判定：含 `ParentDir` 组件或 NUL 字节时返回 `Some()`。
+/// 路径类 env 值的安全判定：含 `ParentDir` 组件或 NUL 字节时返回 `Some(())`。
 fn unsafe_path_reason(raw: &str) -> Option<()> {
     let has_traversal = std::path::PathBuf::from(raw)
         .components()
@@ -402,7 +402,7 @@ fn unsafe_path_reason(raw: &str) -> Option<()> {
 }
 
 /// 推断值须为目标无符号整型可容纳的整数字面量（否则按「不可解析」保留现值——
-/// 与旧实现 `parse.unwrap_or(current)` 的静默回退一致）。
+/// 与旧实现 `parse().unwrap_or(current)` 的静默回退一致）。
 fn fit_uint<T>(inferred: &confers::types::ConfigValue) -> Option<T>
 where
     T: TryFrom<i64> + TryFrom<u64>,
@@ -771,10 +771,10 @@ impl InklogConfig {
 
     /// Normalize configuration values by auto-correcting invalid settings.
     ///
-    /// Unlike `validate` which returns errors, this method adjusts values
-    /// in-place with warnings. Call before `validate` to auto-fix common
+    /// Unlike `validate()` which returns errors, this method adjusts values
+    /// in-place with warnings. Call before `validate()` to auto-fix common
     /// misconfigurations. Problems that cannot be auto-corrected are logged
-    /// here and surface as errors from `validate`.
+    /// here and surface as errors from `validate()`.
     pub fn normalize(&mut self) {
         fn warn_validation(err: String) {
             let mut args = crate::i18n::MsgArgs::new();

@@ -21,7 +21,7 @@
 /// use inklog::infrastructure::Config;
 ///
 /// fn example(config: &dyn Config) {
-///     let level = config.get_string("log.level").unwrap_or("info".to_string);
+///     let level = config.get_string("log.level").unwrap_or("info".to_string());
 ///     let port = config.get_int("server.port").unwrap_or(8080) as u16;
 ///     let debug = config.get_bool("debug").unwrap_or(false);
 /// }
@@ -114,14 +114,14 @@ use crate::InklogError;
 /// ```ignore
 /// use inklog::infrastructure::config::{Config, InklogConfigAdapter};
 ///
-/// fn main -> Result<, Box<dyn std::error::Error>> {
-///     let config = InklogConfigAdapter::new?;
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = InklogConfigAdapter::new()?;
 ///
 ///     let level = config.get_string("global.level");
 ///     let port = config.get_int("http_server.port");
 ///     let enabled = config.get_bool("file_sink.enabled");
 ///
-///     Ok()
+///     Ok(())
 /// }
 /// ```
 pub struct InklogConfigAdapter {
@@ -171,7 +171,7 @@ impl InklogConfigAdapter {
     /// use inklog::config::InklogConfig;
     /// use inklog::infrastructure::config::InklogConfigAdapter;
     ///
-    /// let inklog_config = InklogConfig::default;
+    /// let inklog_config = InklogConfig::default();
     /// let adapter = InklogConfigAdapter::from_config(inklog_config);
     /// ```
     pub fn from_config(config: InklogConfig) -> Self {
@@ -435,18 +435,18 @@ use std::collections::HashMap;
 /// use inklog::infrastructure::config::{Config, MockConfig};
 ///
 /// // 创建带初始值的配置
-/// let config = MockConfig::new
+/// let config = MockConfig::new()
 ///     .with_value("level", "debug")
 ///     .with_value("port", "8080")
 ///     .with_value("enabled", "true");
 ///
-/// assert_eq!(config.get_string("level"), Some("debug".to_string));
+/// assert_eq!(config.get_string("level"), Some("debug".to_string()));
 /// assert_eq!(config.get_int("port"), Some(8080));
 /// assert_eq!(config.get_bool("enabled"), Some(true));
 ///
 /// // 运行时修改
 /// config.set("level", "info");
-/// assert_eq!(config.get_string("level"), Some("info".to_string));
+/// assert_eq!(config.get_string("level"), Some("info".to_string()));
 /// ```
 #[cfg(any(test, feature = "test-utils"))]
 pub struct MockConfig {

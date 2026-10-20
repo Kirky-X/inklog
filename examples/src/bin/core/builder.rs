@@ -16,7 +16,7 @@
 //! - 配置构建器展示：展示 Builder 的灵活性
 //!
 //! 各配置片段以字符串展示（不在本示例中实际初始化）；`LoggerManager::builder`
-//! 本身没有限制，真实项目在 async 函数中调用 `build.await` 即生效。
+//! 本身没有限制，真实项目在 async 函数中调用 `build().await` 即生效。
 
 use inklog_examples::common::print_section;
 use inklog_examples::common::{tr, tr_args};

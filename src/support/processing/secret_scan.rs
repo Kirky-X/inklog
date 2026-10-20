@@ -12,7 +12,7 @@
 //!   不扫描即不可证安全）时返回 `Err`，脱敏输出不可用（防疑似密钥风暴
 //!   落盘）。两个出口共用计数器，Err 时计数已更新可查。
 //!
-//! 层位：经 `DataMasker::builder.with_secret_scan` 挂到 sink 写出前的
+//! 层位：经 `DataMasker::builder().with_secret_scan()` 挂到 sink 写出前的
 //! 掩码点（与 encryption / ring_buffered_file 同层），`DataMasker::mask`
 //! 保持失败放行语义（向后兼容），fail-closed 由 `DataMasker::mask_checked`
 //! 显式选择。

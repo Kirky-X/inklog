@@ -15,13 +15,13 @@
 //! use std::path::PathBuf;
 //!
 //! let opts = QueryOptions {
-//!     level: Some("warn".into),
-//!     keyword: Some("timeout".into),
-//!     ..Default::default
+//!     level: Some("warn".into()),
+//!     keyword: Some("timeout".into()),
+//!     ..Default::default()
 //! };
-//! let entries = query_paths(&[PathBuf::from("logs/app.log")], &opts, None).unwrap;
+//! let entries = query_paths(&[PathBuf::from("logs/app.log")], &opts, None).unwrap();
 //! for e in entries {
-//!     println!("{} {} {}", e.timestamp.map(|t| t.to_rfc3339).unwrap_or_default, e.level, e.message);
+//!     println!("{} {} {}", e.timestamp.map(|t| t.to_rfc3339()).unwrap_or_default(), e.level, e.message);
 //! }
 //! ```
 

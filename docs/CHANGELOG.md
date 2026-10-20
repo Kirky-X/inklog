@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <summary>📑 目录</summary>
 
 - [Unreleased](#unreleased)
+- [0.3.0-rc.11](#030-rc11---2026-10-20)
 - [0.3.0-rc.10](#030-rc10---2026-10-19)
 - [0.3.0-rc.9](#030-rc9---2026-10-10)
 - [0.3.0-rc.8](#030-rc8---2026-10-08)
@@ -35,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **安全文档**：移除 `docs/SECURITY.md` 的「安全赏金计划」章节（含奖励金额表与排除范围清单）——当前不再设任何安全赏金计划。
+
+## [0.3.0-rc.11] - 2026-10-20
+
+### Changed
+
+- **依赖**：`oxcache` 从 `=0.5.0-rc.8` 放宽为 `^0.5.0-rc.8`——vecboost 线要求 rc.10，精确 pin 与其区间无交集导致下游（fluxgate）解析冲突；rc.8~rc.10 已全量实测兼容（2162 项测试）。跨仓申报：oxcache 反向桥接（`inklog` feature）下次发布需同步将 `=0.3.0-rc.10` 升至 `=0.3.0-rc.11`。
+
+### Fixed
+
+- **文档**：还原 8de6cec 批量注释精简误删的 doc 示例空参数括号（347 行），修复 22 个 doctest 编译失败；`config_schema.json` 随 doc 文本回归一致（无需变更）。
 
 ## [0.3.0-rc.10] - 2026-10-19
 

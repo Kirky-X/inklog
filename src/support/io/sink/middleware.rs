@@ -16,11 +16,11 @@
 //! use inklog::LogTemplate;
 //! use std::sync::Arc;
 //!
-//! let chain = MiddlewareChain::new
+//! let chain = MiddlewareChain::new()
 //!     .push(Arc::new(LevelFilterMiddleware::new("warn").expect("valid level")))
 //!     .push(Arc::new(EnrichMiddleware::new("cluster", "prod-1")));
 //! let inner: Arc<dyn inklog::LogSink> = Arc::new(ConsoleSink::new(
-//!     Default::default,
+//!     Default::default(),
 //!     LogTemplate::new("{timestamp} [{level}] {message}"),
 //!));
 //! let sink: Arc<dyn inklog::LogSink> =

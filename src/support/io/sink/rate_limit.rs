@@ -20,7 +20,7 @@
 //!
 //! // inklog 侧注入：
 //! let sink = RateLimitedSink::new(inner_sink, Arc::new(LimiteronRateLimit::new(config)));
-//! LoggerManager::builder.add_sink(Arc::new(sink));
+//! LoggerManager::builder().add_sink(Arc::new(sink));
 //! ```
 
 use std::sync::Arc;

@@ -533,7 +533,7 @@ impl JournalCrypto {
 /// nonce(12) + 长度(4) + ciphertext，明文为一行 JSON）。
 ///
 /// **nonce 唯一性策略（实现前固化）**：随机 96-bit/段，CSPRNG
-/// （`rand::rng`，OS 定期重播种）生成；同 key 跨段、跨文件不重复由
+/// （`rand::rng()`，OS 定期重播种）生成；同 key 跨段、跨文件不重复由
 /// 单测断言（96-bit 随机空间下生日碰撞概率可忽略）。
 ///
 /// **显性失败约束**：[`FallbackJournal::with_crypto`] 在 key 缺失/无效时

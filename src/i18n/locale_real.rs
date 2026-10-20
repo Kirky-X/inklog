@@ -84,7 +84,7 @@ thread_local! {
 ///
 /// Resolution priority:
 /// 1. `INKLOG_LOCALE` environment variable
-/// 2. System locale via `sys-locale::get_locale`
+/// 2. System locale via `sys-locale::get_locale()`
 /// 3. Fallback to `"en"`
 ///
 /// This function is idempotent — subsequent calls after the first are no-ops.

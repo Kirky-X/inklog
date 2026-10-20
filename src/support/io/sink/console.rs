@@ -58,7 +58,7 @@ impl ConsoleSink {
         }
     }
 
-    /// 注入自定义 masker（如经 DataMasker::builder 构建的 literal 规则，
+    /// 注入自定义 masker（如经 DataMasker::builder() 构建的 literal 规则，
     /// fast-masking feature 下走 AC 加速路径）。
     pub fn with_masker(mut self, masker: DataMasker) -> Self {
         self.masker = Some(masker);
@@ -197,7 +197,7 @@ impl LogSink for ConsoleSink {
     ///
     /// The writer lock only guards a short, synchronous critical section;
     /// never hold it across an `.await`. A poisoned lock is recovered via
-    /// `into_inner` so flush still succeeds after a panicking writer.
+    /// `into_inner()` so flush still succeeds after a panicking writer.
     async fn flush(&self) -> Result<(), InklogError> {
         // Flush stdout writer
         let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());

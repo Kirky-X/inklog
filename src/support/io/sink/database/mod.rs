@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(mock_db.stored_count(), 1);
     }
 
-    /// 测试 new 方法（不传 config，使用默认配置）
+    /// 测试 new() 方法（不传 config，使用默认配置）
     #[tokio::test(flavor = "multi_thread")]
     async fn test_database_sink_new_without_config() {
         let mock_db = Arc::new(MockDatabaseAdapter::new());

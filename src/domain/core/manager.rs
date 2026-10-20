@@ -51,10 +51,10 @@ use tracing_subscriber::prelude::*;
 /// use inklog::{LoggerManager, InklogConfig};
 ///
 /// #[tokio::main]
-/// async fn main -> Result<, Box<dyn std::error::Error>> {
-///     let config = InklogConfig::default;
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = InklogConfig::default();
 ///     let _logger = LoggerManager::with_config(config).await?;
-///     Ok()
+///     Ok(())
 /// }
 /// ```
 pub struct LoggerManager {
@@ -212,7 +212,7 @@ impl LoggerManager {
     ///
     /// # Deprecated
     ///
-    /// DI 入口已收敛：请改用 [`LoggerManager::builder`]（唯一推荐入口），
+    /// DI 入口已收敛：请改用 [`LoggerManager::builder()`]（唯一推荐入口），
     /// 本方法仅为兼容保留，行为为直接转发到内部构建逻辑。
     #[deprecated(since = "0.3.0", note = "use LoggerManager::builder() instead")]
     pub async fn with_dependencies(deps: LoggerDependencies) -> Result<Self, InklogError> {
@@ -378,10 +378,10 @@ impl LoggerManager {
     /// use inklog::{LoggerManager, InklogConfig};
     ///
     /// #[tokio::main]
-    /// async fn main -> Result<, Box<dyn std::error::Error>> {
-    ///     let config = InklogConfig::default;
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let config = InklogConfig::default();
     ///     let _logger = LoggerManager::with_config(config).await?;
-    ///     Ok()
+    ///     Ok(())
     /// }
     /// ```
     pub async fn with_config(config: InklogConfig) -> Result<Self, InklogError> {
@@ -1035,9 +1035,9 @@ impl LoggerManager {
     /// use inklog::LoggerManager;
     ///
     /// #[tokio::main]
-    /// async fn main -> Result<, Box<dyn std::error::Error>> {
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let _logger = LoggerManager::from_file("config.toml").await?;
-    ///     Ok()
+    ///     Ok(())
     /// }
     /// ```
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, InklogError> {
@@ -1070,9 +1070,9 @@ impl LoggerManager {
     /// use inklog::LoggerManager;
     ///
     /// #[tokio::main]
-    /// async fn main -> Result<, Box<dyn std::error::Error>> {
-    ///     let _logger = LoggerManager::load.await?;
-    ///     Ok()
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let _logger = LoggerManager::load().await?;
+    ///     Ok(())
     /// }
     /// ```
     pub async fn load() -> Result<Self, InklogError> {
@@ -1315,10 +1315,10 @@ impl LoggerManager {
     }
 }
 
-/// 资源释放兜底：调用方未显式 `shutdown` 时也确保 worker 线程退出。
+/// 资源释放兜底：调用方未显式 `shutdown()` 时也确保 worker 线程退出。
 ///
-/// 历史缺陷：原实现无 `Drop`，测试若忘记调用 `shutdown`，4 个 worker 线程
-/// 会因全局 subscriber 持有 `sender.clone` 永不 disconnect 而死循环，
+/// 历史缺陷：原实现无 `Drop`，测试若忘记调用 `shutdown()`，4 个 worker 线程
+/// 会因全局 subscriber 持有 `sender.clone()` 永不 disconnect 而死循环，
 /// 最终导致进程挂起（tarpaulin 单元测试运行后 PID 不退出）。
 impl Drop for LoggerManager {
     fn drop(&mut self) {
@@ -2514,7 +2514,7 @@ worker_threads = 1
         let _ = manager.shutdown();
     }
 
-    /// Strict 模式：无效主机名导致 addr.parse 失败时，错误应传播给调用者
+    /// Strict 模式：无效主机名导致 addr.parse() 失败时，错误应传播给调用者
     #[cfg(feature = "http")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[serial_test::serial]

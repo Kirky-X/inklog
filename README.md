@@ -128,7 +128,7 @@ cargo add inklog
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.10"
+inklog = "0.3.0-rc.11"
 ```
 
 </details>

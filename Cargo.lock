@@ -2656,7 +2656,7 @@ dependencies = [
 
 [[package]]
 name = "inklog"
-version = "0.3.0-rc.10"
+version = "0.3.0-rc.11"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -2723,7 +2723,7 @@ dependencies = [
 
 [[package]]
 name = "inklog-examples"
-version = "0.3.0-rc.10"
+version = "0.3.0-rc.11"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3416,9 +3416,9 @@ checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
 
 [[package]]
 name = "oxcache"
-version = "0.5.0-rc.8"
+version = "0.5.0-rc.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6c684538b8626da5e37a495e10a0c8cd88219d5ccd51ba19d47d4e83bcefa6f"
+checksum = "ede643c41f28680a136a9c23b60aabb5964264ca661f7adc023e3033f3795d80"
 dependencies = [
  "async-trait",
  "chrono",

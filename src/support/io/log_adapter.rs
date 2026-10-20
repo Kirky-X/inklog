@@ -72,7 +72,7 @@ impl LogAdapter {
     }
 
     /// 共享级别指令集（manager 的 level_state）：启用后 log 门面在
-    /// `enabled` 中按 per-target 指令过滤，与 tracing 侧 EnvFilter 语义对齐。
+    /// `enabled()` 中按 per-target 指令过滤，与 tracing 侧 EnvFilter 语义对齐。
     pub(crate) fn with_level_state(
         mut self,
         state: Arc<std::sync::Mutex<crate::domain::core::manager::LevelDirectives>>,
@@ -196,7 +196,7 @@ impl LogLogger {
     /// 只能调用一次，多次调用会返回错误。
     ///
     /// # Returns
-    /// `Ok()` 如果安装成功，`Err(...)` 如果已经安装过 logger。
+    /// `Ok(())` 如果安装成功，`Err(...)` 如果已经安装过 logger。
     pub fn install(self) -> Result<(), log::SetLoggerError> {
         let max_level = self.max_level;
         log::set_boxed_logger(Box::new(self))?;

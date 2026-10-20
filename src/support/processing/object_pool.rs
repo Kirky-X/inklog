@@ -11,25 +11,25 @@
 //! # Construction Patterns
 //!
 //! This module supports two construction patterns:
-//! - `new` - Creates pool with default configuration (async, returns Result)
-//! - `with_config` - Creates pool with custom configuration (async, returns Result)
+//! - `new()` - Creates pool with default configuration (async, returns Result)
+//! - `with_config()` - Creates pool with custom configuration (async, returns Result)
 //!
 //! # Usage Examples
 //!
 //! ```no_run
 //! use inklog::ObjectPool;
 //!
-//! # async fn example -> Result<, Box<dyn std::error::Error>> {
-//! // Pattern 1: new - Default configuration
-//! let pool1 = ObjectPool::<String, i32>::new.await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Pattern 1: new() - Default configuration
+//! let pool1 = ObjectPool::<String, i32>::new().await?;
 //!
-//! // Pattern 2: with_config - Custom configuration
+//! // Pattern 2: with_config() - Custom configuration
 //! use inklog::ObjectPoolConfig;
 //! let pool2 = ObjectPool::<String, i32>::with_config(ObjectPoolConfig {
 //!     max_capacity: 2048,
 //!     ttl_secs: None,
 //! }).await?;
-//! # Ok()
+//! # Ok(())
 //! # }
 //! ```
 
@@ -115,7 +115,7 @@ where
     /// Create a new object pool with full configuration
     ///
     /// Errors are propagated as `InklogError::CacheError`; no silent
-    /// `Cache::default` fallback is used.
+    /// `Cache::default()` fallback is used.
     pub async fn with_config(config: ObjectPoolConfig) -> Result<Self, InklogError> {
         let mut builder = Cache::builder();
         builder = builder.capacity(config.max_capacity as u64);
@@ -169,11 +169,11 @@ where
 
     /// Get the approximate number of items that have been put into the pool.
     ///
-    /// Note: This count tracks the number of `put` calls and may over-count
+    /// Note: This count tracks the number of `put()` calls and may over-count
     /// if the underlying oxcache evicts entries (TTL expiry, capacity pressure).
     /// It is an approximation, not an exact count of current cache contents.
     /// In particular it only ever increments: it does **not** decrement when
-    /// entries are evicted or removed, so after an eviction `len` over-counts
+    /// entries are evicted or removed, so after an eviction `len()` over-counts
     /// permanently.
     pub fn len(&self) -> usize {
         self.stats.total_items.load(Ordering::Relaxed)

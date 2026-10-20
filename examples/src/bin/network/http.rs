@@ -94,11 +94,11 @@ use std::time::Duration;
 ///
 /// ```rust,no_run
 /// #[tokio::main]
-/// async fn main -> Result<, Box<dyn std::error::Error>> {
-///     let (port, shutdown) = start_http_server.await?;
+/// async fn main -> Result<(), Box<dyn std::error::Error>> {
+///     let (port, shutdown) = start_http_server().await?;
 ///     println!("HTTP 服务器运行在端口 {}", port);
 ///     // ... 使用服务器 ...
-///     Ok()
+///     Ok(())
 /// }
 /// ```
 async fn start_http_server() -> Result<(u16, tokio::sync::oneshot::Sender<()>)> {

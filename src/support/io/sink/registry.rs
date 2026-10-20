@@ -151,7 +151,7 @@ impl SinkFactory for FileSinkFactory {
 /// FileSinkConfig 的 JSON Schema：`schema` feature 下填充真实导出，
 /// 未启用时维持 None（与 SinkMetadata 的 Option 语义一致）。
 ///
-/// 进程级缓存一次生成：输出是类型的纯函数，而 metadata 是公开
+/// 进程级缓存一次生成：输出是类型的纯函数，而 metadata() 是公开
 /// discovery 端口，可能被管理/健康端点轮询，缓存把每次调用从
 /// 「新建 SchemaGenerator 走全类型树」降为一次 Value 克隆。
 #[cfg(feature = "schema")]
