@@ -11,6 +11,8 @@ pub mod confers_config;
 pub mod infra;
 #[cfg(all(feature = "kit", feature = "database"))]
 pub mod kit;
+#[cfg(feature = "oxcache-audit")]
+pub mod oxcache_audit;
 
 // dbnexus AuditStorage 端口的 inklog 写入桥（审计事件 → 结构化日志 → 落库）
 #[cfg(feature = "dbnexus-audit")]
@@ -21,6 +23,9 @@ pub use confers_config::{ConfersConfigWatcher, HotReloadValues, load_config_via_
 // confers AuditSink 端口的 inklog 实现（审计事件 → 结构化日志 sink）
 #[cfg(feature = "confers-audit")]
 pub use confers_audit::ConfersAuditSink;
+// oxcache AuditEventPublisher 端口的 inklog 实现（缓存审计事件 → 结构化日志 sink）
+#[cfg(feature = "oxcache-audit")]
+pub use oxcache_audit::OxcacheAuditPublisher;
 
 // Re-export infra types at module level for two-level import paths
 pub use infra::{Cache, Config, Database, InklogConfigAdapter};

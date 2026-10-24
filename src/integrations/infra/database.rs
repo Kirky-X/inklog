@@ -85,6 +85,8 @@ use dbnexus::database::PoolStatus;
 #[cfg(feature = "database")]
 use dbnexus::database::pool::DbPool;
 #[cfg(feature = "database")]
+use dbnexus::foundation::DatabaseType;
+#[cfg(feature = "database")]
 use dbnexus::foundation::config::DbConfig;
 
 #[cfg(feature = "database")]
@@ -184,6 +186,12 @@ impl DbNexusAdapter {
     /// * `table_name` - 日志表名称
     /// * `permissions_path` - 权限配置文件路径，`None` 时不启用权限校验
     /// * `admin_role` - 管理员角色名
+    ///
+    /// # Warning
+    ///
+    /// 驱动语义由 dbnexus 解析（`DbConfig::database_type()`，与 dbnexus 建池
+    /// 选后端同源）：scheme 大小写不敏感；判定不出时**构造失败**（不猜一个
+    /// 语义）。
     pub async fn with_full_config(
         url: &str,
         pool_size: u32,
@@ -213,6 +221,9 @@ impl DbNexusAdapter {
             ..Default::default()
         };
 
+        // 驱动判定在建池之前完成：判定不出即失败，不建连接、不猜一个语义。
+        let driver = driver_from_config(&config)?;
+
         // 使用 DbPool::with_config 创建连接池
         let pool = DbPool::with_config(config).await.map_err(|e| {
             let mut args = crate::i18n::MsgArgs::new();
@@ -227,11 +238,11 @@ impl DbNexusAdapter {
             pool: Arc::new(pool),
             table_name: table_name.to_string(),
             admin_role: admin_role.to_string(),
-            driver: detect_driver_from_url(url),
+            driver,
         };
 
         // 自动建表
-        adapter.ensure_table_exists(url).await?;
+        adapter.ensure_table_exists().await?;
 
         Ok(adapter)
     }
@@ -247,18 +258,21 @@ impl DbNexusAdapter {
     ///
     /// # Warning
     ///
-    /// 池实例无法解析驱动，转义语义固定为 PostgreSQL（不含 MySQL 的
-    /// 反斜杠二次转义）。MySQL 连接池请改用 `with_full_config` /
-    /// `with_table_name` 等可显式指定驱动的方式，避免错误转义。
+    /// 驱动语义从连接池实际配置（`DbConfig.url`）解析，判据与 dbnexus 建池
+    /// 选后端同源（`DbConfig::database_type()`）——转义语义必须与后端
+    /// 一致：MySQL 默认把 `\` 当转义符，仅双写单引号仍可逃逸字符串字面量
+    /// （`\'; DROP ...` → 闭合字面量 + 独立语句）。URL scheme 无法判定时
+    /// **构造失败**（不猜一个语义）。
     pub fn from_pool(pool: DbPool, table_name: &str) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
-        // 无 URL 可解析驱动，沿用 detect_driver_from_url 的默认回退（PostgreSQL）；
-        // MySQL 连接池的用户请改用 with_full_config/with_table_name（可识别驱动）。
+        // 驱动语义取自连接池实际配置（DbPool::config()）——不再固定为
+        // PostgreSQL：MySQL 后端下按 PG 语义转义可被 `\'` 闭合字面量。
+        let driver = driver_from_config(pool.config())?;
         Ok(Self {
             pool: Arc::new(pool),
             table_name: table_name.to_string(),
             admin_role: "admin".to_string(),
-            driver: DatabaseDriver::PostgreSQL,
+            driver,
         })
     }
 
@@ -274,19 +288,21 @@ impl DbNexusAdapter {
     ///
     /// # Warning
     ///
-    /// trait 对象无法解析驱动，转义语义固定为 PostgreSQL（不含 MySQL 的
-    /// 反斜杠二次转义）。MySQL 场景请改用可显式指定驱动的构造方式。
+    /// 驱动语义从连接池实际配置（`ConnectionPool::config().url`）解析，判据
+    /// 与 dbnexus 建池选后端同源；scheme 无法判定时**构造失败**（不猜一个
+    /// 语义）。
     pub fn from_connection_pool(
         pool: Arc<dyn ConnectionPool + Send + Sync>,
         table_name: &str,
     ) -> Result<Self, InklogError> {
         validate_table_name(table_name)?;
-        // 同上：无法从 trait 对象解析驱动，回退到 PostgreSQL 语义
+        // 同上：trait 对象的 config() 同样能取到 URL——驱动语义不再回退。
+        let driver = driver_from_config(pool.config())?;
         Ok(Self {
             pool,
             table_name: table_name.to_string(),
             admin_role: "admin".to_string(),
-            driver: DatabaseDriver::PostgreSQL,
+            driver,
         })
     }
 
@@ -318,10 +334,10 @@ impl DbNexusAdapter {
     /// 确保日志表存在，若不存在则自动创建。
     ///
     /// 使用管理员角色获取 session 并执行 DDL。
-    /// 驱动类型通过 URL 前缀自动识别。
-    async fn ensure_table_exists(&self, url: &str) -> Result<(), InklogError> {
-        let driver = detect_driver_from_url(url);
-        let ddl = generate_create_table_sql(&self.table_name, &driver);
+    /// DDL 方言取自构造时判定的驱动（`self.driver`）——与写入路径的转义语义
+    /// 同源，不会出现「建表按一种后端、转义按另一种后端」的分叉。
+    async fn ensure_table_exists(&self) -> Result<(), InklogError> {
+        let ddl = generate_create_table_sql(&self.table_name, &self.driver);
         let session = self.pool.get_session(&self.admin_role).await.map_err(|e| {
             let mut args = crate::i18n::MsgArgs::new();
             args.set("err", e.to_string());
@@ -336,7 +352,7 @@ impl DbNexusAdapter {
         // 语句 admin 直接放行——故分派入参限定为本函数生成的 CREATE TABLE
         // 模板，禁止复用该分支执行其他 DDL。
         #[cfg(feature = "duckdb")]
-        if driver == DatabaseDriver::DuckDB {
+        if self.driver == DatabaseDriver::DuckDB {
             ensure_create_table_ddl(&ddl)?;
             session
                 .execute_duckdb_raw(&ddl)
@@ -500,20 +516,43 @@ fn generate_create_table_sql(table_name: &str, driver: &DatabaseDriver) -> Strin
     }
 }
 
-/// 从数据库 URL 推断驱动类型。
+/// 驱动判定失败时的错误：只回显遮蔽后的 DSN。
+///
+/// 连接池 URL 内嵌口令，原文进消息会随错误文本出口（`?` / `to_string()`）外泄。
 #[cfg(feature = "database")]
-fn detect_driver_from_url(url: &str) -> DatabaseDriver {
-    if url.starts_with("sqlite:") || url.starts_with("sqlite3:") {
-        DatabaseDriver::SQLite
-    } else if url.starts_with("postgres:") || url.starts_with("postgresql:") {
-        DatabaseDriver::PostgreSQL
-    } else if url.starts_with("mysql:") {
-        DatabaseDriver::MySQL
-    } else if url.starts_with("duckdb:") || url.starts_with("duckdb://") {
-        DatabaseDriver::DuckDB
-    } else {
-        // 默认回退到 PostgreSQL
-        DatabaseDriver::PostgreSQL
+fn driver_undetectable(url: &str) -> InklogError {
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("url", crate::domain::config::database::redact_dsn(url));
+    InklogError::ConfigError(crate::i18n::tr_args("db-driver_undetectable", args))
+}
+
+/// 由 dbnexus 解析出的数据库类型判定 inklog 驱动。
+///
+/// 判据与 dbnexus 建池选后端同源（`DbConfig::database_type()` →
+/// `DatabaseType::from_url`）：scheme 大小写不敏感（`MYSQL://` 与 `mysql://`
+/// 同义），未知 scheme 由 dbnexus 直接报错。Ladybug/Neo4j 是图数据库，inklog
+/// 适配器不支持——不回退 PostgreSQL（回退会让 MySQL 后端按 PG 语义转义）。
+#[cfg(feature = "database")]
+fn driver_from_db_type(db_type: DatabaseType, url: &str) -> Result<DatabaseDriver, InklogError> {
+    match db_type {
+        DatabaseType::Postgres => Ok(DatabaseDriver::PostgreSQL),
+        DatabaseType::MySql => Ok(DatabaseDriver::MySQL),
+        DatabaseType::Sqlite => Ok(DatabaseDriver::SQLite),
+        DatabaseType::DuckDb => Ok(DatabaseDriver::DuckDB),
+        DatabaseType::Ladybug | DatabaseType::Neo4j => Err(driver_undetectable(url)),
+    }
+}
+
+/// 从连接池配置判定驱动；无法判定时返回 `Err`。
+///
+/// 转义语义必须与后端一致，猜错即为注入面：MySQL 默认把 `\` 当转义符，
+/// 仅双写单引号仍可逃逸字符串字面量——`\'; DROP TABLE logs; --` 在 MySQL
+/// 下会闭合字面量并让后续内容成为独立语句。故不判定即失败，不回退。
+#[cfg(feature = "database")]
+fn driver_from_config(config: &DbConfig) -> Result<DatabaseDriver, InklogError> {
+    match config.database_type() {
+        Ok(db_type) => driver_from_db_type(db_type, &config.url),
+        Err(_) => Err(driver_undetectable(&config.url)),
     }
 }
 
@@ -1300,6 +1339,187 @@ mod tests {
     // ============================================================================
     // escape_sql_string 单元测试
     // ============================================================================
+
+    /// 连接池驱动的解析：scheme 决定转义语义，判定不了即失败（不回退）。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_driver_from_config_detects_backend() {
+        let cases = [
+            ("mysql://user:pw@127.0.0.1:3306/logs", DatabaseDriver::MySQL),
+            (
+                "postgres://user:pw@127.0.0.1:5432/logs",
+                DatabaseDriver::PostgreSQL,
+            ),
+            (
+                "postgresql://user:pw@127.0.0.1:5432/logs",
+                DatabaseDriver::PostgreSQL,
+            ),
+            ("sqlite://logs.db", DatabaseDriver::SQLite),
+            ("sqlite:logs.db", DatabaseDriver::SQLite),
+            ("sqlite3://logs.db", DatabaseDriver::SQLite),
+            ("duckdb://logs.duckdb", DatabaseDriver::DuckDB),
+            ("duckdb:logs.duckdb", DatabaseDriver::DuckDB),
+        ];
+        for (url, expected) in cases {
+            let config = DbConfig {
+                url: url.to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                driver_from_config(&config).unwrap(),
+                expected,
+                "wrong driver for {url}"
+            );
+        }
+    }
+
+    /// scheme 大小写不敏感：`MYSQL://` 与 `mysql://` 是同一个 DSN。
+    ///
+    /// dbnexus 建池选后端按小写化后的 scheme 解析（`DatabaseType::from_url`），
+    /// 判定必须与之一致——否则 `MYSQL://` 会被误判成 PostgreSQL，建表用 PG
+    /// 方言、转义用 PG 语义。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_driver_from_config_scheme_is_case_insensitive() {
+        let cases = [
+            ("MYSQL://user:pw@127.0.0.1:3306/logs", DatabaseDriver::MySQL),
+            ("Mysql://user:pw@127.0.0.1:3306/logs", DatabaseDriver::MySQL),
+            (
+                "POSTGRES://user:pw@127.0.0.1:5432/logs",
+                DatabaseDriver::PostgreSQL,
+            ),
+            (
+                "Postgres://user:pw@127.0.0.1:5432/logs",
+                DatabaseDriver::PostgreSQL,
+            ),
+            (
+                "PostgreSQL://user:pw@127.0.0.1:5432/logs",
+                DatabaseDriver::PostgreSQL,
+            ),
+            ("SQLITE://logs.db", DatabaseDriver::SQLite),
+            ("SQLite://logs.db", DatabaseDriver::SQLite),
+            ("DUCKDB://logs.duckdb", DatabaseDriver::DuckDB),
+        ];
+        for (url, expected) in cases {
+            let config = DbConfig {
+                url: url.to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                driver_from_config(&config).unwrap(),
+                expected,
+                "wrong driver for {url}"
+            );
+        }
+    }
+
+    /// 无法判定的 scheme 必须失败：猜一个语义即注入面（MySQL 的 `\` 转义）。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_driver_from_config_rejects_unknown_scheme() {
+        for url in [
+            "",
+            "  ",
+            "sqlserver://host/db",
+            "oracle://host/db",
+            "unknown",
+        ] {
+            let config = DbConfig {
+                url: url.to_string(),
+                ..Default::default()
+            };
+            assert!(
+                driver_from_config(&config).is_err(),
+                "unknown scheme must not guess a driver: {url}"
+            );
+        }
+    }
+
+    /// 图数据库（Ladybug/Neo4j）是 dbnexus 支持但 inklog 适配器不支持的后端：
+    /// 必须显式失败，不得回退 PostgreSQL。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_driver_from_config_rejects_unsupported_graph_backends() {
+        for url in [
+            "ladybug://host/db",
+            "lbug://host/db",
+            "neo4j://host/db",
+            "neo4j+s://host/db",
+        ] {
+            let config = DbConfig {
+                url: url.to_string(),
+                ..Default::default()
+            };
+            assert!(
+                driver_from_config(&config).is_err(),
+                "graph backends are not supported by the inklog adapter: {url}"
+            );
+        }
+    }
+
+    /// 判定失败的错误文本不得带出口令（错误文本会随 `?` / `to_string()` 外泄）。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_driver_from_config_error_redacts_password() {
+        let config = DbConfig {
+            url: "sqlserver://user:sup3rs3cret@host/db".to_string(),
+            ..Default::default()
+        };
+        let err = driver_from_config(&config).expect_err("unknown scheme must fail");
+        let InklogError::ConfigError(message) = err else {
+            panic!("expected ConfigError");
+        };
+        assert!(
+            !message.contains("sup3rs3cret"),
+            "error text must not leak the DSN password: {message}"
+        );
+        assert!(
+            message.contains("***"),
+            "error text must show the redacted DSN: {message}"
+        );
+    }
+
+    /// 回归：适配器判定的驱动必须与实际连上的后端一致——建表方言与写入转义
+    /// 语义同源于 `self.driver`，不得再出现「一种后端建表、另一种后端转义」。
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_dbnexus_adapter_driver_matches_connected_backend() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join("inklog_driver_consistency.db");
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
+
+        let adapter = DbNexusAdapter::with_table_name(&db_url, 1, "logs")
+            .await
+            .expect("with_table_name should succeed");
+
+        // 判定的驱动必须是 SQLite（不是猜出来的 PostgreSQL）
+        assert_eq!(adapter.driver, DatabaseDriver::SQLite);
+
+        // 建表方言随驱动：SQLite 方言（AUTOINCREMENT），不是 PG 方言（BIGSERIAL）
+        let ddl = generate_create_table_sql(adapter.table_name(), &adapter.driver);
+        assert!(ddl.contains("INTEGER PRIMARY KEY AUTOINCREMENT"));
+        assert!(!ddl.contains("BIGSERIAL"));
+
+        // 落库的表确实是该方言（SQLite 文件内保存建表 SQL 原文）
+        let mut content =
+            String::from_utf8_lossy(&std::fs::read(&db_path).expect("db file")).to_string();
+        let wal_path = db_path.with_extension("db-wal");
+        if wal_path.exists() {
+            content.push_str(&String::from_utf8_lossy(
+                &std::fs::read(&wal_path).expect("wal"),
+            ));
+        }
+        assert!(
+            content.contains("AUTOINCREMENT"),
+            "created table must use the SQLite dialect"
+        );
+        assert!(
+            !content.contains("BIGSERIAL"),
+            "created table must not use the PostgreSQL dialect"
+        );
+
+        let _ = std::fs::remove_file(&db_path);
+    }
 
     #[cfg(feature = "database")]
     #[test]

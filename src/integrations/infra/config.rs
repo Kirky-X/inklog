@@ -523,6 +523,7 @@ impl Config for MockConfig {
 mod tests {
     use super::*;
     use crate::InklogConfig;
+    use serial_test::serial;
 
     // InklogConfigAdapter 测试
 
@@ -804,6 +805,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_adapter_default() {
         // Default impl 调用 new，失败时回退到 from_config(default)
         let adapter = InklogConfigAdapter::default();
@@ -812,12 +814,12 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_adapter_default_falls_back_when_load_fails() {
         // INKLOG_CONFIG_PATH 指向非法 TOML 时 new 失败，
         // Default 须回退到默认配置并以 warn 告知
-        static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _lock = ENV_MUTEX.lock().unwrap();
-
+        // #[serial] 持进程级串行锁：INKLOG_CONFIG_PATH 是进程级状态，
+        // 模块私有互斥量对本二进制其他模块的测试不可见
         let temp = tempfile::tempdir().unwrap();
         let bad_config = temp.path().join("bad.toml");
         std::fs::write(&bad_config, "not [valid toml").unwrap();
@@ -1080,5 +1082,31 @@ mod tests {
         let adapter = InklogConfigAdapter::from_config(config);
 
         assert_eq!(adapter.get_int("global.level"), None);
+    }
+
+    /// env 变更必须在进程级串行锁内执行。
+    ///
+    /// 本模块曾用模块私有 `ENV_MUTEX` 保护 INKLOG_CONFIG_PATH：该互斥量对
+    /// 本二进制其他模块（domain/config、domain/core/manager）的测试不可见，
+    /// 并发改写同一变量会互相污染。`#[serial]` 的进程级锁对全二进制生效。
+    #[test]
+    #[serial]
+    fn test_env_mutation_holds_process_wide_serial_lock() {
+        assert!(
+            serial_test::is_locked_serially(None),
+            "env mutation must run under the process-wide serial lock, \
+             not a module-local mutex"
+        );
+        unsafe {
+            std::env::set_var("INKLOG_TEST_SERIAL_LOCK_PROBE", "1");
+        }
+        assert_eq!(
+            std::env::var("INKLOG_TEST_SERIAL_LOCK_PROBE").as_deref(),
+            Ok("1"),
+            "env mutation must be observable while the lock is held"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_SERIAL_LOCK_PROBE");
+        }
     }
 }
