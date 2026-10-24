@@ -504,7 +504,7 @@ pub fn convert_logs_to_parquet(
     _logs: &[crate::LogRecord],
     _config: &crate::ParquetConfig,
 ) -> Result<Vec<u8>, String> {
-    Err("parquet feature not enabled: rebuild inklog with `parquet` feature to export logs as Parquet".to_string())
+    Err(crate::i18n::tr("sink-parquet_feature_not_enabled"))
 }
 
 #[cfg(test)]

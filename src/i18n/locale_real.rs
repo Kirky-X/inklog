@@ -587,6 +587,76 @@ mod tests {
         );
     }
 
+    /// 守卫：TLS 配置校验与 parquet feature 门控的文案在 en/zh-CN 双侧都要
+    /// 渲染出预期文本（en 值与构造点内嵌的规范串逐字一致）。
+    #[test]
+    fn test_tls_and_parquet_keys_render_in_both_locales() {
+        init_locale();
+        let cases: &[(&str, Option<&[(&str, &str)]>, &str, &str)] = &[
+            (
+                "config-tls_cert_path_empty",
+                None,
+                "tls.cert_path is empty",
+                "tls.cert_path 为空",
+            ),
+            (
+                "config-tls_key_path_empty",
+                None,
+                "tls.key_path is empty",
+                "tls.key_path 为空",
+            ),
+            (
+                "config-tls_cert_path_missing",
+                Some(&[("path", "/tmp/cert.pem")]),
+                "tls.cert_path \"/tmp/cert.pem\" does not exist",
+                "tls.cert_path \"/tmp/cert.pem\" 不存在",
+            ),
+            (
+                "config-tls_key_path_missing",
+                Some(&[("path", "/tmp/key.pem")]),
+                "tls.key_path \"/tmp/key.pem\" does not exist",
+                "tls.key_path \"/tmp/key.pem\" 不存在",
+            ),
+            (
+                "sink-parquet_feature_not_enabled",
+                None,
+                "parquet feature not enabled: rebuild inklog with `parquet` feature to export logs as Parquet",
+                "未启用 parquet 特性：请以 `parquet` 特性重新构建 inklog 以将日志导出为 Parquet",
+            ),
+        ];
+        for (id, args, expected_en, expected_zh) in cases {
+            let fluent_args = args.map(|pairs| {
+                let mut fluent = FluentArgs::new();
+                for (k, v) in pairs {
+                    fluent.set(*k, *v);
+                }
+                fluent
+            });
+            assert_eq!(
+                strip_bidi_isolates(format_message("en", id, fluent_args.as_ref()).as_deref())
+                    .as_deref(),
+                Some(*expected_en),
+                "en rendering of '{id}' diverged"
+            );
+            assert_eq!(
+                strip_bidi_isolates(format_message("zh-CN", id, fluent_args.as_ref()).as_deref())
+                    .as_deref(),
+                Some(*expected_zh),
+                "zh-CN rendering of '{id}' diverged"
+            );
+        }
+    }
+
+    /// Fluent 默认对占位符插入双向隔离符（U+2068 / U+2069）以防双向文本串扰；
+    /// 本仓 bundle 未关闭该行为，故比对前剥离隔离符只留可见文本。
+    fn strip_bidi_isolates(rendered: Option<&str>) -> Option<String> {
+        rendered.map(|text| {
+            text.chars()
+                .filter(|c| !matches!(c, '\u{2068}' | '\u{2069}'))
+                .collect::<String>()
+        })
+    }
+
     #[test]
     fn test_embedded_resources_match_filesystem_entries() {
         let locales_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");

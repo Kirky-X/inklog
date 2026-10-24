@@ -169,3 +169,7 @@ log-config_validation_failed = 配置校验失败：{ $err }
 log-console_secret_scan_feature_missing = console_sink.secret_scan_enabled=true 需要 `secret-scan` 特性；当前构建忽略该开关
 log-database_secret_scan_feature_missing = database_sink.secret_scan_enabled=true 需要 `secret-scan` 特性；当前构建忽略该开关
 log-console_stderr_levels_entries_removed = 已移除非法的 stderr_levels 条目
+config-tls_cert_path_empty = tls.cert_path 为空
+config-tls_key_path_empty = tls.key_path 为空
+config-tls_cert_path_missing = tls.cert_path "{ $path }" 不存在
+config-tls_key_path_missing = tls.key_path "{ $path }" 不存在

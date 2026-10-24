@@ -199,3 +199,4 @@ log-kit_observer_module_built = inklog 构建观察者：模块构建成功
 log-db_batch_insert_succeeded = 数据库批量插入成功
 log-db_batch_insert_succeeded_parameterized = 数据库批量插入成功（参数化）
 log-custom_sink_write_failed = 自定义 sink '{ $name }' 写入失败（第 { $attempt }/{ $max_attempts } 次尝试）：{ $err }
+sink-parquet_feature_not_enabled = 未启用 parquet 特性：请以 `parquet` 特性重新构建 inklog 以将日志导出为 Parquet

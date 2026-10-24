@@ -108,19 +108,24 @@ impl TlsConfig {
     /// first connection.
     pub fn validate(&self) -> Result<(), String> {
         if self.cert_path.is_empty() {
-            return Err("tls.cert_path is empty".to_string());
+            return Err(crate::i18n::tr("config-tls_cert_path_empty"));
         }
         if self.key_path.is_empty() {
-            return Err("tls.key_path is empty".to_string());
+            return Err(crate::i18n::tr("config-tls_key_path_empty"));
         }
         if !std::path::Path::new(&self.cert_path).is_file() {
-            return Err(format!(
-                "tls.cert_path \"{}\" does not exist",
-                self.cert_path
-            ));
+            return Err(crate::i18n::tr_args("config-tls_cert_path_missing", {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("path", &self.cert_path);
+                args
+            }));
         }
         if !std::path::Path::new(&self.key_path).is_file() {
-            return Err(format!("tls.key_path \"{}\" does not exist", self.key_path));
+            return Err(crate::i18n::tr_args("config-tls_key_path_missing", {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("path", &self.key_path);
+                args
+            }));
         }
         Ok(())
     }

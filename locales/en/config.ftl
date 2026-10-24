@@ -169,3 +169,7 @@ log-config_validation_failed = Configuration validation failed: { $err }
 log-console_secret_scan_feature_missing = console_sink.secret_scan_enabled=true requires the `secret-scan` feature; the flag is ignored in this build
 log-database_secret_scan_feature_missing = database_sink.secret_scan_enabled=true requires the `secret-scan` feature; the flag is ignored in this build
 log-console_stderr_levels_entries_removed = Removed invalid stderr_levels entries
+config-tls_cert_path_empty = tls.cert_path is empty
+config-tls_key_path_empty = tls.key_path is empty
+config-tls_cert_path_missing = tls.cert_path "{ $path }" does not exist
+config-tls_key_path_missing = tls.key_path "{ $path }" does not exist
