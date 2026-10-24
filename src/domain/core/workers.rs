@@ -10,7 +10,6 @@ use crate::support::io::LogSink;
 use crate::{InklogError, LogRecord};
 use chrono::Utc;
 use crossbeam_channel::{Receiver, Sender, bounded};
-use limiteron::retry::{RetryPolicy, delay_for_attempt};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -72,32 +71,34 @@ pub(crate) struct CustomSinkEntry {
 pub(crate) type WorkerStartResult =
     Result<(Vec<tokio::task::JoinHandle<()>>, Vec<Sender<()>>), InklogError>;
 
-/// sink 写失败重试的档位（内置 worker 与 custom sink 共用）：
-/// `max_retries = 2`（含首调共 3 次尝试）、固定间隔 10ms×attempt。
-/// 次数语义单源于 limiteron `RetryPolicy`（公开访问器 `max_retries`）；
-/// async 执行器（内部 tokio sleep）不进入同步 worker 路径。
-fn write_retry_policy() -> RetryPolicy {
-    RetryPolicy::new(2, Duration::from_millis(10))
-}
+/// sink 写失败重试的最大重试次数（不含首次写入）：含首调共 3 次尝试。
+const WRITE_MAX_RETRIES: u32 = 2;
+
+/// sink 写失败重试的固定间隔基数（实际间隔 = 基数 × attempt）。
+const WRITE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 /// sink 写失败重试上限（含首次写入）。
 fn write_max_attempts() -> u32 {
-    write_retry_policy().max_retries() + 1
+    WRITE_MAX_RETRIES + 1
 }
 
 /// sink 工厂重试的退避时长（`attempt` 从 1 起）：1s、2s、4s、8s、16s，
-/// 第 6 档起封顶 30s。公式与数值单源于 limiteron `delay_for_attempt`
-/// 纯函数（jitter=0，无时钟副作用），同步工厂循环直接消费，不引入
-/// tokio 时钟；降级模式下工厂持续重试不放弃。
+/// 第 6 档起封顶 30s。指数退避 + 绝对封顶（jitter=0，无时钟副作用），
+/// 同步工厂循环直接消费，不引入 tokio 时钟；降级模式下工厂持续重试不放弃。
 fn factory_retry_delay(attempt: u32) -> Duration {
-    delay_for_attempt(
-        attempt,
-        Duration::from_secs(1),
-        2.0,
-        Duration::from_secs(30),
-        0.0,
-    )
+    let base =
+        FACTORY_RETRY_BASE.as_millis() as f64 * FACTORY_RETRY_FACTOR.powi(attempt as i32 - 1);
+    Duration::from_millis(base.min(FACTORY_RETRY_MAX.as_millis() as f64) as u64)
 }
+
+/// sink 工厂重试的初始退避时长。
+const FACTORY_RETRY_BASE: Duration = Duration::from_secs(1);
+
+/// sink 工厂重试的退避乘数。
+const FACTORY_RETRY_FACTOR: f64 = 2.0;
+
+/// sink 工厂重试的单次等待上限（绝对封顶）。
+const FACTORY_RETRY_MAX: Duration = Duration::from_secs(30);
 
 /// 通用 SinkWorker 主循环，消费动态注册 sink 的专属 channel。
 ///
@@ -169,7 +170,7 @@ pub(crate) fn run_custom_sink_worker(
                                 let _ = runtime_handle
                                     .block_on(async { console_sink.write(&record).await });
                             } else {
-                                thread::sleep(Duration::from_millis(10 * attempt as u64));
+                                thread::sleep(WRITE_RETRY_INTERVAL * attempt);
                             }
                         }
                     }
@@ -332,7 +333,7 @@ struct SinkWorkerState {
     sink: Option<Box<dyn LogSink>>,
     failures: FailureState,
     /// 工厂重试的退避档位序号（`attempt` 从 1 起：等待 1s、2s、4s…
-    /// 封顶 30s，由 limiteron [`factory_retry_delay`] 计算；失败递增加一，
+    /// 封顶 30s，由 [`factory_retry_delay`] 计算；失败递增加一，
     /// 成功后复位）
     factory_attempts: u32,
     last_factory_attempt: Instant,
@@ -455,8 +456,8 @@ impl SinkWorker<'_> {
     }
 
     /// 单条记录的带重试写入；返回是否最终成功。
-    /// 契约：最多 3 次尝试（[`write_max_attempts`]，limiteron RetryPolicy
-    /// max_retries=2 单源），失败间隔 sleep(10ms×attempt)；第 3 次失败后
+    /// 契约：最多 3 次尝试（[`write_max_attempts`]，重试次数单源于
+    /// [`WRITE_MAX_RETRIES`]），失败间隔 sleep(10ms×attempt)；第 3 次失败后
     /// 计 sink_error、健康置 false 并降级写 console。
     fn write_with_retry(
         &self,
@@ -491,7 +492,7 @@ impl SinkWorker<'_> {
                             .update_sink_health(self.desc.name, false, Some(e.to_string()));
                         self.fallback_to_console(record);
                     } else {
-                        thread::sleep(Duration::from_millis(10 * attempts as u64));
+                        thread::sleep(WRITE_RETRY_INTERVAL * attempts);
                     }
                 }
             }
@@ -1100,11 +1101,11 @@ mod tests {
         assert!(should_attempt_recovery(Some(&old), Duration::from_secs(30)));
     }
 
-    // 重试数值单源（limiteron retry：RetryPolicy / delay_for_attempt）
+    // 重试数值单源（本模块常量：WRITE_MAX_RETRIES / factory_retry_delay）
 
     #[test]
     fn test_factory_retry_backoff_sequence() {
-        // 初始 1s、因子 2.0 翻倍、封顶 30s（limiteron delay_for_attempt 纯函数单源）
+        // 初始 1s、因子 2.0 翻倍、封顶 30s（factory_retry_delay 纯函数单源）
         assert_eq!(factory_retry_delay(1), Duration::from_secs(1));
         assert_eq!(factory_retry_delay(2), Duration::from_secs(2));
         assert_eq!(factory_retry_delay(3), Duration::from_secs(4));

@@ -280,6 +280,7 @@ fn parse_config_size(size_str: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_validate_rejects_invalid_compression_level() {
@@ -295,6 +296,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_validate_rejects_encrypt_without_key_env() {
         let mut config = FileSinkConfig::default();
         config.encrypt = true;

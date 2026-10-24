@@ -582,6 +582,13 @@ impl LoggerManager {
         ),
         InklogError,
     > {
+        // HTTP 暴露面守卫：非回环绑定且既无 Bearer 鉴权也无 IP 白名单时，
+        // /metrics 与 /health 对网络上任何可达对端开放。守卫必须落在
+        // 库自身的构建入口上——只在 `InklogConfig::validate()` 内约束，
+        // 则 `LoggerManager::with_config` / `LoggerBuilder::build` 这些
+        // 推荐入口可绕过（配置不经过 validate 即构建成功）。
+        config.validate_http_exposure()?;
+
         let metrics = Arc::new(Metrics::new());
         let (sender, receiver) = bounded(config.performance.channel_capacity);
         let (console_sender, console_receiver) = bounded(config.performance.channel_capacity);
@@ -716,7 +723,14 @@ impl LoggerManager {
         if config.global.fallback_journal {
             let journal_path = std::path::PathBuf::from(&config.global.fallback_journal_path);
             if let Some(parent) = journal_path.parent() {
+                // 新建的 journal 目录收敛为 0700（已存在目录不回改用户权限）——
+                // 与 file sink 的日志目录同一约束：journal 存的是主链路失败
+                // 期间落盘的 ERROR/FATAL 原文，最可能含敏感上下文。
+                let newly_created = !parent.exists();
                 let _ = std::fs::create_dir_all(parent);
+                if newly_created {
+                    crate::support::fallback_journal::tighten_journal_dir_permissions(parent);
+                }
             }
             let journal = if config.global.fallback_journal_encrypt {
                 crate::support::fallback_journal::FallbackJournal::with_crypto(
@@ -2439,6 +2453,31 @@ worker_threads = 1
         false
     }
 
+    /// 发送带自定义 `Host` 头的 HTTP/1.1 请求，返回响应状态码
+    ///
+    /// 用裸 TCP 拼请求，避免客户端库按 URI 改写 `Host` 头
+    #[cfg(feature = "http")]
+    async fn raw_http_status(port: u16, host: &str) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect to http server");
+        let request = format!("GET /health HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("write request");
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.expect("read response");
+        let response = String::from_utf8_lossy(&buf);
+        response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse::<u16>().ok())
+            .unwrap_or_else(|| panic!("unexpected response: {response}"))
+    }
+
     /// 构建基础的 HTTP 测试配置（无 auth、无 IP 白名单、Warn 模式）
     #[cfg(feature = "http")]
     fn http_test_config(port: u16) -> InklogConfig {
@@ -2493,12 +2532,15 @@ worker_threads = 1
     async fn test_with_config_http_warn_mode_continues_on_startup_error() {
         // 使用无效主机名触发 start_http_server 中 addr.parse 失败
         // Warn 模式应记录警告但继续返回 Ok(manager)
+        // 配 IP 白名单：非回环绑定且无访问控制会被暴露面守卫先行拒绝，
+        // 那条路径另有覆盖——本用例只关心 HTTP 服务器启动期错误
         let config = InklogConfig {
             http_server: Some(crate::HttpServerConfig {
                 enabled: true,
                 host: "invalid host with spaces".to_string(),
                 port: 9090,
                 error_mode: crate::HttpErrorMode::Warn,
+                ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
                 ..Default::default()
             }),
             performance: crate::PerformanceConfig {
@@ -2525,6 +2567,9 @@ worker_threads = 1
                 host: "invalid host with spaces".to_string(),
                 port: 9091,
                 error_mode: crate::HttpErrorMode::Strict,
+                // 配 IP 白名单：暴露面守卫只针对「无访问控制的非回环绑定」，
+                // 本用例针对 HTTP 服务器启动期的地址解析失败
+                ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
                 ..Default::default()
             }),
             performance: crate::PerformanceConfig {
@@ -2545,6 +2590,39 @@ worker_threads = 1
             Err(other) => panic!("Expected ConfigError, got {:?}", other),
             Ok(_) => panic!("Strict mode should return Err on invalid HTTP address"),
         }
+    }
+
+    /// 暴露面守卫：非回环绑定且无鉴权/白名单 → 构建期拒绝（fail-closed）。
+    ///
+    /// 守卫必须覆盖库自身的推荐入口（`LoggerManager::with_config` /
+    /// `LoggerBuilder::build`）——只在 `InklogConfig::validate()` 内约束，
+    /// 推荐入口可绕过。
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_with_config_rejects_exposed_http_without_access_control() {
+        let config = InklogConfig {
+            http_server: Some(crate::HttpServerConfig {
+                enabled: true,
+                host: "0.0.0.0".to_string(),
+                port: 9092,
+                ..Default::default()
+            }),
+            performance: crate::PerformanceConfig {
+                channel_capacity: 1000,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let Err(err) = LoggerManager::with_config(config).await else {
+            panic!("exposed HTTP endpoint without access control must be rejected");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("http_server") && msg.contains("0.0.0.0"),
+            "error must name the exposed endpoint, got: {msg}"
+        );
     }
 
     /// /health 端点返回 200 和 JSON 格式的健康状态
@@ -3013,6 +3091,80 @@ worker_threads = 1
             resp.status(),
             reqwest::StatusCode::OK,
             "wildcard 127.0.* should match 127.0.0.1"
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// 通配绑定（`0.0.0.0`）+ 白名单含回环段：rebinding 后浏览器对端是回环，
+    /// 非回环 `Host` 必须 403；回环 `Host` 放行。
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_wildcard_bind_rejects_non_loopback_host() {
+        let port = find_available_http_port();
+        let mut config = http_test_config(port);
+        let http = config
+            .http_server
+            .as_mut()
+            .expect("http_server should be set");
+        http.host = "0.0.0.0".to_string();
+        http.ip_whitelist = Some(vec!["127.0.0.1".to_string()]);
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable on port {}",
+            port
+        );
+
+        // rebinding 形态：Host 是攻击者域名，对端是回环 → 403
+        let status = raw_http_status(port, "evil.example.com").await;
+        assert_eq!(
+            status, 403,
+            "non-loopback Host from a loopback peer must be rejected"
+        );
+
+        // 本机直连：回环 Host → 200
+        let status = raw_http_status(port, &format!("127.0.0.1:{port}")).await;
+        assert_eq!(
+            status, 200,
+            "loopback Host from a loopback peer must pass the host check"
+        );
+        let _ = manager.shutdown();
+    }
+
+    /// 回环绑定：非回环 `Host` 必须 403，回环 `Host` 放行。
+    ///
+    /// 与通配绑定用例互补：绑定地址本身是回环时，Host 校验仍是唯一防线
+    /// （DNS rebinding 后浏览器对端即回环）。
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_http_server_loopback_bind_rejects_non_loopback_host() {
+        let port = find_available_http_port();
+        let config = http_test_config(port);
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("Manager should start with HTTP server");
+        assert!(
+            wait_for_http_server("127.0.0.1", port).await,
+            "HTTP server should become reachable on port {}",
+            port
+        );
+
+        // rebinding 形态：Host 是攻击者域名，对端是回环 → 403
+        let status = raw_http_status(port, "evil.example.com").await;
+        assert_eq!(
+            status, 403,
+            "non-loopback Host from a loopback peer must be rejected"
+        );
+
+        // 本机直连：回环 Host → 200
+        let status = raw_http_status(port, &format!("127.0.0.1:{port}")).await;
+        assert_eq!(
+            status, 200,
+            "loopback Host from a loopback peer must pass the host check"
         );
         let _ = manager.shutdown();
     }

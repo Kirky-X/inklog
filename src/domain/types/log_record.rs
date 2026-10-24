@@ -37,6 +37,12 @@ use tracing::{Event, Level};
 /// [`mask_sensitive_fields()`](Self::mask_sensitive_fields). This should be called
 /// by sinks before persisting logs to external storage.
 ///
+/// 出口口径：
+/// - `Debug`（`{:?}`）经脱敏——调试输出不外带凭据与 PII；
+/// - `Serialize` 保持原文——落盘前的脱敏是 sink 的职责
+///   （`masking_enabled` / `secret_scan_enabled` 开关的语义面），在序列化
+///   层改写会静默改变使用方显式配置过的落盘数据。
+///
 /// # Example
 ///
 /// ```
@@ -52,7 +58,7 @@ use tracing::{Event, Level};
 /// assert_eq!(record.level, "INFO");
 /// assert_eq!(record.target, "myapp::service");
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LogRecord {
     /// UTC timestamp when this log record was created.
     pub timestamp: DateTime<Utc>,
@@ -95,6 +101,38 @@ pub struct LogRecord {
     /// Format: 16-char lowercase hex; `None` when outside any span.
     #[serde(default)]
     pub span_id: Option<String>,
+}
+
+/// `LogRecord` 的调试视图：message、字段值与来源路径经脱敏。
+///
+/// 派生 `Debug` 会原样打印 message 与全部字段值——凭据、令牌、PII 直接
+/// 进调试输出（`{:?}` 与 `Display` 一样是最常见的记录外流口）。
+///
+/// 持久化出口（`Serialize`）保持原文：脱敏点是 sink
+/// （`masking_enabled` / `secret_scan_enabled` 开关的语义面），在序列化
+/// 层改写会静默改变落盘数据——那是使用方的显式配置，不是本层能替其
+/// 决定的事。
+impl std::fmt::Debug for LogRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 顺序与真实管线一致：subscriber 的 sanitizer 先于 sink 的掩码
+        let sanitizer = crate::validation::sanitize::LogSanitizer::new();
+        let mut record = self.clone();
+        record.message = sanitizer.sanitize(&record.message);
+        record.mask_sensitive_fields();
+        let file = record.file.as_deref().map(|path| sanitizer.sanitize(path));
+        f.debug_struct("LogRecord")
+            .field("timestamp", &record.timestamp)
+            .field("level", &record.level)
+            .field("target", &record.target)
+            .field("message", &record.message)
+            .field("fields", &record.fields)
+            .field("file", &file)
+            .field("line", &record.line)
+            .field("thread_id", &record.thread_id)
+            .field("trace_id", &record.trace_id)
+            .field("span_id", &record.span_id)
+            .finish()
+    }
 }
 
 impl Default for LogRecord {

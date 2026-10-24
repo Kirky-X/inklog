@@ -1039,6 +1039,59 @@ impl LoggerBuilder {
         self
     }
 
+    /// 启用HTTP服务器 Bearer Token 鉴权
+    ///
+    /// token 值从**环境变量**读取（启动期一次性读取，缺失即拒绝启动）；
+    /// 本方法只指定变量名，不接受明文 token。
+    ///
+    /// # Arguments
+    /// * `token_env` - 存放 token 的环境变量名（默认 `INKLOG_HTTP_AUTH_TOKEN`）
+    ///
+    /// # Example
+    /// ```ignore
+    /// let _logger = LoggerManager::builder()
+    ///     .enable_http_server(true)
+    ///     .http_auth("INKLOG_HTTP_AUTH_TOKEN")
+    ///     .build()
+    ///     .await?;
+    /// ```
+    #[cfg(feature = "http")]
+    pub fn http_auth(mut self, token_env: impl Into<String>) -> Self {
+        let auth = crate::HttpAuthConfig {
+            enabled: true,
+            token_env: token_env.into(),
+        };
+        if let Some(ref mut http) = self.config.http_server {
+            http.auth = Some(auth);
+        } else {
+            self.config.http_server = Some(crate::HttpServerConfig {
+                auth: Some(auth),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
+    /// 设置HTTP服务器 IP 白名单
+    ///
+    /// 条目形式三选一：精确 IP、CIDR（`10.0.0.0/8`）、前缀通配（`10.*`）。
+    /// 非法条目在配置期拒绝。
+    ///
+    /// # Arguments
+    /// * `whitelist` - 允许访问的来源 IP 列表
+    #[cfg(feature = "http")]
+    pub fn http_ip_whitelist(mut self, whitelist: Vec<String>) -> Self {
+        if let Some(ref mut http) = self.config.http_server {
+            http.ip_whitelist = Some(whitelist);
+        } else {
+            self.config.http_server = Some(crate::HttpServerConfig {
+                ip_whitelist: Some(whitelist),
+                ..Default::default()
+            });
+        }
+        self
+    }
+
     // 依赖注入方法
 
     /// 注入自定义 Cache 实现

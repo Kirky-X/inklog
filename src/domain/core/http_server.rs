@@ -112,6 +112,13 @@ impl LoggerManager {
             request: Request<axum::body::Body>,
             next: Next,
         ) -> Response {
+            // DNS rebinding 防护：对端为回环时只接受回环 Host——恶意站点可把
+            // 自有域名 rebind 到 127.0.0.1，此时 Origin 与目标同源，跨源
+            // 读取不再被同源策略阻断，只能由服务端校验 Host 拦住。
+            if let Some(response) = loopback_host_check(addr.ip(), &request) {
+                return response;
+            }
+
             // vuln-0003: 使用启动时缓存的 token_value，不再读取环境变量。
             // 若 auth_enabled=true 则 token_value 一定为 Some（启动时已校验）。
             if state.auth_enabled
@@ -207,14 +214,18 @@ impl LoggerManager {
             ))
             .with_state(auth_state);
 
-        let addr: std::net::SocketAddr = format!("{}:{}", config.host, config.port)
-            .parse()
-            .map_err(|e: std::net::AddrParseError| {
-                let mut args = crate::i18n::MsgArgs::new();
-                args.set("addr", format!("{}:{}", config.host, config.port));
-                args.set("err", e.to_string());
-                InklogError::ConfigError(crate::i18n::tr_args("config-invalid_http_address", args))
-            })?;
+        // 绑定地址解析与配置期回环判定共用同一函数：两处各按一套规则解析 host
+        // 会让守卫放行一个起不来的端点（判为回环却绑不上）。
+        let addr: std::net::SocketAddr = crate::domain::config::http::bind_socket_addr(
+            &config.host,
+            config.port,
+        )
+        .map_err(|e: std::net::AddrParseError| {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("addr", format!("{}:{}", config.host, config.port));
+            args.set("err", e.to_string());
+            InklogError::ConfigError(crate::i18n::tr_args("config-invalid_http_address", args))
+        })?;
 
         let auth_enabled = config.auth.as_ref().map(|a| a.enabled).unwrap_or(false);
         let ip_whitelist = config.ip_whitelist.clone();
@@ -312,6 +323,142 @@ impl LoggerManager {
     }
 }
 
+/// DNS rebinding 防护判定：对端为回环时，目标主机必须是回环主机。
+///
+/// 放行返回 `None`；拒绝返回 403 响应。
+///
+/// 触发条件按**对端地址**判定而非绑定地址：通配绑定（`0.0.0.0` / `::`）
+/// 下浏览器经 rebinding 连到的对端同样是回环地址，必须校验 Host；而 LAN
+/// 对端不是回环，不受 Host 限制（否则正常 LAN 抓取会被误杀）。
+#[cfg(feature = "http")]
+fn loopback_host_check<B>(
+    peer_ip: std::net::IpAddr,
+    request: &axum::http::Request<B>,
+) -> Option<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    if !peer_ip.is_loopback() {
+        return None;
+    }
+    let (host_header, authority) = request_host_values(request);
+    if request_host_allowed(host_header, authority) {
+        return None;
+    }
+    Some(
+        (
+            axum::http::StatusCode::FORBIDDEN,
+            crate::i18n::tr("config-http_invalid_host"),
+        )
+            .into_response(),
+    )
+}
+
+/// 取请求的目标主机来源：`Host` 头与 URI authority。
+///
+/// HTTP/2 请求不带 `Host` 头（`:authority` 伪头落到 URI authority 上），
+/// 故两者都要读。
+#[cfg(feature = "http")]
+fn request_host_values<B>(request: &axum::http::Request<B>) -> (Option<&str>, Option<&str>) {
+    use axum::http::header;
+
+    let host_header = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|h: &axum::http::HeaderValue| h.to_str().ok());
+    let authority = request.uri().authority().map(|a| a.as_str());
+    (host_header, authority)
+}
+
+/// 目标主机判定：`Host` 头优先，缺失时回退 URI authority，两者并存必须一致。
+///
+/// HTTP/1.1 请求带 `Host` 头；HTTP/2 请求只带 `:authority`（映射到 URI
+/// authority、没有 `Host` 头）。两者都缺失按 fail-closed 拒绝；两者并存
+/// 但指向不同主机时视为歧义输入并拒绝——不能「各自判定后取与」，那会让
+/// 不一致的输入退化成单边判定。
+#[cfg(feature = "http")]
+fn request_host_allowed(host_header: Option<&str>, authority: Option<&str>) -> bool {
+    match (host_header, authority) {
+        (None, None) => false,
+        (Some(host), None) => host_header_allowed(Some(host)),
+        (None, Some(authority)) => host_header_allowed(Some(authority)),
+        (Some(host), Some(authority)) => {
+            match (parse_host_value(host), parse_host_value(authority)) {
+                (Some(host), Some(authority)) => host == authority && is_loopback_host_name(&host),
+                _ => false,
+            }
+        }
+    }
+}
+
+/// Host 头校验（DNS rebinding 防护）：只接受回环主机。
+///
+/// 缺失 Host 头按 fail-closed 拒绝。
+#[cfg(feature = "http")]
+fn host_header_allowed(host_header: Option<&str>) -> bool {
+    let Some(raw) = host_header else {
+        return false;
+    };
+    parse_host_value(raw).is_some_and(|host| is_loopback_host_name(&host))
+}
+
+/// 严格解析 Host/authority 值为规范化主机名（小写、去端口、去 IPv6 方括号）。
+///
+/// 标准 authority 解析有三处宽松点会掩盖真实目标：userinfo（`@`）被剥离
+/// 后给出另一个主机、非数字端口被静默丢弃、方括号后的残留字符被忽略。
+/// 这三类一律拒绝；其余畸形值（非法 URI 字符、多重端口）由标准解析挡住。
+#[cfg(feature = "http")]
+fn parse_host_value(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.contains('@') {
+        return None;
+    }
+    // 标准 authority 解析：非法 URI 字符、多重端口等畸形值在此被拒
+    raw.parse::<axum::http::uri::Authority>().ok()?;
+    let (host, port) = split_host_port(raw)?;
+    if let Some(port) = port
+        && (port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    if host.is_empty() {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+/// 拆出主机部分与端口部分（端口为 `None` 表示未带端口）。
+///
+/// 方括号形式（IPv6 字面量）的 `]` 之后只允许 `:端口` 或空串，其余视为畸形。
+#[cfg(feature = "http")]
+fn split_host_port(raw: &str) -> Option<(&str, Option<&str>)> {
+    if let Some(rest) = raw.strip_prefix('[') {
+        let end = rest.find(']')?;
+        let tail = &rest[end + 1..];
+        let port = if tail.is_empty() {
+            None
+        } else {
+            Some(tail.strip_prefix(':')?)
+        };
+        Some((&rest[..end], port))
+    } else {
+        match raw.split_once(':') {
+            Some((host, port)) => Some((host, Some(port))),
+            None => Some((raw, None)),
+        }
+    }
+}
+
+/// 主机名是否为回环主机：`localhost`（大小写不敏感）或回环 IP 字面量。
+#[cfg(feature = "http")]
+fn is_loopback_host_name(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 /// bind / TLS 初始化失败后按 [`crate::HttpErrorMode`] 决策启动行为
 /// （修复：此前失败被吞在 spawn 任务内，Strict 形同虚设）。
 ///
@@ -394,12 +541,160 @@ fn parse_cidr(cidr: &str) -> Option<ipnet::IpNet> {
 #[cfg(all(test, feature = "http"))]
 mod tests {
     use super::bind_failure_outcome;
+    use super::host_header_allowed;
+    use super::loopback_host_check;
+    use super::request_host_allowed;
+    use super::request_host_values;
     use super::whitelist_entry_matches;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
 
     fn ip(s: &str) -> std::net::IpAddr {
         s.parse().unwrap()
+    }
+
+    /// Host 头校验：回环主机放行，rebind 用的非回环 Host 拒绝。
+    #[test]
+    fn test_host_header_allowed_only_loopback() {
+        assert!(host_header_allowed(Some("127.0.0.1:9090")));
+        assert!(host_header_allowed(Some("127.0.0.1")));
+        assert!(host_header_allowed(Some("localhost:9090")));
+        assert!(host_header_allowed(Some("LOCALHOST")));
+        assert!(host_header_allowed(Some("[::1]:9090")));
+        // rebind 形态：域名解析到 127.0.0.1，但 Host 头是攻击者的域名
+        assert!(!host_header_allowed(Some("evil.example.com")));
+        assert!(!host_header_allowed(Some("evil.example.com:9090")));
+        assert!(!host_header_allowed(Some("192.168.1.10:9090")));
+        // 缺失/空 Host：fail-closed
+        assert!(!host_header_allowed(None));
+        assert!(!host_header_allowed(Some("")));
+    }
+
+    /// 畸形 authority 必须拒绝：userinfo、非数字端口、方括号后残留字符、多重端口。
+    #[test]
+    fn test_request_host_allowed_rejects_malformed_authority() {
+        for raw in [
+            "[::1]@evil",
+            "localhost:9090@evil",
+            "127.0.0.1:9090@evil",
+            "[::1]junk",
+            "127.0.0.1:not-a-port",
+            "127.0.0.1:80:99",
+        ] {
+            assert!(
+                !request_host_allowed(Some(raw), None),
+                "malformed host value must be rejected: {raw}"
+            );
+        }
+        // 合法值仍然放行（含 IPv6 回环与文档列出的允许值）
+        for raw in ["[::1]:9090", "[::1]", "127.0.0.1:9090", "localhost:9090"] {
+            assert!(
+                request_host_allowed(Some(raw), None),
+                "valid host value must pass: {raw}"
+            );
+        }
+    }
+
+    /// 目标主机判定口径：Host 头优先、缺失回退 URI authority、并存必须一致。
+    #[test]
+    fn test_request_host_allowed_combines_host_and_authority() {
+        // 只有 Host 头（HTTP/1.1 形态）
+        assert!(request_host_allowed(Some("127.0.0.1:9090"), None));
+        // 只有 URI authority（HTTP/2 形态：`:authority` 落到 URI，无 Host 头）
+        assert!(request_host_allowed(None, Some("127.0.0.1:9090")));
+        // 两者都缺失：fail-closed
+        assert!(!request_host_allowed(None, None));
+        // 两者并存且指向同一主机 → 放行（端口不同不影响主机一致性）
+        assert!(request_host_allowed(
+            Some("127.0.0.1:9090"),
+            Some("127.0.0.1:9090")
+        ));
+        assert!(request_host_allowed(
+            Some("127.0.0.1:9090"),
+            Some("127.0.0.1")
+        ));
+        // 两者并存但主机不一致 → 拒绝（任一方向都不放行）
+        assert!(!request_host_allowed(
+            Some("evil.example.com"),
+            Some("127.0.0.1")
+        ));
+        assert!(!request_host_allowed(
+            Some("127.0.0.1"),
+            Some("evil.example.com")
+        ));
+    }
+
+    /// HTTP/2 请求形态回归：`:authority` 伪头落到 URI authority，请求里没有
+    /// `Host` 头——只看 Host 头会把这类合法回环请求判成非法主机。
+    #[test]
+    fn test_loopback_host_check_accepts_http2_request_without_host_header() {
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("http://127.0.0.1:9090/metrics")
+            .body(())
+            .unwrap();
+        // h2 请求不带 Host 头（RFC 7540 禁止），目标主机只体现在 URI authority
+        assert!(request.headers().get(axum::http::header::HOST).is_none());
+        let (host_header, authority) = request_host_values(&request);
+        assert!(host_header.is_none());
+        assert_eq!(authority, Some("127.0.0.1:9090"));
+        assert!(
+            loopback_host_check(ip("127.0.0.1"), &request).is_none(),
+            "HTTP/2 request with loopback authority must pass the host check"
+        );
+    }
+
+    /// Host 头与 authority 并存但指向不同主机 → 403。
+    #[test]
+    fn test_loopback_host_check_rejects_inconsistent_host_and_authority() {
+        let evil_header = axum::http::Request::builder()
+            .method("GET")
+            .uri("http://127.0.0.1:9090/metrics")
+            .header(axum::http::header::HOST, "evil.example.com")
+            .body(())
+            .unwrap();
+        let response = loopback_host_check(ip("127.0.0.1"), &evil_header)
+            .expect("Host 头与 authority 不一致必须拒绝");
+        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+
+        let evil_authority = axum::http::Request::builder()
+            .method("GET")
+            .uri("http://evil.example.com/metrics")
+            .header(axum::http::header::HOST, "127.0.0.1:9090")
+            .body(())
+            .unwrap();
+        let response = loopback_host_check(ip("127.0.0.1"), &evil_authority)
+            .expect("Host 头与 authority 不一致必须拒绝");
+        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    /// Host 校验按对端地址触发：回环对端必须过校验，通配绑定下的 LAN 对端不受限。
+    #[test]
+    fn test_loopback_host_check_applies_to_loopback_peer_only() {
+        let rebind = axum::http::Request::builder()
+            .method("GET")
+            .uri("http://127.0.0.1:9090/metrics")
+            .header(axum::http::header::HOST, "evil.example.com")
+            .body(())
+            .unwrap();
+        // rebinding 后浏览器对端是回环，非回环 Host 必须 403
+        assert_eq!(
+            loopback_host_check(ip("127.0.0.1"), &rebind).map(|r| r.status()),
+            Some(axum::http::StatusCode::FORBIDDEN),
+            "loopback peer with non-loopback Host must be rejected"
+        );
+
+        // LAN 对端带自身 Host：不受 Host 校验限制（不误伤正常 LAN 访问）
+        let lan = axum::http::Request::builder()
+            .method("GET")
+            .uri("/metrics")
+            .header(axum::http::header::HOST, "10.0.0.5:9090")
+            .body(())
+            .unwrap();
+        assert!(
+            loopback_host_check(ip("10.0.0.5"), &lan).is_none(),
+            "LAN peer must not be subject to the loopback Host check"
+        );
     }
 
     #[test]

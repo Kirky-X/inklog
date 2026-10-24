@@ -5,9 +5,9 @@ use crate::Metrics;
 use crate::support::io::sink::middleware::{MiddlewareVerdict, RecordMiddleware};
 use crate::support::processing::pipeline::is_critical_level;
 use crate::support::processing::target_rate_limiter::TargetRateLimiter;
+use crate::support::processing::{GlobalRateLimitMiddleware, RateLimiter, TargetQuotaMiddleware};
 use crate::support::processing::{
-    GlobalRateLimitMiddleware, IdentityFieldsMiddleware, ProcessingPipeline, RateLimiter,
-    SanitizeMiddleware, StressRelief, TargetQuotaMiddleware,
+    IdentityFieldsMiddleware, ProcessingPipeline, SanitizeMiddleware, StressRelief,
 };
 use crate::validation::sanitize::LogSanitizer;
 use crossbeam_channel::Sender;

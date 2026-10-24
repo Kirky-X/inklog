@@ -361,7 +361,16 @@ fn interpret_env_value(
             }
         }
         EnvValueRule::DbUrl => unsafe_path_reason(raw).map_or_else(
-            || Some(serde_json::Value::String(raw.to_string())),
+            || {
+                // env 值本身是脱敏视图（口令位为占位符）时不可用：落到配置里
+                // 只会拿占位符去认证
+                if crate::domain::config::database::dsn_has_redacted_credential(raw) {
+                    tracing::warn!("{}", crate::i18n::tr("config-env_redacted_db_url"));
+                    None
+                } else {
+                    Some(serde_json::Value::String(raw.to_string()))
+                }
+            },
             |()| {
                 tracing::warn!("{}", crate::i18n::tr("config-env_invalid_db_url"));
                 None
@@ -622,6 +631,9 @@ impl InklogConfig {
     pub fn load_with_env_overrides() -> Result<Self, InklogError> {
         let mut config = Self::load_sync()?;
         Self::apply_env_overrides(&mut config);
+        // env 覆盖在 validate() 之后应用（既有语义），暴露面守卫须在覆盖后
+        // 再执行一次——否则 env 覆盖可绕过绑定约束（fail-closed 失效）
+        config.validate_http_exposure()?;
         Ok(config)
     }
 
@@ -642,6 +654,20 @@ impl InklogConfig {
         // 共用同一棵树；序列化途经自有的 Serialize derive，不引入外部数据。
         let mut json = serde_json::to_value(config.clone())
             .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("config-serialize_invariant")));
+
+        // Serialize 对 database_sink.url 是脱敏视图（口令遮蔽为 `***`）：
+        // 序列化→反序列化往返会把口令换成占位符。补丁前把原 DSN 写回
+        // JSON 树，往返后口令不丢；env 覆盖 url 时由 env 原值替换。
+        if let Some(sink) = config.database_sink.as_ref()
+            && let Some(object) = json
+                .get_mut("database_sink")
+                .and_then(serde_json::Value::as_object_mut)
+        {
+            object.insert(
+                "url".to_string(),
+                serde_json::Value::String(sink.url.clone()),
+            );
+        }
 
         for spec in ENV_OVERRIDE_SPECS {
             let Some((_, raw)) = env_vars.iter().find(|(name, _)| *name == spec.env_name) else {
@@ -878,6 +904,16 @@ impl InklogConfig {
                 db.driver
             )));
         }
+        // 口令位是脱敏占位符：这条 DSN 认证必然失败，显式拒绝而不是
+        // 拿占位符去连接。
+        if let Some(ref db) = self.database_sink
+            && db.enabled
+            && crate::domain::config::database::dsn_has_redacted_credential(&db.url)
+        {
+            return Err(InklogError::ConfigError(
+                crate::domain::config::database::REDACTED_CREDENTIAL_ERROR.to_string(),
+            ));
+        }
 
         // HTTP server
         if let Some(ref http) = self.http_server
@@ -886,6 +922,17 @@ impl InklogConfig {
             if http.port == 0 {
                 return Err(InklogError::ConfigError(crate::i18n::tr(
                     "config-http_port_zero",
+                )));
+            }
+            // host 必须能构成 socket 地址：主机名（`localhost`）与畸形方括号写法
+            // 绑不上，运行期才报错时用户只看到「端点起不来」。此处提前拒绝，
+            // 并给出可操作提示。
+            if crate::domain::config::http::bind_socket_addr(&http.host, http.port).is_err() {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("host", http.host.clone());
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "config-http_invalid_bind_host",
+                    args,
                 )));
             }
             // ip_whitelist 条目格式校验：解析失败的条目在运行期会被静默跳过
@@ -908,6 +955,7 @@ impl InklogConfig {
                 tls.validate().map_err(InklogError::ConfigError)?;
             }
         }
+        self.validate_http_exposure()?;
 
         // Console sink stderr_levels
         if let Some(ref console) = self.console_sink
@@ -928,6 +976,30 @@ impl InklogConfig {
         // Per-target rate limit quota groups
         self.rate_limit.validate()?;
 
+        Ok(())
+    }
+
+    /// HTTP 监控端点的暴露面守卫（fail-closed）。
+    ///
+    /// 非回环绑定（`0.0.0.0` / `::` / 内网地址）且既无 Bearer 鉴权也无
+    /// IP 白名单时，`/metrics` 与 `/health` 对网络上任何可达对端开放——
+    /// 配置期直接拒绝，不静默放行。
+    ///
+    /// 该守卫在 env 覆盖之后需再执行一次：`apply_env_overrides` 发生在
+    /// `validate()` 之后（既有语义：非法 env 值 warn 后保留现值、加载不
+    /// 失败），仅在 `validate()` 内加约束覆盖不到 env 路径。
+    pub fn validate_http_exposure(&self) -> Result<(), InklogError> {
+        if let Some(ref http) = self.http_server
+            && http.is_exposed_without_access_control()
+        {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("host", &http.host);
+            args.set("port", http.port);
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-http_exposed_without_auth",
+                args,
+            )));
+        }
         Ok(())
     }
 }
@@ -973,9 +1045,7 @@ impl std::str::FromStr for InklogConfig {
 mod tests {
     use super::*;
     use crate::domain::config::http::HttpErrorMode;
-
-    // Mutex to serialize env var tests (env vars are process-global state)
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use serial_test::serial;
 
     #[test]
     fn test_validate_default_config() {
@@ -1098,9 +1168,10 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_from_search_paths_falls_back_to_default() {
-        // 与会临时设置 INKLOG_CONFIG_PATH 的测试互斥，避免并发读全局环境变量竞态
-        let _lock = ENV_MUTEX.lock().unwrap();
+        // #[serial] 持进程级串行锁：与会设置 INKLOG_CONFIG_PATH 的测试互斥，
+        // 避免并发读全局环境变量竞态
         unsafe {
             std::env::remove_var("INKLOG_CONFIG_PATH");
         }
@@ -1110,8 +1181,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_override_invalid_level_falls_back() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         // invalid log level should not be applied
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_LEVEL", "invalid_level");
@@ -1129,8 +1200,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_override_identity_fields() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_SERVICE_NAME", "orders");
             std::env::set_var("INKLOG_GLOBAL_SERVICE_INSTANCE", "orders-7f3a");
@@ -1155,8 +1226,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_override_blank_identity_value_ignored() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         // 空值不得覆盖为 Some("")：应保持 None 并告警忽略
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_SERVICE_NAME", "   ");
@@ -1173,8 +1244,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_override_static_fields_parses_key_value_pairs() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_STATIC_FIELDS", "region=cn-north-1,az=a");
         }
@@ -1198,8 +1269,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_override_static_fields_skips_invalid_segments() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         // 无 '=' 的段与空段跳过；合法段仍生效
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_STATIC_FIELDS", "good=1,,bad-segment");
@@ -1214,8 +1285,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_override_control_char_identity_ignored() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         // env 值含控制字符：在覆盖点告警忽略（保持 None），不进入配置
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_SERVICE_NAME", "orders\nfake");
@@ -1232,8 +1303,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_override_static_fields_control_char_segment_skipped() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_STATIC_FIELDS", "good=1,bad=line1\nline2");
         }
@@ -1318,8 +1389,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_valid_level() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_LEVEL", "warn");
         }
@@ -1332,8 +1403,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_format() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_FORMAT", "{message}");
         }
@@ -1346,8 +1417,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_file_sink_path() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test.log");
         }
@@ -1364,8 +1435,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_file_sink_path_traversal_rejected() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_FILE_SINK_PATH", "../etc/passwd");
         }
@@ -1379,8 +1450,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_http_server() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "true");
             std::env::set_var("INKLOG_HTTP_SERVER_HOST", "0.0.0.0");
@@ -1401,8 +1472,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_performance() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_PERFORMANCE_WORKER_THREADS", "8");
             std::env::set_var("INKLOG_PERFORMANCE_CHANNEL_CAPACITY", "2048");
@@ -1418,8 +1489,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_error_mode_strict() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "strict");
         }
@@ -1436,8 +1507,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_error_mode_warn() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "warn");
         }
@@ -1453,8 +1524,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_masking_and_fallback() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_MASKING_ENABLED", "false");
             std::env::set_var("INKLOG_GLOBAL_AUTO_FALLBACK", "false");
@@ -1497,9 +1568,9 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_env_override_mapping_table_nested_paths() {
         // 规格映射表：每字段一条 INKLOG_* → 值断言（嵌套路径经点分路径落位）
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
             std::env::set_var("INKLOG_GLOBAL_FORMAT", "json");
@@ -1533,9 +1604,9 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_env_override_enabled_invalid_does_not_enable() {
         // ENABLED 单向语义：不可解析为 true 的值（如 "banana"）不启用组件
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_FILE_SINK_ENABLED", "banana");
             std::env::set_var("INKLOG_HTTP_SERVER_ENABLED", "banana");
@@ -1557,29 +1628,29 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_load_sync_returns_config() {
-        // Must hold ENV_MUTEX to ensure INKLOG_CONFIG_PATH is not set by another test
-        let _lock = ENV_MUTEX.lock().unwrap();
+        // #[serial] 持进程级串行锁：确保 INKLOG_CONFIG_PATH 未被其他测试设置
         // load_sync calls from_search_paths which falls back to default
         let config = InklogConfig::load_sync().unwrap();
         assert_eq!(config.global.level, "info");
     }
 
     #[test]
+    #[serial]
     fn test_load_with_env_overrides_applies() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_LEVEL", "debug");
         }
         let config = InklogConfig::load_with_env_overrides().unwrap();
         assert_eq!(config.global.level, "debug");
-        // Cleanup is guaranteed by _lock Drop (mutex release)
         unsafe {
             std::env::remove_var("INKLOG_GLOBAL_LEVEL");
         }
     }
 
     #[test]
+    #[serial]
     fn test_from_search_paths_rejects_oversized_config() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("oversized.toml");
@@ -1587,7 +1658,6 @@ level = "debug"
         let oversized = vec![b'#'; 1024 * 1024 + 1];
         std::fs::write(&config_path, oversized).unwrap();
 
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
         }
@@ -1629,8 +1699,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_file_sink_enabled() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_FILE_SINK_ENABLED", "true");
         }
@@ -1644,8 +1714,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_file_sink_max_size_valid() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "100MB");
         }
@@ -1659,8 +1729,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_file_sink_max_size_invalid() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "INVALID");
         }
@@ -1674,8 +1744,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_http_metrics_and_health_path() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/custom/metrics");
             std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/custom/health");
@@ -1693,8 +1763,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_error_mode_unknown_keeps_current() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_ERROR_MODE", "unknown_mode");
         }
@@ -1711,8 +1781,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_database_sink_url() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_DATABASE_SINK_URL", "postgres://localhost/testdb");
         }
@@ -1728,9 +1798,96 @@ level = "debug"
         }
     }
 
+    /// env 覆盖路径的序列化→反序列化往返不得吞掉 DSN 口令。
+    ///
+    /// Serialize 视图的口令被遮蔽为 `***`：直接往返会让配置文件里的口令
+    /// 变成占位符，连接必然失败。
     #[test]
+    #[serial]
+    fn test_apply_env_overrides_preserves_dsn_password() {
+        let mut config = InklogConfig::default();
+        config.database_sink = Some(DatabaseSinkConfig {
+            enabled: true,
+            url: "postgres://appuser:s3cr3t@db.internal:5432/logs".to_string(),
+            ..Default::default()
+        });
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(
+            config.database_sink.as_ref().unwrap().url,
+            "postgres://appuser:s3cr3t@db.internal:5432/logs",
+            "env override roundtrip must keep the DSN password"
+        );
+    }
+
+    /// env 覆盖 db url 时以 env 原值为准（口令不被遮蔽）。
+    #[test]
+    #[serial]
+    fn test_apply_env_overrides_database_sink_url_keeps_env_password() {
+        unsafe {
+            std::env::set_var(
+                "INKLOG_DATABASE_SINK_URL",
+                "postgres://appuser:envpw@db.internal:5432/logs",
+            );
+        }
+        let mut config = InklogConfig::default();
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(
+            config.database_sink.as_ref().unwrap().url,
+            "postgres://appuser:envpw@db.internal:5432/logs"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_DATABASE_SINK_URL");
+        }
+    }
+
+    /// env 提供的 db url 口令是脱敏占位符时忽略该 env 值（认证必然失败）。
+    #[test]
+    #[serial]
+    fn test_apply_env_overrides_ignores_redacted_db_url() {
+        unsafe {
+            std::env::set_var(
+                "INKLOG_DATABASE_SINK_URL",
+                "postgres://appuser:***@db.internal:5432/logs",
+            );
+        }
+        let mut config = InklogConfig::default();
+        config.database_sink = Some(DatabaseSinkConfig {
+            enabled: true,
+            url: "postgres://appuser:s3cr3t@db.internal:5432/logs".to_string(),
+            ..Default::default()
+        });
+        InklogConfig::apply_env_overrides(&mut config);
+        assert_eq!(
+            config.database_sink.as_ref().unwrap().url,
+            "postgres://appuser:s3cr3t@db.internal:5432/logs",
+            "redacted env url must be ignored"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_DATABASE_SINK_URL");
+        }
+    }
+
+    /// 配置文件里的 db url 口令是脱敏占位符时加载必须失败。
+    #[test]
+    fn test_validate_rejects_redacted_db_password() {
+        let mut config = InklogConfig::default();
+        config.database_sink = Some(DatabaseSinkConfig {
+            enabled: true,
+            url: "postgres://appuser:***@db.internal:5432/logs".to_string(),
+            ..Default::default()
+        });
+        let err = config
+            .validate()
+            .expect_err("redacted password must be rejected");
+        assert!(
+            err.to_string().contains("redaction placeholder"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    #[serial]
     fn test_apply_env_overrides_database_sink_pool_size() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_DATABASE_SINK_POOL_SIZE", "20");
         }
@@ -1744,8 +1901,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_global_format_empty() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_GLOBAL_FORMAT", "");
         }
@@ -1775,8 +1932,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_file_sink_retained_with_invalid_max_size() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_FILE_SINK_PATH", "/tmp/test.log");
             std::env::set_var("INKLOG_FILE_SINK_MAX_SIZE", "INVALID");
@@ -1810,8 +1967,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_http_path_encoded_traversal_rejected() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/%2E%2E/etc/passwd");
         }
@@ -1825,8 +1982,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_http_path_encoded_backslash_rejected() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_HEALTH_PATH", "/a%5Cb");
         }
@@ -1840,8 +1997,8 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_apply_env_overrides_http_path_encoded_control_char_rejected() {
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_HTTP_SERVER_METRICS_PATH", "/metrics%0A");
         }
@@ -1908,6 +2065,7 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_validate_file_sink_encrypt_requires_existing_env() {
         let mut config = InklogConfig::default();
         config.file_sink = Some(FileSinkConfig {
@@ -1965,6 +2123,40 @@ level = "debug"
             ..Default::default()
         });
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_http_host_bindable_literal() {
+        // 主机名与畸形方括号写法无法构成 socket 地址：运行期必然绑定失败，
+        // 配置期即拒绝并给出可用写法
+        for bad in ["localhost", "::1", "[[::1]]", "[::1"] {
+            let mut config = InklogConfig::default();
+            config.http_server = Some(HttpServerConfig {
+                enabled: true,
+                host: bad.to_string(),
+                ..Default::default()
+            });
+            let err = config.validate().unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains(bad) && msg.contains("127.0.0.1"),
+                "错误消息应含 host 原文与可用写法: {msg}"
+            );
+        }
+
+        // IP 字面量（IPv4 明文 / IPv6 带方括号）通过
+        for good in ["127.0.0.1", "[::1]"] {
+            let mut config = InklogConfig::default();
+            config.http_server = Some(HttpServerConfig {
+                enabled: true,
+                host: good.to_string(),
+                ..Default::default()
+            });
+            assert!(
+                config.validate().is_ok(),
+                "合法绑定地址不应被拒: host={good}"
+            );
+        }
     }
 
     #[test]
@@ -2063,6 +2255,7 @@ level = "debug"
     }
 
     #[test]
+    #[serial]
     fn test_from_search_paths_rejects_invalid_config_values() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("invalid.toml");
@@ -2075,7 +2268,6 @@ level = "verbose"
         )
         .unwrap();
 
-        let _lock = ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap());
         }
@@ -2209,5 +2401,161 @@ keep_level = "verbose"
         // 空前缀拒绝（TOML 裸键可表空串）
         let result: Result<InklogConfig, _> = "[rate_limit.rules]\n\"\" = 10\n".parse();
         assert!(result.is_err(), "empty prefix must be rejected");
+    }
+
+    /// env 变更必须在进程级串行锁内执行。
+    ///
+    /// `INKLOG_*` 是进程级状态：模块私有互斥量对本二进制其他模块的测试
+    /// 不可见，会与 integrations/infra、domain/core/manager 的 env 测试
+    /// 并发改写同一变量。`#[serial]` 持有的进程级锁对全二进制的
+    /// `#[serial]` 测试生效，是唯一能跨模块排除的机制。
+    #[test]
+    #[serial]
+    fn test_env_mutation_holds_process_wide_serial_lock() {
+        assert!(
+            serial_test::is_locked_serially(None),
+            "env mutation must run under the process-wide serial lock, \
+             not a module-local mutex"
+        );
+        unsafe {
+            std::env::set_var("INKLOG_TEST_SERIAL_LOCK_PROBE", "1");
+        }
+        assert_eq!(
+            std::env::var("INKLOG_TEST_SERIAL_LOCK_PROBE").as_deref(),
+            Ok("1"),
+            "env mutation must be observable while the lock is held"
+        );
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_SERIAL_LOCK_PROBE");
+        }
+    }
+
+    /// crate 内每个改写进程级 env 的测试都必须持进程级串行锁。
+    ///
+    /// 只由模块私有互斥量保护的 env 测试对本二进制其他模块不可见，会互相
+    /// 污染。新增 env 测试若漏加 `#[serial]`，此断言立即失败。
+    #[test]
+    fn test_env_mutating_tests_are_all_marked_serial() {
+        let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        // src/ 与 tests/ 各是独立测试二进制：两处都需进程级串行锁
+        collect_rs_files(&crate_root.join("src"), &mut files);
+        collect_rs_files(&crate_root.join("tests"), &mut files);
+
+        // 探针按片段拼装：完整字面量会出现在本测试自身的源码里，
+        // 令扫描器把自己判为违规
+        let set_var = format!("env::set_{}", "var");
+        let remove_var = format!("env::remove_{}", "var");
+
+        let mut offenders = Vec::new();
+        for path in &files {
+            let text = std::fs::read_to_string(path).expect("source file must be readable");
+            for (idx, line) in text.lines().enumerate() {
+                if !line.contains(&set_var) && !line.contains(&remove_var) {
+                    continue;
+                }
+                if let Some((name, has_serial)) = enclosing_test_fn(&text, idx)
+                    && !has_serial
+                {
+                    offenders.push(format!("{}:{}:{}", path.display(), idx + 1, name));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "env-mutating tests must carry #[serial]: {offenders:?}"
+        );
+    }
+
+    /// 收集目录下的全部 `.rs` 文件（递归）。
+    fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let entries = std::fs::read_dir(dir).expect("source dir must be readable");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// 定位第 `idx` 行所属的测试函数：返回 `(函数名, 是否带 #[serial])`。
+    ///
+    /// 以最近的先行 `fn` 定义为归属项，再回溯其属性块；非测试函数返回
+    /// `None`（helper 里的 env 改写由调用它的测试负责）。
+    fn enclosing_test_fn(text: &str, idx: usize) -> Option<(String, bool)> {
+        let lines: Vec<&str> = text.lines().collect();
+        let mut owner = None;
+        for (i, line) in lines.iter().enumerate().take(idx).rev() {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("fn ") {
+                owner = Some((i, rest.split('(').next().unwrap_or("").to_string()));
+                break;
+            }
+            if let Some(rest) = trimmed.strip_prefix("async fn ") {
+                owner = Some((i, rest.split('(').next().unwrap_or("").to_string()));
+                break;
+            }
+        }
+        let (fn_line, name) = owner?;
+        let mut is_test = false;
+        let mut has_serial = false;
+        for line in lines[..fn_line].iter().rev() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("#[") {
+                if trimmed.contains("serial") {
+                    has_serial = true;
+                }
+                if trimmed == "#[test]" || trimmed.starts_with("#[tokio::test") {
+                    is_test = true;
+                }
+                continue;
+            }
+            if trimmed.is_empty() || trimmed.starts_with("//") {
+                continue;
+            }
+            break;
+        }
+        is_test.then_some((name, has_serial))
+    }
+
+    /// 暴露面拒绝消息必须带上绑定的 host 与 port。
+    ///
+    /// 消息参数取自配置的 host/port 字段：借引用传入（`&http.host`）与克隆
+    /// 传入渲染结果必须一致，否则运维看不到实际绑定地址。
+    #[test]
+    fn test_validate_http_exposure_error_names_host_and_port() {
+        let config = InklogConfig {
+            http_server: Some(HttpServerConfig {
+                enabled: true,
+                host: "0.0.0.0".to_string(),
+                port: 9090,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let err = config
+            .validate_http_exposure()
+            .expect_err("non-loopback bind without access control must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("0.0.0.0"),
+            "rejection message must name the bound host: {msg}"
+        );
+        assert!(
+            msg.contains("9090"),
+            "rejection message must name the bound port: {msg}"
+        );
+        // fluent 在占位符两侧插入双向隔离符（U+2066..=U+2069）：
+        // 去掉它们后才是模板里的 host:port 字面形态
+        let plain: String = msg
+            .chars()
+            .filter(|c| !matches!(*c, '\u{2066}'..='\u{2069}'))
+            .collect();
+        assert!(
+            plain.contains("0.0.0.0:9090"),
+            "rejection message must render host and port adjacently: {msg}"
+        );
     }
 }
