@@ -81,6 +81,9 @@ static DEFAULT_SENSITIVE_PATTERNS: LazyLock<Vec<(Regex, String)>> = LazyLock::ne
                 .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-ssn_invariant"))),
             "[SSN]".to_string(),
         ),
+        // 标记保护在「值」一级执行（见 sanitize() 的标记契约说明）：值已是
+        // 脱敏/掩码标记时不重复脱敏——上游标记不被改写成另一种标记。保护
+        // 判定不依赖环视（regex crate 不支持），由替换闭包按值判定。
         (
             Regex::new(r"(?i)password\s*[=:]\s*\S+")
                 .unwrap_or_else(|_| panic!("{}", crate::i18n::tr("sanitize-password_invariant"))),
@@ -150,12 +153,14 @@ impl LogSanitizer {
     ///
     /// # Marker Idempotency Contract
     ///
-    /// Step 3 is skipped entirely when the message already contains a
-    /// redaction/masking marker (`***REDACTED`、`***MASKED`、`[REDACTED]`):
-    /// the message is treated as already redacted by an upstream entry point
-    /// （`InklogError::safe_message` 或 `DataMasker::mask`），避免产生
-    /// REDACTED 套 REDACTED 的嵌套标记。注入防护不受短路影响——ANSI 剥离
-    /// 与 escape 转义仍然执行。
+    /// Redaction markers (`***REDACTED`、`***MASKED`、`[REDACTED]`) never
+    /// disable redaction for the whole message: the marker vocabulary is
+    /// attacker-controllable free text, so a message-level short-circuit
+    /// would let anyone exempt an entire record by injecting a marker.
+    /// Marker protection therefore lives at the *value* level — a key=value
+    /// rule whose value already is a marker is left untouched, while every
+    /// other part of the message is still redacted. Injection protection
+    /// (ANSI stripping, escape encoding) is unaffected.
     pub fn sanitize(&self, message: &str) -> String {
         // Strip ANSI escape sequences before any other processing
         let mut result = self.strip_ansi(message).into_owned();
@@ -164,14 +169,23 @@ impl LogSanitizer {
             result = result.replace(from, to);
         }
 
-        // 标记幂等短路（契约见 doc）：已含脱敏/掩码标记的输入跳过敏感正则
-        // 再次脱敏；注入防护（ANSI 剥离、自定义替换、escape 转义）照常执行。
-        if !contains_redaction_marker(&result) {
-            for (pattern, replacement) in &self.sensitive_regexes {
-                result = pattern
-                    .replace_all(&result, replacement.as_str())
-                    .to_string();
-            }
+        for (pattern, replacement) in &self.sensitive_regexes {
+            result = pattern
+                .replace_all(&result, |caps: &regex::Captures<'_>| {
+                    let whole = caps.get(0).map(|m| m.as_str()).unwrap_or_default();
+                    // 值已是脱敏/掩码标记：原样保留（幂等，不改写上游标记）
+                    if value_is_redaction_marker(matched_value(whole)) {
+                        whole.to_string()
+                    } else {
+                        // 替换串中的捕获组引用（`$1` / `${name}`）必须展开——
+                        // 与 regex 的 `&str` 替换器同语义；直接 clone 会把
+                        // `$1` 原样输出（用户自定义模式因此失效）。
+                        let mut expanded = String::new();
+                        caps.expand(replacement, &mut expanded);
+                        expanded
+                    }
+                })
+                .to_string();
         }
 
         match self.config.mode {
@@ -288,24 +302,60 @@ impl Default for LogSanitizer {
     }
 }
 
-/// 已脱敏/已掩码标记（脱敏幂等契约）。
+/// 已脱敏/已掩码标记（脱敏幂等契约）——**精确匹配**词表。
 ///
 /// 三处脱敏入口共享同一分工与契约：
 /// - `InklogError::safe_message`（src/error.rs）：错误消息出口脱敏
 /// - [`LogSanitizer`]（本模块）：日志注入防护（CWE-117）与转义
 /// - `DataMasker::mask`（src/support/processing/masking.rs）：PII 掩码
 ///
-/// 双开关叠加时同一条消息会先后经过多个入口。输入包含任一标记
-/// （`***REDACTED***`、`***MASKED***`、`[REDACTED]` 等，含各自变体前缀）
-/// 即视为已被上游处理过，入口必须短路跳过再次脱敏，避免产生
-/// REDACTED 套 REDACTED 的嵌套标记。
-pub(crate) const REDACTION_MARKERS: &[&str] = &["***REDACTED", "***MASKED", "[REDACTED]"];
+/// 双开关叠加时同一条消息会先后经过多个入口。标记保护下沉到「值」一级：
+/// 值已是标记时不重复脱敏，避免产生 REDACTED 套 REDACTED 的嵌套标记。
+/// 判定不落在「整条消息」一级——标记词表可被自由文本伪造，整条消息级
+/// 短路会让注入一个标记的记录整体免于脱敏。
+///
+/// 词表只收**本 crate 实际产出的标记形态**，判定为整值精确匹配：形态
+/// 之外的拼接（如 `***REDACTEDSECRET`——标记前缀后直接跟真实值）不再
+/// 构成免脱敏旁路。词表须与产出点同步登记：
+/// `src/support/processing/secret_patterns.rs` 的内建替换串由
+/// `test_builtin_secret_markers_are_registered` 兜底防漂移。
+pub(crate) const REDACTION_MARKERS: &[&str] = &[
+    "***MASKED***",
+    "***REDACTED***",
+    "***REDACTED_API_KEY***",
+    "***REDACTED_AWS_KEY***",
+    "***REDACTED_CORP***",
+    "***REDACTED_ENGINE_ERROR***",
+    "***REDACTED_GITHUB***",
+    "***REDACTED_GOOGLE***",
+    "***REDACTED_JWT***",
+    "***REDACTED_OVERSIZED***",
+    "***REDACTED_PEM_KEY***",
+    "***REDACTED_SLACK***",
+    "***REDACTED_STRIPE***",
+    "***HIGH_ENTROPY***",
+    "[REDACTED]",
+];
 
-/// 判断消息是否已包含脱敏/掩码标记（幂等短路判定）。
-pub(crate) fn contains_redaction_marker(message: &str) -> bool {
-    REDACTION_MARKERS
-        .iter()
-        .any(|marker| message.contains(marker))
+/// 取匹配文本中的「值」部分：首个 `=`/`:` 之后；无分隔符时为整体。
+///
+/// `key=value` 形态的敏感正则据此判定「值是否已是脱敏标记」；无分隔符
+/// 的形态（邮箱、卡号、SSN、Bearer 等）值即整体。
+pub(crate) fn matched_value(whole: &str) -> &str {
+    match whole.find(['=', ':']) {
+        Some(pos) => &whole[pos + 1..],
+        None => whole,
+    }
+}
+
+/// 值部分是否已是脱敏/掩码标记（幂等判定）。
+///
+/// 判定为**整值精确匹配**词表（见 [`REDACTION_MARKERS`）：标记形态之外的
+/// 值一律照常脱敏——「以标记字样开头再拼真实值」（如
+/// `***REDACTEDSECRET`）不构成免脱敏旁路。
+pub(crate) fn value_is_redaction_marker(value: &str) -> bool {
+    let trimmed = value.trim();
+    REDACTION_MARKERS.contains(&trimmed)
 }
 
 #[cfg(test)]
@@ -599,6 +649,74 @@ mod tests {
         let result = sanitizer.sanitize("\x1b[31mERROR\x1b[0m");
         assert_eq!(result, "ERROR");
         assert!(!result.contains('\x1b'));
+    }
+
+    #[test]
+    fn test_sanitize_marker_injection_does_not_disable_rules() {
+        // 回归：整条消息级标记短路可被自由文本伪造——注入一个标记即可让
+        // 整条记录免于敏感正则。标记保护只在「值」一级。
+        let sanitizer = LogSanitizer::new();
+        for marker in ["[REDACTED]", "***REDACTED***", "***MASKED***"] {
+            let text = format!("login user={marker} token=supersecretvalue123");
+            let out = sanitizer.sanitize(&text);
+            assert!(
+                !out.contains("supersecretvalue123"),
+                "injected marker {marker} must not exempt the record: {out}"
+            );
+        }
+    }
+
+    /// 用户自定义模式的替换串里的捕获组引用必须展开（`$1` / `${name}`）。
+    #[test]
+    fn test_sanitize_expands_capture_group_in_custom_replacement() {
+        let mut sanitizer = LogSanitizer::new();
+        sanitizer.add_pattern(
+            Regex::new(r"secret-(\d+)").expect("valid regex"),
+            "secret-[REDACTED:$1]".to_string(),
+        );
+
+        let result = sanitizer.sanitize("token secret-42 end");
+        assert!(
+            result.contains("secret-[REDACTED:42]"),
+            "capture group must be expanded: {result}"
+        );
+        assert!(
+            !result.contains("$1"),
+            "raw $1 must not be emitted: {result}"
+        );
+    }
+
+    /// 标记判定不得过宽：「标记前缀 + 真实值」拼接不是标记形态。
+    #[test]
+    fn test_sanitize_marker_prefix_glued_to_real_value_is_redacted() {
+        let sanitizer = LogSanitizer::new();
+        let result = sanitizer.sanitize("password=***REDACTEDSECRET");
+        assert!(
+            !result.contains("REDACTEDSECRET"),
+            "marker prefix glued to a real value must still be redacted: {result}"
+        );
+        assert!(result.contains("[REDACTED]"), "unexpected output: {result}");
+    }
+
+    /// 标记词表与 secret-scan 内建模式的替换串必须同步（防漂移）。
+    #[cfg(feature = "secret-scan")]
+    #[test]
+    fn test_builtin_secret_markers_are_registered() {
+        use crate::support::processing::secret_patterns::SecretPatternRegistry;
+
+        for registry in [
+            SecretPatternRegistry::with_builtins(),
+            SecretPatternRegistry::with_extended(),
+        ] {
+            for pattern in registry.patterns() {
+                assert!(
+                    REDACTION_MARKERS.contains(&pattern.replacement()),
+                    "secret pattern '{}' emits unregistered marker '{}'",
+                    pattern.name(),
+                    pattern.replacement()
+                );
+            }
+        }
     }
 
     #[test]

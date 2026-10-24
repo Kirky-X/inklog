@@ -44,7 +44,7 @@
 use std::sync::LazyLock;
 use thiserror::Error;
 
-use crate::validation::sanitize::contains_redaction_marker;
+use crate::validation::sanitize::{matched_value, value_is_redaction_marker};
 
 /// Sensitive pattern redaction rules for error messages.
 /// Each tuple contains (pattern, replacement).
@@ -144,14 +144,8 @@ fn compile_sensitive_patterns(
 /// Sanitizes a message by removing sensitive information.
 /// Uses pre-compiled regex patterns for optimal performance under high-frequency logging.
 /// Returns a borrowed reference when no patterns match (zero-allocation fast path).
-fn sanitize_message(msg: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn sanitize_message(msg: &str) -> std::borrow::Cow<'_, str> {
     use std::borrow::Cow;
-    // 标记幂等短路：已含脱敏/掩码标记（***REDACTED***、***MASKED***、
-    // [REDACTED] 等）的消息已被上游（subscriber 脱敏 / DataMasker 掩码）
-    // 处理过，不再重复套用，避免标记被改写或产生嵌套标记。
-    if contains_redaction_marker(msg) {
-        return Cow::Borrowed(msg);
-    }
     // Fast path: check if any pattern matches before allocating
     let mut has_match = false;
     for (re, _) in COMPILED_PATTERNS.iter() {
@@ -166,33 +160,44 @@ fn sanitize_message(msg: &str) -> std::borrow::Cow<'_, str> {
     // Slow path: apply all replacements
     let mut result = msg.to_string();
     for (re, replacement) in COMPILED_PATTERNS.iter() {
-        result = re.replace_all(&result, *replacement).into_owned();
+        result = re
+            .replace_all(&result, |caps: &regex::Captures<'_>| {
+                let whole = caps.get(0).map(|m| m.as_str()).unwrap_or_default();
+                // 值已是脱敏/掩码标记：原样保留（幂等，不改写上游标记）
+                if value_is_redaction_marker(matched_value(whole)) {
+                    return whole.to_string();
+                }
+                let mut expanded = String::new();
+                caps.expand(replacement, &mut expanded);
+                expanded
+            })
+            .into_owned();
     }
     Cow::Owned(result)
 }
 
-#[derive(Error, Debug)]
+#[derive(Error)]
 pub enum InklogError {
-    #[error("Configuration error: {0}")]
+    #[error("Configuration error: {}", sanitized(.0))]
     ConfigError(String),
 
-    #[error("IO error: {0}")]
+    #[error("IO error: {}", sanitized_owned(.0.to_string()))]
     IoError(#[from] std::io::Error),
 
-    #[error("Serialization error: {0}")]
+    #[error("Serialization error: {}", sanitized_owned(.0.to_string()))]
     SerializationError(#[from] serde_json::Error),
 
-    #[error("Database error: {message}")]
+    #[error("Database error: {}", sanitized(.message))]
     DatabaseError {
         message: String,
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
-    #[error("Cache error: {0}")]
+    #[error("Cache error: {}", sanitized(.0))]
     CacheError(String),
 
-    #[error("Encryption error: {message}")]
+    #[error("Encryption error: {}", sanitized(.message))]
     EncryptionError {
         message: String,
         #[source]
@@ -214,7 +219,7 @@ pub enum InklogError {
 
     /// secret-scan fail-closed（feature `secret-scan`）：单条输入超过掩码
     /// 上限（`MAX_MASK_INPUT_BYTES`）——不扫描即不可证安全，fail-closed
-    /// 出口拒绝输出（`mask` 的失败放行语义不受影响）。
+    /// 出口拒绝输出（`mask` 对同输入以整体遮蔽收口，同样 fail-closed）。
     #[cfg(feature = "secret-scan")]
     #[error(
         "Secret scan oversized input: {size} bytes exceeds the {limit}-byte masking limit; \
@@ -222,23 +227,109 @@ pub enum InklogError {
     )]
     SecretScanOversizedInput { size: usize, limit: usize },
 
-    #[error("Shutdown error: {0}")]
+    #[error("Shutdown error: {}", sanitized(.0))]
     Shutdown(String),
 
-    #[error("Channel error: {0}")]
+    #[error("Channel error: {}", sanitized(.0))]
     ChannelError(String),
 
-    #[error("Compression error: {0}")]
+    #[error("Compression error: {}", sanitized(.0))]
     CompressionError(String),
 
-    #[error("Runtime error: {0}")]
+    #[error("Runtime error: {}", sanitized(.0))]
     RuntimeError(String),
 
-    #[error("HTTP server error: {0}")]
+    #[error("HTTP server error: {}", sanitized(.0))]
     HttpServerError(String),
 
-    #[error("Unknown error: {0}")]
+    #[error("Unknown error: {}", sanitized(.0))]
     Unknown(String),
+}
+
+/// 错误文本出口的脱敏（借用输入；未命中模式时零分配）。
+///
+/// 错误文本的**全部**出口（`Display`、`Debug`、`localized_message`、
+/// `safe_message`）共用本函数——只保护其中一处会留下旁路：`?` 与
+/// `to_string()` 走 `Display`，`{:?}` 走 `Debug`，任一出口未脱敏都会把
+/// 路径、DSN、SQL 片段带出。
+fn sanitized(msg: &str) -> std::borrow::Cow<'_, str> {
+    sanitize_message(msg)
+}
+
+/// 错误文本出口的脱敏（拥有型输入：临时字符串）。
+fn sanitized_owned(msg: String) -> String {
+    sanitize_message(&msg).into_owned()
+}
+
+/// 错误调试视图：细节经脱敏。
+///
+/// 派生 `Debug` 会原样打印 DSN、路径与 SQL 片段——`{:?}` 与 `Display`
+/// 一样是错误文本的出口，必须同口径脱敏。`source` 链只报存在性：
+/// 错误链内部同样可能带敏感数据。
+impl std::fmt::Debug for InklogError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InklogError::ConfigError(msg) => {
+                f.debug_tuple("ConfigError").field(&sanitized(msg)).finish()
+            }
+            InklogError::IoError(err) => f
+                .debug_tuple("IoError")
+                .field(&sanitized_owned(err.to_string()))
+                .finish(),
+            InklogError::SerializationError(err) => f
+                .debug_tuple("SerializationError")
+                .field(&sanitized_owned(err.to_string()))
+                .finish(),
+            InklogError::DatabaseError { message, source } => f
+                .debug_struct("DatabaseError")
+                .field("message", &sanitized(message))
+                .field("has_source", &source.is_some())
+                .finish(),
+            InklogError::CacheError(msg) => {
+                f.debug_tuple("CacheError").field(&sanitized(msg)).finish()
+            }
+            InklogError::EncryptionError { message, source } => f
+                .debug_struct("EncryptionError")
+                .field("message", &sanitized(message))
+                .field("has_source", &source.is_some())
+                .finish(),
+            InklogError::Shutdown(msg) => f.debug_tuple("Shutdown").field(&sanitized(msg)).finish(),
+            InklogError::ChannelError(msg) => f
+                .debug_tuple("ChannelError")
+                .field(&sanitized(msg))
+                .finish(),
+            InklogError::CompressionError(msg) => f
+                .debug_tuple("CompressionError")
+                .field(&sanitized(msg))
+                .finish(),
+            InklogError::RuntimeError(msg) => f
+                .debug_tuple("RuntimeError")
+                .field(&sanitized(msg))
+                .finish(),
+            InklogError::HttpServerError(msg) => f
+                .debug_tuple("HttpServerError")
+                .field(&sanitized(msg))
+                .finish(),
+            InklogError::Unknown(msg) => f.debug_tuple("Unknown").field(&sanitized(msg)).finish(),
+            #[cfg(feature = "secret-scan")]
+            InklogError::SecretScanLimit {
+                pattern,
+                count,
+                limit,
+            } => f
+                .debug_struct("SecretScanLimit")
+                .field("pattern", pattern)
+                .field("count", count)
+                .field("limit", limit)
+                .finish(),
+            #[cfg(feature = "secret-scan")]
+            InklogError::SecretScanOversizedInput { size, limit } => f
+                .debug_struct("SecretScanOversizedInput")
+                .field("size", size)
+                .field("limit", limit)
+                .finish(),
+        }
+    }
 }
 
 impl From<toml::de::Error> for InklogError {
@@ -290,8 +381,8 @@ impl InklogError {
     /// for this error variant.
     ///
     /// Shared extraction for [`Self::localized_message`] and
-    /// [`Self::safe_message`], which differ only in whether the detail is
-    /// passed through [`sanitize_message`] before formatting.
+    /// [`Self::safe_message`]; the detail is passed through
+    /// [`sanitize_message`] at both exits.
     fn i18n_key_and_detail(&self) -> (&'static str, std::borrow::Cow<'_, str>) {
         use std::borrow::Cow;
         match self {
@@ -326,12 +417,13 @@ impl InklogError {
     ///
     /// The error type prefix is translated according to the active locale,
     /// while the detail message remains in its original language.
-    /// Sensitive data is NOT sanitized — use [`safe_message()`](Self::safe_message) for that.
-    ///
-    /// Note: `safe_message()` and `localized_message()` are independent paths.
+    /// The detail is sanitized (same redaction rules as
+    /// [`safe_message()`](Self::safe_message)) — every error-text exit is
+    /// sanitized, so no path, DSN or SQL fragment leaks through this path
+    /// either.
     pub fn localized_message(&self) -> String {
         let (key, detail) = self.i18n_key_and_detail();
-        format!("{}: {}", crate::i18n::tr(key), detail)
+        format!("{}: {}", crate::i18n::tr(key), sanitize_message(&detail))
     }
 
     /// Returns a sanitized error message that does not contain sensitive information.
@@ -345,11 +437,17 @@ impl InklogError {
     /// - `validation::sanitize::LogSanitizer`：日志注入防护（CWE-117）与转义
     /// - `processing::masking::DataMasker`：PII 掩码（邮箱、电话、卡号等）
     ///
+    /// 本方法与 [`localized_message()`](Self::localized_message) 现在等价
+    /// （均脱敏）；`safe_message` 保留以兼容既有调用方。`Display` 与
+    /// `Debug` 同样脱敏——错误文本没有未脱敏的出口。
+    ///
     /// # 标记幂等契约
     ///
-    /// 消息已含脱敏/掩码标记（`***REDACTED***`、`***MASKED***`、`[REDACTED]`）
-    /// 时视为已被上游处理，本方法原样返回、不再重复套用——与 subscriber 脱敏
-    /// / sink 掩码双开关叠加时不会产生 REDACTED 套 REDACTED 的嵌套标记。
+    /// 标记保护在「值」一级：值已是脱敏/掩码标记（`***REDACTED***`、
+    /// `***MASKED***`、`[REDACTED]`）时不重复套用，与 subscriber 脱敏 /
+    /// sink 掩码双开关叠加时不会产生 REDACTED 套 REDACTED 的嵌套标记。
+    /// 判定不落在「整条消息」一级——标记词表可被自由文本伪造，整条消息级
+    /// 短路会让含标记的消息整体免于脱敏。
     ///
     /// # Example
     ///

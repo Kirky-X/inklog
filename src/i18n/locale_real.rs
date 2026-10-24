@@ -719,4 +719,95 @@ mod tests {
             }
         }
     }
+
+    /// Message ids of an FTL source, in source order.
+    ///
+    /// Comments (`#`), attributes (`.name`), terms (`-name`) and indented
+    /// continuation lines are not message definitions.
+    fn ftl_message_ids(source: &str) -> Vec<String> {
+        source
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim_end();
+                if line.is_empty()
+                    || line.starts_with('#')
+                    || line.starts_with('.')
+                    || line.starts_with('-')
+                    || line.starts_with(char::is_whitespace)
+                {
+                    return None;
+                }
+                let id = line.split_once('=')?.0.trim();
+                (!id.is_empty()).then(|| id.to_string())
+            })
+            .collect()
+    }
+
+    /// The `cli-verify-chain-*` family must occupy one contiguous run of
+    /// messages: a sibling parked at the end of the file falls under an
+    /// unrelated comment group and drifts away from the ones it belongs
+    /// with.
+    #[test]
+    fn test_cli_verify_chain_messages_are_contiguous() {
+        for (locale, files) in EMBEDDED_LOCALES {
+            let cli = files
+                .iter()
+                .find(|(name, _)| *name == "cli.ftl")
+                .map(|(_, source)| *source)
+                .unwrap_or_else(|| panic!("locale '{locale}': cli.ftl is not embedded"));
+            let ids = ftl_message_ids(cli);
+            let positions: Vec<usize> = ids
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| id.starts_with("cli-verify-chain-"))
+                .map(|(idx, _)| idx)
+                .collect();
+            assert!(
+                positions.len() > 1,
+                "locale '{locale}': expected several cli-verify-chain-* messages, found {}",
+                positions.len()
+            );
+            let first = positions[0];
+            let last = positions[positions.len() - 1];
+            assert_eq!(
+                last - first + 1,
+                positions.len(),
+                "locale '{locale}': cli-verify-chain-* messages are not contiguous between '{}' and '{}'",
+                ids[first],
+                ids[last]
+            );
+            let empty = ids
+                .iter()
+                .position(|id| id == "cli-verify-chain-empty")
+                .unwrap_or_else(|| panic!("locale '{locale}': cli-verify-chain-empty is missing"));
+            assert!(
+                (first..=last).contains(&empty),
+                "locale '{locale}': cli-verify-chain-empty sits outside the cli-verify-chain-* group"
+            );
+        }
+    }
+
+    /// `en` and `zh-CN` must list the same message ids in the same order;
+    /// a locale pair that drifts leaves one side untranslated.
+    #[test]
+    fn test_cli_locales_list_same_message_ids_in_order() {
+        let ids_of = |locale: &str| -> Vec<String> {
+            let files = EMBEDDED_LOCALES
+                .iter()
+                .find(|(l, _)| *l == locale)
+                .unwrap_or_else(|| panic!("EMBEDDED_LOCALES missing locale '{locale}'"))
+                .1;
+            let cli = files
+                .iter()
+                .find(|(name, _)| *name == "cli.ftl")
+                .map(|(_, source)| *source)
+                .unwrap_or_else(|| panic!("locale '{locale}': cli.ftl is not embedded"));
+            ftl_message_ids(cli)
+        };
+        assert_eq!(
+            ids_of("en"),
+            ids_of("zh-CN"),
+            "en and zh-CN cli.ftl must list the same message ids in the same order"
+        );
+    }
 }

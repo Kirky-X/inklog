@@ -106,6 +106,42 @@
 //! }
 //! ```
 //!
+//! ## oxcache 审计桥（feature `oxcache-audit`）
+//!
+//! 启用 `oxcache-audit` 后，[`integrations::OxcacheAuditPublisher`] 实现
+//! oxcache 的 `AuditEventPublisher` 端口，把缓存审计事件转换为 inklog
+//! 结构化日志，经有界通道交由单一 writer task 写入注入的 sink：
+//!
+//! ```rust,ignore
+//! use std::sync::Arc;
+//! use inklog::integrations::OxcacheAuditPublisher;
+//!
+//! let publisher = Arc::new(OxcacheAuditPublisher::new(sink));
+//! let cache = oxcache::Cache::<String, String>::builder()
+//!     .audit_publisher(publisher)
+//!     .build()
+//!     .await?;
+//! ```
+//!
+//! ## limiteron 限流注入（feature `limiteron-rate-limit`）
+//!
+//! 默认构建不含 limiteron 依赖：sink 级突发配额限速由 [`BurstLimiter`]
+//! 承担（等价 `TokenBucketLimiter::new(capacity, 0)` 的纯预算语义——无时钟、
+//! 无补充）。启用 `limiteron-rate-limit` 后可注入 limiteron 原生限流器，
+//! 并获得按速率/按 target 分组的限流模块（[`RateLimiter`] /
+//! [`TargetRateLimiter`]）：
+//!
+//! ```rust,ignore
+//! use std::sync::Arc;
+//! use inklog::RateLimitedSink;
+//!
+//! // sink 级限流：注入 limiteron 限流器
+//! let sink = RateLimitedSink::with_limiter(inner_sink, Arc::new(limiter));
+//!
+//! // 订阅器级限流：按速率（每秒令牌数）
+//! let subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(100)));
+//! ```
+//!
 //! ## 配置文件示例 (TOML)
 //!
 //! ```toml
@@ -200,12 +236,14 @@ pub use support::io::sink::ring_buffered_file::{
     BackpressureStrategy, ChannelBufferedConfig, ChannelBufferedFileSink, ChannelBufferedMetrics,
 };
 pub use support::io::sink::{
-    AsyncSink, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
+    AsyncSink, BurstLimiter, CircuitBreaker, CircuitBreakerConfig, CircuitState, CompositeRotation,
     CompressionStrategy, DiskCheckable, FileSinkFactory, LogSink, NoCompression, NoOpRateLimit,
     RateLimitedSink, Rotatable, RotationContext, RotationResult, RotationStrategy, Sampler,
     SamplingPolicy, SamplingSink, SinkFactory, SinkMetadata, SinkRateLimit, SinkRegistry,
     SizeBasedRotation, TimeBasedRotation, TokenBucketRateLimit,
 };
+// limiteron 原生限流器适配（feature `limiteron-rate-limit`）为内部实现：
+// 其参数类型属第三方 trait，不经 crate 根再导出；外部扩展用 `SinkRateLimit` 端口。
 
 // Re-export masking for benchmarks
 pub use support::processing::masking;
@@ -255,9 +293,13 @@ pub use support::observability::{
 pub use support::processing::ObjectPool;
 pub use support::processing::{
     DataMasker, DataMaskerBuilder, LogTemplate, MaskMatch, MaskRule, MaskRuleBuilder,
-    MaskRuleRegistry, ObjectPoolConfig, OutputFormat, RateLimiter, TargetQuotaVerdict,
-    TargetRateLimiter, get_log_record, get_string_buffer, put_log_record, put_string_buffer,
-    secret_scan_masker,
+    MaskRuleRegistry, ObjectPoolConfig, OutputFormat, get_log_record, get_string_buffer,
+    put_log_record, put_string_buffer, secret_scan_masker,
+};
+// 速率/按 target 配额限流（feature `limiteron-rate-limit`）
+pub use support::processing::{
+    GlobalRateLimitMiddleware, RateLimiter, TargetQuotaMiddleware, TargetQuotaVerdict,
+    TargetRateLimiter,
 };
 // secret-scan 出站脱敏门（feature `secret-scan`）
 #[cfg(feature = "secret-scan")]
