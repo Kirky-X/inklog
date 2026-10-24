@@ -92,6 +92,46 @@ pub struct ArchiveChainEntry {
     pub hmac: String,
 }
 
+/// 归档链封条（链外锚点）：条目总数 + 尾哈希 + 封条 HMAC。
+///
+/// 链内自洽校验（序号连续 + 盐一致 + prev_hash 衔接 + HMAC 匹配）无法证明
+/// 「没有条目被删掉」——被截尾到**非空前缀**的 manifest 仍然自洽。封条是
+/// 链外的唯一锚点：条目总数与尾哈希必须与 manifest 一致，且封条 HMAC 以
+/// 链密钥签发，无法伪造。
+///
+/// 封条必须与 manifest **分开落盘**：同文件内的封条会随截尾一并丢失，
+/// 截断检测随之失效（`seal_path_for_manifest`）。
+///
+/// 威胁模型边界：封条与 manifest 同目录同可写域——把某一代的 manifest 与
+/// 当时合法的封条一并回滚对校验不可见。封条只挡单侧截尾，不挡成对回滚。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ArchiveChainSeal {
+    /// 封条覆盖的条目总数
+    pub count: u64,
+    /// 末条目的 HMAC（hex）
+    pub tail_hash: String,
+    /// 链首随机盐（hex；与 manifest 首条目同盐）
+    pub salt: String,
+    /// HMAC-SHA256(key, salt || count || tail_hash)（hex）
+    pub hmac: String,
+}
+
+/// 封条路径：由 manifest 路径推出（`<stem>.chain.jsonl` → `<stem>.chain.seal.json`）。
+///
+/// sink 写入与 CLI 校验共用同一命名规则——封条与 manifest 必须成对推导，
+/// 否则校验方找不到锚点。
+pub fn seal_path_for_manifest(manifest: &std::path::Path) -> std::path::PathBuf {
+    let stem = manifest
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let name = format!("{stem}.seal.json");
+    match manifest.parent() {
+        Some(parent) => parent.join(name),
+        None => std::path::PathBuf::from(name),
+    }
+}
+
 /// 归档防篡改 HMAC 链。
 pub struct ArchiveChain {
     key: Vec<u8>,
@@ -138,6 +178,26 @@ impl ArchiveChain {
         &self.entries
     }
 
+    /// 生成封条（当前链状态的链外锚点）；空链返回 `None`。
+    ///
+    /// 封条须与 manifest 分文件落盘（见 [`seal_path_for_manifest`])——
+    /// 同文件内的封条会随截尾一并丢失，截断检测随之失效。
+    pub fn seal(&self) -> Option<ArchiveChainSeal> {
+        let last = self.entries.last()?;
+        let count = self.entries.len() as u64;
+        let mut message = Vec::with_capacity(CHAIN_SALT_LEN + 8 + last.hmac.len());
+        message.extend_from_slice(&self.salt);
+        message.extend_from_slice(&count.to_be_bytes());
+        message.extend_from_slice(last.hmac.as_bytes());
+        let hmac = hmac_sha256(&self.key, &message);
+        Some(ArchiveChainSeal {
+            count,
+            tail_hash: last.hmac.clone(),
+            salt: hex_encode(&self.salt),
+            hmac: hex_encode(&hmac),
+        })
+    }
+
     /// 校验当前链条（实例方法便捷封装）。
     pub fn verify(&self) -> bool {
         Self::verify_entries(self.entries(), &self.key)
@@ -147,7 +207,17 @@ impl ArchiveChain {
     ///
     /// 任一事件被篡改、删除、重排或伪造（prev_hash 链断裂 / hmac 不匹配 /
     /// 序号跳跃 / 盐不一致）即返回 `false`。
+    ///
+    /// **空链返回 `false`**：链内自洽性校验无法证明「没有条目被删掉」——
+    /// 空 manifest（被删空或被截断）在没有外部锚点（条目总数 / 尾哈希）
+    /// 时与「本就没有归档」不可区分，故按校验失败处理（fail-closed）。
+    ///
+    /// **本函数检不出「截尾到非空前缀」**：截断后的链仍然自洽。截尾检测
+    /// 需要链外锚点——见 [`Self::verify_seal`]。
     pub fn verify_entries(entries: &[ArchiveChainEntry], key: &[u8]) -> bool {
+        if entries.is_empty() {
+            return false;
+        }
         let mut prev_hash = [0u8; CHAIN_HASH_LEN];
         let mut salt: Option<[u8; CHAIN_SALT_LEN]> = None;
         for (expected_index, entry) in entries.iter().enumerate() {
@@ -191,6 +261,59 @@ impl ArchiveChain {
         }
         true
     }
+
+    /// 校验 manifest 与封条的一致性（截尾检测）。
+    ///
+    /// 链内自洽（[`Self::verify_entries`]）无法证明「没有条目被删掉」：
+    /// 被截尾到**非空前缀**的 manifest 仍然自洽（序号连续、盐一致、
+    /// prev_hash 衔接、HMAC 匹配）。本函数用链外锚点补上这一缺口：
+    ///
+    /// - 条目总数必须与封条一致（截尾 → 数量不符）；
+    /// - 尾哈希必须与封条一致（截尾 → 尾哈希不符）；
+    /// - 链首盐必须与 manifest 首条目一致（换链 → 盐不符）；
+    /// - 封条自身的 HMAC 必须以链密钥验证通过（封条不可伪造）。
+    ///
+    /// 封条缺失或不可解析时**无法判定完整性**——调用方须按失败处理
+    /// （fail-closed）：删掉封条是绕过截尾检测的最短路径。
+    pub fn verify_seal(seal: &ArchiveChainSeal, entries: &[ArchiveChainEntry], key: &[u8]) -> bool {
+        if entries.is_empty() {
+            return false;
+        }
+        if seal.count != entries.len() as u64 {
+            return false;
+        }
+        let Some(last) = entries.last() else {
+            return false;
+        };
+        if seal.tail_hash != last.hmac {
+            return false;
+        }
+        if seal.salt != entries[0].salt {
+            return false;
+        }
+        let Some(salt) = hex_decode(&seal.salt) else {
+            return false;
+        };
+        if salt.len() != CHAIN_SALT_LEN {
+            return false;
+        }
+        let Some(tail) = hex_decode(&seal.tail_hash) else {
+            return false;
+        };
+        if tail.len() != CHAIN_HASH_LEN {
+            return false;
+        }
+        let mut message = Vec::with_capacity(CHAIN_SALT_LEN + 8 + seal.tail_hash.len());
+        message.extend_from_slice(&salt);
+        message.extend_from_slice(&seal.count.to_be_bytes());
+        message.extend_from_slice(seal.tail_hash.as_bytes());
+        let expected = hmac_sha256(key, &message);
+        let Some(actual) = hex_decode(&seal.hmac) else {
+            return false;
+        };
+        // 常量时间比较（与链内校验同口径）
+        bool::from(expected.ct_eq(&actual))
+    }
 }
 
 #[cfg(test)]
@@ -199,6 +322,13 @@ mod tests {
 
     fn event(kind: &str, file: &str) -> String {
         serde_json::json!({ "kind": kind, "file": file }).to_string()
+    }
+
+    #[test]
+    fn test_verify_rejects_empty_chain() {
+        // 空链无法证明「没有条目被删掉」：空 manifest（被删空或被截断）
+        // 与「本就没有归档」不可区分，必须判为校验失败（fail-closed）。
+        assert!(!ArchiveChain::verify_entries(&[], b"key-1"));
     }
 
     #[test]
@@ -291,6 +421,65 @@ mod tests {
             a.entries()[0].salt,
             b.entries()[0].salt,
             "chain-start salt must be random per instance"
+        );
+    }
+
+    /// 截尾到非空前缀：链内校验仍自洽（检不出），封条比对必须判失败。
+    #[test]
+    fn test_seal_detects_truncation_to_nonempty_prefix() {
+        let mut chain = ArchiveChain::new(b"key-1");
+        chain.append(&event("a", "1"));
+        chain.append(&event("b", "2"));
+        chain.append(&event("c", "3"));
+        let seal = chain.seal().expect("seal");
+
+        // 截尾：去掉末尾条目——链内自洽（序号连续 + prev_hash 衔接 +
+        // HMAC 匹配）仍成立，链内校验检不出
+        let truncated: Vec<ArchiveChainEntry> = chain.entries()[..2].to_vec();
+        assert!(
+            ArchiveChain::verify_entries(&truncated, b"key-1"),
+            "truncated prefix stays self-consistent — the seal is the only anchor"
+        );
+        assert!(
+            !ArchiveChain::verify_seal(&seal, &truncated, b"key-1"),
+            "truncation must be detected by the seal"
+        );
+
+        // 完整链：封条一致
+        assert!(ArchiveChain::verify_seal(&seal, chain.entries(), b"key-1"));
+    }
+
+    /// 封条自身不可伪造：改 count / 尾哈希 / 换盐 / 换密钥均判失败。
+    #[test]
+    fn test_seal_rejects_tampering() {
+        let mut chain = ArchiveChain::new(b"key-1");
+        chain.append(&event("a", "1"));
+        chain.append(&event("b", "2"));
+        let seal = chain.seal().expect("seal");
+        let entries = chain.entries().to_vec();
+
+        let mut wrong_count = seal.clone();
+        wrong_count.count = 1;
+        assert!(!ArchiveChain::verify_seal(&wrong_count, &entries, b"key-1"));
+
+        let mut wrong_tail = seal.clone();
+        wrong_tail.tail_hash = hex_encode(&[0u8; CHAIN_HASH_LEN]);
+        assert!(!ArchiveChain::verify_seal(&wrong_tail, &entries, b"key-1"));
+
+        let mut wrong_salt = seal.clone();
+        wrong_salt.salt = hex_encode(&[9u8; CHAIN_SALT_LEN]);
+        assert!(!ArchiveChain::verify_seal(&wrong_salt, &entries, b"key-1"));
+
+        assert!(!ArchiveChain::verify_seal(&seal, &entries, b"other-key"));
+    }
+
+    /// 封条路径与 manifest 路径成对推导。
+    #[test]
+    fn test_seal_path_is_derived_from_manifest_path() {
+        let path = seal_path_for_manifest(std::path::Path::new("/var/log/app.chain.jsonl"));
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/var/log/app.chain.seal.json")
         );
     }
 

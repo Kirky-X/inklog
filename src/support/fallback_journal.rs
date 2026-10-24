@@ -644,9 +644,15 @@ impl FallbackJournal {
         line.push(b'\n');
         if let Some(parent) = self.path.parent()
             && !parent.as_os_str().is_empty()
-            && std::fs::create_dir_all(parent).is_err()
         {
-            return false;
+            // 新建的 journal 目录收敛为 0700（已存在目录不回改用户权限）
+            let newly_created = !parent.exists();
+            if std::fs::create_dir_all(parent).is_err() {
+                return false;
+            }
+            if newly_created {
+                tighten_journal_dir_permissions(parent);
+            }
         }
         let written = match self.crypto.as_ref() {
             Some(crypto) => {
@@ -725,12 +731,16 @@ impl FallbackJournal {
         if self.current_size() + line.len() as u64 > self.max_bytes {
             self.truncate_head_for(line.len() as u64);
         }
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
+        // 明文路径与加密路径同权限语义：0600（默认 umask 的 0644 会把
+        // ERROR/FATAL 级原文暴露给组/其他用户——落盘原因即主链路失败，
+        // 记录最可能含敏感上下文）。
+        let written = open_journal_file(&self.path, true)
             .and_then(|mut f| f.write_all(line))
-            .is_ok()
+            .is_ok();
+        if written {
+            tighten_journal_permissions(&self.path);
+        }
+        written
     }
 
     /// 文件以 journal 加密 magic 开头（仅非空文件调用；O(1) 读 8 字节）。
@@ -987,12 +997,17 @@ impl FallbackJournal {
             }
         }
         let tmp = self.path.with_extension("journal.tmp");
-        if std::fs::write(&tmp, &data[cut..])
-            .and_then(|_| std::fs::rename(&tmp, &self.path))
-            .is_err()
-        {
+        // tmp 与 journal 同权限语义（0600）：rename 换目录项，目标文件的
+        // mode 取自 tmp——tmp 若按默认 umask 创建（0644），会把操作员手工
+        // 收紧的 0600 静默放宽回去。
+        let tmp_written = open_journal_file(&tmp, false)
+            .and_then(|mut f| f.write_all(&data[cut..]))
+            .is_ok();
+        if !tmp_written || std::fs::rename(&tmp, &self.path).is_err() {
             // 截断失败：放弃保留，直接清空（宁可丢旧也不超限增长）
             let _ = std::fs::write(&self.path, b"");
+        } else {
+            tighten_journal_permissions(&self.path);
         }
     }
 }
@@ -1001,6 +1016,35 @@ fn header_conflict_args(path: &std::path::Path) -> crate::i18n::MsgArgs {
     let mut args = crate::i18n::MsgArgs::new();
     args.set("file", path.display().to_string());
     args
+}
+
+/// journal 文件权限收紧：unix 0600。
+///
+/// `OpenOptions::mode` 仅在**创建**时生效——既有文件（历史版本创建的
+/// 0644、人工放宽过的权限）不受影响，故落盘后显式 set_permissions 收口。
+/// 明文与加密路径共用：明文 journal 存的是未脱敏的 ERROR/FATAL 原文，
+/// 暴露面比密文更大，权限语义不得弱于加密路径。
+fn tighten_journal_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// journal 父目录权限收紧：unix 0700（与 file sink 的日志目录同一约束）。
+///
+/// 目录默认 0755 时，组/其他用户可列出并读取其中的 journal 文件。
+pub(crate) fn tighten_journal_dir_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 /// 加密 journal 写入句柄：unix 0600——加密产物与 key 文件同一约束
@@ -1936,6 +1980,40 @@ mod tests {
         unsafe {
             std::env::remove_var("INKLOG_TEST_JKEY_0600");
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_plaintext_journal_files_created_0600() {
+        // 明文 journal 与加密 journal 同权限语义：默认 umask 的 0644 会把
+        // 未脱敏的 ERROR/FATAL 原文暴露给组/其他用户（明文路径连密文都没有，
+        // 泄露面比加密路径更大）。
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("plain0600.journal");
+        let journal = FallbackJournal::with_limit(&path, 1024);
+        for i in 0..4 {
+            assert!(journal.spill(&record(&format!("plain-{i}-{}", "x".repeat(40)))));
+        }
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "plaintext journal must be 0600, got {:o}",
+            mode & 0o777
+        );
+
+        // 触发超限截断（tmp + rename 重建文件）：权限不得回退到 0644
+        for i in 0..8 {
+            assert!(journal.spill(&record(&format!("plain-more-{i}-{}", "y".repeat(60)))));
+        }
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "truncated (tmp+rename) plaintext journal must stay 0600, got {:o}",
+            mode & 0o777
+        );
     }
 
     // TcpJournalPusher：断线缓冲 + 自动重连 + 满则丢最旧（net-sink 范式）
