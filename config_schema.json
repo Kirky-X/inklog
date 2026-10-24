@@ -428,7 +428,7 @@
       }
     },
     "DatabaseSinkConfig": {
-      "description": "Database sink configuration for persistent log storage.",
+      "description": "Database sink configuration for persistent log storage.\n\n`Debug` 与 `Serialize` 均遮蔽 DSN 中的口令：配置对象常被整体打印\n（`tracing::info!(\"{:?}\", config)`）或整体回显（管理接口 JSON）——\n派生实现会把内嵌凭据（`postgres://user:password@host/db`）一并带出。\n\n序列化产物是**脱敏视图**，不是可回载的配置——序列化→反序列化往返会丢\n口令。需要保真往返（备份、迁移、跨环境搬运）用\n[`to_lossless_json`](Self::to_lossless_json) /\n[`to_lossless_toml`](Self::to_lossless_toml)。",
       "type": "object",
       "properties": {
         "name": {

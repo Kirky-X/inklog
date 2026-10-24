@@ -599,13 +599,17 @@ criterion_group!(
     bench_backpressure,
     bench_concurrency,
     bench_object_pool,
-    bench_zero_allocation,
+    bench_zero_allocation
+);
+// 限流相关基准：限流模块为仓内自持，默认构建即生效
+criterion_group!(
+    rate_limit_benches,
     bench_sampling_stress_overhead,
     bench_target_rate_limiter_lookup
 );
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 criterion_group!(dbnexus_benches, bench_parquet_conversion);
-criterion_main!(benches);
+criterion_main!(benches, rate_limit_benches);
 
 // Object Pool Performance Benchmark
 

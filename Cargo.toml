@@ -38,10 +38,10 @@ crossbeam-channel = { version = "0.5", default-features = false, features = ["st
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf"] }
-# dbnexus 精确钉（与 oxcache→inklog 的 `=钉` 同一策略）：只对实测对齐的版本承诺兼容，rc 阶段次版本号不承载兼容性
-dbnexus = { version = "=0.6.0-rc.10", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
-limiteron = { version = "0.3.0-rc.6", default-features = false, features = ["retry", "sync", "test-clock"] }
-
+# dbnexus 跨仓地板（caret + rc 前缀）：地板是"已承诺兼容的最低版本"承诺面，
+# 允许滞后于实际可用版本；禁 `=` 精确钉（精确钉会迫使底层推进时顶层重发，
+# 并在下游产生双版本同图）
+dbnexus = { version = "0.6.0-rc.10", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥（见 [features] 说明），全开必然编译失败
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "zstd", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "confers-audit", "config-confers", "otel"]
@@ -62,6 +62,8 @@ default = ["i18n", "cache"]
 i18n = ["dep:icu", "dep:writeable", "dep:fluent-bundle", "dep:unic-langid", "dep:sys-locale"]
 # 缓存后端：裁 icu/fluent 依赖树必须同时关闭 i18n 与 cache，否则 ObjectPool 不导出
 cache = ["dep:oxcache"]
+# oxcache 审计事件 → inklog 结构化日志桥（实现 oxcache AuditEventPublisher 端口）
+oxcache-audit = ["dep:oxcache"]
 # mock 导出：不入 default 与生产组合，仅外部测试消费者显式启用
 test-utils = []
 # JSON Schema 导出（schemars）：配置类型 derive JsonSchema + InklogConfig::json_schema
@@ -111,6 +113,11 @@ kms = ["confers/encryption", "confers/cloud-kms"]
 otel = ["dep:opentelemetry"]
 # 网络转发 Sink——TCP（可 TLS，rustls 客户端）+ UDP，断线缓冲重连
 net-sink = ["dep:rustls"]
+# 允许在发布构建中禁用 TLS 证书校验（danger_accept_invalid_certs）。
+# 默认关闭：跳过证书校验后链路只加密不认证，中间人可完整读取并篡改外发
+# 日志，客户端侧无任何报错或指标信号。调试构建（debug_assertions）不
+# 需要本特性即可使用该开关。
+insecure-tls = []
 # OTLP 日志导出 MVP（OTLP/HTTP JSON，手写传输，无新增依赖）
 otlp = []
 
@@ -135,9 +142,6 @@ confers = { version = "0.6.0-rc.11", default-features = false, features = ["toml
 thiserror = { version = "2.0", default-features = false, features = [] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-# 同步 trait 决策点桥接 limiteron 异步原语（try_acquire → TokenBucketLimiter::allow）：
-# futures 轻量执行器不引入 tokio 时钟或 reactor
-futures = { version = "0.3", default-features = false, features = ["executor"] }
 chrono = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["json", "tokio", "http1"], optional = true }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
@@ -145,7 +149,7 @@ is-terminal = { version = "0.4", default-features = false, features = [] }
 dirs = { version = "7.0", default-features = false, features = [] }
 parking_lot = { version = "0.12", default-features = false, features = [] }
 # oxcache 放宽为 caret（rc.11 起）：vecboost 线需 rc.10，精确 pin 与其区间无交集导致下游解析冲突；rc.8 与 rc.10 已实测兼容（inklog 消费面无变更）
-oxcache = { version = "0.5.0-rc.9", default-features = false, features = ["memory", "serialization"], optional = true }
+oxcache = { version = "0.5.0-rc.9", default-features = false, features = ["memory", "serialization", "audit"], optional = true }
 zstd = { version = "0.14", default-features = false, features = [], optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
@@ -154,7 +158,6 @@ parquet = { version = "60.0", default-features = false, features = ["async", "ar
 arrow-array = { version = "60.0", default-features = false, features = [], optional = true }
 arrow-schema = { version = "60.0", default-features = false, features = [], optional = true }
 dbnexus = { workspace = true, optional = true }
-limiteron = { workspace = true }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false, features = [] }
