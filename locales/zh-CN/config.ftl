@@ -23,6 +23,7 @@ config-env_unsafe_http_path = HTTP 路径 '{ $path }'（环境变量: { $env_var
 config-invalid_stderr_level = 无效的 stderr_levels 条目 '{ $level }'。有效级别: { $valid }
 config-env_invalid_format = INKLOG_GLOBAL_FORMAT 为空，已忽略
 config-env_invalid_db_url = INKLOG_DATABASE_SINK_URL 包含不安全字符，已忽略
+config-env_redacted_db_url = INKLOG_DATABASE_SINK_URL 含脱敏口令占位符，已忽略
 config-env_blank_value_ignored = 环境变量 '{ $var }' 为空，已忽略
 config-env_invalid_static_field = INKLOG_GLOBAL_STATIC_FIELDS 段 '{ $segment }' 不是有效的 key=value（完整原始值: '{ $raw }'），已忽略
 config-env_control_char_ignored = 环境变量 '{ $var }' 含控制字符，已忽略
@@ -55,6 +56,7 @@ config-masking_missing_pattern = masking_rules 条目 '{ $name }' 缺少 'patter
 config-http_auth_token_empty = HTTP 认证已启用但 token 环境变量 '{ $env }' 为空
 config-http_auth_token_not_set = HTTP 认证已启用但 token 环境变量 '{ $env }' 未设置
 config-invalid_http_address = 无效的 HTTP 服务器地址: '{ $addr }': { $err }
+config-http_invalid_bind_host = HTTP 服务器 host '{ $host }' 不是可绑定的地址字面量: 请使用 IP 字面量, 如 '127.0.0.1' 或 '[::1]'
 
 # 加密配置错误
 config-encryption_key_not_set = 加密密钥环境变量 '{ $env }' 未设置
@@ -169,6 +171,8 @@ log-config_validation_failed = 配置校验失败：{ $err }
 log-console_secret_scan_feature_missing = console_sink.secret_scan_enabled=true 需要 `secret-scan` 特性；当前构建忽略该开关
 log-database_secret_scan_feature_missing = database_sink.secret_scan_enabled=true 需要 `secret-scan` 特性；当前构建忽略该开关
 log-console_stderr_levels_entries_removed = 已移除非法的 stderr_levels 条目
+config-http_exposed_without_auth = http_server 绑定在非回环地址（{ $host }:{ $port }）且未配置鉴权与 IP 白名单；请配置 http_server.auth 或 http_server.ip_whitelist
+config-http_invalid_host = Host 头不是回环主机
 config-tls_cert_path_empty = tls.cert_path 为空
 config-tls_key_path_empty = tls.key_path 为空
 config-tls_cert_path_missing = tls.cert_path "{ $path }" 不存在

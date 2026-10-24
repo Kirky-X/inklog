@@ -408,6 +408,10 @@ pub struct InklogConfig {
 > 1-in-100 采样保留（`sampling` 策略优先），非关键级别计为 `logs_dropped`。
 > 未配置时整体不接线，全局行为不变。
 >
+> ✅ 限流能力默认构建即生效：`performance.rate_limit` 与
+> `rate_limit.rules` 的限流内核（按速率 / 按 target 前缀分组的令牌桶）随该
+> feature 提供；未启用时配置仍被接受但不生效，启动会打印显性告警。
+>
 > 运维提示：组配额应显著低于全局 `performance.rate_limit` 预算——过大的组配
 > 额等效于该前缀豁免全局限流；规则数建议 ≤ 64（查找为按记录执行的线性扫描）。
 > 配置 JSON Schema（`schema` feature）：`InklogConfig::json_schema()` 程序化导出
@@ -481,7 +485,7 @@ pub struct FileSinkConfig {
     pub batch_size: usize,                    // 默认 100
     pub flush_interval_ms: u64,               // 默认 100
     pub fsync: bool,                          // 默认 false；每批写盘后 `sync_all`（fsync）：崩溃一致性增强，吞吐优先默认关，等保/审计场景建议开启
-    pub audit_chain_enabled: bool,            // 默认 false；归档审计链（HMAC-SHA256 前向链）：轮转成功后向 `<stem>.chain.jsonl` manifest 追加 `{path, sha256, timestamp}`，可检测归档篡改/删除/重排；密钥读 `INKLOG_AUDIT_KEY`，缺失时链禁用并告警
+    pub audit_chain_enabled: bool,            // 默认 false；归档审计链（HMAC-SHA256 前向链）：轮转成功后向 `<stem>.chain.jsonl` manifest 追加 `{path, sha256, timestamp}`，并写穿链外封条 `<stem>.chain.seal.json`（条目总数 + 尾哈希，用于检出截尾）；可检测归档篡改/删除/重排/截尾；密钥读 `INKLOG_AUDIT_KEY`，缺失时链禁用并告警
     pub masking_enabled: bool,                // 默认 true（推荐新名 `pii_masking_enabled`，旧名为 serde 兼容别名）
     pub output_format: OutputFormat,          // 默认 Text
 }
@@ -536,6 +540,12 @@ pub struct DatabaseSinkConfig {
 
 > `secret_scan_enabled`（console / database 内置 sink 出站门）：开启后裸凭据（`sk-` 系列、AWS AKIA、PEM 块等）无需敏感字段名即可被归因并掩码，落库/输出前生效。声明式接线与默认值说明见 [安全文档](SECURITY.md)。
 
+> **DSN 脱敏与保真导出**：`Debug` 与 `Serialize` 均把 `url` 的口令遮蔽为 `***`（配置对象常被整体打印或整体回显）。序列化产物是**脱敏视图**，序列化→反序列化往返会丢口令；需要保真往返（备份、迁移、跨环境搬运）用 `to_lossless_json()` / `to_lossless_toml()`——两者输出含原始口令，导出文件须按凭据同等对待。
+>
+> **env 覆盖不吞口令**：`load_with_env_overrides()` 的 env 覆盖走「序列化→打补丁→反序列化」往返，往返会把口令换成脱敏占位符——配置里的口令因此丢失。该路径已改写为保留原 DSN，`INKLOG_DATABASE_SINK_URL` 提供的 DSN 按原值生效。
+>
+> **脱敏视图不可用于认证**：口令位是占位符（`***`）的 DSN 认证必然失败，`DatabaseSinkConfig::validate()` 与配置加载校验均显式拒绝该形态（`INKLOG_DATABASE_SINK_URL` 传入占位符口令时按非法值忽略并告警）。
+
 #### DatabaseDriver
 
 ```rust
@@ -550,6 +560,8 @@ pub enum DatabaseDriver {
 ```
 
 实现 `FromStr` 与 `Display`（`"postgres"` / `"mysql"` / `"sqlite"` / `"duckdb"`，解析忽略大小写）；合法值外的输入返回本地化（i18n）错误消息。
+
+`DbNexusAdapter` 的驱动不由该枚举直接解析，而是取自 dbnexus 的 `DbConfig::database_type()`（与 dbnexus 建池选后端同源）：scheme 大小写不敏感（`MYSQL://` 与 `mysql://` 同义），未知 scheme 或不受支持的后端（Ladybug/Neo4j）时构造返回 `Err(InklogError::ConfigError)`——不猜一个语义。建表方言与写入转义同源于该驱动。
 
 #### PartitionStrategy
 
@@ -596,6 +608,8 @@ pub struct HttpServerConfig {
 }
 ```
 
+`host` 只接受可绑定的 IP 字面量：IPv4 明文（`127.0.0.1`）或 IPv6 带方括号（`[::1]` / `[::]`）。主机名（`localhost`）与畸形方括号写法无法构成 socket 地址，配置校验直接拒绝。
+
 | 关联类型 | 字段/变体 | 描述 |
 |----------|-----------|------|
 | `HttpErrorMode` | `Strict` / `Warn` | 启动失败时返回错误 / 记录警告并继续 |
@@ -625,40 +639,44 @@ pub struct PerformanceConfig {
 ### InklogError
 
 ```rust
-#[derive(Error, Debug)]
+#[derive(Error)]
 pub enum InklogError {
-    #[error("Configuration error: {0}")]
+    #[error("Configuration error: {}", sanitized(.0))]
     ConfigError(String),
-    #[error("IO error: {0}")]
+    #[error("IO error: {}", sanitized_owned(.0.to_string()))]
     IoError(#[from] std::io::Error),
-    #[error("Serialization error: {0}")]
+    #[error("Serialization error: {}", sanitized_owned(.0.to_string()))]
     SerializationError(#[from] serde_json::Error),
-    #[error("Database error: {message}")]
+    #[error("Database error: {}", sanitized(.message))]
     DatabaseError {
         message: String,
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
-    #[error("Cache error: {0}")]
+    #[error("Cache error: {}", sanitized(.0))]
     CacheError(String),
-    #[error("Encryption error: {message}")]
+    #[error("Encryption error: {}", sanitized(.message))]
     EncryptionError {
         message: String,
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
-    #[error("Shutdown error: {0}")]
+    #[error("Shutdown error: {}", sanitized(.0))]
     Shutdown(String),
-    #[error("Channel error: {0}")]
+    #[error("Channel error: {}", sanitized(.0))]
     ChannelError(String),
-    #[error("Compression error: {0}")]
+    #[error("Compression error: {}", sanitized(.0))]
     CompressionError(String),
-    #[error("Runtime error: {0}")]
+    #[error("Runtime error: {}", sanitized(.0))]
     RuntimeError(String),
-    #[error("HTTP server error: {0}")]
+    #[error("HTTP server error: {}", sanitized(.0))]
     HttpServerError(String),
-    #[error("Unknown error: {0}")]
+    #[error("Unknown error: {}", sanitized(.0))]
     Unknown(String),
 }
 ```
+
+> **错误文本出口全部脱敏**：`Display`（`to_string()` / `format!("{err}")`）、
+> `Debug`（`{:?}`）、`localized_message()` 与 `safe_message()` 共用同一套
+> 脱敏规则——路径、DSN、SQL 片段与凭据不会随任一出口外带。
 
 | 变体 | 描述 |
 |------|------|
@@ -835,6 +853,8 @@ let record = LogRecord::new(
 );
 ```
 
+> **出口口径**：`Debug`（`{:?}`）为脱敏视图——message 过 sanitizer（消息级敏感值）再过掩码器（PII 与敏感键字段值），来源路径同口径脱敏。`Serialize` 保持原文：落盘前的脱敏是 sink 的职责（`masking_enabled` / `secret_scan_enabled` 开关的语义面），在序列化层改写会静默改变使用方显式配置过的落盘数据。
+
 ### LogLevel
 
 `LogLevel` 枚举实现 `FromStr` 与 `Display`，用于级别解析与比较（非法输入返回 `LogLevelParseError`）。
@@ -887,7 +907,7 @@ impl SecretScanGate {
     pub fn new(registry: SecretPatternRegistry) -> Self;
     pub fn with_entropy(self, scanner: EntropyScanner) -> Self;            // 默认关闭
     pub fn with_match_limit(self, limit: usize) -> Self;                   // 默认 64（单条输入单模式命中上限）
-    pub fn mask(&self, text: &str) -> String;                              // 失败放行：替换 + 计数
+    pub fn mask(&self, text: &str) -> String;                              // fail-closed：替换 + 计数（超限整体遮蔽）
     pub fn mask_checked(&self, text: &str) -> Result<String, InklogError>; // 超限 Err，输出不可用
     pub fn scan(&self, text: &str) -> Vec<SecretMatch>;                    // 纯检测，不计数
     pub fn hit_counts(&self) -> Vec<(String, u64)>;
@@ -903,7 +923,7 @@ impl SecretScanGate {
 pub fn mask_checked(&self, text: &str) -> Result<String, InklogError>
 ```
 
-fail-closed 出口：挂有门时，Ok 路径与 `mask` 共用规则管线（门产物继续过 fast-masking 与规则集，替换语义一致，PII 不漏）；单条输入内任一模式命中数超过门限返回 `Err(InklogError::SecretScanLimit)`，输入超过 1 MiB 掩码上限返回 `Err(InklogError::SecretScanOversizedInput)`（`mask` 对同输入原样放行，两出口在此分叉）。未挂门时退化为 `mask`（永远 `Ok`）。既有 `mask` 签名不变（失败放行，向后兼容）。
+fail-closed 出口：挂有门时，Ok 路径与 `mask` 共用规则管线（门产物继续过 fast-masking 与规则集，替换语义一致，PII 不漏）；单条输入内任一模式命中数超过门限返回 `Err(InklogError::SecretScanLimit)`，输入超过 1 MiB 掩码上限返回 `Err(InklogError::SecretScanOversizedInput)`（`mask` 对同输入整体遮蔽为 `***REDACTED_OVERSIZED***`，两出口在此分叉）。未挂门时退化为 `mask`（永远 `Ok`）。既有 `mask` 签名不变（超限整体遮蔽，向后兼容）。
 
 **示例**
 
@@ -956,7 +976,7 @@ impl<T: LogSink + ?Sized> AsyncSink for T {}
 | `TcpSink` / `UdpSink` | `support::io::sink::net` | `net-sink` | TCP（可 TLS，rustls）+ UDP（NDJSON），断线缓冲与自动重连 |
 | `OtlpSink` | `support::io::sink::otlp` | `otlp` | OTLP/HTTP JSON 日志导出 |
 | `SamplingSink` | `support::io::sink::sampling` | 无 | 采样装饰器（级别阈值 + N 取 1 + 关键词白名单豁免） |
-| `RateLimitedSink` | `support::io::sink::rate_limit` | 无 | 令牌桶限流装饰器 |
+| `RateLimitedSink` | `support::io::sink::rate_limit` | 无（扩展走自有 `SinkRateLimit` 端口） | 限流装饰器（默认突发配额内核 `BurstLimiter`） |
 | `MiddlewareSink` | `support::io::sink::middleware` | 无 | 中间件链装饰器（filter / transform 组合） |
 
 ### 关联类型
@@ -972,7 +992,8 @@ impl<T: LogSink + ?Sized> AsyncSink for T {}
 | `Sampler` | 采样器（`should_emit(&LogRecord) -> bool`） |
 | `SamplingPolicy` | 限流压力下的采样策略（per_level 采样率 + per_target_prefix 规则；`should_emit` 返回 `Option<bool>`，`None` = 无规则命中，回退内置兜底） |
 | `SamplingConfig` / `TargetSamplingRule` | 采样策略配置（`InklogConfig.sampling`，加载期校验） |
-| `SinkRateLimit` / `NoOpRateLimit` / `TokenBucketRateLimit` | 限流端口与实现（对象安全，供上层实现注入） |
+| `SinkRateLimit` / `NoOpRateLimit` / `TokenBucketRateLimit` | 限流端口与实现（对象安全，供上层实现注入）；`TokenBucketRateLimit` 内核为仓内 `BurstLimiter`（纯预算，无时钟无补充） |
+| `BurstLimiter` | 突发配额计数器（原子 CAS 递减，初始 `capacity` 枚，归零拒绝） |
 | `MiddlewareChain` / `MiddlewareVerdict` / `RecordMiddleware` / `EnrichMiddleware` / `LevelFilterMiddleware` | 中间件组合子 |
 
 ## 🧪 依赖注入类型

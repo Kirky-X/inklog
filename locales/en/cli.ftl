@@ -185,8 +185,12 @@ cli-verify-chain-err-manifest-unreadable = Cannot read audit chain manifest
 cli-verify-chain-err-line-invalid = Invalid manifest line
 cli-verify-chain-err-key-missing = Audit key environment variable is not set
 cli-verify-chain-ok = chain intact
-cli-verify-chain-tampered = chain TAMPERED (deletion, reorder or content change detected)
+cli-verify-chain-tampered = chain TAMPERED (deletion, reorder, truncation or content change detected)
+cli-verify-chain-empty = chain manifest is EMPTY (0 entries): integrity cannot be proven (deletion or truncation)
+cli-verify-chain-seal-unreadable = chain seal unreadable ({ $path }): { $err } — integrity cannot be proven
 cli-verify-chain-ok-detail = { $chain }: { $path } ({ $count } entries)
+cli-verify-chain-rotated-during-verify = archive chain was rewritten during verification (manifest and seal re-read and matched) — result below
+cli-verify-chain-generation-mismatch = chain seal does not match manifest (seal covers { $seal_count } entries, manifest has { $count } entries): manifest and seal are out of sync (rotation interrupted or entries removed) — integrity cannot be proven
 
 # CLI generate schema errors
 

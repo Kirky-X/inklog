@@ -71,9 +71,9 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 | **HTTP 端点** | Axum 健康检查与 Prometheus 指标端点 |
 | **网络转发** | TCP（可 TLS）+ UDP Sink，断线缓冲与自动重连 |
 | **OTLP 导出** | OTLP/HTTP JSON 日志导出 |
-| **CLI 工具** | `inklog-cli`：decrypt / generate / validate / query / verify-chain（审计链校验，`--manifest` + `--key-env`） |
+| **CLI 工具** | `inklog-cli`：decrypt / generate / validate / query / verify-chain（审计链校验，`--manifest` + `--key-env`；校验同时要求 manifest 同目录的 `<stem>.chain.seal.json` 封条——封条缺失或与 manifest 不符即判失败，退出码 2；空 manifest 同样判失败（退出码 2），与密钥是否设置无关；封条覆盖的条目数与 manifest 不一致时重读一次再判定——重读后配对一致即提示「校验期间发生轮转」并按实际结果退出，仍不一致则输出与篡改区分开的诊断（manifest 与封条不同代），退出码仍为 2） |
 | **采样与限流** | 采样器（N 取 1）、令牌桶限流、中间件链装饰器、可配采样策略（per_level 采样率 + per_target_prefix 规则）、per-target 分级限流（rate_limit.rules 前缀配额组，最长前缀优先） |
-| **归档防篡改** | HMAC-SHA256 归档链，防删除、重排与伪造 |
+| **归档防篡改** | HMAC-SHA256 归档链，防删除、重排与伪造；截尾到非空前缀由链外封条（条目总数 + 尾哈希）检出 |
 
 ## 📦 安装
 
@@ -451,7 +451,9 @@ let custom_rule = MaskRule::builder("employee_id")
 
 console / file sink 在 `masking_enabled` 门控下执行的 PII 脱敏，使用的是 `DataMasker::new()` 构造的 **inklog 内置规则集**（21 条正则规则 + 敏感字段名检测，按优先级排序）。这套内置规则与消费方业务代码自管的脱敏规则**不同源**：消费方在自己的出口（如 API 响应、落库字段）做的脱敏，与 inklog sink 出口的内置掩码，二者规则集、掩码形态彼此独立，不要假设两边输出一致。需要 sink 侧复用自管规则时，用注册表构建 `DataMasker` 后经 `with_masker` 注入（见下）。
 
-**标记幂等契约**：脱敏输出会带上 `***REDACTED***`、`***MASKED***`、`[REDACTED]` 等标记；`DataMasker::mask` 对已含这些标记的输入直接原样返回、不再套用规则。因此多层脱敏叠加（例如全局净化器已处理过、sink 出口 PII 掩码再次经过同一条记录）不会产生 `REDACTED` 套 `REDACTED` 的嵌套标记——运维侧可据此假设：日志中每个标记都来自且仅来自一次真实的脱敏动作。
+**标记幂等契约**：脱敏输出会带上 `***REDACTED***`、`***MASKED***`、`[REDACTED]` 等标记。标记保护只作用于**值**一级：值已是标记时不再重复脱敏（多层脱敏叠加，例如全局净化器已处理过、sink 出口 PII 掩码再次经过同一条记录，不会产生 `REDACTED` 套 `REDACTED` 的嵌套标记）。**整条消息**不做标记短路——标记词表可被用户输入伪造，整条消息级短路会让注入一个标记的记录整体免于脱敏（含 secret-scan 门）：同条消息中的裸 secret 与 PII 照常遮蔽。
+
+**不可证安全即遮蔽**：单条消息超过 1 MiB（跳过扫描）或正则引擎报错（如 `fancy-regex` 回溯预算耗尽）时，`DataMasker::mask` 不放行原文，而是以 `***REDACTED_OVERSIZED***` / `***REDACTED_ENGINE_ERROR***` 整体遮蔽并留 warn——不扫描/引擎错误都意味着「内容是否含敏感值」不可判定。需要逐条区分的部署可改用 `DataMasker::mask_checked`（超限/命中数超门限返回 `Err`，由调用方决定丢弃或降级）。
 
 **自定义规则集注入（`with_registry` 对齐）**：`DataMasker::builder().with_registry(registry)` 用注册表中的规则**替换**全部内置规则（`add_rule` / `disable_builtin` 在替换结果上继续叠加）；注册表可用 `MaskRuleRegistry::with_builtins()`（装载内置规则）或 `load_from_toml`（解析 TOML 规则）获得。构建出的 `DataMasker` 经 sink 的 `with_masker` 注入即生效：
 
@@ -474,7 +476,7 @@ let sink = ConsoleSink::new(console_config, template).with_masker(masker);
 | 字段 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
 | `enabled` | `bool` | `false` | 是否启用 HTTP 服务器（需 `http` feature） |
-| `host` | `String` | `"127.0.0.1"` | 监听主机地址 |
+| `host` | `String` | `"127.0.0.1"` | 监听主机地址（IP 字面量：IPv4 明文如 `127.0.0.1`，IPv6 带方括号如 `[::1]`） |
 | `port` | `u16` | `9090` | 监听端口 |
 | `metrics_path` | `String` | `"/metrics"` | Prometheus 指标端点路径 |
 | `health_path` | `String` | `"/health"` | 健康检查端点路径 |
@@ -484,6 +486,10 @@ let sink = ConsoleSink::new(console_config, template).with_masker(masker);
 | `tls` | `Option<TlsConfig>` | `None` | TLS 配置（`cert_path` / `key_path`） |
 
 #### HTTP 服务器示例
+
+> **非回环绑定必须配访问控制**：`http_server` 绑定在非回环地址（`0.0.0.0` / `[::]` / 内网 IP）且既无 `auth` 又无 `ip_whitelist` 时，配置校验直接返回 `Err`——`/metrics` 与 `/health` 不得在无访问控制下暴露给网络。
+
+> **`host` 必须是可绑定的地址字面量**：只接受 IPv4 明文（`127.0.0.1`）与 IPv6 带方括号（`[::1]` / `[::]`）。主机名（`localhost`）与畸形方括号写法（`[::1`、`[[::1]]`）无法构成 socket 地址，配置校验直接返回 `Err`——这类地址运行期必然绑定失败。回环判定与运行期绑定共用同一解析，不会出现「判为回环却绑不上」。白名单条目若为放行全部地址的 CIDR（`0.0.0.0/0`），不构成访问控制。
 
 ```rust
 use inklog::config::{HttpErrorMode, HttpServerConfig};
@@ -497,6 +503,8 @@ let config = InklogConfig {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Strict,
+        // 非回环绑定：必须给出访问控制之一
+        ip_whitelist: Some(vec!["10.0.0.0/8".to_string()]),
         ..Default::default()
     }),
     ..Default::default()
@@ -507,6 +515,21 @@ let _logger = LoggerManager::with_config(config).await?;
 // 健康检查端点: http://0.0.0.0:8080/health
 // 指标端点: http://0.0.0.0:8080/metrics
 ```
+
+`LoggerBuilder` 亦可直接接线访问控制（`http_auth` / `http_ip_whitelist`）：
+
+```rust
+let _logger = LoggerManager::builder()
+    .enable_http_server(true)
+    .http_host("0.0.0.0")
+    .http_port(8080)
+    .http_auth("INKLOG_HTTP_AUTH_TOKEN")   // token 值取自环境变量
+    .http_ip_whitelist(vec!["10.0.0.0/8".to_string()])
+    .build()
+    .await?;
+```
+
+对端地址为回环时（含默认 `127.0.0.1` 绑定，以及通配绑定下从本机发起的请求）服务端校验目标主机必须为回环主机（`localhost` / `127.0.0.1` / `[::1]`）——阻断 DNS rebinding 借本机端口读取端点响应的路径。目标主机取 `Host` 头，缺失时回退 URI authority（HTTP/2 只带 `:authority`），两者并存时必须指向同一主机。
 
 #### 健康检查端点（/health）
 
@@ -568,7 +591,7 @@ inklog_write_latency_us_bucket{le="50"} 950
 | `shrink_wait_seconds` | `u64` | `30` | 缩容前等待时间（秒） |
 | `min_capacity` | `usize` | `1000` | 最小通道容量 |
 | `max_capacity` | `usize` | `50000` | 最大通道容量 |
-| `rate_limit` | `Option<u64>` | `None` | 全局日志速率上限（条/秒） |
+| `rate_limit` | `Option<u64>` | `None` | 全局日志速率上限（条/秒）——默认构建即生效，未启用时限流不生效（启动显性告警） |
 
 #### 性能调优示例
 

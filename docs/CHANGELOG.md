@@ -33,9 +33,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `oxcache-audit` feature：承接 oxcache 审计事件（实现 oxcache `AuditEventPublisher` 端口，事件 → `LogRecord` 写入注入的 `LogSink`），保留 fail-open 计数语义（`dropped_count` / `write_failure_count`）。
+
+### Added
+
+- **feature `oxcache-audit`**：新增 `inklog::integrations::OxcacheAuditPublisher`——oxcache `AuditEventPublisher` 端口的 inklog 实现（原 oxcache 侧 `InklogAuditPublisher` 迁入消费侧）。缓存审计事件经有界通道交由单一 writer task 写入注入的 sink；通道过载 / 无 runtime 上下文计入 `dropped_count()`，sink 写失败计入 `write_failure_count()`（fail-open 观测面，不回压缓存主路径）。级别映射：Set/Delete/Clear → INFO，Hit/Miss/Evict/Expired → DEBUG；消息文案为 inklog 侧字面量 `"cache audit event"`。启用方式：`features = ["oxcache-audit"]`。
+- **限流自持（BREAKING）**：新增仓内令牌桶（`support/processing/token_bucket.rs`，容量 = 速率、每秒补充速率个令牌，语义等价 limiteron `TokenBucketLimiter::new(rate, rate)`），按速率（`RateLimiter`）与按 target 前缀分组（`TargetRateLimiter`）的限流模块**默认构建即生效**。决策点为同步 O(1)，不再经 `futures::executor::block_on` 桥接异步判定（原实现把同步阻塞留在 async 写路径上，每条日志阻塞一次）。sink 级限流扩展统一走自有 `SinkRateLimit` 端口（`RateLimitedSink::new`），不再暴露第三方限流 trait。
+- **突发配额计数器 `BurstLimiter`**（`inklog::BurstLimiter`）：原子 CAS 递减的配额计数器，无时钟、无补充、无速率语义——等价 limiteron `TokenBucketLimiter::new(capacity, 0)`（`refill_rate = 0`）的纯预算行为，供默认限速路径使用。
+
+### Changed
+
+- 限流能力自持：新增仓内令牌桶（`support/processing/token_bucket.rs`，容量 = 速率、每秒补充速率个令牌），订阅者级限流（`performance.rate_limit` / `rate_limit.rules`）在默认构建下即生效，不再随 feature 关闭。决策点为同步 O(1)，不再经 `futures::executor::block_on` 桥接异步判定（原实现把同步阻塞留在 async 写路径上，每条日志阻塞一次）。
+- 移除 `limiteron-rate-limit` feature 与对 limiteron 的依赖：inklog 对 limiteron 依赖归零，公开 API 不含任何第三方限流 trait；sink 级限流扩展统一走 inklog 自有的 `SinkRateLimit` 端口。
+
+### Changed
+
+- `LimiteronRateLimit` 与 `RateLimitedSink::with_limiter` 转为内部实现并移除：其参数为第三方 trait，留在公开 API 会让下游在 path 依赖开发模式下遭遇 trait 身份分裂（同一 crate 两个实例）。外部扩展请实现 inklog 自有的 `SinkRateLimit` 端口（`RateLimitedSink::new` 注入）。
+- 移除 `limiteron-rate-limit` feature：限流能力不再有「未编译即静默失效」的路径，原先依赖该 feature 的告警随之删除（该告警本身用 `tracing::warn!`，而此刻全局 subscriber 尚未安装，事件必被丢弃）。
+- 移除对 limiteron 的 `retry` / `sync` / `test-clock` feature 引用（inklog 只用其限流器类型；retry 公式已自持，另两者为空特性）。
+- 跨仓自研依赖改为 `path` + `version` 双重声明：本地恒走工作树，发布时仍按 version 解析 registry。
+### Changed
+
+- **依赖（BREAKING）**：`limiteron` 依赖**完全移除**（`cargo tree -p inklog -e normal` 中 limiteron 消失，inklog 依赖树归零于外部限流库）。迁移要点：
+  - 默认限速路径的语义**不变**——sink 级突发配额限速由仓内 `BurstLimiter` 承担，初始放行 `capacity` 次、其后拒绝、无时间补充；
+  - 按速率 / 按 target 分组限流（`RateLimiter` / `TargetRateLimiter` / `GlobalRateLimitMiddleware` / `TargetQuotaMiddleware` / `LoggerSubscriber::with_rate_limiter` / `with_target_rate_limiter`）**默认构建即生效**（内核为仓内令牌桶）——原先随 `limiteron-rate-limit` feature 提供的 limiteron 原生限流器注入路径（`RateLimitedSink::with_limiter`）已移除，改为实现自有 `SinkRateLimit` 端口注入——需要限流的用户请显式启用该 feature；未启用时若配置了 `performance.rate_limit` 或 `rate_limit.rules`，启动会打印显性告警（不静默忽略）；
+  - sink worker 池的重试次数与退避数值改为 inklog 侧常量（数值与语义不变：`max_retries = 2`、退避 1s/2s/4s/8s/16s、封顶 30s）。
+- **依赖地板**：`dbnexus` 由精确钉 `=0.6.0-rc.10` 放宽为 caret `0.6.0-rc.10`——精确钉是底层推进迫使顶层重发、以及下游双版本同图的唯一来源；地板仍是「已承诺兼容的最低版本」承诺面，允许滞后于实际可用版本。
+- **跨仓地板基线**：7 仓（trait-kit / confers / dbnexus / inklog / oxcache / limiteron / sdforge）跨仓自研依赖声明共 26 条，机器扫描断言「版本串不得以 `=` 开头（精确钉）」且「地板必须带预发布前缀（`-rc` / `-alpha` / `-beta` / `-pre`）」——当前基线 **0 处违规**（同仓 path 依赖内联钉豁免）。本次仅固化断言与基线记录，未改动任何依赖声明。
+
 ### Removed
 
 - **安全文档**：移除 `docs/SECURITY.md` 的「安全赏金计划」章节（含奖励金额表与排除范围清单）——当前不再设任何安全赏金计划。
+
+### Security
+
+- **错误文本出口全部脱敏**：`InklogError` 的 `Display`（`to_string()` / `format!("{err}")`）与 `Debug`（`{:?}`）此前原样内插细节，路径、DSN、SQL 片段与凭据会随 `?` 传播外带；`localized_message()` 同样未脱敏。现四个出口（`Display` / `Debug` / `localized_message()` / `safe_message()`）共用同一套脱敏规则，`Debug` 为手工实现（变体名保留，细节脱敏，`source` 只报存在性）。
+- **连接池 DSN 不再进错误消息**：`driver_from_config` 判定驱动失败时回显的连接池 URL 改为遮蔽口令后的形态（`postgres://user:***@host/db`）。
+- **归档链截尾可检出**：`verify_entries` 只做链内自洽校验，manifest 被截尾到非空前缀时仍自洽（判为完整、CLI 退出码 0）。新增链外锚点——`<stem>.chain.seal.json` 封条（条目总数 + 尾哈希 + 封条 HMAC，以链密钥签发、不可伪造），随 manifest 单独落盘；`inklog-cli verify-chain` 追加封条比对，**封条缺失或与 manifest 不符即判失败**（退出码 2）。
+- **HTTP 暴露面守卫覆盖库入口**：`validate_http_exposure()` 此前只在 `InklogConfig::validate()` 与 `load_with_env_overrides()` 内生效，`LoggerManager::with_config` / `LoggerBuilder::build` 这类推荐入口不经 `validate()` 即可构建出「非回环绑定 + 无鉴权/白名单」的监控端点。守卫现落在所有构建入口的公共路径上（`build_detached_full`），配置期即拒绝。
+- **出站 TLS 证书校验降级受编译期门控**：`danger_accept_invalid_certs`（跳过证书链与主机名校验）此前是无门控的公开开关，仅发一条 `tracing::warn!`——而告警在 sink 构造期发出，此刻全局 subscriber 尚未安装，事件必被丢弃。现新增 `insecure-tls` feature：仅调试构建（`debug_assertions`）或显式启用该 feature 时可用，发布构建无授权即构造失败（fail-closed）；放行时的告警改走标准错误，保证送达。
+- **`LogRecord` 调试视图脱敏**：`Debug` 此前原样打印 message、全部字段值与来源路径。现手工实现：message 过 sanitizer（消息级敏感值）再过掩码器（PII 与敏感键字段值），来源路径同口径脱敏。`Serialize` 保持原文——落盘前的脱敏是 sink 的职责（`masking_enabled` / `secret_scan_enabled` 开关的语义面），在序列化层改写会静默改变使用方显式配置过的落盘数据。
+- **脱敏标记判定收窄**：`value_is_redaction_marker` 此前允许标记后缀为任意大写字母（`***REDACTEDSECRET` 这类「标记 + 真实值」拼接被判为已脱敏而原样保留）。判定改为对 crate 实际产出的标记形态**整值精确匹配**；secret-scan 内建模式的替换串由单测兜底防词表漂移。
+- **`LogSanitizer` 捕获组展开回归修复**：自定义敏感模式的替换串改用闭包替换时丢失了 `$1` / `${name}` 展开（`$1` 原样输出）。恢复为 `Captures::expand`，与 regex `&str` 替换器同语义。
+- **驱动判定收敛为单一来源**：`DbNexusAdapter` 此前有两套语义不同的检测器——`with_full_config` / `ensure_table_exists` 走 `detect_driver_from_url`（大小写敏感，未知 scheme **回退 PostgreSQL**），`from_pool` / `from_connection_pool` 走 `driver_from_pool_url`（大小写敏感，判定失败即中止）。后果：`MYSQL://…` 这类 dbnexus 认可的有效 DSN 在主构造路径被判成 PostgreSQL（建表用 PG 方言、转义用 PG 语义——MySQL 后端下 `\'` 可闭合字符串字面量），`SQLite://…` / `DUCKDB://…` 同理。现四个构造器统一取自 dbnexus 的 `DbConfig::database_type()`（与 dbnexus 建池选后端同源，scheme 大小写不敏感），建表方言与写入转义同源于该驱动；未知 scheme 或不受支持的后端（Ladybug/Neo4j）构造直接失败，不再回退。
+- **env 覆盖不再吞掉 DSN 口令**：`load_with_env_overrides()` 的 env 覆盖走「序列化→打补丁→反序列化」往返，而 `DatabaseSinkConfig` 的 `Serialize` 视图把口令遮蔽为 `***`——往返后配置文件里的口令变成占位符，连接必然认证失败。该路径现保留原 DSN（`INKLOG_DATABASE_SINK_URL` 提供的 DSN 仍按 env 原值生效）。
+- **DSN 脱敏覆盖 query/keyword 形态**：口令此前只在 userinfo 形态被遮蔽；`?password=…`（sqlx 按 URL 解析 query 参数，该形态有效）与 keyword/value 形态（`host=… password=…`）的口令原样进入 `Debug` / `Serialize` 输出。现按凭据字段名（password/pwd/pass/token/secret/api_key/apikey/auth/key/sig/signature，大小写不敏感）遮蔽 query、fragment 与 keyword/value 形态的取值；authority 边界同时识别 `?` 与 `#`（此前只识别 `/`，query 里的 `@` 会把 host 一起吞掉）；口令含未编码 `/` 或形态不可判定时整体遮蔽，不回显疑似口令原文。
+- **脱敏视图不可用于认证**：口令位是占位符（`***`）的 DSN 认证必然失败。`DatabaseSinkConfig::validate()` 与配置加载校验现显式拒绝该形态，`INKLOG_DATABASE_SINK_URL` 传入占位符口令时按非法值忽略并告警。
+
+### Added
+
+- **feature `insecure-tls`**：允许在发布构建中使用 `danger_accept_invalid_certs`（跳过 TLS 证书校验）。默认关闭——跳过证书校验后链路只加密不认证，中间人可完整读取并篡改外发日志，客户端侧无任何报错或指标信号。调试构建（`debug_assertions`）无需本特性即可使用该开关。
+- **`DatabaseSinkConfig::to_lossless_json()` / `to_lossless_toml()`**：`Serialize` 输出的是脱敏视图（DSN 口令遮蔽为 `***`），序列化→反序列化往返会丢口令。两个新方法输出**不脱敏**的完整配置，供需要保真往返的场景（备份、迁移、跨环境搬运）使用——导出结果含原始口令，须按凭据同等对待。
+
+### Fixed
+
+- **HTTP 绑定地址判定与运行期绑定同源**：`HttpServerConfig::is_loopback_host()` 与 HTTP 服务器的实际绑定此前各按一套规则解析 `host`——判定侧接受主机名（`localhost`）与过度剥离的方括号（`[[::1]]`、`[::1`），运行期只接受 socket 地址字面量。结果是守卫放行一个起不来的端点（如 `host = "localhost"` 判为回环，运行期 `localhost:9090` 解析失败），也判错非回环绑定的暴露面。现抽出共享的地址解析（`config::http::bind_socket_addr`），判定侧与运行期绑定共用：只接受 IPv4 明文（`127.0.0.1`）与 IPv6 带方括号（`[::1]` / `[::]`）的 IP 字面量，主机名与畸形方括号写法判为不可绑定。配置校验新增可绑定性检查，`host` 不可绑定时在配置期即报错（此前要等启动失败才暴露）。
+- **放行全部地址的白名单不再算访问控制**：`ip_whitelist` 含前缀长度为 0 的 CIDR（`0.0.0.0/0`）时，该条目对所有来源放行，与不加白名单无异——此前被计入访问控制，暴露面守卫因此放行实际裸露的端点。现此类白名单不构成访问控制。
 
 ## [0.3.0-rc.11] - 2026-10-20
 

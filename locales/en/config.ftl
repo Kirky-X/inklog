@@ -23,6 +23,7 @@ config-env_unsafe_http_path = HTTP path '{ $path }' (env: { $env_var }) is not a
 config-invalid_stderr_level = Invalid stderr_levels entry '{ $level }'. Valid levels: { $valid }
 config-env_invalid_format = INKLOG_GLOBAL_FORMAT is empty, ignoring
 config-env_invalid_db_url = INKLOG_DATABASE_SINK_URL contains unsafe characters, ignoring
+config-env_redacted_db_url = INKLOG_DATABASE_SINK_URL contains a redacted password placeholder, ignoring
 config-env_blank_value_ignored = Environment variable '{ $var }' is blank, ignoring
 config-env_invalid_static_field = INKLOG_GLOBAL_STATIC_FIELDS segment '{ $segment }' is not a valid key=value pair (full raw value: '{ $raw }'), ignoring
 config-env_control_char_ignored = Environment variable '{ $var }' contains control characters, ignoring
@@ -55,6 +56,7 @@ config-masking_missing_pattern = masking_rules entry '{ $name }' missing 'patter
 config-http_auth_token_empty = HTTP auth enabled but token env var '{ $env }' is empty
 config-http_auth_token_not_set = HTTP auth enabled but token env var '{ $env }' is not set
 config-invalid_http_address = Invalid HTTP server address: '{ $addr }': { $err }
+config-http_invalid_bind_host = HTTP server host '{ $host }' is not a bindable address literal: use an IP literal such as '127.0.0.1' or '[::1]'
 
 # Encryption config errors
 config-encryption_key_not_set = Encryption key environment variable '{ $env }' not set
@@ -169,6 +171,8 @@ log-config_validation_failed = Configuration validation failed: { $err }
 log-console_secret_scan_feature_missing = console_sink.secret_scan_enabled=true requires the `secret-scan` feature; the flag is ignored in this build
 log-database_secret_scan_feature_missing = database_sink.secret_scan_enabled=true requires the `secret-scan` feature; the flag is ignored in this build
 log-console_stderr_levels_entries_removed = Removed invalid stderr_levels entries
+config-http_exposed_without_auth = http_server is bound to a non-loopback address ({ $host }:{ $port }) without authentication or IP whitelist; configure http_server.auth or http_server.ip_whitelist
+config-http_invalid_host = Host header is not a loopback host
 config-tls_cert_path_empty = tls.cert_path is empty
 config-tls_key_path_empty = tls.key_path is empty
 config-tls_cert_path_missing = tls.cert_path "{ $path }" does not exist

@@ -197,8 +197,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage port adapter; audit events persisted through the inklog DB sink, combinable with any backend |
 | `config-confers` | ❌ | Configuration loaded via confers + watch hot-reload of level and rotation parameters; confers 0.6.0-rc.6 is a non-optional core dependency (the `INKLOG_*` env override mapping goes through the confers source chain), this feature additionally enables confers' `toml`/`watch` features (kept for compatibility) |
 | `confers-audit` | ❌ | inklog implementation of the confers `AuditSink` port; configuration audit events are written into the inklog structured sink; confers is a non-optional core dependency, this feature additionally enables confers' `audit` feature |
+| `oxcache-audit` | ❌ | inklog implementation of the oxcache `AuditEventPublisher` port (`OxcacheAuditPublisher`): cache audit events are handed to a single writer task over a bounded channel and written into the injected sink |
+| Rate limiting | ✅ | Native limiteron limiters: the `RateLimitedSink::with_limiter(Arc<dyn limiteron::limiters::Limiter>)` injection path plus the rate-based and per-target quota limiting modules (`RateLimiter` / `TargetRateLimiter`). The default build contains **no limiteron**: sink-level burst quota limiting is served by the in-repo `BurstLimiter` (equivalent to the `TokenBucketLimiter::new(capacity, 0)` pure-budget semantics). ⚠️ Without this feature the `performance.rate_limit` and `rate_limit.rules` configuration has no effect (an explicit warning is emitted at startup) |
 | `kms` | ❌ | KMS key providers (`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP); confers is a non-optional core dependency, this feature additionally enables confers' `encryption`/`cloud-kms` features |
 | `net-sink` | ❌ | Network forwarding sinks (TCP with optional TLS + UDP, buffered reconnection) |
+| `insecure-tls` | ❌ | Allows disabling TLS certificate verification (`danger_accept_invalid_certs`) in **release builds**; off by default — without certificate verification the link is encrypted but unauthenticated, so a man-in-the-middle can read and tamper with the exported logs. Debug builds (`debug_assertions`) may use the switch without this feature |
 | `otlp` | ❌ | OTLP/HTTP JSON log export MVP (hand-written transport, zero new dependencies) |
 | `otel` | ❌ | Real OpenTelemetry trace context: reads the SpanContext from span extensions (written by the host's tracing-opentelemetry layer); the host otel version must match inklog's (currently opentelemetry 0.33, paired with tracing-opentelemetry 0.34), otherwise it silently falls back to root-span derivation |
 | `metrics-registry` | ❌ | General-purpose business metrics registry (CounterVec / GaugeVec / HistogramVec + Prometheus text export) |
@@ -314,7 +317,7 @@ cargo run --package inklog-examples --bin <name>
 | `object_pool` | Object pool (Layer 0, zero dependencies) | none |
 | `output_format` | Output formats (Layer 0, zero dependencies) | none |
 | `performance` | Performance demo | none |
-| `rate_limiter` | Rate limiter (Layer 0, zero dependencies) | none |
+| `rate_limiter` | Rate limiter (Layer 0, zero dependencies) | default (no feature needed) |
 | `runtime_ops` | LoggerManager runtime operations API | none |
 
 </details>
@@ -550,7 +553,7 @@ inklog builds on these outstanding open-source projects:
 - [Project Fluent](https://projectfluent.org/) and [ICU](https://icu4x.unicode.org/): internationalized message formatting
 - [criterion](https://github.com/bheisler/criterion.rs): statistically rigorous benchmarking
 
-Database, cache, configuration, and lifecycle integrations are provided by the sibling workspace projects dbnexus, oxcache, confers, and trait-kit; rate limiting, retry, and circuit-breaking primitives come from limiteron. Following the "self-developed libraries first" strategy, so that algorithm fixes for worker retries, token buckets, and circuit breakers converge on a single place in the libraries, limiteron 0.3.0-rc.6 (`default-features = false`, `retry` + `sync` features) and confers 0.6.0-rc.6 (`default-features = false`, `toml` + `watch` features) are both **non-optional core dependencies** — sink worker pool retry values, the three token bucket kernels, and the `INKLOG_*` environment override mapping are single-sourced to limiteron and confers respectively.
+Database, cache, configuration, and lifecycle integrations are provided by the sibling workspace projects dbnexus, oxcache, confers, and trait-kit; rate limiting, retry, and circuit-breaking primitives come from limiteron. confers 0.6.0-rc.6 (`default-features = false`, `toml` + `watch` features) stays a **non-optional core dependency** — the `INKLOG_*` environment override mapping is single-sourced to confers. limiteron is no longer a dependency from this release: the limiting kernel is the in-crate token bucket (capacity = rate, refilled at the rate per second, semantically equal to limiteron `TokenBucketLimiter::new(rate, rate)`), sink-level burst quota still uses `BurstLimiter` (pure-budget semantics, no clock, no refill), the sink worker pool retry counts are inklog-side constants, and the rate/target-grouped limit modules work in the default build — inklog depends on no external limiting library.
 
 ---
 

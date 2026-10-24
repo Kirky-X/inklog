@@ -215,7 +215,7 @@ trait 签名逐项见 [📘 API 参考](API_REFERENCE.md)「依赖注入类型�
 | 装饰器 | 类型 | 说明 |
 |--------|------|------|
 | `SamplingSink` + `Sampler` | 采样 | 级别阈值 + N 取 1 + 关键词白名单豁免；`should_emit` 为原子计数 |
-| `RateLimitedSink` + `TokenBucketRateLimit` | 限流 | 对象安全 `SinkRateLimit` 端口 + `NoOpRateLimit` 默认，`try_acquire` 为 CAS 无锁 |
+| `RateLimitedSink` + `TokenBucketRateLimit` | 限流 | 对象安全 `SinkRateLimit` 端口 + `NoOpRateLimit` 默认，`try_acquire` 为 CAS 无锁（内核为仓内 `BurstLimiter`：纯预算，无时钟无补充）；订阅者级限流内核为仓内令牌桶（容量 = 速率、每秒补充速率个令牌），扩展统一走自有 `SinkRateLimit` 端口，inklog 不依赖外部限流库 |
 | `MiddlewareSink` + `MiddlewareChain` | 中间件 | filter（`LevelFilterMiddleware`）/ transform（`RecordMiddleware` / `EnrichMiddleware`）组合 |
 
 ### 动态 Sink 注册（add_sink）

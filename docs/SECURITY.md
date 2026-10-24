@@ -147,15 +147,23 @@ inklog 是安全优先的 Rust 日志基础设施，为需要严格数据保护�
 | 密钥内存清零 | `zeroize` | 密钥离开作用域自动清零 |
 | KMS 密钥提供 | `support::security`（`kms` feature） | `EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP |
 | 数据脱敏 | `support::processing::masking` | 21 条内置正则规则（fancy-regex 环视实现 CJK 友好边界）+ 敏感字段名检测 + 自定义注册表；console/file/database/net/otlp 全部出口默认掩码（`masking_enabled` 门控），递归深度 16 层上限、单条 1 MiB 上限 |
-| Secret 出站脱敏门 | `support::processing::secret_scan`（`secret-scan` feature） | 值形态正则注册表（`sk-` 前缀/PEM 私钥块/AWS AKIA 等九类裸 secret）+ 值熵扫描（Shannon，阈值可配）+ 逐模式计数；`mask_checked` 超限 fail-closed 拒发输出，`mask` 失败放行向后兼容；中文敏感键名组并入键名检测 |
+| Secret 出站脱敏门 | `support::processing::secret_scan`（`secret-scan` feature） | 值形态正则注册表（`sk-` 前缀/PEM 私钥块/AWS AKIA 等九类裸 secret）+ 值熵扫描（Shannon，阈值可配）+ 逐模式计数；`mask_checked` 超限 fail-closed 拒发输出；`mask` 对超大输入（>1 MiB）以整体遮蔽收口，同样 fail-closed（不扫描即不可证安全）；中文敏感键名组并入键名检测 |
 | 路径安全 | `validation::path`（PathValidator） | 路径穿越防护，禁止写入用户主目录与密钥文件 |
 | 内容净化 | `validation::sanitize`（LogSanitizer） | 日志注入与控制字符防护 |
 | SQL 注入防护 | DatabaseSink / `integrations::infra::database` | 表名白名单校验 + 参数化查询 |
-| HTTP 访问控制 | `http` feature | 认证 token 启动期缓存、失败 fail-closed；IP 白名单；TLS |
-| 归档防篡改 | `support::audit_chain`（ArchiveChain） | HMAC-SHA256 归档链（随机链首盐），防删除、重排与伪造；`audit_chain_enabled = true` 后每次轮转自动登记 `{path, sha256, timestamp}` 并写穿 `<stem>.chain.jsonl` manifest，`inklog-cli verify-chain --manifest <file> --key-env INKLOG_AUDIT_KEY` 校验（链完整退出码 0、篡改退出码 2） |
+| HTTP 访问控制 | `http` feature | 认证 token 启动期缓存、失败 fail-closed；IP 白名单；TLS；非回环绑定且无鉴权/白名单时**配置期拒绝**（暴露面守卫覆盖 `InklogConfig::validate` 与库自身的构建入口） |
+| 错误文本出口脱敏 | `error::InklogError` / `validation::sanitize` | `Display` / `Debug` / `localized_message()` / `safe_message()` 全部出口脱敏——路径、DSN、SQL 片段与凭据不随错误文本外带；`LogRecord` 的 `Debug` 视图经脱敏，`Serialize` 保持原文（落盘脱敏是 sink 的职责，由 `masking_enabled` / `secret_scan_enabled` 门控） |
+| 出站 TLS 认证 | `support::io::sink::net` / `otlp`（`net-sink` / `otlp` feature） | `danger_accept_invalid_certs`（跳过证书校验）受**编译期门控**：仅调试构建（`debug_assertions`）或显式启用 `insecure-tls` feature 可用，发布构建无授权即构造失败（fail-closed）；放行时告警走标准错误（sink 构造期全局 subscriber 尚未安装，`tracing::warn!` 必被丢弃） |
+| 归档防篡改 | `support::audit_chain`（ArchiveChain） | HMAC-SHA256 归档链（随机链首盐），防删除、重排与伪造；`audit_chain_enabled = true` 后每次轮转自动登记 `{path, sha256, timestamp}` 并写穿 `<stem>.chain.jsonl` manifest 与 `<stem>.chain.seal.json` 封条（链外锚点：条目总数 + 尾哈希 + 封条 HMAC），`inklog-cli verify-chain --manifest <file> --key-env INKLOG_AUDIT_KEY` 校验（链完整退出码 0、篡改退出码 2；**空 manifest 与封条缺失均判为失败**——链内自洽性校验无法证明「没有条目被删掉」，空链与无锚点一律按 fail-closed 处理；**截尾到非空前缀由封条检出**，链内校验检不出截尾） |
 | 供应链安全 | `deny.toml` / lefthook | `cargo deny check` + `cargo audit` + pre-commit 私钥扫描 |
 
 > 说明：仓库维护 [`deny.toml`](../deny.toml)，CI 的 security job 与 lefthook pre-push 分别运行 `cargo deny check`（漏洞/许可证/重复依赖）与 `cargo audit`（RustSec 公告）。
+
+### 归档审计链的威胁模型边界
+
+- **封条与 manifest 同目录同可写域**：封条路径（`<stem>.chain.seal.json`）由 manifest 路径推导，写入侧与 manifest 分两次落盘（非原子成对发布）。把某一代的 manifest 与当时合法的封条一并回滚，对 `inklog-cli verify-chain` 不可见——**封条只挡单侧截尾，不挡成对回滚**；覆盖成对回滚需把封条放到独立可写域（当前 CLI 无 `--seal` 参数）。
+- **校验期间的轮转**：manifest 与封条是两次独立读取，轮转落在两次读之间即产生条目数错配。CLI 侧重读一次再判定——重读后配对一致即判「校验期间发生轮转」并按重读后的实际结果给退出码；重读后仍不一致则输出与「篡改」区分开的诊断（manifest 与封条不同代），退出码仍为 2（fail-closed，不把写入侧不一致误报为人为篡改）。
+- **崩溃残留**：写入侧在 manifest 与封条之间崩溃会留下错配，直到下一次成功轮转把两者再次写齐为止——期间校验按 fail-closed 处理。
 
 ## 🔐 加密与密钥管理
 
@@ -241,8 +249,8 @@ export INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 - **nonce 唯一性策略**：随机 96-bit/段（CSPRNG），同 key 跨段/跨文件不重复由单测断言；
 - **显性失败**：加密启用而 key 缺失/无效（env 与 key 文件均不可用、格式不符、原始密钥熵不足）时构建期报错，禁止静默明文落盘；
 - **格式自适应**：`replay` 按 magic 识别新旧格式——旧明文 JSONL 可被加密实例重放；不可识别/不可解密（版本或算法不支持、明文实例遇加密文件的配置回滚、错误密钥全军覆没）时文件原样保留并按段计数上报，不做静默清空销毁；
-- **文件权限**：加密 journal 的头创建、段追加与截断重建全部以 unix `0600` 创建（对齐 FileSink 加密产物与 key 文件约束）；
-- **明文模式的威胁模型**：`fallback_journal_encrypt = false`（默认）时兜底 journal 以**明文 JSONL** 落盘——其中集中存放 ERROR/FATAL 级记录，敏感上下文（异常消息、字段透传）可能比主日志更密集；共享主机/备份链路场景下该文件与主日志同等暴露，敏感部署应启用加密或将 `fallback_journal_path` 指向受限目录（目录权限不改变文件本身 0644 语义）；
+- **文件权限**：加密 journal 的头创建、段追加与截断重建全部以 unix `0600` 创建（对齐 FileSink 加密产物与 key 文件约束）；**明文 journal 同权限语义**——明文路径不再按默认 umask 建 0644，落盘后显式收紧既有文件的权限（`mode` 仅在创建时生效）；journal 父目录新建时收敛为 `0700`；
+- **明文模式的威胁模型**：`fallback_journal_encrypt = false`（默认）时兜底 journal 以**明文 JSONL** 落盘——其中集中存放 ERROR/FATAL 级记录，敏感上下文（异常消息、字段透传）可能比主日志更密集；共享主机/备份链路场景下该文件与主日志同等暴露，敏感部署应启用加密或将 `fallback_journal_path` 指向受限目录（文件权限已统一为 0600、目录 0700，目录权限不改变文件本身的暴露面）；
 - **推送端口**：`fallback_journal_push_addr` 可选把 spill 记录同步推送远端（断线缓冲、失败计数不反压落盘）；`TransportSecurity` 预留 TLS 扩展点，当前为明文出站，部署在可信网段或由隧道层提供传输安全。
 
 ### 密钥轮换
@@ -539,7 +547,7 @@ export INKLOG_GLOBAL_MASKING_ENABLED=true
 
 - **值形态注册表** `SecretPatternRegistry`：九类内置形态正则（前缀 + 长度 + 字符集三要素），可注册自定义形态；
 - **值熵扫描** `EntropyScanner`：对 base64 核心字母 token（默认 ≥20 字符）做 Shannon 熵判定（阈值可配，默认 4.5 bits/char；hex 全集熵上限 4.0，哈希/UUID 族不误伤）。与 `encryption::validate_key_entropy` 分域——那边校验加密密钥字节，这边探测日志内容；
-- **逐模式计数 + fail-closed** `SecretScanGate`：每条模式累计命中数可查（`hit_counts`）；`mask_checked` 在单条输入内任一模式命中数超门限时返回 `Err(InklogError::SecretScanLimit)` 拒发输出，`mask` 保持失败放行（向后兼容）。
+- **逐模式计数 + fail-closed** `SecretScanGate`：每条模式累计命中数可查（`hit_counts`）；`mask_checked` 在单条输入内任一模式命中数超门限时返回 `Err(InklogError::SecretScanLimit)` 拒发输出，`mask` 对超限输入整体遮蔽为 `***REDACTED_OVERSIZED***`（向后兼容）。
 
 ```rust
 use inklog::{DataMasker, EntropyScanner, SecretPatternRegistry, SecretScanGate};
@@ -570,9 +578,13 @@ assert_eq!(probe.hit_count("openai_sk"), Some(1));
   `pii_masking_enabled` 叠加生效（PII 关则整体无掩码）；database 侧此前
   无 `with_masker` 注入口、masker 写死无门——本版本补齐（默认行为逐位
   不变）。
-- **sink 默认走 fail-open**：库内全部 sink 出站路径（database/console/file/ring_buffered_file/net/otlp）调用 `DataMasker::mask()`——命中照常替换、超限也放行。`mask_checked()` 的 fail-closed 拒发是**消费方显式选择**的能力（自定义 sink 或自建写出管线调用它），默认不改变任何 sink 行为（向后兼容）。需要 fail-closed 落盘保护的部署须自行在写出点调用 `mask_checked` 并处理 `Err`。
-- **超大输入（> 1 MiB）两出口分叉**：`mask` 原样放行（跳过扫描，留 warn——21 趟线性扫描对超大文本是 CPU 放大器）；`mask_checked` 返回 `Err(InklogError::SecretScanOversizedInput)` 拒绝输出——不扫描即不可证安全，fail-closed 出口不豁免。
-- **脱敏标记不再关闭门的检测面**：门（`SecretScanGate`）不对 `***REDACTED` 等标记做子串短路——标记文本本身不被内置模式命中（幂等自然成立），同条消息中的裸 secret 照常替换与计数，伪造标记无法豁免整条记录。`DataMasker::mask()` 自身的标记幂等短路（更早版本的既有契约，防止 REDACTED 套 REDACTED）保持不变：经 `DataMasker` 出口的记录，含标记的输入仍整条跳过（含门）——依赖门检测标记旁内容的调用方请直接使用 `SecretScanGate::mask`/`mask_checked` 或 `DataMasker::detect`（检测面从不短路）。
+- **sink 出站掩码 fail-closed**：库内全部 sink 出站路径（database/console/file/ring_buffered_file/net/otlp）调用 `DataMasker::mask()`——命中照常替换；**不可证安全的情形不再放行原文**：
+  - 超大输入（> 1 MiB）跳过扫描后以 `***REDACTED_OVERSIZED***` 整体遮蔽（不扫描即不可证安全，原样放行会让其中的凭据/PII 明文落盘）；
+  - 正则引擎错误（`fancy-regex` 回溯预算耗尽等）以 `***REDACTED_ENGINE_ERROR***` 整体遮蔽并 warn 留痕（引擎错误下「该规则是否命中」不可判定）；
+  - 脱敏标记不再让整条消息免于规则：标记保护下沉到**值**一级（值已是 `***REDACTED***`/`***MASKED***`/`[REDACTED]` 时不重复脱敏），消息中并存的裸 secret 与 PII 照常遮蔽——伪造标记无法豁免整条记录。
+  `mask_checked()` 仍提供更严格的 fail-closed 出口（命中数超门限或超限时返回 `Err`，消费方显式选择）。
+- **超大输入（> 1 MiB）两出口分叉**：`mask` 跳过扫描并整体遮蔽（留 warn——21 趟线性扫描对超大文本是 CPU 放大器）；`mask_checked` 返回 `Err(InklogError::SecretScanOversizedInput)` 拒绝输出——不扫描即不可证安全，fail-closed 出口不豁免。
+- **脱敏标记不再关闭检测面**：门（`SecretScanGate`）与 `DataMasker::mask()` 均不对 `***REDACTED` 等标记做**整条消息**级短路——标记文本本身不被内置模式命中（幂等自然成立），同条消息中的裸 secret 照常替换与计数，伪造标记无法豁免整条记录。标记保护只作用于**值**一级（值已是标记时不重复脱敏，防止 REDACTED 套 REDACTED）。依赖门检测标记旁内容的调用方也可直接使用 `SecretScanGate::mask`/`mask_checked` 或 `DataMasker::detect`（检测面从不短路）。
 - **自定义模式的 ReDoS 责任**：门跑在每条出站记录上，底层 `fancy-regex` 为回溯引擎；`SecretPatternRegistry::register` 不做复杂度校验，自定义模式须避免嵌套无界量词与歧义字符集回退（见 `register` 文档）。
 
 ## 🧠 内存安全
@@ -640,7 +652,9 @@ inklog 在文件、数据库和网络层面实施严格的访问控制。
 
 - 表名白名单校验（`validate_table_name`）：仅允许字母、数字、下划线，必须以字母或下划线开头（`^[a-zA-Z_][a-zA-Z0-9_]*$`，无长度上限）；
 - 业务数据一律经参数化查询写入，禁止字符串拼接；
-- DDL（建表/分区）使用校验后的名称构建。
+- DDL（建表/分区）使用校验后的名称构建；
+- **转义语义随实际后端**：`DbNexusAdapter` 的四个构造器（`with_full_config` / `from_pool` / `from_connection_pool`）用同一判据解析驱动——dbnexus 的 `DbConfig::database_type()`（与 dbnexus 建池选后端同源，scheme 大小写不敏感，`MYSQL://` 与 `mysql://` 同义）；URL scheme 无法判定或后端不受支持（Ladybug/Neo4j）时构造直接失败，不猜一个语义。建表方言与写入转义同源于该驱动，不会分叉。MySQL 默认把反斜杠当转义符，仅双写单引号仍可逃逸字符串字面量（反斜杠 + 单引号 → 闭合字面量 + 独立语句），按错误后端语义转义即成注入面；
+- **DSN 凭据不外泄**：`DatabaseSinkConfig` 的 `Debug` 与 `Serialize` 均遮蔽 DSN 中的口令（`postgres://user:***@host/db`）——配置对象整体打印或整体回显（管理接口 JSON）不携带数据库凭据。遮蔽覆盖 userinfo、query/fragment 与 keyword/value 三种形态（凭据字段名 password/pwd/pass/token/secret/api_key/apikey/auth/key/sig/signature，大小写不敏感）；形态不可判定时不回显疑似口令原文。口令位是占位符（`***`）的 DSN 认证必然失败，配置校验显式拒绝该形态。
 
 **连接池管理**：
 
@@ -684,6 +698,9 @@ GRANT CREATE ON logs.* TO 'inklog_writer'@'%';  -- 分区创建
 | **IP 白名单** | `ip_whitelist` 限制访问来源 |
 | **TLS** | `TlsConfig`（cert_path / key_path，rustls）启用 HTTPS |
 | **错误模式** | `Strict` 启动失败即返回错误 / `Warn` 记录警告并继续 |
+| **绑定约束（fail-closed）** | 绑定非回环地址（`0.0.0.0` / `::` / 内网 IP）且既无 `auth` 又无 `ip_whitelist` 时，配置校验返回 `Err`——`/metrics`、`/health` 不得无访问控制暴露 |
+| **Host 校验（DNS rebinding）** | 对端地址为回环时，目标主机必须为回环主机（`localhost` / `127.0.0.1` / `[::1]`），否则 403——阻断恶意站点 rebind 到本机端口后跨源读取端点响应。目标主机取 `Host` 头，缺失时回退 URI authority（HTTP/2 只带 `:authority`），两者并存必须指向同一主机 |
+| **响应面** | `/health` 只回显状态类别：sink 错误原文（含表名/约束名/路径）不进序列化输出，留在进程内与内部日志 |
 
 ## 🌐 网络安全
 

@@ -66,6 +66,7 @@ sink-fsync_failed = fsync after batch write failed: { $err }
 sink-rotate_postprocess_failed = Failed to post-process rotated log: { $err }
 sink-rotate_postprocess_panicked = Rotation post-processing thread panicked: { $msg }
 sink-audit_manifest_write_failed = Failed to write audit chain manifest { $path }: { $err }
+sink-audit_seal_write_failed = Failed to write audit chain seal { $path }: { $err }
 sink-plaintext_residue = plaintext residue: remove after encryption failed
 
 # Fallback journal messages
@@ -93,6 +94,7 @@ masking-from-rules-duplicate-names = from_rules: duplicate rule names make detec
 
 # Config validation warnings
 warn-http_feature_not_compiled = http_server.enabled = true but the 'http' feature is not compiled in; the monitoring server will not start
+warn-rate_limit_feature_not_compiled = rate limiting is configured but the 'limiteron-rate-limit' feature is not compiled in; rate limiting will not be applied
 
 # Channel-buffered file sink maintenance (cleanup thread & rotation)
 sink-channel_buffered_cleanup_failed = ChannelBufferedFileSink cleanup failed: { $err }
@@ -199,4 +201,7 @@ log-kit_observer_module_built = inklog build observer: module built successfully
 log-db_batch_insert_succeeded = Database batch insert succeeded
 log-db_batch_insert_succeeded_parameterized = Database batch insert succeeded (parameterized)
 log-custom_sink_write_failed = custom sink '{ $name }' write failed (attempt { $attempt }/{ $max_attempts }): { $err }
+db-driver_undetectable = Cannot determine database driver from connection pool URL '{ $url }'; refusing to guess escape semantics
+sink-tls_insecure_certs_accepted = TLS certificate verification is DISABLED (danger_accept_invalid_certs): the connection is encrypted but unauthenticated — a man-in-the-middle can read and tamper with the exported logs
+sink-tls_insecure_certs_forbidden = TLS certificate verification cannot be disabled in a release build: danger_accept_invalid_certs requires a debug build or the 'insecure-tls' crate feature
 sink-parquet_feature_not_enabled = parquet feature not enabled: rebuild inklog with `parquet` feature to export logs as Parquet

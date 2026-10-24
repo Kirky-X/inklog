@@ -185,8 +185,12 @@ cli-verify-chain-err-manifest-unreadable = 无法读取审计链 manifest
 cli-verify-chain-err-line-invalid = manifest 行格式非法
 cli-verify-chain-err-key-missing = 审计链密钥环境变量未设置
 cli-verify-chain-ok = 链完整
-cli-verify-chain-tampered = 链已被篡改（检测到删除/重排/内容修改）
+cli-verify-chain-tampered = 链已被篡改（检测到删除/重排/截尾/内容修改）
+cli-verify-chain-empty = 链 manifest 为空（0 个条目）：无法证明完整性（归档被删除或截断）
+cli-verify-chain-seal-unreadable = 无法读取链封条（{ $path }）：{ $err }——无法证明完整性
 cli-verify-chain-ok-detail = { $chain }: { $path }（{ $count } 个条目）
+cli-verify-chain-rotated-during-verify = 校验期间归档链被重写（manifest 与封条重读后配对一致）——以下为重读后的结果
+cli-verify-chain-generation-mismatch = 链封条与 manifest 不匹配（封条覆盖 { $seal_count } 个条目，manifest 实际 { $count } 个）：两者不同步（轮转中断或条目被删除）——无法证明完整性
 
 # CLI generate schema 错误
 

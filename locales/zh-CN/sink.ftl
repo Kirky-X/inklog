@@ -66,6 +66,7 @@ sink-fsync_failed = 批量写入后 fsync 失败: { $err }
 sink-rotate_postprocess_failed = 轮转日志后处理失败: { $err }
 sink-rotate_postprocess_panicked = 轮转后处理线程异常: { $msg }
 sink-audit_manifest_write_failed = 写入审计链 manifest { $path } 失败: { $err }
+sink-audit_seal_write_failed = 写入审计链封条 { $path } 失败: { $err }
 sink-plaintext_residue = 存在明文残留：加密后删除失败
 
 # fallback journal 消息
@@ -93,6 +94,7 @@ masking-from-rules-duplicate-names = from_rules: 规则名重复会使 detect �
 
 # 配置验证警告
 warn-http_feature_not_compiled = http_server.enabled = true 但未编译 'http' feature；监控服务器不会启动
+warn-rate_limit_feature_not_compiled = 已配置限流但未编译 'limiteron-rate-limit' feature；限流不会生效
 
 # Channel-buffered 文件 Sink 维护（清理线程与轮转）
 sink-channel_buffered_cleanup_failed = ChannelBufferedFileSink 清理失败: { $err }
@@ -199,4 +201,7 @@ log-kit_observer_module_built = inklog 构建观察者：模块构建成功
 log-db_batch_insert_succeeded = 数据库批量插入成功
 log-db_batch_insert_succeeded_parameterized = 数据库批量插入成功（参数化）
 log-custom_sink_write_failed = 自定义 sink '{ $name }' 写入失败（第 { $attempt }/{ $max_attempts } 次尝试）：{ $err }
+db-driver_undetectable = 无法从连接池 URL '{ $url }' 判定数据库驱动；拒绝猜测转义语义
+sink-tls_insecure_certs_accepted = 已禁用 TLS 证书校验（danger_accept_invalid_certs）：连接仅加密不认证，中间人可读取并篡改外发日志
+sink-tls_insecure_certs_forbidden = 发布构建不允许禁用 TLS 证书校验：danger_accept_invalid_certs 需要调试构建或显式启用 crate 特性 'insecure-tls'
 sink-parquet_feature_not_enabled = 未启用 parquet 特性：请以 `parquet` 特性重新构建 inklog 以将日志导出为 Parquet
