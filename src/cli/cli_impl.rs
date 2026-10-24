@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 use anyhow::{Context as _, Result};
 use clap::Parser;
+use inklog::support::audit_chain::{ArchiveChain, ArchiveChainEntry, ArchiveChainSeal};
 use std::path::PathBuf;
 
 use super::query::QueryArgs;
@@ -261,12 +262,182 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
 
 // 全子命令 --json + 稳定退出码（0/1/2）契约单测
 
+/// `verify-chain` 校验结论。
+///
+/// 退出码只有 0（链完整）与 2（其余）两档，但运维必须区分「被人为篡改」
+/// 与「封条缺失 / manifest 为空 / manifest 与封条不同代 / 校验期间发生
+/// 轮转」——判定进 `ChainVerdict`，输出文案与单测断言共用同一份结论。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ChainVerdict {
+    /// 链完整
+    Intact,
+    /// 链被篡改（删除/重排/内容修改）
+    Tampered,
+    /// manifest 为空（0 条目）——无法证明完整性
+    Empty,
+    /// 封条缺失或不可解析——无法判定完整性
+    SealUnreadable { err: String },
+    /// manifest 与封条覆盖的条目数不一致（重读后仍不一致）
+    GenerationMismatch { seal_count: u64 },
+}
+
+impl ChainVerdict {
+    /// 退出码：`0` = 链完整，`2` = 其余（无法证明完整性）。
+    fn exit_code(&self) -> i32 {
+        match self {
+            ChainVerdict::Intact => 0,
+            _ => 2,
+        }
+    }
+}
+
+/// 校验结论 + 判定依据。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChainVerification {
+    verdict: ChainVerdict,
+    /// 参与判定的 manifest 条目数
+    entry_count: usize,
+    /// 首次读取的 manifest 与封条目目数不符、重读后配对一致——校验期间发生轮转
+    rotated: bool,
+}
+
+/// 一代 manifest + 封条的读取结果。
+///
+/// manifest 与封条是两次独立读取，而写入侧两文件分两次落盘（非原子成对
+/// 发布），轮转可能落在两次读之间——快照承载「某次读取看到的一代」。
+#[derive(Debug, Clone)]
+struct ChainSnapshot {
+    /// manifest 条目
+    entries: Vec<ArchiveChainEntry>,
+    /// 封条；`Err` 为读取或解析失败原因
+    seal: Result<ArchiveChainSeal, String>,
+}
+
 /// `verify-chain`：重算 HMAC 链并核对 manifest 完整性。
 ///
 /// 退出码契约：`0` = 链完整，`1` = 错误，`2` = 篡改/校验失败。
 fn verify_chain_manifest(manifest: &std::path::Path, key_env: &str) -> Result<i32> {
-    use inklog::support::audit_chain::ArchiveChainEntry;
+    let outcome = verify_chain(manifest, || {
+        std::env::var(key_env)
+            .with_context(|| inklog::i18n::tr("cli-verify-chain-err-key-missing"))
+            .map(String::into_bytes)
+    })?;
+    print_verdict(manifest, &outcome);
+    Ok(outcome.verdict.exit_code())
+}
 
+/// 校验主体：密钥惰性求值。
+///
+/// 空 manifest 的判据与密钥无关——先判空再取密钥：缺 key 且 manifest 为空
+/// 时也稳定给退出码 2 与「空 manifest」诊断（诊断优先级：空链先于密钥缺失）。
+fn verify_chain(
+    manifest: &std::path::Path,
+    key: impl FnOnce() -> Result<Vec<u8>>,
+) -> Result<ChainVerification> {
+    let snapshot = read_chain_snapshot(manifest)?;
+    if snapshot.entries.is_empty() {
+        return Ok(ChainVerification {
+            verdict: ChainVerdict::Empty,
+            entry_count: 0,
+            rotated: false,
+        });
+    }
+    let key = key()?;
+    verify_chain_pair(&key, snapshot, || read_chain_snapshot(manifest))
+}
+
+/// 密钥显式传入的校验入口：不经环境变量取密钥——测试直接传字面量密钥，
+/// 进程内不再改环境变量（edition 2024 下 POSIX `setenv` 非线程安全，与其他
+/// 线程的 `getenv` 并发即未定义行为）。
+#[cfg(test)]
+fn verify_chain_with_key(manifest: &std::path::Path, key: &[u8]) -> Result<ChainVerification> {
+    verify_chain(manifest, || Ok(key.to_vec()))
+}
+
+/// 判定 manifest 与封条是否一致（`entries` 非空，空判在 [`verify_chain`] 完成）。
+///
+/// 条目数不符时用 `reread` 重读一次再判定：写入侧 manifest 与封条分两次
+/// 落盘，轮转落在两次读之间即读到「manifest=N 而 seal=N+1」这类错配，
+/// 不重读就判篡改会把写入侧的不一致误报为人为篡改。
+fn verify_chain_pair(
+    key: &[u8],
+    first: ChainSnapshot,
+    reread: impl FnOnce() -> Result<ChainSnapshot>,
+) -> Result<ChainVerification> {
+    let ChainSnapshot { entries, seal } = first;
+    let seal = match seal {
+        Ok(seal) => seal,
+        Err(err) => {
+            return Ok(ChainVerification {
+                verdict: ChainVerdict::SealUnreadable { err },
+                entry_count: entries.len(),
+                rotated: false,
+            });
+        }
+    };
+    if seal.count == entries.len() as u64 {
+        return Ok(ChainVerification {
+            verdict: chain_verdict(&entries, &seal, key),
+            entry_count: entries.len(),
+            rotated: false,
+        });
+    }
+
+    // 条目数不符：重读一次（轮转可能落在两次读之间）
+    let ChainSnapshot { entries, seal } = reread()?;
+    let seal = match seal {
+        Ok(seal) => seal,
+        Err(err) => {
+            return Ok(ChainVerification {
+                verdict: ChainVerdict::SealUnreadable { err },
+                entry_count: entries.len(),
+                rotated: false,
+            });
+        }
+    };
+    if seal.count == entries.len() as u64 {
+        // 重读后配对一致：校验期间发生轮转，按重读后的实际结果判定
+        return Ok(ChainVerification {
+            verdict: chain_verdict(&entries, &seal, key),
+            entry_count: entries.len(),
+            rotated: true,
+        });
+    }
+    // 重读后仍不配对：manifest 与封条不属于同一代——无法证明完整性
+    Ok(ChainVerification {
+        verdict: ChainVerdict::GenerationMismatch {
+            seal_count: seal.count,
+        },
+        entry_count: entries.len(),
+        rotated: false,
+    })
+}
+
+/// 链内自洽 + 封条比对 → 判定。
+fn chain_verdict(
+    entries: &[ArchiveChainEntry],
+    seal: &ArchiveChainSeal,
+    key: &[u8],
+) -> ChainVerdict {
+    let intact =
+        ArchiveChain::verify_entries(entries, key) && ArchiveChain::verify_seal(seal, entries, key);
+    if intact {
+        ChainVerdict::Intact
+    } else {
+        ChainVerdict::Tampered
+    }
+}
+
+/// 读取当前磁盘上的一代 manifest + 封条。
+fn read_chain_snapshot(manifest: &std::path::Path) -> Result<ChainSnapshot> {
+    let entries = read_manifest_entries(manifest)?;
+    let seal_path = inklog::support::audit_chain::seal_path_for_manifest(manifest);
+    let seal = read_seal(&seal_path);
+    Ok(ChainSnapshot { entries, seal })
+}
+
+/// 读取并解析 manifest（JSONL，每行一个链条目）。
+fn read_manifest_entries(manifest: &std::path::Path) -> Result<Vec<ArchiveChainEntry>> {
     let data = std::fs::read_to_string(manifest)
         .with_context(|| inklog::i18n::tr("cli-verify-chain-err-manifest-unreadable"))?;
     let mut entries: Vec<ArchiveChainEntry> = Vec::new();
@@ -283,28 +454,77 @@ fn verify_chain_manifest(manifest: &std::path::Path, key_env: &str) -> Result<i3
         })?;
         entries.push(entry);
     }
-    let key = std::env::var(key_env)
-        .with_context(|| inklog::i18n::tr("cli-verify-chain-err-key-missing"))?;
+    Ok(entries)
+}
 
-    let intact =
-        inklog::support::audit_chain::ArchiveChain::verify_entries(&entries, key.as_bytes());
-    if intact {
-        let mut args = inklog::i18n::MsgArgs::new();
-        args.set("chain", inklog::i18n::tr("cli-verify-chain-ok"));
-        args.set("path", manifest.display().to_string());
-        args.set("count", entries.len());
-        println!(
-            "{}",
-            inklog::i18n::tr_args("cli-verify-chain-ok-detail", args)
-        );
-    } else {
+/// 读取封条（链外锚点）：条目总数 + 尾哈希。manifest 被截尾到非空前缀时
+/// 链内校验仍自洽，只有与封条比对才能判定截断。封条缺失/不可解析即
+/// 无法判定完整性——删掉封条是绕过截尾检测的最短路径，按失败处理。
+///
+/// 威胁模型边界：封条与 manifest 同目录同可写域——把某一代的 manifest 与
+/// 当时合法的封条一并回滚对本校验不可见。封条只挡单侧截尾，不挡成对回滚。
+fn read_seal(seal_path: &std::path::Path) -> Result<ArchiveChainSeal, String> {
+    std::fs::read_to_string(seal_path)
+        .map_err(|e| e.to_string())
+        .and_then(|raw| serde_json::from_str::<ArchiveChainSeal>(&raw).map_err(|e| e.to_string()))
+}
+
+/// 输出校验结论（本地化文案）。
+fn print_verdict(manifest: &std::path::Path, outcome: &ChainVerification) {
+    if outcome.rotated {
         println!(
             "{}: {}",
-            inklog::i18n::tr("cli-verify-chain-tampered"),
+            inklog::i18n::tr("cli-verify-chain-rotated-during-verify"),
             manifest.display()
         );
     }
-    Ok(if intact { 0 } else { 2 })
+    match &outcome.verdict {
+        ChainVerdict::Intact => {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("chain", inklog::i18n::tr("cli-verify-chain-ok"));
+            args.set("path", manifest.display().to_string());
+            args.set("count", outcome.entry_count);
+            println!(
+                "{}",
+                inklog::i18n::tr_args("cli-verify-chain-ok-detail", args)
+            );
+        }
+        ChainVerdict::Tampered => {
+            println!(
+                "{}: {}",
+                inklog::i18n::tr("cli-verify-chain-tampered"),
+                manifest.display()
+            );
+        }
+        ChainVerdict::Empty => {
+            println!(
+                "{}: {}",
+                inklog::i18n::tr("cli-verify-chain-empty"),
+                manifest.display()
+            );
+        }
+        ChainVerdict::SealUnreadable { err } => {
+            let seal_path = inklog::support::audit_chain::seal_path_for_manifest(manifest);
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("path", seal_path.display().to_string());
+            args.set("err", err);
+            println!(
+                "{}: {}",
+                inklog::i18n::tr_args("cli-verify-chain-seal-unreadable", args),
+                manifest.display()
+            );
+        }
+        ChainVerdict::GenerationMismatch { seal_count } => {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("seal_count", seal_count);
+            args.set("count", outcome.entry_count);
+            println!(
+                "{}: {}",
+                inklog::i18n::tr_args("cli-verify-chain-generation-mismatch", args),
+                manifest.display()
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -457,18 +677,33 @@ mod exit_code_tests {
 #[cfg(all(test, feature = "cli"))]
 mod verify_chain_tests {
     use super::*;
+    use inklog::support::audit_chain::ArchiveChain;
+
+    /// 落盘 manifest（JSONL，每行一个条目）。
+    fn write_manifest(entries: &[ArchiveChainEntry], path: &std::path::Path) {
+        let body: String = entries
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(path, body).unwrap();
+    }
+
+    /// 落盘封条（链外锚点）：与 manifest 成对存放。
+    fn write_seal(seal: &ArchiveChainSeal, manifest: &std::path::Path) {
+        let seal_path = inklog::support::audit_chain::seal_path_for_manifest(manifest);
+        std::fs::write(&seal_path, serde_json::to_string(seal).unwrap()).unwrap();
+    }
 
     /// ok 路径：真实轮转产物 manifest → 退出码 0；篡改后 → 退出码 2。
     #[test]
     fn test_verify_chain_ok_and_tampered_paths() {
-        use inklog::support::audit_chain::ArchiveChain;
-
         let dir = tempfile::TempDir::new().unwrap();
         let manifest = dir.path().join("chained.chain.jsonl");
+        let key = b"verify-chain-ok-test-key";
 
         // 用与 FileSink 审计链一致的语义构造真实链
-        let key = "verify-chain-ok-test-key";
-        let mut chain = ArchiveChain::new(key.as_bytes());
+        let mut chain = ArchiveChain::new(key);
         let entry_json = |p: &str| {
             serde_json::json!({
                 "path": p,
@@ -477,30 +712,189 @@ mod verify_chain_tests {
             })
             .to_string()
         };
-        let mut body = String::new();
         for p in ["chained_20260923_000001.log", "chained_20260923_000002.log"] {
             chain.append(&entry_json(p));
         }
-        for e in chain.entries() {
-            body.push_str(&serde_json::to_string(e).unwrap());
-            body.push('\n');
-        }
-        std::fs::write(&manifest, &body).unwrap();
+        write_manifest(chain.entries(), &manifest);
+        write_seal(&chain.seal().expect("seal"), &manifest);
 
-        unsafe {
-            std::env::set_var("INKLOG_TEST_VERIFY_KEY", key);
-        }
-        let code = verify_chain_manifest(&manifest, "INKLOG_TEST_VERIFY_KEY").unwrap();
-        assert_eq!(code, 0, "intact manifest must verify with exit code 0");
+        let outcome = verify_chain_with_key(&manifest, key).unwrap();
+        assert_eq!(
+            outcome.verdict,
+            ChainVerdict::Intact,
+            "intact manifest must verify"
+        );
+        assert_eq!(
+            outcome.verdict.exit_code(),
+            0,
+            "intact manifest must exit 0"
+        );
 
-        // 篡改：改 sha256 键名破坏 HMAC
-        let tampered = body.replace("sha256", "sha256x");
+        // 篡改：改事件内容破坏 HMAC
         let tampered_path = dir.path().join("tampered.chain.jsonl");
-        std::fs::write(&tampered_path, tampered).unwrap();
-        let code = verify_chain_manifest(&tampered_path, "INKLOG_TEST_VERIFY_KEY").unwrap();
-        assert_eq!(code, 2, "tampered manifest must yield exit code 2");
-        unsafe {
-            std::env::remove_var("INKLOG_TEST_VERIFY_KEY");
+        let mut tampered_entries = chain.entries().to_vec();
+        tampered_entries[0].event = tampered_entries[0].event.replace("sha256", "sha256x");
+        write_manifest(&tampered_entries, &tampered_path);
+        write_seal(&chain.seal().expect("seal"), &tampered_path);
+
+        let outcome = verify_chain_with_key(&tampered_path, key).unwrap();
+        assert_eq!(
+            outcome.verdict,
+            ChainVerdict::Tampered,
+            "tampered manifest must be detected"
+        );
+        assert_eq!(
+            outcome.verdict.exit_code(),
+            2,
+            "tampered manifest must exit 2"
+        );
+    }
+
+    /// 截尾到非空前缀：链内自洽，链外锚点（封条）必须判失败。
+    #[test]
+    fn test_verify_chain_detects_truncation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let manifest = dir.path().join("truncated.chain.jsonl");
+        let key = b"verify-chain-truncation-test-key";
+
+        let mut chain = ArchiveChain::new(key);
+        for i in 0..3 {
+            chain.append(&format!("{{\"n\":{i}}}"));
         }
+        let seal = chain.seal().expect("seal");
+        // 只落盘前两条（截尾），封条仍是完整链的封条
+        write_manifest(&chain.entries()[..2], &manifest);
+        write_seal(&seal, &manifest);
+
+        let outcome = verify_chain_with_key(&manifest, key).unwrap();
+        // 封条覆盖 3 条、manifest 只有 2 条：重读后仍不配对 → 无法证明完整性
+        assert_eq!(
+            outcome.verdict,
+            ChainVerdict::GenerationMismatch { seal_count: 3 },
+            "truncated manifest must not be reported as an intact chain"
+        );
+        assert_eq!(
+            outcome.verdict.exit_code(),
+            2,
+            "truncated manifest must yield exit code 2"
+        );
+    }
+
+    /// 封条缺失：无法判定完整性——按失败处理（fail-closed）。
+    #[test]
+    fn test_verify_chain_fails_without_seal() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let manifest = dir.path().join("noseal.chain.jsonl");
+        let key = b"verify-chain-noseal-test-key";
+
+        let mut chain = ArchiveChain::new(key);
+        chain.append("{\"n\":0}");
+        write_manifest(chain.entries(), &manifest);
+        // 封条不存在
+
+        let outcome = verify_chain_with_key(&manifest, key).unwrap();
+        assert!(
+            matches!(outcome.verdict, ChainVerdict::SealUnreadable { .. }),
+            "missing seal must be reported as unreadable"
+        );
+        assert_eq!(
+            outcome.verdict.exit_code(),
+            2,
+            "missing seal must yield exit code 2"
+        );
+    }
+
+    /// 校验期间发生轮转：manifest 与封条是两次独立读取，写入侧两文件非原子
+    /// 成对发布，轮转落在两次读之间即读到「manifest=N 而 seal=N+1」的错配
+    /// ——必须重读再判定，不得误报篡改。
+    #[test]
+    fn test_verify_chain_rotation_during_verify_is_not_tampering() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let manifest = dir.path().join("rotating.chain.jsonl");
+        let key = b"verify-chain-rotation-test-key";
+
+        let mut chain = ArchiveChain::new(key);
+        for i in 0..3 {
+            chain.append(&format!("{{\"n\":{i}}}"));
+        }
+        let seal = chain.seal().expect("seal");
+        // 磁盘状态：manifest 还是轮转前（2 条），封条已是轮转后（覆盖 3 条）
+        write_manifest(&chain.entries()[..2], &manifest);
+        write_seal(&seal, &manifest);
+
+        // 重读时轮转已完成：manifest 3 条 + 覆盖 3 条的封条 → 配对一致
+        let after_rotation = ChainSnapshot {
+            entries: chain.entries().to_vec(),
+            seal: Ok(seal.clone()),
+        };
+        let first = read_chain_snapshot(&manifest).unwrap();
+        // 只看首次快照就判定：错配会被判成篡改——这正是轮转期间的误报路径
+        assert_eq!(
+            chain_verdict(
+                &first.entries,
+                first.seal.as_ref().expect("seal readable"),
+                key
+            ),
+            ChainVerdict::Tampered,
+            "the mismatched pair alone must be judged as tampering"
+        );
+        // 重读后配对一致 → 判为校验期间发生轮转，按重读后的结果给结论
+        let outcome = verify_chain_pair(key, first, || Ok(after_rotation)).unwrap();
+        assert!(outcome.rotated, "the rotation must be detected");
+        assert_eq!(
+            outcome.verdict,
+            ChainVerdict::Intact,
+            "rotation during verify must not be reported as tampering"
+        );
+        assert_eq!(
+            outcome.verdict.exit_code(),
+            0,
+            "rotation during verify must not fail the verification"
+        );
+    }
+
+    /// 空 manifest（0 条目）：无法证明完整性——按失败处理（fail-closed）。
+    #[test]
+    fn test_verify_chain_empty_manifest_fails_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let manifest = dir.path().join("empty.chain.jsonl");
+        std::fs::write(&manifest, "").unwrap();
+
+        let outcome = verify_chain_with_key(&manifest, b"verify-chain-empty-test-key").unwrap();
+        assert_eq!(
+            outcome.verdict,
+            ChainVerdict::Empty,
+            "empty manifest must be reported as empty"
+        );
+        assert_eq!(
+            outcome.verdict.exit_code(),
+            2,
+            "empty manifest must yield exit code 2"
+        );
+    }
+
+    /// 封条存在但 JSON 非法：与「封条缺失」同属无法判定完整性——退出码 2。
+    #[test]
+    fn test_verify_chain_invalid_seal_json_fails_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let manifest = dir.path().join("badseal.chain.jsonl");
+        let key = b"verify-chain-badseal-test-key";
+
+        let mut chain = ArchiveChain::new(key);
+        chain.append("{\"n\":0}");
+        write_manifest(chain.entries(), &manifest);
+        let seal_path = inklog::support::audit_chain::seal_path_for_manifest(&manifest);
+        std::fs::write(&seal_path, "{ not json").unwrap();
+
+        let outcome = verify_chain_with_key(&manifest, key).unwrap();
+        assert!(
+            matches!(outcome.verdict, ChainVerdict::SealUnreadable { .. }),
+            "unparsable seal must be reported as unreadable"
+        );
+        assert_eq!(
+            outcome.verdict.exit_code(),
+            2,
+            "unparsable seal must yield exit code 2"
+        );
     }
 }

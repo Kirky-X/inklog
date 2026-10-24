@@ -653,6 +653,7 @@ mod tests {
     use base64::{Engine as _, engine::general_purpose};
     use inklog::sink::encryption::derive_key_from_password;
     use rand::RngExt;
+    use serial_test::serial;
     use sha2::Digest as Sha256Digest;
     use sha2::Sha256;
     use std::fs::File;
@@ -843,6 +844,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_base64() {
         let test_key = generate_test_key();
         let key_base64 = general_purpose::STANDARD.encode(test_key);
@@ -875,6 +877,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_raw_32_bytes() {
         let raw_key = [0x42u8; 32];
         // SAFETY: test-only env var mutation under single-threaded test
@@ -887,6 +890,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_decrypt_file_v1_format() {
         let temp_dir = tempfile::tempdir().unwrap();
         let input_file = temp_dir.path().join("test_v1.enc");
@@ -909,6 +913,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_decrypt_file_compatible() {
         let temp_dir = tempfile::tempdir().unwrap();
         let test_key = generate_test_key();
@@ -938,6 +943,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_library_encrypted_file_decryptable_by_cli() {
         // 回归测试：库内 FileSink::encrypt_file 产出的文件必须能被 CLI 解密工具读取
         let temp_dir = tempfile::tempdir().unwrap();
@@ -998,6 +1004,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_password_mode_v2_roundtrip() {
         // Critical 修复补漏 (a)：普通密码 env → encrypt_file(v2) →
         // decrypt_file_compatible 同密码 env → 内容一致。
@@ -1034,6 +1041,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_v1_password_key_returns_clear_error() {
         // v1 头未存盐：密码模式密钥不可恢复，必须返回明确诊断
         // 而非误导性的 "decryption failed"。
@@ -1062,6 +1070,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_v2_wrong_password_fails() {
         // v2 密码模式：密码错误时盐虽可读出，但派生密钥不同 → 解密失败
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1093,6 +1102,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_v2_base64_key_roundtrip_via_cli() {
         // Critical 修复补漏 (b)：Base64 32 字节 env → v2 round-trip
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1176,6 +1186,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_base64_wrong_length() {
         // 覆盖 -277: Base64 解码成功但长度不是 32
         let wrong_key = general_purpose::STANDARD.encode([0u8; 16]);
@@ -1189,6 +1200,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_decrypt_file_error_chain_keeps_key_length_detail() {
         // 目录/批量模式逐文件报错经 format_error_chain 展开因果链后输出：
         // 密钥长度明细不得被外层 context 吞掉（单文件出口同款契约）
@@ -1216,6 +1228,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_password_via_cli() {
         // 覆盖 -288: 通过 get_encryption_key_cli 调用 PBKDF2 派生
         // "my-short-password" 不是 32 字节，也不是有效 Base64（含 '-'），长度 < 128
@@ -1227,6 +1240,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_too_long() {
         // 覆盖 -295: 密钥长度 >= 128 且非有效 Base64
         let long_key = "!".repeat(128);
@@ -1264,6 +1278,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_batch_decrypt_skips_paths_outside_base_dir() {
         // 相对 glob 模式以 CWD 为基准目录：经符号链接目录展开到基外的输入必须被跳过。
         // 该测试会切换进程 CWD，需要独占运行。
@@ -1318,6 +1333,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[serial]
     fn test_directory_decrypt_validates_input_file_against_output_dir() {
         // 目录模式：每个待解密文件须通过相对输出目录的校验，
         // 符号链接输入文件必须被跳过，不影响其余文件解密
