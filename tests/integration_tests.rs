@@ -1212,6 +1212,7 @@ async fn verify_file_sink_compression() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn verify_file_sink_encryption() {
     let temp_dir = VerifyTempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("enc.log");

@@ -117,3 +117,41 @@ fn test_config_env_override_performance() {
     assert_eq!(config.performance.worker_threads, 8);
     assert_eq!(config.performance.channel_capacity, 20000);
 }
+
+/// 配置文件里的 DSN 口令经 env 覆盖路径往返后仍是原文。
+///
+/// env 覆盖内部做「序列化→打补丁→反序列化」往返，而 Serialize 视图的口令是
+/// 脱敏占位符：往返会把口令换成 `***`，连接必然失败。
+#[test]
+#[serial]
+fn test_config_env_override_keeps_db_url_password() {
+    clear_all_inklog_env_vars();
+
+    let dir = std::env::temp_dir().join("inklog_test_db_url_password");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("db_url_password.toml");
+    std::fs::write(
+        &path,
+        "[database_sink]\nenabled = true\nurl = \"postgres://appuser:s3cr3t@db.internal:5432/logs\"\n",
+    )
+    .unwrap();
+
+    unsafe {
+        std::env::set_var("INKLOG_CONFIG_PATH", path.to_str().unwrap());
+    }
+
+    let config = InklogConfig::load_with_env_overrides().expect("failed to load config");
+
+    let sink = config
+        .database_sink
+        .as_ref()
+        .expect("database_sink should exist");
+    assert_eq!(
+        sink.url, "postgres://appuser:s3cr3t@db.internal:5432/logs",
+        "env override path must not swallow the DSN password"
+    );
+
+    unsafe {
+        std::env::remove_var("INKLOG_CONFIG_PATH");
+    }
+}

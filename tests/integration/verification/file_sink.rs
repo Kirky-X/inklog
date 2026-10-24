@@ -12,6 +12,7 @@ use inklog::tracing::Level;
 use inklog::{
     FileSinkConfig, MockDatabaseAdapter, config::DatabaseSinkConfig, log_record::LogRecord,
 };
+use serial_test::serial;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -86,6 +87,7 @@ fn verify_file_sink_compression() {
 }
 
 #[test]
+#[serial]
 fn verify_file_sink_encryption() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let log_path = temp_dir.path().join("enc.log");

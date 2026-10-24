@@ -382,3 +382,155 @@ fn test_cli_decrypt_json_error_is_machine_readable() {
         .code(1)
         .stderr(predicate::str::contains("\"status\":\"error\""));
 }
+
+// verify-chain 子命令
+//
+// 密钥经子进程环境传入（子进程 env 与进程内 setenv 无关，不引入并发改环境
+// 变量的未定义行为）。
+
+/// 完整链：密钥从环境变量取 → 退出码 0。
+#[test]
+fn test_cli_verify_chain_intact_exits_0() {
+    let dir = TempDir::new().expect("tempdir");
+    let manifest = dir.path().join("chained.chain.jsonl");
+    let key = b"cli-integration-verify-key";
+    let mut chain = inklog::support::audit_chain::ArchiveChain::new(key);
+    chain.append("{\"path\":\"app.001.log\"}");
+    let body: String = chain
+        .entries()
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&manifest, body).expect("write manifest");
+    let seal_path = inklog::support::audit_chain::seal_path_for_manifest(&manifest);
+    fs::write(
+        &seal_path,
+        serde_json::to_string(&chain.seal().expect("seal")).unwrap(),
+    )
+    .expect("write seal");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env("INKLOG_TEST_AUDIT_KEY", "cli-integration-verify-key");
+    cmd.args([
+        "verify-chain",
+        "--manifest",
+        manifest.to_str().unwrap(),
+        "--key-env",
+        "INKLOG_TEST_AUDIT_KEY",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("chain intact"));
+}
+
+/// 空 manifest（0 条目）：无法证明完整性 → 退出码 2 + 空 manifest 诊断。
+#[test]
+fn test_cli_verify_chain_empty_manifest_exits_2() {
+    let dir = TempDir::new().expect("tempdir");
+    let manifest = dir.path().join("empty.chain.jsonl");
+    fs::write(&manifest, "").expect("write manifest");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env("INKLOG_TEST_AUDIT_KEY", "cli-integration-verify-key");
+    cmd.args([
+        "verify-chain",
+        "--manifest",
+        manifest.to_str().unwrap(),
+        "--key-env",
+        "INKLOG_TEST_AUDIT_KEY",
+    ])
+    .assert()
+    .code(2)
+    .stdout(predicate::str::contains("EMPTY"));
+}
+
+/// 空 manifest 且密钥未设置：空链判据与密钥无关 → 仍给退出码 2 与空
+/// manifest 诊断（不退回「密钥未设置」的退出码 1）。
+#[test]
+fn test_cli_verify_chain_empty_manifest_without_key_exits_2() {
+    let dir = TempDir::new().expect("tempdir");
+    let manifest = dir.path().join("empty.chain.jsonl");
+    fs::write(&manifest, "").expect("write manifest");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env_remove("INKLOG_TEST_ABSENT_KEY");
+    cmd.args([
+        "verify-chain",
+        "--manifest",
+        manifest.to_str().unwrap(),
+        "--key-env",
+        "INKLOG_TEST_ABSENT_KEY",
+    ])
+    .assert()
+    .code(2)
+    .stdout(predicate::str::contains("EMPTY"));
+}
+
+/// 封条存在但 JSON 非法：无法判定完整性 → 退出码 2 + 封条不可读诊断。
+#[test]
+fn test_cli_verify_chain_invalid_seal_exits_2() {
+    let dir = TempDir::new().expect("tempdir");
+    let manifest = dir.path().join("badseal.chain.jsonl");
+    let entry = serde_json::json!({
+        "index": 0,
+        "salt": "00".repeat(16),
+        "prev_hash": "00".repeat(32),
+        "event": "{}",
+        "hmac": "00".repeat(32),
+    });
+    fs::write(&manifest, format!("{entry}\n")).expect("write manifest");
+    let seal_path = inklog::support::audit_chain::seal_path_for_manifest(&manifest);
+    fs::write(&seal_path, "{ not json").expect("write seal");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env("INKLOG_TEST_AUDIT_KEY", "cli-integration-verify-key");
+    cmd.args([
+        "verify-chain",
+        "--manifest",
+        manifest.to_str().unwrap(),
+        "--key-env",
+        "INKLOG_TEST_AUDIT_KEY",
+    ])
+    .assert()
+    .code(2)
+    .stdout(predicate::str::contains("seal unreadable"));
+}
+
+/// 封条覆盖的条目数与 manifest 不一致（重读后仍不一致）：无法证明完整性
+/// → 退出码 2 + 与「篡改」区分开的诊断。
+#[test]
+fn test_cli_verify_chain_generation_mismatch_exits_2() {
+    let dir = TempDir::new().expect("tempdir");
+    let manifest = dir.path().join("mismatch.chain.jsonl");
+    let mut chain = inklog::support::audit_chain::ArchiveChain::new(b"cli-integration-verify-key");
+    chain.append("{\"n\":0}");
+    chain.append("{\"n\":1}");
+    // manifest 只落第一条，封条覆盖两条 → 条目数不一致
+    let entry = serde_json::to_string(&chain.entries()[0]).unwrap();
+    fs::write(&manifest, format!("{entry}\n")).expect("write manifest");
+    let seal_path = inklog::support::audit_chain::seal_path_for_manifest(&manifest);
+    fs::write(
+        &seal_path,
+        serde_json::to_string(&chain.seal().expect("seal")).unwrap(),
+    )
+    .expect("write seal");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env("INKLOG_TEST_AUDIT_KEY", "cli-integration-verify-key");
+    cmd.args([
+        "verify-chain",
+        "--manifest",
+        manifest.to_str().unwrap(),
+        "--key-env",
+        "INKLOG_TEST_AUDIT_KEY",
+    ])
+    .assert()
+    .code(2)
+    .stdout(predicate::str::contains("does not match manifest"));
+}

@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 use inklog::LoggerManager;
 use inklog::tracing::{error, info};
+use serial_test::serial;
 use std::thread;
 use std::time::{Duration, Instant};
 
 #[tokio::test]
+#[serial]
 #[ignore = "Requires Docker database environment"]
 async fn test_long_running_stability() {
     // Set up database environment variables for Docker
