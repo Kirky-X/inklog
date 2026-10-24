@@ -66,14 +66,24 @@ use std::time::{Duration, Instant};
 ///
 /// This enum provides more granular status information than a simple boolean,
 /// allowing for better observability and debugging.
+///
+/// 错误/原因原文带内部拓扑（表名、约束名、路径、远端地址），不进序列化
+/// 输出（`skip_serializing`）——`/health` 响应体只回显状态类别。原文留在
+/// 进程内（[`SinkHealth::last_error`]）与内部日志。
 #[derive(Debug, Serialize, Clone, PartialEq, Default)]
 pub enum SinkStatus {
     /// Sink is operating normally
     Healthy,
     /// Sink is degraded but still functioning
-    Degraded { reason: String },
+    Degraded {
+        #[serde(skip_serializing)]
+        reason: String,
+    },
     /// Sink has failed and is not functioning
-    Unhealthy { error: String },
+    Unhealthy {
+        #[serde(skip_serializing)]
+        error: String,
+    },
     #[default]
     /// Sink has not been initialized yet
     NotStarted,
@@ -99,6 +109,8 @@ impl SinkStatus {
 #[derive(Debug, Serialize, Clone)]
 pub struct SinkHealth {
     pub status: SinkStatus,
+    /// 最近一次失败原文（进程内可见；不进序列化输出——见 [`SinkStatus`]）
+    #[serde(skip_serializing)]
     pub last_error: Option<String>,
     pub consecutive_failures: u32,
 }
@@ -528,6 +540,10 @@ impl Metrics {
     /// * `error` - Optional error message if the sink is unhealthy
     pub fn update_sink_health(&self, name: &str, healthy: bool, error: Option<String>) {
         // 减少锁持有时间：在锁外准备状态
+        // 错误原文经统一脱敏出口（凭据/路径遮蔽）后再入状态：入参是
+        // `InklogError` 的 Display 原文（未脱敏），而健康状态可被
+        // `/health` 端点读取。
+        let error = error.map(|e| crate::error::sanitize_message(&e).into_owned());
         let status = if healthy {
             SinkStatus::Healthy
         } else {
@@ -2158,6 +2174,65 @@ mod metrics_tests {
         let status = metrics.get_status(0, 100);
         assert!(
             matches!(status.overall_status, SinkStatus::Unhealthy { error } if error.contains("disk error"))
+        );
+    }
+
+    /// 健康状态的序列化输出不得携带原始错误文本（表名/约束名/路径等内部
+    /// 拓扑会直达未鉴权的 `/health` 客户端）——原文只留在进程内。
+    #[test]
+    fn test_health_status_serialization_omits_raw_error_text() {
+        let metrics = Metrics::new();
+        metrics.sink_started("database");
+        metrics.update_sink_health(
+            "database",
+            false,
+            Some("UNIQUE constraint failed: logs.id".to_string()),
+        );
+        let status = metrics.get_status(0, 100);
+        let json = serde_json::to_string(&status).expect("serialize should succeed");
+        assert!(
+            !json.contains("UNIQUE constraint failed"),
+            "health payload must not carry raw error text: {json}"
+        );
+        assert!(
+            json.contains("\"Unhealthy\""),
+            "health payload must still report the status class: {json}"
+        );
+        // 进程内仍可读到原文（诊断与内部日志用）
+        assert!(
+            status
+                .sinks
+                .get("database")
+                .and_then(|s| s.last_error.as_deref())
+                .is_some_and(|e| e.contains("UNIQUE constraint failed")),
+            "raw error text must stay available in-process"
+        );
+    }
+
+    /// 入健康状态的错误文本经统一脱敏出口：凭据与用户路径不留原文。
+    #[test]
+    fn test_update_sink_health_sanitizes_error_text() {
+        let metrics = Metrics::new();
+        metrics.update_sink_health(
+            "database",
+            false,
+            Some(
+                "failed to load AKIAIOSFODNN7EXAMPLE from /home/alice/.aws/credentials".to_string(),
+            ),
+        );
+        let status = metrics.get_status(0, 100);
+        let stored = status
+            .sinks
+            .get("database")
+            .and_then(|s| s.last_error.clone())
+            .unwrap_or_default();
+        assert!(
+            !stored.contains("AKIAIOSFODNN7EXAMPLE"),
+            "AWS key must not survive in health state: {stored}"
+        );
+        assert!(
+            !stored.contains("/home/alice/"),
+            "user home path must not survive in health state: {stored}"
         );
     }
 

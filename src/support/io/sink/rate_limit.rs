@@ -11,15 +11,20 @@
 //! 返回 `true` 表示预算允许本次写入；写入结果经 [`SinkRateLimit::report`]
 //! 回报，供预算回收或上层熔断。
 //!
+//! 默认路径不依赖 limiteron：突发配额内核由仓内 [`BurstLimiter`] 承担
+//! （无时钟、无补充），与 limiteron `TokenBucketLimiter::new(capacity, 0)`
+//! 的纯预算语义等价。需要 limiteron 原生限流器（速率补充/按目标分桶）时
+//! 启用 `limiteron-rate-limit` feature，经 [`RateLimitedSink::with_limiter`]
+//! 注入。
+//!
 //! # Example
 //!
 //! ```ignore
-//! // limiteron 侧：
-//! struct LimiteronRateLimit { /* token bucket per target */ }
-//! impl SinkRateLimit for LimiteronRateLimit { /* ... */ }
+//! // 默认路径（无 limiteron 依赖）：
+//! let sink = RateLimitedSink::new(inner_sink, Arc::new(TokenBucketRateLimit::new(100)));
 //!
-//! // inklog 侧注入：
-//! let sink = RateLimitedSink::new(inner_sink, Arc::new(LimiteronRateLimit::new(config)));
+//! // limiteron-rate-limit feature：注入 limiteron 限流器
+//! let sink = RateLimitedSink::with_limiter(inner_sink, Arc::new(limiter));
 //! LoggerManager::builder().add_sink(Arc::new(sink));
 //! ```
 
@@ -28,6 +33,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::support::io::LogSink;
+use crate::support::io::sink::BurstLimiter;
 use crate::{InklogError, LogRecord, Metrics};
 
 /// sink 写入结果（供限流端口回报预算/熔断状态）。
@@ -43,7 +49,9 @@ pub enum SinkWriteOutcome {
 
 /// 按目标的 sink 写入限流端口（对象安全，NoOp 默认放行）。
 ///
-/// 下层默认实现 [`NoOpRateLimit`]；上层 limiteron 提供真实 token 预算实现。
+/// 下层默认实现 [`NoOpRateLimit`]；纯预算基线实现 [`TokenBucketRateLimit`]
+/// （内核为仓内 [`BurstLimiter`]）；上层限流器（按 target 分桶等增强语义）
+/// 由消费方实现本端口注入，inklog 不依赖任何第三方限流库。
 pub trait SinkRateLimit: Send + Sync {
     /// 记录写入前判定；`true` = 允许本次写入（消费预算）。
     ///
@@ -70,34 +78,32 @@ impl SinkRateLimit for NoOpRateLimit {
     }
 }
 
-/// 全局令牌桶（[`SinkRateLimit`] 端口的内置基线实现）。
+/// 全局突发配额限流（[`SinkRateLimit`] 端口的内置基线实现）。
 ///
-/// 算法内核委托 limiteron `TokenBucketLimiter`（CAS + 补充时间积分守恒
-/// 修复，算法修复收敛库侧单处）：`new(capacity)` 映射
-/// `TokenBucketLimiter::new(capacity, 0)`——`refill_rate = 0` 保持既有纯
-/// 预算语义（无时间补充，预算耗尽后不放行）。同步决策点（trait 契约）经
-/// `futures::executor::block_on` 桥接异步 `allow(1)`。
+/// 算法内核为仓内 [`BurstLimiter`]（原子 CAS 递减，无时钟、无补充）：
+/// `new(capacity)` 与 limiteron `TokenBucketLimiter::new(capacity, 0)`
+/// （`refill_rate = 0` 的纯预算语义）行为等价——初始放行 `capacity` 次，
+/// 其后拒绝，无时间补充。
 ///
-/// 语义变更：`report(Failed)` 不再归还预算——limiteron 无 refund API
-/// （方法面仅 allow/peek/remaining/snapshot），写失败的预算由 worker 层
-/// 重试兜底；归还 API 的库侧需求见 upstream-requests。
+/// 语义：`report(Failed)` 不归还预算——写失败的预算由 worker 层重试兜底；
+/// 归还 API 的库侧需求见 upstream-requests。
 pub struct TokenBucketRateLimit {
-    limiter: limiteron::limiters::TokenBucketLimiter,
+    limiter: BurstLimiter,
     name: String,
 }
 
 impl TokenBucketRateLimit {
-    /// 以固定容量创建（`refill_rate = 0` 纯预算：无后台补充线程，无时间补充）。
+    /// 以固定容量创建（纯预算：无后台补充线程，无时间补充）。
     pub fn new(capacity: u64) -> Self {
         Self {
-            limiter: limiteron::limiters::TokenBucketLimiter::new(capacity, 0),
+            limiter: BurstLimiter::new(capacity),
             name: format!("token-bucket({capacity})"),
         }
     }
 
     /// 当前剩余预算。
     pub fn available(&self) -> u64 {
-        self.limiter.tokens()
+        self.limiter.available()
     }
 
     /// 归还预算上限。
@@ -108,14 +114,11 @@ impl TokenBucketRateLimit {
 
 impl SinkRateLimit for TokenBucketRateLimit {
     fn try_acquire(&self, _record: &LogRecord) -> bool {
-        // 同步热路径桥接 limiteron 异步判定；cost=1 恒合法，错误路径
-        // fail-closed（视为拒绝）不放大写入压力
-        futures::executor::block_on(limiteron::limiters::Limiter::allow(&self.limiter, 1))
-            .unwrap_or(false)
+        self.limiter.try_acquire()
     }
 
     fn report(&self, _record: &LogRecord, _outcome: SinkWriteOutcome) {
-        // limiteron 无预算归还 API：写失败的预算不归还（语义变更，测试钉死）
+        // 纯预算内核无归还路径：写失败的预算不归还（语义钉死于测试）
     }
 
     fn name(&self) -> &str {
@@ -352,12 +355,56 @@ mod tests {
         assert_eq!(inner.messages.lock().len(), 1);
     }
 
-    /// 端口对象安全性验证：dyn SinkRateLimit 可经 Arc 分发（limiteron 注入形态）。
+    /// 端口对象安全性验证：dyn SinkRateLimit 可经 Arc 分发（消费方注入形态）。
     #[test]
     fn test_port_is_object_safe() {
         fn accepts(_limiter: Arc<dyn SinkRateLimit>) {}
         accepts(Arc::new(NoOpRateLimit));
         accepts(Arc::new(TokenBucketRateLimit::new(1)));
+    }
+
+    /// 自有端口注入路径：sink 级装饰器经消费方实现的 `SinkRateLimit` 裁决——
+    /// 预算耗尽后拒绝写入。外部扩展的正式入口（不再暴露第三方限流 trait）。
+    #[tokio::test]
+    async fn test_port_injection_path_limits_writes() {
+        /// 容量 1 的纯预算限流器（无补充）
+        struct OneShotLimiter {
+            left: std::sync::atomic::AtomicUsize,
+        }
+
+        impl SinkRateLimit for OneShotLimiter {
+            fn try_acquire(&self, _record: &LogRecord) -> bool {
+                self.left
+                    .fetch_update(
+                        std::sync::atomic::Ordering::AcqRel,
+                        std::sync::atomic::Ordering::Acquire,
+                        |v| if v > 0 { Some(v - 1) } else { None },
+                    )
+                    .is_ok()
+            }
+        }
+
+        let inner = Arc::new(CollectingSink {
+            messages: Mutex::new(Vec::new()),
+            fail_once: std::sync::atomic::AtomicBool::new(false),
+        });
+        let limiter = Arc::new(OneShotLimiter {
+            left: std::sync::atomic::AtomicUsize::new(1),
+        });
+        let sink = RateLimitedSink::new(inner.clone() as Arc<dyn LogSink>, limiter);
+
+        sink.write(&record(tracing::Level::INFO, "t"))
+            .await
+            .unwrap();
+        sink.write(&record(tracing::Level::INFO, "t"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            inner.messages.lock().len(),
+            1,
+            "the injected port limiter must gate the write"
+        );
     }
 
     #[test]

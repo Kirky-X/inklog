@@ -309,6 +309,7 @@ impl ChannelBufferedFileSink {
     /// 回落判定收窄后默认配置（含 encrypt/compress）全部走本路径，
     /// 权限不得比 FileSink 退化。
     fn open_file(path: &PathBuf) -> Result<File, InklogError> {
+        #[cfg(unix)]
         let parent_newly_created = path
             .parent()
             .is_some_and(|p| !p.as_os_str().is_empty() && !p.exists());
@@ -1910,6 +1911,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_encrypt_without_key_fails_explicitly() {
         // 复用 journal 加密（R-inklog-002）的 key 管理范式：显式启用加密而
         // key 缺失 → 构造期显性失败

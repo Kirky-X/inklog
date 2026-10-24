@@ -46,6 +46,9 @@ pub struct OtlpConfig {
     /// 二选一；仅 net-sink feature 下生效，语义与 TcpSink 的 TlsClientConfig 一致）
     pub ca_pem_path: Option<std::path::PathBuf>,
     /// https endpoint 跳过证书校验（仅测试用途）
+    ///
+    /// 仅在调试构建或显式启用 crate 特性 `insecure-tls` 时可用；发布构建
+    /// 下开启即构造失败。
     pub danger_accept_invalid_certs: bool,
 }
 
@@ -202,6 +205,13 @@ fn https_post_json(
     timeout: Duration,
     tls_config: Arc<rustls::ClientConfig>,
 ) -> Result<(), InklogError> {
+    // CR/LF 注入防护：host/path 直接内插进原始请求头，出现换行控制符
+    // 即可注入额外头部/拆分请求（http 与 https 两条路径同一守卫）
+    if host.contains(['\r', '\n']) || path.contains(['\r', '\n']) {
+        return Err(InklogError::ConfigError(format!(
+            "OTLP endpoint contains CR/LF in host or path: '{endpoint}'"
+        )));
+    }
     let addr = format!("{host}:{port}");
     let stream = std::net::TcpStream::connect(&addr).map_err(|e| {
         InklogError::IoError(std::io::Error::other(format!(
@@ -342,6 +352,15 @@ impl OtlpSink {
             .with_safe_default_protocol_versions()
             .map_err(|e| InklogError::ConfigError(format!("TLS protocol versions: {e}")))?;
         if config.danger_accept_invalid_certs {
+            // 认证降级：跳过证书链与主机名校验后，链路上的中间人可完整读取
+            // 并篡改外发日志流，客户端侧无其他报错或指标信号。发布构建里
+            // 不留后门——无编译期授权即构造失败（fail-closed）。
+            if !super::net::insecure_tls_opt_in() {
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "sink-tls_insecure_certs_forbidden",
+                )));
+            }
+            super::net::warn_insecure_certs_accepted();
             return Ok(builder
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(super::net::AcceptAnyVerifier {
@@ -558,13 +577,24 @@ mod tests {
             "error must mention CA configuration, got: {err}"
         );
 
-        // danger 标志放行：构造成功（不发起连接）
+        // danger 标志：调试构建（或显式启用 insecure-tls）放行——构造成功
+        // （不发起连接）；发布构建无编译期授权即拒绝（fail-closed）
         let sink = OtlpSink::new(OtlpConfig {
             endpoint: "https://collector:4318/v1/logs".to_string(),
             danger_accept_invalid_certs: true,
             ..Default::default()
         });
-        assert!(sink.is_ok());
+        if crate::support::io::sink::net::insecure_tls_opt_in() {
+            assert!(sink.is_ok(), "authorized build must accept the danger flag");
+        } else {
+            let Err(err) = sink else {
+                panic!("release build without opt-in must reject the flag");
+            };
+            assert!(
+                err.to_string().contains("insecure-tls"),
+                "error must name the opt-in feature, got: {err}"
+            );
+        }
     }
 
     /// mock collector：接受一次 POST，捕获请求体并回 200。

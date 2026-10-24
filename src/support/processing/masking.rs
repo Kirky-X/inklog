@@ -72,9 +72,20 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::error::InklogError;
 
-/// mask 入口的单条输入上限（字节）：超过则跳过脱敏原样放行并留痕——
-/// 21 趟线性扫描对超大文本是 CPU 放大器。secret-scan 门共用同一上限。
+/// mask 入口的单条输入上限（字节）：超过则跳过脱敏扫描（21 趟线性扫描对
+/// 超大文本是 CPU 放大器）并以整体遮蔽收口——不扫描即不可证安全，原样
+/// 放行会让其中的凭据/PII 明文落盘。secret-scan 门共用同一上限。
 pub(crate) const MAX_MASK_INPUT_BYTES: usize = 1024 * 1024;
+
+/// 超限输入的整体遮蔽标记（fail-closed：未扫描即不可证安全）。
+pub(crate) const OVERSIZED_INPUT_REDACTION: &str = "***REDACTED_OVERSIZED***";
+
+/// 引擎级匹配错误后的整体遮蔽标记（fail-closed）。
+///
+/// 引擎错误意味着「该规则在这条文本上是否命中」不可判定——文本内容不可
+/// 证明安全，故整体替换而非放行原文。标记与常规脱敏标记区分命名：运维可
+/// 据此看出「该记录未被脱敏」，不会与真实脱敏动作混淆。
+pub(crate) const ENGINE_ERROR_REDACTION: &str = "***REDACTED_ENGINE_ERROR***";
 
 /// Word-boundary regex patterns for sensitive field detection.
 /// Uses \b (word boundary) to avoid false positives like "cakey" matching "key".
@@ -320,12 +331,14 @@ impl DataMasker {
     ///
     /// # 标记幂等契约
     ///
-    /// 输入已含脱敏/掩码标记（`***REDACTED***`、`***MASKED***`、`[REDACTED]`）
-    /// 时视为已被上游处理，直接原样返回、不再套用规则——双开关叠加下不会
-    /// 产生 REDACTED 套 REDACTED 的嵌套标记。
+    /// 标记保护下沉到「值」一级：内置规则的替换产物（`***REDACTED***`、
+    /// `***MASKED***` 等）不会被任何规则再次命中，双开关叠加下不会产生
+    /// REDACTED 套 REDACTED 的嵌套标记。判定不落在「整条消息」一级——
+    /// 标记词表可被自由文本（用户输入）伪造，整条消息级短路会让注入一个
+    /// 标记的记录整体免于脱敏（含 secret-scan 门）。
     pub fn mask(&self, text: &str) -> String {
-        // 超大输入跳过掩码：21 趟线性扫描对 1 MiB+ 文本是 CPU 放大器，
-        // 且此类输入通常是误用（整段请求体贴进日志），原样放行并留痕
+        // 超大输入跳过掩码扫描：21 趟线性扫描对 1 MiB+ 文本是 CPU 放大器；
+        // 不扫描即不可证安全，故整体遮蔽而非原样放行（fail-closed）
         if text.len() > MAX_MASK_INPUT_BYTES {
             tracing::warn!(
                 size = text.len(),
@@ -333,12 +346,7 @@ impl DataMasker {
                 "{}",
                 crate::i18n::tr("masking-limit-exceeded")
             );
-            return text.to_string();
-        }
-
-        // 标记幂等短路（契约见 doc）
-        if crate::validation::sanitize::contains_redaction_marker(text) {
-            return text.to_string();
+            return OVERSIZED_INPUT_REDACTION.to_string();
         }
 
         // secret-scan 门先于规则集执行：在原文上定位裸 secret，归因计数
@@ -382,8 +390,9 @@ impl DataMasker {
     /// Ok 路径与 `mask` 共用规则管线尾段（门产物继续过 fast-masking 与
     /// 规则集，PII 不漏）。未挂门时退化为 `mask()`（永远 `Ok`）。
     ///
-    /// 与 `mask` 的分叉点：超大输入在 `mask` 原样放行（fail-open，向后
-    /// 兼容），在 `mask_checked` 拒绝（fail-closed）。
+    /// 与 `mask` 的分叉点：超大输入在 `mask` 以整体遮蔽收口
+    /// （[`OVERSIZED_INPUT_REDACTION`]，fail-closed），在 `mask_checked`
+    /// 拒绝并返回错误（fail-closed）。
     ///
     /// # Errors
     /// - `InklogError::SecretScanLimit`：单条输入内某模式命中数超过门限。
@@ -915,7 +924,8 @@ fn report_engine_error_for(rule: &str, error: &fancy_regex::Error) {
 /// 日志路径兜底替换：fancy_regex 的 replace_all/replacen 在引擎错误
 /// （BacktrackLimitExceeded 等）上内部 unwrap，会让 console worker panic
 /// 离场、日志双通道静默终止，本模块统一走 try_replacen——失败即经统一
-/// 出口留痕并返回原文（漏报可观测优于日志通道死亡）。
+/// 出口留痕，并以保守遮蔽整体替换该文本（fail-closed：引擎错误后放行
+/// 原文会让本该被遮蔽的 PII 明文落盘）。
 fn replace_all_masked(
     rule: &str,
     regex: &Regex,
@@ -926,7 +936,7 @@ fn replace_all_masked(
         Ok(masked) => masked.into_owned(),
         Err(e) => {
             report_engine_error_for(rule, &e);
-            text.to_string()
+            ENGINE_ERROR_REDACTION.to_string()
         }
     }
 }
@@ -1031,8 +1041,9 @@ impl MaskRule {
             apply_fn: apply_fn.unwrap_or_else(move || {
                 Arc::new(move |regex: &Regex, text: &str, replacement: &str| {
                     // fancy-regex 的 &str replacer 支持 ${1}/$1 组展开；匹配期
-                    // 错误实际可达（长文本回溯上限），统一出口留痕并返回原文
-                    // （日志路径禁 panic，漏报可观测优于日志通道死亡）
+                    // 错误实际可达（长文本回溯上限），统一出口留痕并以保守
+                    // 遮蔽整体替换该文本（fail-closed：日志路径禁 panic，且
+                    // 引擎错误后放行原文等于放行未脱敏 PII）
                     replace_all_masked(&rule_name, regex, text, replacement)
                 })
             }),
@@ -1547,17 +1558,19 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_apply_engine_error_does_not_panic_and_skips_masking() {
-        // 灾难性回溯模式：尾部非 'a' 字符使匹配必败，指数回溯在默认预算内
-        // 触发 BacktrackLimitExceeded——确定性引擎错误。
+    fn test_apply_engine_error_fails_closed_instead_of_returning_plaintext() {
+        // 环视规则（负向断言）在长输入上耗尽 fancy-regex 的回溯预算
+        // （BacktrackLimitExceeded）——确定性引擎错误。
         let rule = MaskRule::builder("zz-catastrophic")
-            .pattern(r"^(?:a+)+$")
+            .pattern(r"(?<![0-9A-Za-z])1[3-9]\d{9}(?![0-9A-Za-z])")
             .build()
             .unwrap();
-        let text = format!("log prefix {} tail", "a".repeat(40));
-        // 修复前：此处 panic；修复后：留痕并返回原文
+        let text = format!("13812345678 {}", "1".repeat(1_100_000));
+        // 修复前：此处 panic；再修复前：留痕并返回原文（fail-open，未脱敏
+        // 原文直落日志）；当前：留痕并以保守遮蔽整体替换（fail-closed）
         let out = rule.apply(&text);
-        assert_eq!(out, text);
+        assert_eq!(out, ENGINE_ERROR_REDACTION);
+        assert!(!out.contains("13812345678"));
     }
 
     #[test]
@@ -1866,6 +1879,46 @@ mod tests {
             masker.mask(marked),
             marked,
             "marked input must pass through unchanged"
+        );
+    }
+
+    #[test]
+    fn test_mask_marker_injection_does_not_disable_rules() {
+        // 回归：整条消息级标记短路可被自由文本伪造——注入一个标记即可让
+        // 整条记录免于掩码（含 secret-scan 门）。标记保护只在「值」一级。
+        let masker = DataMasker::new();
+        for marker in ["[REDACTED]", "***REDACTED***", "***MASKED***"] {
+            let text = format!("login user={marker} token=sk-live-abcdefghijklmnopqrstuvwxyz");
+            let masked = masker.mask(&text);
+            assert!(
+                !masked.contains("sk-live-abcdefghijklmnopqrstuvwxyz"),
+                "injected marker {marker} must not exempt the record: {masked}"
+            );
+
+            // 同一条消息中的 PII 也不得因标记旁路而明文留存
+            let text = format!("user={marker} phone=13800138000");
+            let masked = masker.mask(&text);
+            assert!(
+                !masked.contains("13800138000"),
+                "injected marker {marker} must not exempt PII: {masked}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mask_long_input_backtrack_budget_does_not_leak_pii() {
+        // 回溯预算耗尽窗口：fancy-regex 的 look-around 规则在长输入上耗尽
+        // 回溯预算（引擎错误）。引擎错误不得让整条记录以未脱敏原文落盘。
+        let masker = DataMasker::new();
+        let big = format!("13812345678 123-45-6789 {}", "1".repeat(1_000_000));
+        let masked = masker.mask(&big);
+        assert!(
+            !masked.contains("13812345678"),
+            "phone must not survive the backtrack budget window: {masked:.80}"
+        );
+        assert!(
+            !masked.contains("123-45-6789"),
+            "ssn must not survive the backtrack budget window: {masked:.80}"
         );
     }
 
@@ -2522,13 +2575,14 @@ mod tests {
     }
 
     #[test]
-    fn test_oversized_input_skips_masking() {
+    fn test_oversized_input_is_redacted_not_passed_through() {
         let masker = DataMasker::new();
         let big = format!("user 13812345678 {}", "x".repeat(1024 * 1024 + 1));
         let result = masker.mask(&big);
-        // 超过 1 MiB 的输入原样返回（不做 21 趟扫描）
-        assert!(result.contains("13812345678"));
-        assert_eq!(result.len(), big.len());
+        // 超过 1 MiB 的输入跳过 21 趟扫描，但整体遮蔽：未扫描即不可证安全，
+        // 原样放行会让其中的凭据/PII 明文落盘
+        assert_eq!(result, OVERSIZED_INPUT_REDACTION);
+        assert!(!result.contains("13812345678"));
     }
 
     // mask_kv_lines：行级 key=value 脱敏（= 前原文逐字保留）
@@ -2721,8 +2775,9 @@ mod tests {
 
     #[test]
     fn test_detect_fail_closed_on_marked_input() {
-        // fail-closed：detect 不走标记幂等短路——已含 REDACTED 标记的
-        // 输入仍要检测出伴随的未脱敏 PII；mask 的幂等契约保持不变
+        // fail-closed：detect 不走标记短路——已含 REDACTED 标记的
+        // 输入仍要检测出伴随的未脱敏 PII；mask 同样不走整条消息级
+        // 标记短路（标记词表可被自由文本伪造，见 test_mask_marker_injection_does_not_disable_rules）
         let masker = DataMasker::new();
         let text = "user@example.com ***REDACTED***";
         let matches = masker.detect(text);
@@ -2731,8 +2786,13 @@ mod tests {
             "detect must not be blinded by existing redaction markers: {:?}",
             matches
         );
-        // mask 幂等短路契约保持：含标记输入原样返回
-        assert_eq!(masker.mask(text), text);
+        // 标记不再让整条消息免于掩码：并存的 PII 仍被遮蔽
+        let masked = masker.mask(text);
+        assert!(
+            !masked.contains("user@example.com"),
+            "mask must not be blinded by existing redaction markers: {masked}"
+        );
+        assert!(masked.contains("***REDACTED***"));
     }
 
     #[test]
@@ -2968,7 +3028,7 @@ mod tests {
     #[cfg(feature = "secret-scan")]
     #[test]
     fn test_mask_checked_oversized_fails_closed() {
-        // 超大输入在 mask_checked 是拒绝（Err）而非 mask 的原样放行：
+        // 超大输入在 mask_checked 是拒绝（Err）而 mask 是整体遮蔽：
         // 不扫描即不可证安全，fail-closed 出口不放行未经检测的内容
         use crate::support::processing::{SecretPatternRegistry, SecretScanGate};
         let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins());

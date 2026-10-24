@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
+pub mod burst_limiter;
 pub mod circuit_breaker;
 pub mod compression;
 pub mod console;
@@ -20,6 +21,7 @@ pub mod ring_buffered_file;
 pub mod rotation;
 pub mod sampling;
 
+pub use burst_limiter::BurstLimiter;
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 #[cfg(feature = "gzip")]
 pub use compression::GzipCompression;

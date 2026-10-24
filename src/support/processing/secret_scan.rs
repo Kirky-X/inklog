@@ -6,16 +6,16 @@
 //! 与值熵扫描（[`EntropyScanner`](super::secret_entropy::EntropyScanner)），
 //! 提供逐模式命中计数与超限 fail-closed 出口：
 //!
-//! - `mask`：失败放行——替换全部命中并累加计数，永不报错；
+//! - `mask`：不返回错误——替换全部命中并累加计数；
 //! - `mask_checked`：同语义，但单条输入内任一模式命中数超过门限
 //!   （`SecretScanLimit`）或输入超过掩码上限（`SecretScanOversizedInput`，
 //!   不扫描即不可证安全）时返回 `Err`，脱敏输出不可用（防疑似密钥风暴
 //!   落盘）。两个出口共用计数器，Err 时计数已更新可查。
 //!
 //! 层位：经 `DataMasker::builder().with_secret_scan()` 挂到 sink 写出前的
-//! 掩码点（与 encryption / ring_buffered_file 同层），`DataMasker::mask`
-//! 保持失败放行语义（向后兼容），fail-closed 由 `DataMasker::mask_checked`
-//! 显式选择。
+//! 掩码点（与 encryption / ring_buffered_file 同层）。两个出口都是
+//! fail-closed 的：命中数超门限时 `mask_checked` 拒绝输出；超大输入在
+//! `mask` 以整体遮蔽收口（不扫描即不可证安全），在 `mask_checked` 拒绝。
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -91,11 +91,11 @@ impl SecretScanGate {
         self.entropy.as_ref()
     }
 
-    /// 失败放行出口：替换全部命中并计数，永不报错。
+    /// 不返回错误的出口：替换全部命中并计数。
     ///
-    /// 与 `DataMasker::mask` 同契约：超 1 MiB 输入跳过扫描原样返回；
-    /// 脱敏标记文本不被特殊处理（标记不被任何内置模式命中，幂等自然
-    /// 成立），同条消息中的裸 secret 照常替换与计数。
+    /// 与 `DataMasker::mask` 同契约：超 1 MiB 输入跳过扫描并以整体遮蔽
+    /// 收口（不扫描即不可证安全）；脱敏标记文本不被特殊处理（标记不被任何
+    /// 内置模式命中，幂等自然成立），同条消息中的裸 secret 照常替换与计数。
     pub fn mask(&self, text: &str) -> String {
         self.mask_inner(text).0
     }
@@ -110,7 +110,7 @@ impl SecretScanGate {
     /// - `InklogError::SecretScanLimit`：任一模式（含熵命中）在单条输入内
     ///   命中数 > 门限，携带首个越限模式名与计数。
     /// - `InklogError::SecretScanOversizedInput`：输入超过掩码上限，未做
-    ///   任何扫描（`mask` 对同输入原样放行，两出口在此分叉）。
+    ///   任何扫描（`mask` 对同输入以整体遮蔽收口，两出口在此分叉）。
     pub fn mask_checked(&self, text: &str) -> Result<String, InklogError> {
         // fail-closed 不豁免超大输入：跳过扫描的原样放行只属于 fail-open
         // 的 mask；这里拒绝输出，把「内容是否含 secret」的不确定性显性化。
@@ -152,7 +152,9 @@ impl SecretScanGate {
     pub fn scan(&self, text: &str) -> Vec<SecretMatch> {
         let mut matches = Vec::new();
         for pattern in &self.core.patterns {
-            for (start, end) in pattern.find_spans_iter(text) {
+            for span in pattern.find_spans_iter(text) {
+                // 引擎错误：fancy-regex 在首个错误处终止迭代，其后命中不可信
+                let Ok((start, end)) = span else { break };
                 matches.push(SecretMatch {
                     pattern: pattern.name().to_string(),
                     start,
@@ -221,8 +223,9 @@ impl SecretScanGate {
     /// 干净文本零中间分配：结果 Option 惰性拷贝、counts 只收非零命中、
     /// 无命中的模式不重组字符串。
     fn mask_inner(&self, text: &str) -> (String, Vec<(String, u64)>) {
-        // 与 DataMasker::mask 同契约：超大输入跳过（日志热路径不做 CPU 放大）；
-        // fail-closed 出口在 mask_checked 中对此显式拒绝。
+        // 与 DataMasker::mask 同契约：超大输入跳过扫描（日志热路径不做 CPU
+        // 放大）并以整体遮蔽收口——不扫描即不可证安全，原样放行会让其中的
+        // 裸 secret 明文落盘；fail-closed 出口在 mask_checked 中显式拒绝。
         if text.len() > MAX_MASK_INPUT_BYTES {
             tracing::warn!(
                 size = text.len(),
@@ -230,7 +233,10 @@ impl SecretScanGate {
                 "{}",
                 crate::i18n::tr("masking-limit-exceeded")
             );
-            return (text.to_string(), Vec::new());
+            return (
+                super::masking::OVERSIZED_INPUT_REDACTION.to_string(),
+                Vec::new(),
+            );
         }
 
         // 标记不做短路：脱敏标记不被任何内置模式命中（幂等自然成立），
@@ -239,7 +245,15 @@ impl SecretScanGate {
         let mut counts: Vec<(String, u64)> = Vec::new();
         for (idx, pattern) in self.core.patterns.iter().enumerate() {
             let base = result.as_deref().unwrap_or(text);
-            let (next, hits) = replace_pattern(base, pattern);
+            let (next, hits) = match replace_pattern(base, pattern) {
+                Ok(hit) => hit,
+                Err(()) => {
+                    // 引擎错误：该模式的命中集合不可信——整条文本保守遮蔽
+                    // （fail-closed），裸 secret 不得留在文本里
+                    result = Some(super::masking::ENGINE_ERROR_REDACTION.to_string());
+                    break;
+                }
+            };
             if hits > 0 {
                 counts.push((pattern.name().to_string(), hits));
                 result = Some(next.into_owned());
@@ -263,24 +277,31 @@ impl SecretScanGate {
 /// 单模式单趟扫描替换：命中区间替换为模式标记，返回（新文本，命中数）。
 ///
 /// 单趟定位 + 区间重组，避免先 find 再 replace 的双重扫描；无命中返回
-/// 借用原文（热路径主导场景零分配）；引擎级匹配错误逐命中跳过
-/// （`SecretPattern::find_spans_iter` 内留痕）。
-fn replace_pattern<'a>(text: &'a str, pattern: &SecretPattern) -> (std::borrow::Cow<'a, str>, u64) {
+/// 借用原文（热路径主导场景零分配）；引擎级匹配错误上抛（`Err`）——
+/// 命中集合不再可信，调用方须 fail-closed，不得把未遮蔽的裸 secret 留在
+/// 文本里（`SecretPattern::find_spans_iter` 内已留痕）。
+fn replace_pattern<'a>(
+    text: &'a str,
+    pattern: &SecretPattern,
+) -> Result<(std::borrow::Cow<'a, str>, u64), ()> {
     let mut spans = pattern.find_spans_iter(text).peekable();
-    if spans.peek().is_none() {
-        return (std::borrow::Cow::Borrowed(text), 0);
+    match spans.peek() {
+        None => return Ok((std::borrow::Cow::Borrowed(text), 0)),
+        Some(Err(_)) => return Err(()),
+        Some(Ok(_)) => {}
     }
     let mut out = String::with_capacity(text.len());
     let mut last = 0usize;
     let mut hits: u64 = 0;
-    for (start, end) in spans {
+    for span in spans {
+        let (start, end) = span.map_err(|_| ())?;
         out.push_str(&text[last..start]);
         out.push_str(pattern.replacement());
         last = end;
         hits += 1;
     }
     out.push_str(&text[last..]);
-    (std::borrow::Cow::Owned(out), hits)
+    Ok((std::borrow::Cow::Owned(out), hits))
 }
 
 /// 按字节区间集合重组文本（区间互不重叠且有序）。
@@ -313,7 +334,7 @@ mod tests {
         gate().with_entropy(EntropyScanner::new())
     }
 
-    // mask：替换 + 计数（失败放行）
+    // mask：替换 + 计数（fail-closed：超限整体遮蔽）
 
     #[test]
     fn test_mask_replaces_and_counts_per_pattern() {
@@ -397,7 +418,7 @@ mod tests {
     #[test]
     fn test_mask_checked_oversized_input_fails_closed() {
         // fail-closed 出口不豁免超大输入：不扫描即不可证安全，拒绝输出
-        // 而非原样放行（mask 的失败放行语义不变，见 oversized passthrough 测试）。
+        // 而非原样放行（mask 同样 fail-closed 整体遮蔽，见 oversized redacted 测试）。
         let g = gate();
         let big = format!("blob {SK_KEY} {}", "x".repeat(1024 * 1024 + 1));
         match g.mask_checked(&big) {
@@ -410,11 +431,16 @@ mod tests {
     }
 
     #[test]
-    fn test_mask_oversized_input_passthrough() {
+    fn test_mask_oversized_input_is_redacted() {
         let g = gate();
         let big = format!("blob {SK_KEY} {}", "x".repeat(1024 * 1024 + 1));
         let out = g.mask(&big);
-        assert!(out.contains(SK_KEY), "oversized input passes through raw");
+        // 超限输入不扫描即不可证安全：整体遮蔽而非原样放行
+        assert!(
+            !out.contains(SK_KEY),
+            "oversized input must not pass through raw"
+        );
+        assert_eq!(out, super::super::masking::OVERSIZED_INPUT_REDACTION);
         assert_eq!(g.total_hits(), 0);
     }
 

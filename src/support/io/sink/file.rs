@@ -154,6 +154,14 @@ impl FileSink {
         }
     }
 
+    /// 封条路径：`<stem>.chain.seal.json`（与 manifest 同目录）。
+    ///
+    /// 封条是链外锚点（条目总数 + 尾哈希），与 manifest **分文件**存放——
+    /// 同文件内的封条会随截尾一并丢失，截断检测随之失效。
+    pub(crate) fn audit_seal_path(log_path: &std::path::Path) -> std::path::PathBuf {
+        crate::support::audit_chain::seal_path_for_manifest(&Self::audit_manifest_path(log_path))
+    }
+
     /// Creates a new FileSink with the given configuration.
     pub fn new(config: FileSinkConfig) -> Result<Self, InklogError> {
         let rotation_interval = match config.rotation_time.as_str() {
@@ -281,6 +289,7 @@ impl FileSink {
             )));
         }
 
+        #[cfg(unix)]
         let parent_newly_created = self
             .config
             .path
@@ -1488,7 +1497,14 @@ pub(crate) fn register_rotated_archive(
         body.push_str(&serde_json::to_string(entry).unwrap_or_default());
         body.push('\n');
     }
-    if let Err(e) = fs::write(&manifest, body) {
+    // manifest 原子替换：tmp + rename。`fs::write` 是覆盖写（非原子），
+    // 崩溃或并发轮转落在截断与写入之间会留下半截 manifest——校验时会被
+    // 判为失败，却无法区分「归档被篡改」与「manifest 写坏了」。
+    let manifest_tmp = manifest.with_extension("manifest.tmp");
+    let write_result =
+        fs::write(&manifest_tmp, body).and_then(|_| fs::rename(&manifest_tmp, &manifest));
+    if let Err(e) = write_result {
+        let _ = fs::remove_file(&manifest_tmp);
         let mut args = crate::i18n::MsgArgs::new();
         args.set("path", manifest.display().to_string());
         args.set("err", &e);
@@ -1496,6 +1512,28 @@ pub(crate) fn register_rotated_archive(
             "{}",
             crate::i18n::tr_args("sink-audit_manifest_write_failed", args)
         );
+    }
+
+    // 封条（链外锚点）：条目总数 + 尾哈希 + 封条 HMAC，单独落盘。
+    // manifest 被截尾到非空前缀时链内校验仍自洽，只有与封条比对才能判定
+    // 截断；封条以链密钥签发，无法伪造。封条必须与 manifest 分文件——
+    // 同文件内的封条会随截尾一并丢失。
+    if let Some(seal) = chain.seal() {
+        let seal_path = FileSink::audit_seal_path(base_path);
+        let seal_tmp = seal_path.with_extension("tmp");
+        let seal_body = serde_json::to_string(&seal).unwrap_or_default();
+        let seal_result =
+            fs::write(&seal_tmp, seal_body).and_then(|_| fs::rename(&seal_tmp, &seal_path));
+        if let Err(e) = seal_result {
+            let _ = fs::remove_file(&seal_tmp);
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", seal_path.display().to_string());
+            args.set("err", &e);
+            error!(
+                "{}",
+                crate::i18n::tr_args("sink-audit_seal_write_failed", args)
+            );
+        }
     }
 }
 
@@ -2197,6 +2235,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_encryption_key_no_env_var() {
         let config = FileSinkConfig {
             enabled: true,
@@ -3403,6 +3442,28 @@ mod tests {
             ArchiveChain::verify_entries(&entries, b"audit-chain-test-key-01"),
             "manifest chain must verify with the correct key"
         );
+        // 封条（链外锚点）随轮转落盘：与 manifest 一致
+        let seal_path = FileSink::audit_seal_path(&path);
+        let seal_data =
+            std::fs::read_to_string(&seal_path).expect("seal must exist after rotation");
+        let seal: crate::support::audit_chain::ArchiveChainSeal =
+            serde_json::from_str(&seal_data).expect("seal must be JSON");
+        assert!(
+            ArchiveChain::verify_seal(&seal, &entries, b"audit-chain-test-key-01"),
+            "seal must match the manifest"
+        );
+        // 截尾到非空前缀：链内仍自洽，封条比对必须判失败
+        if entries.len() > 1 {
+            let truncated = &entries[..entries.len() - 1];
+            assert!(
+                ArchiveChain::verify_entries(truncated, b"audit-chain-test-key-01"),
+                "truncated prefix stays self-consistent"
+            );
+            assert!(
+                !ArchiveChain::verify_seal(&seal, truncated, b"audit-chain-test-key-01"),
+                "truncation must be detected by the seal"
+            );
+        }
         // 篡改任一事件（改 sha256 摘要）→ 校验失败
         let mut tampered = entries.clone();
         tampered[0].event = tampered[0].event.replace("sha256", "sha256_tampered");

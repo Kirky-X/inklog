@@ -52,7 +52,34 @@ pub struct TlsClientConfig {
     /// CA 证书 PEM 路径（与 `danger_accept_invalid_certs` 二选一）
     pub ca_pem_path: Option<PathBuf>,
     /// 危险：跳过服务端证书校验（仅测试/自签内网）
+    ///
+    /// 仅在调试构建或显式启用 crate 特性 `insecure-tls` 时可用；发布构建
+    /// 下开启即构造失败（见 [`insecure_tls_opt_in`]）。
     pub danger_accept_invalid_certs: bool,
+}
+
+/// `danger_accept_invalid_certs` 的编译期门控。
+///
+/// 跳过证书链与主机名校验后，链路只加密不认证——中间人可完整读取并篡改
+/// 外发日志，客户端侧没有任何报错或指标信号。该开关因此只在两种情况下
+/// 可用：
+///
+/// - 调试构建（`debug_assertions`）：测试与自签内网联调；
+/// - 显式启用 crate 特性 `insecure-tls`：生产环境由使用方明示承担。
+///
+/// 两者皆不成立时构造期直接失败（fail-closed）——发布构建里的
+/// 「临时关掉校验」不能只靠一个运行期开关悄悄生效。
+pub(crate) const fn insecure_tls_opt_in() -> bool {
+    cfg!(debug_assertions) || cfg!(feature = "insecure-tls")
+}
+
+/// 证书校验被禁用的告警（走标准错误，保证送达）。
+///
+/// sink 构造期全局 tracing subscriber 往往尚未安装，`tracing::warn!`
+/// 事件必被丢弃（见 `docs/CHANGELOG.md` 同类教训）——认证降级这种必须
+/// 留痕的事件不能用可能被吞掉的通道。
+pub(crate) fn warn_insecure_certs_accepted() {
+    eprintln!("{}", crate::i18n::tr("sink-tls_insecure_certs_accepted"));
 }
 
 /// TCP sink 配置。
@@ -213,6 +240,15 @@ impl TcpSink {
             .with_safe_default_protocol_versions()
             .map_err(|e| InklogError::ConfigError(format!("TLS protocol versions: {e}")))?;
         let config = if tls.danger_accept_invalid_certs {
+            // 认证降级：跳过证书链与主机名校验后，链路上的中间人可完整读取
+            // 并篡改外发日志流，客户端侧无其他报错或指标信号。发布构建
+            // 里不留后门——无编译期授权即构造失败（fail-closed）。
+            if !insecure_tls_opt_in() {
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "sink-tls_insecure_certs_forbidden",
+                )));
+            }
+            warn_insecure_certs_accepted();
             builder
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(AcceptAnyVerifier {
@@ -957,6 +993,32 @@ mod tests {
             .is_err(),
             "TLS without CA and without danger opt-in must be rejected"
         );
+    }
+
+    /// danger 标志受编译期门控：调试构建（或显式启用 insecure-tls）放行，
+    /// 发布构建无授权即拒绝（fail-closed）。
+    #[tokio::test]
+    async fn test_tcp_sink_danger_flag_is_gated() {
+        let sink = TcpSink::new(TcpSinkConfig {
+            addr: "127.0.0.1:5170".to_string(),
+            tls: Some(TlsClientConfig {
+                server_name: "logs.internal".to_string(),
+                ca_pem_path: None,
+                danger_accept_invalid_certs: true,
+            }),
+            ..Default::default()
+        });
+        if insecure_tls_opt_in() {
+            assert!(sink.is_ok(), "authorized build must accept the danger flag");
+        } else {
+            let Err(err) = sink else {
+                panic!("release build without opt-in must reject the flag");
+            };
+            assert!(
+                err.to_string().contains("insecure-tls"),
+                "error must name the opt-in feature, got: {err}"
+            );
+        }
     }
 
     #[tokio::test]

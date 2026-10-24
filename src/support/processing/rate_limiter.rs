@@ -5,22 +5,20 @@
 //! Provides a thread-safe rate limiter using the token bucket algorithm
 //! to prevent log flooding and protect downstream systems.
 //!
-//! 算法内核委托 limiteron [`TokenBucketLimiter`]（手写 `Mutex<f64>` 桶与
-//! 补充公式已删除）：`new(rate)` 映射 `TokenBucketLimiter::new(rate, rate)`
-//! （桶满 rate、每秒补 rate）；同步 `try_acquire()` 经
-//! `futures::executor::block_on` 桥接异步 `allow(1)`；拒绝计数
-//! [`RateLimiter::dropped_count`] 由 inklog 自持（limiteron 无诊断字段）。
+//! 算法内核为仓内自持令牌桶 [`TokenBucket`]：`new(rate)` 映射「桶满 rate、
+//! 每秒补 rate」；决策点同步 O(1)，不经异步桥接（避免在 async 写路径上
+//! 阻塞）；拒绝计数 [`RateLimiter::dropped_count`] 由 inklog 自持。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use limiteron::limiters::{Limiter, TokenBucketLimiter};
+use super::token_bucket::TokenBucket;
 
 /// Token bucket rate limiter for controlling log throughput.
 ///
 /// 容量 = 速率 = `rate`：桶满 `rate`、每秒补 `rate`（与既有
 /// `Mutex<f64>` 实现语义等价）。`try_acquire()` 为 O(1) 同步决策点。
 pub struct RateLimiter {
-    limiter: TokenBucketLimiter,
+    limiter: TokenBucket,
     dropped_count: AtomicU64,
 }
 
@@ -31,16 +29,19 @@ impl RateLimiter {
     /// `refill_rate` equals `rate` — tokens replenish at the same rate they consume.
     pub fn new(rate: u64) -> Self {
         Self {
-            limiter: TokenBucketLimiter::new(rate, rate),
+            limiter: TokenBucket::new(rate),
             dropped_count: AtomicU64::new(0),
         }
     }
 
     /// 时钟注入构造（单元测试确定性时间；生产走 [`Self::new`] 系统时钟）。
     #[cfg(test)]
-    pub(crate) fn with_clock(rate: u64, clock: std::sync::Arc<dyn limiteron::Clock>) -> Self {
+    pub(crate) fn with_clock(
+        rate: u64,
+        clock: std::sync::Arc<dyn super::token_bucket::Clock>,
+    ) -> Self {
         Self {
-            limiter: TokenBucketLimiter::with_clock(rate, rate, clock),
+            limiter: TokenBucket::with_clock(rate, clock),
             dropped_count: AtomicU64::new(0),
         }
     }
@@ -49,9 +50,8 @@ impl RateLimiter {
     ///
     /// On rejection, increments the internal dropped counter.
     pub fn try_acquire(&self) -> bool {
-        // 同步决策点桥接 limiteron 异步判定；cost=1 恒合法，错误路径
-        // fail-closed（拒绝并计数）不放大写入压力
-        if futures::executor::block_on(self.limiter.allow(1)).unwrap_or(false) {
+        // 同步 O(1) 决策点：余额不足即拒绝并计数（fail-closed），不阻塞写路径
+        if self.limiter.try_acquire() {
             true
         } else {
             self.dropped_count.fetch_add(1, Ordering::Relaxed);
@@ -67,8 +67,8 @@ impl RateLimiter {
 
 #[cfg(test)]
 mod tests {
+    use super::super::token_bucket::MockClock;
     use super::*;
-    use limiteron::MockClock;
     use std::sync::Arc;
 
     #[test]

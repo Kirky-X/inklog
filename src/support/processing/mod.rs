@@ -17,6 +17,7 @@ pub mod secret_patterns;
 pub mod secret_scan;
 pub mod target_rate_limiter;
 pub mod template;
+pub(crate) mod token_bucket;
 
 pub use masking::secret_scan_masker;
 pub use masking::{DataMasker, DataMaskerBuilder, MaskMatch, MaskRule, MaskRuleBuilder};
@@ -28,9 +29,9 @@ pub use object_pool::ObjectPool;
 pub use object_pool::{
     ObjectPoolConfig, get_log_record, get_string_buffer, put_log_record, put_string_buffer,
 };
+pub use pipeline::{GlobalRateLimitMiddleware, TargetQuotaMiddleware};
 pub use pipeline::{
-    GlobalRateLimitMiddleware, IdentityFieldsMiddleware, ProcessingPipeline, SanitizeMiddleware,
-    StressRelief, TargetQuotaMiddleware,
+    IdentityFieldsMiddleware, ProcessingPipeline, SanitizeMiddleware, StressRelief,
 };
 pub use rate_limiter::RateLimiter;
 #[cfg(feature = "secret-scan")]

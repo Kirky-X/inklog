@@ -67,14 +67,17 @@ impl SecretPattern {
         &self.replacement
     }
 
-    /// 单趟命中区间迭代器。引擎级错误逐命中跳过不中断其余
-    /// （对齐 `MaskRule::find_matches` 的取舍）。
+    /// 单趟命中区间迭代器。
+    ///
+    /// 引擎级错误以 `Err` 上抛：fancy-regex 在首个错误处终止迭代，其后的
+    /// 命中一并丢失——命中集合不再可信，调用方须 fail-closed（改写路径
+    /// 整体遮蔽）而非把未遮蔽的裸 secret 留在文本里。
     pub(crate) fn find_spans_iter<'a>(
         &'a self,
         text: &'a str,
-    ) -> impl Iterator<Item = (usize, usize)> + 'a {
-        self.pattern.find_iter(text).filter_map(|m| match m {
-            Ok(found) => Some((found.start(), found.end())),
+    ) -> impl Iterator<Item = Result<(usize, usize), fancy_regex::Error>> + 'a {
+        self.pattern.find_iter(text).map(|m| match m {
+            Ok(found) => Ok((found.start(), found.end())),
             Err(e) => {
                 tracing::warn!(
                     pattern = self.name.as_str(),
@@ -82,7 +85,7 @@ impl SecretPattern {
                     "{}",
                     crate::i18n::tr("secret-pattern-scan-match-error")
                 );
-                None
+                Err(e)
             }
         })
     }
@@ -263,7 +266,9 @@ impl SecretPatternRegistry {
     pub fn scan(&self, text: &str) -> Vec<SecretMatch> {
         let mut matches = Vec::new();
         for pattern in &self.patterns {
-            for (start, end) in pattern.find_spans_iter(text) {
+            for span in pattern.find_spans_iter(text) {
+                // 引擎错误：fancy-regex 在首个错误处终止迭代，其后命中不可信
+                let Ok((start, end)) = span else { break };
                 matches.push(SecretMatch {
                     pattern: pattern.name.clone(),
                     start,
