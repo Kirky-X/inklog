@@ -28,7 +28,7 @@ dbnexus = { workspace = true, optional = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
-# serde 必须声明为直接依赖：`#[derive(Serialize)]` 展开时 serde_derive 生成`extern crate serde as _serde
+# serde 必须直接依赖：#[derive(Serialize)] 展开引用 serde::* 路径
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { version = "1.28", default-features = false, features = ["v4"] }
@@ -37,12 +37,12 @@ aes-gcm = { workspace = true }
 base64 = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
-# Layer 0 示例所需：log crate 适配器、channel、自定义正则模式
+# Layer 0 示例所需：log 适配器、channel、自定义正则模式
 log = { workspace = true }
 crossbeam-channel = { workspace = true }
 regex = { workspace = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-# confers 审计桥示例所需（与 inklog 同钉已发布 rc.6；仅 audit feature）
+# confers 审计桥示例所需（仅 audit feature）
 confers = { version = "0.6.0-rc.11", default-features = false, features = ["audit"], optional = true }
 
 [[bin]]
@@ -52,8 +52,7 @@ path = "src/bin/sinks/console.rs"
 [[bin]]
 name = "file"
 path = "src/bin/sinks/file.rs"
-# 示例3 演示 Zstd 压缩；未启用时 cargo 会拒绝运行，避免 compress = true
-# 因缺少压缩后端而静默不压缩、示例却仍打印“Zstd 压缩演示完成”
+# 未启用时 cargo 拒绝运行，避免 compress = true 静默不压缩
 required-features = ["compression"]
 
 [[bin]]
@@ -77,7 +76,6 @@ required-features = ["http"]
 name = "fallback"
 path = "src/bin/infra/fallback.rs"
 
-# 现有 binary（保留）
 [[bin]]
 name = "basic"
 path = "src/bin/core/basic.rs"
@@ -90,7 +88,6 @@ path = "src/bin/core/production.rs"
 name = "all_features"
 path = "src/bin/core/all_features.rs"
 
-# Layer 0 零依赖示例
 [[bin]]
 name = "builder"
 path = "src/bin/core/builder.rs"

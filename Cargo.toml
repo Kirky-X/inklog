@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Enterprise-grade Rust logging infrastructure"
 
 [workspace]
@@ -19,12 +23,16 @@ rust-version = "1.97.1"
 authors = ["Kirky-X <Kirky-X@outlook.com>"]
 license = "MIT"
 repository = "https://github.com/Kirky-X/inklog"
+homepage = "https://github.com/Kirky-X/inklog"
+documentation = "https://docs.rs/inklog"
+keywords = ["logging", "log", "structured-logging", "tracing", "observability"]
+categories = ["development-tools::debugging"]
 
 [workspace.dependencies]
-# Shared across workspace crates — all use default-features = false
-async-trait = { version = "0.1", default-features = false, features = [] }
+# 工作区共享依赖，全部 default-features = false
+async-trait = { version = "0.1", default-features = false }
 tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "signal"] }
-tracing = { version = "0.1", default-features = false, features = [] }
+tracing = { version = "0.1", default-features = false }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
@@ -32,15 +40,13 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 base64 = { version = "0.23", default-features = false, features = ["std"] }
 rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
-tempfile = { version = "3.27", default-features = false, features = [] }
+tempfile = { version = "3.27", default-features = false }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf"] }
-# dbnexus 跨仓地板（caret + rc 前缀）：地板是"已承诺兼容的最低版本"承诺面，
-# 允许滞后于实际可用版本；禁 `=` 精确钉（精确钉会迫使底层推进时顶层重发，
-# 并在下游产生双版本同图）
+# dbnexus 跨仓地板：地板是已承诺兼容的最低版本，允许滞后；禁 `=` 精确钉（会迫使底层推进时顶层重发，并在下游产生双版本同图）
 dbnexus = { version = "0.6.0-rc.10", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥（见 [features] 说明），全开必然编译失败
 [package.metadata.docs.rs]
@@ -57,8 +63,7 @@ workspace = true
 [features]
 # i18n/cache 在 default 中；关闭两者时改用内嵌英文文案回退
 default = ["i18n", "cache"]
-# 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + sys-locale 检测。
-# 关闭后 crate::i18n 入口保留（tr/tr_args 回退到内嵌 en 文案表）。
+# 国际化运行时：ICU4X 格式化 + fluent-bundle 翻译 + sys-locale 检测；关闭后 tr/tr_args 回退到内嵌 en 文案
 i18n = ["dep:icu", "dep:writeable", "dep:fluent-bundle", "dep:unic-langid", "dep:sys-locale"]
 # 缓存后端：裁 icu/fluent 依赖树必须同时关闭 i18n 与 cache，否则 ObjectPool 不导出
 cache = ["dep:oxcache"]
@@ -66,8 +71,7 @@ cache = ["dep:oxcache"]
 oxcache-audit = ["dep:oxcache"]
 # mock 导出：不入 default 与生产组合，仅外部测试消费者显式启用
 test-utils = []
-# JSON Schema 导出（schemars）：配置类型 derive JsonSchema + InklogConfig::json_schema
-# 与 SinkMetadata.config_schema 真实填充；cli 隐式启用（generate --schema）。
+# JSON Schema 导出（schemars）：cli 隐式启用（generate --schema）
 schema = ["dep:schemars"]
 # ⚠️ 数据库后端 features 互斥（embedded 与 server-side 不可混合，含 --all-features）
 sqlite = ["dep:dbnexus", "dbnexus/sqlite", "dbnexus/runtime-tokio-rustls", "database"]
@@ -75,21 +79,17 @@ postgres = ["dep:dbnexus", "dbnexus/postgres", "dbnexus/runtime-tokio-rustls", "
 mysql = ["dep:dbnexus", "dbnexus/mysql", "dbnexus/runtime-tokio-rustls", "database"]
 # DuckDB 数据库后端（通过 dbnexus 连接池）
 duckdb = ["dep:dbnexus", "dbnexus/duckdb", "dbnexus/runtime-tokio-rustls", "database"]
-# 内部聚合谓词：任一数据库后端（sqlite/postgres/mysql/duckdb）启用时为真；
-# 供 cfg 谓词收敛使用，本身不引入任何驱动依赖。
+# 内部聚合谓词：任一数据库后端启用时为真（cfg 收敛用），不引入驱动依赖
 database = ["dep:dbnexus"]
 http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob", "schema"]
-# trait-kit lifecycle/observability integration for DbNexusAdapter and InklogModule.
-# Requires at least one database backend feature (sqlite/postgres/mysql/duckdb).
+# trait-kit lifecycle/observability 集成（DbNexusAdapter/InklogModule）；需至少一个数据库后端 feature
 kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit", "trait-kit/observer"]
-# Zstd compression support for rotated log files (optional to avoid zstd-sys
-# symbol conflicts with downstream projects that bundle their own zstd).
+# Zstd 压缩轮转日志（可选：避免与自带 zstd 的下游产生 zstd-sys 符号冲突）
 zstd = ["dep:zstd"]
 # 通用业务指标 registry（CounterVec/GaugeVec/HistogramVec + Prometheus 文本导出）
 metrics-registry = []
-# Deprecated 兼容别名：等价于 `zstd`，保留既有 `--features compression` 用法；
-# 新代码请直接启用 `zstd`。
+# 兼容别名：等价于 `zstd`，保留既有 `--features compression` 用法
 compression = ["zstd"]
 # Gzip compression backend (optional, pure-Rust flate2).
 gzip = ["dep:flate2"]
@@ -99,11 +99,9 @@ parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 fast-masking = ["dep:aho-corasick"]
 # Secret 出站脱敏：值形态正则 + 熵扫描 + 逐模式计数，超限 fail-closed
 secret-scan = []
-# dbnexus AuditStorage 端口适配器（审计事件 → inklog DB sink 落库）。
-# 不含数据库驱动，可与任一后端 feature 组合。
+# dbnexus AuditStorage 端口适配器（审计事件 → DB sink 落库）；不含驱动，可与任一后端组合
 dbnexus-audit = ["dep:dbnexus", "dbnexus/audit"]
-# confers 配置集成——InklogConfig 经 confers 加载 + watch 热更新
-# 级别/轮转参数（confers 依赖层级合法：inklog → confers）。
+# confers 配置集成：InklogConfig 经 confers 加载 + watch 热更新级别/轮转参数
 config-confers = ["confers/toml", "confers/watch"]
 # confers 审计桥——实现 confers AuditSink 端口（audit 事件 → inklog 结构化 sink 落盘）
 confers-audit = ["confers/audit"]
@@ -113,10 +111,7 @@ kms = ["confers/encryption", "confers/cloud-kms"]
 otel = ["dep:opentelemetry"]
 # 网络转发 Sink——TCP（可 TLS，rustls 客户端）+ UDP，断线缓冲重连
 net-sink = ["dep:rustls"]
-# 允许在发布构建中禁用 TLS 证书校验（danger_accept_invalid_certs）。
-# 默认关闭：跳过证书校验后链路只加密不认证，中间人可完整读取并篡改外发
-# 日志，客户端侧无任何报错或指标信号。调试构建（debug_assertions）不
-# 需要本特性即可使用该开关。
+# 允许发布构建禁用 TLS 证书校验（danger_accept_invalid_certs）；默认关闭（跳过后只加密不认证，中间人可读取篡改外发日志且无信号）
 insecure-tls = []
 # OTLP 日志导出 MVP（OTLP/HTTP JSON，手写传输，无新增依赖）
 otlp = []
@@ -127,9 +122,8 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "registry", "env-filter"] }
 crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
-# supports-colors feature 不启用：inklog 自身经 is-terminal 检测 TTY，
-# 且 owo-colors 4.4 的该 feature 会同时拉入 supports-color 2 与 3 两个版本
-owo-colors = { version = "4.4", default-features = false, features = [] }
+# supports-colors 不启用：inklog 经 is-terminal 检测 TTY，且该 feature 会同时拉入 supports-color 2 与 3
+owo-colors = { version = "4.4", default-features = false }
 regex = { workspace = true }
 fancy-regex = { workspace = true }
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"], optional = true }
@@ -139,38 +133,38 @@ schemars = { version = "1.2", default-features = false, features = ["derive", "s
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 trait-kit = { version = "0.5.0-rc.10", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
 confers = { version = "0.6.0-rc.11", default-features = false, features = ["toml", "watch"] }
-thiserror = { version = "2.0", default-features = false, features = [] }
+thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["json", "tokio", "http1"], optional = true }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
-is-terminal = { version = "0.4", default-features = false, features = [] }
-dirs = { version = "7.0", default-features = false, features = [] }
-parking_lot = { version = "0.12", default-features = false, features = [] }
+is-terminal = { version = "0.4", default-features = false }
+dirs = { version = "7.0", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
 # oxcache 放宽为 caret（rc.11 起）：vecboost 线需 rc.10，精确 pin 与其区间无交集导致下游解析冲突；rc.8 与 rc.10 已实测兼容（inklog 消费面无变更）
 oxcache = { version = "0.5.0-rc.9", default-features = false, features = ["memory", "serialization", "audit"], optional = true }
-zstd = { version = "0.14", default-features = false, features = [], optional = true }
+zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
 parquet = { version = "60.0", default-features = false, features = ["async", "arrow"], optional = true }
-arrow-array = { version = "60.0", default-features = false, features = [], optional = true }
-arrow-schema = { version = "60.0", default-features = false, features = [], optional = true }
+arrow-array = { version = "60.0", default-features = false, optional = true }
+arrow-schema = { version = "60.0", default-features = false, optional = true }
 dbnexus = { workspace = true, optional = true }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
-sha2 = { version = "0.11", default-features = false, features = [] }
+sha2 = { version = "0.11", default-features = false }
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 clap = { version = "4.6", default-features = false, features = ["derive", "env", "std", "help", "usage", "error-context", "suggestions"], optional = true }
-glob = { version = "0.3", default-features = false, features = [], optional = true }
+glob = { version = "0.3", default-features = false, optional = true }
 ipnet = { version = "2.12", default-features = false, features = ["std"] }
-subtle = { version = "2.6", default-features = false, features = [] }
+subtle = { version = "2.6", default-features = false }
 icu = { version = "2.3", default-features = false, features = ["compiled_data"], optional = true }
-writeable = { version = "0.6", default-features = false, features = [], optional = true }
-fluent-bundle = { version = "0.16", default-features = false, features = [], optional = true }
-unic-langid = { version = "0.9", default-features = false, features = [], optional = true }
-sys-locale = { version = "0.3", default-features = false, features = [], optional = true }
+writeable = { version = "0.6", default-features = false, optional = true }
+fluent-bundle = { version = "0.16", default-features = false, optional = true }
+unic-langid = { version = "0.9", default-features = false, optional = true }
+sys-locale = { version = "0.3", default-features = false, optional = true }
 aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 
@@ -178,17 +172,16 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["async_tokio"] }
-serial_test = { version = "4.0", default-features = false, features = [] }
-axum = { version = "0.8", default-features = false, features = [] }
+serial_test = { version = "4.0", default-features = false }
+axum = { version = "0.8", default-features = false }
 log = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-filetime = { version = "0.2", default-features = false, features = [] }
+filetime = { version = "0.2", default-features = false }
 bytes = { version = "1", default-features = false, features = ["std"] }
-assert_cmd = { version = "2.2", default-features = false, features = [] }
-predicates = { version = "3.1", default-features = false, features = [] }
-# 仅测试/基准目标使用（src/ 零引用）：置于 dev-dependencies，
-# 不进入库消费者的依赖图。
-rayon = { version = "1.12", default-features = false, features = [] }
+assert_cmd = { version = "2.2", default-features = false }
+predicates = { version = "3.1", default-features = false }
+# 仅测试/基准目标使用（src/ 零引用），不进入库消费者的依赖图
+rayon = { version = "1.12", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["executor"] }
 ctor = { version = "1.0.13", default-features = false, features = ["std", "proc_macro"] }
 
@@ -199,20 +192,18 @@ nix = { version = "0.31", default-features = false, features = ["fs"] }
 [[test]]
 name = "e2e_advanced"
 path = "tests/e2e/e2e_advanced.rs"
-# 19 个模块中仅 compression_e2e 有 #[cfg(feature = "compression")] 门，
-# 其余用默认 feature API，无需 required-features，任意组合可编译运行
+# 仅 compression_e2e 有 feature 门，其余用默认 feature API，无需 required-features
 
 [[test]]
 name = "integration"
 path = "tests/integration/mod.rs"
-# 子目录依赖：DatabaseSink 用例需 db 驱动；写入落库用例需 test-utils；http/ 需 http
+# DatabaseSink 用例需 db 驱动；写入落库需 test-utils；http/ 需 http
 required-features = ["sqlite", "http", "cli", "compression", "parquet", "test-utils"]
 
 [[test]]
 name = "combinations"
 path = "tests/combinations/mod.rs"
-# complex_features/multi_sink_fallback 使用 DatabaseSink（db 后端需求）；
-# 加密/掩码为默认 feature API
+# complex_features/multi_sink_fallback 使用 DatabaseSink（db 后端需求）
 required-features = ["sqlite"]
 
 [[test]]
@@ -229,8 +220,7 @@ harness = false
 name = "rc4_pipeline_bench"
 harness = false
 
-# secret-scan 出站门热路径基准（注册表扫描/门替换/全 masker 出站路径），
-# 仅在 secret-scan feature 下编译
+# secret-scan 出站门热路径基准，仅 secret-scan 下编译
 [[bench]]
 name = "secret_scan_bench"
 harness = false
@@ -250,4 +240,3 @@ strip = true
 [profile.bench]
 inherits = "release"
 
-# 本地开发联调 [patch] 占位（当前无）
