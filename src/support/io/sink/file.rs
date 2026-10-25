@@ -532,7 +532,7 @@ impl FileSink {
         }
 
         // 年龄清理：独立于大小分支执行——此前藏在 else 里，max_total_size
-        // 不可解析时过期文件永远不会被清理（审计修复）
+        // 不可解析时过期文件永远不会被清理
         for (path, modified) in candidates.iter().take(deletable) {
             let modified_utc: DateTime<Utc> = (*modified).into();
             if modified_utc < cutoff_date

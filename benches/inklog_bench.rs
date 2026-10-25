@@ -784,7 +784,7 @@ fn bench_sampling_stress_overhead(c: &mut Criterion) {
     group.finish();
 }
 
-/// per-target 分级限流的查找路径开销（R7）。
+/// per-target 分级限流的查找路径开销。
 ///
 /// `governs` 是纯前缀查找（规则按前缀长度降序 + 无分配 ASCII 大小写不敏感
 /// 比较）；`evaluate` 额外含组桶决策（令牌扣减 + 时间补充，组桶内核为

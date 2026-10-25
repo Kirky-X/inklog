@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-//! per-target 分级限流（R7）配置链端到端测试：
+//! per-target 分级限流配置链端到端测试：
 //! TOML `[rate_limit.rules]` → 校验 → manager 接线 → 压力下按组裁决。
 
 use inklog::{InklogConfig, InklogError, LoggerManager};

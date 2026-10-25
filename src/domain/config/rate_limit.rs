@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-//! 按 target 前缀分组的限流配额配置（R7：per-target 分级限流）。
+//! 按 target 前缀分组的限流配额配置（per-target 分级限流）。
 //!
 //! 与 `performance.rate_limit`（订阅器级全局令牌桶）的关系：命中
 //! `rules` 前缀的 target 由其配额组独立裁决，未命中的 target 维持

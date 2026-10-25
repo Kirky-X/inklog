@@ -269,12 +269,17 @@ fn parse_config_size(size_str: &str) -> Result<u64, String> {
     };
 
     let num_str = &size_str[..size_str.len() - suffix_len];
-    let num: u64 = num_str
-        .parse()
-        .map_err(|_| format!("\"{num_str}\" is not a valid size number"))?;
+    let num: u64 = num_str.parse().map_err(|_| {
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("num", num_str);
+        crate::i18n::tr_args("config-invalid_size_number", args)
+    })?;
 
-    num.checked_mul(multiplier)
-        .ok_or_else(|| format!("\"{size_str}\" overflows u64"))
+    num.checked_mul(multiplier).ok_or_else(|| {
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("num", num_str);
+        crate::i18n::tr_args("config-invalid_size_number", args)
+    })
 }
 
 #[cfg(test)]

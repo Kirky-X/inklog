@@ -642,7 +642,14 @@ mod tests {
         // 覆盖行 139：path.canonicalize 失败时回退到 path.to_path_buf
         // 构造一个存在的 base_dir，但 path 本身不存在（canonicalize 失败）
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-        let base_dir = temp_dir.path().to_path_buf();
+        // base_dir 取 canonicalize 后的形态：校验器内部对 base_dir 走 canonicalize，
+        // 而 path 的 canonicalize 失败时回退原始路径。若两侧形态不一致
+        // （macOS 的 TMPDIR 位于 /var → /private/var 符号链接之后），
+        // starts_with 比较会失配，此用例只在无符号链接的路径下成立。
+        let base_dir = temp_dir
+            .path()
+            .canonicalize()
+            .expect("failed to canonicalize temp dir");
         // path 不存在 → canonicalize 失败 → 走 Err 分支使用 path.to_path_buf
         // 注意：path 不含 ".." 且不在 deny_components 中，因此能通过前面的检查
         let nonexistent_path = base_dir.join("nonexistent_subdir").join("app.log");

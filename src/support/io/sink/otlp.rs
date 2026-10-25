@@ -293,8 +293,11 @@ fn parse_endpoint(endpoint: &str) -> Result<(Scheme, String, u16, String), Inklo
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) => (
             h.to_string(),
-            p.parse::<u16>()
-                .map_err(|_| InklogError::ConfigError(format!("bad OTLP port in '{endpoint}'")))?,
+            p.parse::<u16>().map_err(|_| {
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("endpoint", endpoint);
+                InklogError::ConfigError(crate::i18n::tr_args("sink-otlp_invalid_port", args))
+            })?,
         ),
         None => (authority.to_string(), default_port),
     };
@@ -452,18 +455,16 @@ impl OtlpSink {
 impl LogSink for OtlpSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
         let should_send = {
-            let mut batch = self
-                .batch
-                .lock()
-                .map_err(|_| InklogError::ConfigError("otlp batch poisoned".to_string()))?;
+            let mut batch = self.batch.lock().map_err(|_| {
+                InklogError::ConfigError(crate::i18n::tr("sink-otlp_batch_poisoned"))
+            })?;
             batch.push(self.mask_record(record));
             batch.len() >= self.config.max_batch_size
         };
         if should_send {
-            let mut batch = self
-                .batch
-                .lock()
-                .map_err(|_| InklogError::ConfigError("otlp batch poisoned".to_string()))?;
+            let mut batch = self.batch.lock().map_err(|_| {
+                InklogError::ConfigError(crate::i18n::tr("sink-otlp_batch_poisoned"))
+            })?;
             self.send_now(&mut batch)?;
         }
         Ok(())
@@ -473,7 +474,7 @@ impl LogSink for OtlpSink {
         let mut batch = self
             .batch
             .lock()
-            .map_err(|_| InklogError::ConfigError("otlp batch poisoned".to_string()))?;
+            .map_err(|_| InklogError::ConfigError(crate::i18n::tr("sink-otlp_batch_poisoned")))?;
         self.send_now(&mut batch)
     }
 

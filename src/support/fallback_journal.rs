@@ -2319,7 +2319,7 @@ mod tests {
     }
 
     /// 对端不可达（connect 拒绝）：退避期投递线程不得持锁忙自旋——连续
-    /// push 每笔 <100ms、Drop（shutdown）有限时间返回（安全复审探针 ①）。
+    /// push 每笔 <100ms、Drop（shutdown）有限时间返回。
     #[test]
     fn test_tcp_pusher_unreachable_peer_push_not_blocked_by_backoff() {
         // 绑定后立即丢弃：得到一个必然连接拒绝的新鲜端口
@@ -2378,7 +2378,7 @@ mod tests {
         dropper.join().unwrap();
     }
 
-    /// 对端接受连接但不排空（安全复审探针 ②）：积压远超内核缓冲、投递线程
+    /// 对端接受连接但不排空：积压远超内核缓冲、投递线程
     /// 处于 写满→写超时→弃连→重连 循环时，连续 push 每笔 <100ms——网络 IO
     /// 必须在 state 锁外执行（旧实现投递全程持锁，push 阻塞至积压排空）。
     #[test]

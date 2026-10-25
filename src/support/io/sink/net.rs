@@ -413,7 +413,7 @@ impl LogSink for TcpSink {
         let TcpState { wire, buffer } = &mut *self
             .state
             .lock()
-            .map_err(|_| InklogError::ConfigError("tcp sink state poisoned".to_string()))?;
+            .map_err(|_| InklogError::ConfigError(crate::i18n::tr("sink-tcp_state_poisoned")))?;
 
         // 无连接：尝试建连（退避窗口内跳过，记录进缓冲）
         if wire.is_none() && self.connect_allowed() {

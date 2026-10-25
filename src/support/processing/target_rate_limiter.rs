@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-//! 按 target 前缀分组的配额限流（R7：per-target 分级限流）。
+//! 按 target 前缀分组的配额限流（per-target 分级限流）。
 //!
 //! 与全局 [`RateLimiter`](crate::RateLimiter) 的关系：
 //! 命中前缀规则的 target 由其配额组桶独立裁决（通过后不再进入全局限流），

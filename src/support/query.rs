@@ -188,7 +188,7 @@ mod bomb_guard_tests {
 /// `ENCLOG1\0`
 const ENCRYPTED_MAGIC: &[u8] = b"ENCLOG1\0";
 
-/// 解压输出上限（默认 1 GiB）：压缩炸弹防护（审计 M16b）。
+/// 解压输出上限（默认 1 GiB）：压缩炸弹防护。
 #[cfg(any(feature = "zstd", feature = "gzip"))]
 pub(crate) const DECOMPRESSION_OUTPUT_LIMIT: u64 = 1024 * 1024 * 1024;
 

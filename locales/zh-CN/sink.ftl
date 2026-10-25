@@ -94,7 +94,6 @@ masking-from-rules-duplicate-names = from_rules: 规则名重复会使 detect �
 
 # 配置验证警告
 warn-http_feature_not_compiled = http_server.enabled = true 但未编译 'http' feature；监控服务器不会启动
-warn-rate_limit_feature_not_compiled = 已配置限流但未编译 'limiteron-rate-limit' feature；限流不会生效
 
 # Channel-buffered 文件 Sink 维护（清理线程与轮转）
 sink-channel_buffered_cleanup_failed = ChannelBufferedFileSink 清理失败: { $err }
@@ -145,6 +144,9 @@ sink-db_sender = db sender 必然在位
 sink-db_sender_present_when_db_enabled = db_enabled 时 db sender 必然在位
 sink-worker_handles_lock_poisoned = worker 句柄锁已中毒：{ $err }
 manager-level_state_mutex_poisoned = level_state 互斥锁已中毒
+sink-console_lock_poisoned = 控制台 sink 锁已中毒
+sink-tcp_state_poisoned = TCP sink 状态锁已中毒
+sink-otlp_batch_poisoned = OTLP 批量缓冲锁已中毒
 sink-high_error_count = 严重：Sink '{ $name }' 连续错误数过高（{ $failures }）
 
 # 掩码 / secret 扫描引擎告警与正则编译不变量
@@ -205,3 +207,6 @@ db-driver_undetectable = 无法从连接池 URL '{ $url }' 判定数据库驱动
 sink-tls_insecure_certs_accepted = 已禁用 TLS 证书校验（danger_accept_invalid_certs）：连接仅加密不认证，中间人可读取并篡改外发日志
 sink-tls_insecure_certs_forbidden = 发布构建不允许禁用 TLS 证书校验：danger_accept_invalid_certs 需要调试构建或显式启用 crate 特性 'insecure-tls'
 sink-parquet_feature_not_enabled = 未启用 parquet 特性：请以 `parquet` 特性重新构建 inklog 以将日志导出为 Parquet
+
+# 网络 Sink 端点配置错误
+sink-otlp_invalid_port = OTLP 端点端口无效: '{ $endpoint }'

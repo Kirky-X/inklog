@@ -635,7 +635,7 @@ impl LoggerManager {
         }
         ops_senders.extend(custom_senders.iter().cloned());
         // 内部故障路径（file.rs 轮转/压缩/加密失败、workers.rs 降级/恢复）
-        // 经全局 hub 复用同一组 ops 通道（审计 M16c 装配点）
+        // 经全局 hub 复用同一组 ops 通道（装配点）
         for sender in &ops_senders {
             crate::support::ops_event::register_ops_channel(sender.clone());
         }
@@ -701,7 +701,7 @@ impl LoggerManager {
             subscriber = subscriber.with_rate_limiter(Arc::new(RateLimiter::new(rate)));
         }
 
-        // per-target 分级限流（R7）：前缀配额组；未配置（空）时不接线，
+        // per-target 分级限流：前缀配额组；未配置（空）时不接线，
         // 全局行为不变。from_config 的硬拒绝与构建期其它配置校验同级
         if !config.rate_limit.is_empty() {
             let limiter = TargetRateLimiter::from_rules(config.rate_limit.rules.clone())?;
@@ -1140,10 +1140,12 @@ impl LoggerManager {
     /// ```
     pub fn set_level(&self, target: Option<&str>, level: &str) -> Result<(), InklogError> {
         if !crate::LogLevel::is_valid_level(level) {
-            return Err(InklogError::ConfigError(format!(
-                "Invalid log level '{}'. Valid levels: {}",
-                level,
-                crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("level", level);
+            args.set("valid", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-invalid_log_level",
+                args,
             )));
         }
         let normalized = level.to_ascii_lowercase();

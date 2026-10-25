@@ -578,7 +578,7 @@ mod tests {
         }
     }
 
-    // per-target 分级限流（R7）：前缀配额组独立裁决，未命中 target 维持
+    // per-target 分级限流：前缀配额组独立裁决，未命中 target 维持
     // 既有全局路径；未接线时整体零介入。
 
     fn target_rules(pairs: &[(&str, u64)]) -> TargetRateLimiter {

@@ -94,7 +94,6 @@ masking-from-rules-duplicate-names = from_rules: duplicate rule names make detec
 
 # Config validation warnings
 warn-http_feature_not_compiled = http_server.enabled = true but the 'http' feature is not compiled in; the monitoring server will not start
-warn-rate_limit_feature_not_compiled = rate limiting is configured but the 'limiteron-rate-limit' feature is not compiled in; rate limiting will not be applied
 
 # Channel-buffered file sink maintenance (cleanup thread & rotation)
 sink-channel_buffered_cleanup_failed = ChannelBufferedFileSink cleanup failed: { $err }
@@ -145,6 +144,9 @@ sink-db_sender = db sender
 sink-db_sender_present_when_db_enabled = db sender present when db_enabled
 sink-worker_handles_lock_poisoned = Worker handles lock poisoned: { $err }
 manager-level_state_mutex_poisoned = level_state mutex poisoned
+sink-console_lock_poisoned = Lock poisoned
+sink-tcp_state_poisoned = tcp sink state poisoned
+sink-otlp_batch_poisoned = otlp batch poisoned
 sink-high_error_count = CRITICAL: Sink '{ $name }' has high error count ({ $failures })
 
 # Masking / secret-scan engine warnings and regex compile invariants
@@ -205,3 +207,6 @@ db-driver_undetectable = Cannot determine database driver from connection pool U
 sink-tls_insecure_certs_accepted = TLS certificate verification is DISABLED (danger_accept_invalid_certs): the connection is encrypted but unauthenticated — a man-in-the-middle can read and tamper with the exported logs
 sink-tls_insecure_certs_forbidden = TLS certificate verification cannot be disabled in a release build: danger_accept_invalid_certs requires a debug build or the 'insecure-tls' crate feature
 sink-parquet_feature_not_enabled = parquet feature not enabled: rebuild inklog with `parquet` feature to export logs as Parquet
+
+# Network sink endpoint configuration errors
+sink-otlp_invalid_port = bad OTLP port in '{ $endpoint }'

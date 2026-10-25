@@ -182,10 +182,11 @@ impl LogSink for ConsoleSink {
             self.write_record(&mut stderr, &masked_record, use_color)
                 .map_err(InklogError::IoError)?;
         } else {
-            let mut writer = self
-                .writer
-                .lock()
-                .map_err(|_| InklogError::IoError(io::Error::other("Lock poisoned")))?;
+            let mut writer = self.writer.lock().map_err(|_| {
+                InklogError::IoError(io::Error::other(crate::i18n::tr(
+                    "sink-console_lock_poisoned",
+                )))
+            })?;
             self.write_record(&mut *writer, &masked_record, use_color)
                 .map_err(InklogError::IoError)?;
         }

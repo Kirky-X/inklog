@@ -198,9 +198,13 @@ impl OxcacheAuditPublisher {
                 .inner
                 .rx
                 .lock()
-                .unwrap_or_else(|e| panic!("audit writer rx lock poisoned: {e:?}"))
+                .unwrap_or_else(|_| {
+                    panic!("{}", crate::i18n::tr("audit-writer-rx-lock-not-poisoned"))
+                })
                 .take()
-                .unwrap_or_else(|| panic!("audit writer rx must be present at startup"));
+                .unwrap_or_else(|| {
+                    panic!("{}", crate::i18n::tr("audit-writer-rx-present-at-startup"))
+                });
             let sink = self.inner.sink.clone();
             let dropped = self.inner.dropped.clone();
             let write_failures = self.inner.write_failures.clone();

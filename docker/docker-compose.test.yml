@@ -12,7 +12,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: inklog-test-postgres
-    # 安全加固（审查报告 MED-002）：禁止提权 + 只读根文件系统
+    # 安全加固：禁止提权 + 只读根文件系统
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -48,7 +48,7 @@ services:
   mysql:
     image: mysql:8.0-oracle
     container_name: inklog-test-mysql
-    # 安全加固（审查报告 MED-002）
+    # 安全加固
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -84,7 +84,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: inklog-test-redis
-    # 安全加固（审查报告 MED-002）
+    # 安全加固
     security_opt:
       - no-new-privileges:true
     read_only: true

@@ -109,7 +109,7 @@ mod tests {
     }
 }
 
-// 内部故障路径的 ops 事件发布（审计 M16c）
+// 内部故障路径的 ops 事件发布
 
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
