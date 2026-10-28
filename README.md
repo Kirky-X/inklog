@@ -89,7 +89,7 @@ inklog 是面向生产环境的日志基础设施：应用代码继续使用 `lo
 <summary>📦 进阶能力清单（对应 <code>src/</code> 模块）</summary>
 
 - **Sink 家族**（`src/support/io/sink/`）：`console`、`file`（轮转/压缩/加密）、`database`（批量/分区/断路器）、`ring_buffered_file`（通道缓冲高吞吐）、`net`（TCP 可 TLS + UDP）、`otlp`、`middleware`、`sampling`、`rate_limit`
-- **处理层**（`src/support/processing/`）：`template` 模板引擎、`masking` 脱敏引擎与规则注册表、`object_pool` LogRecord/字符串对象池
+- **处理层**（`src/support/processing/`）：`template` 模板引擎、`object_pool` LogRecord/字符串对象池；脱敏引擎（`DataMasker`/`MaskRuleRegistry`）由 [trait-kit](https://github.com/Kirky-X/trait-kit) 的 `masking` feature 承载，本仓经 re-export 保持 `inklog::DataMasker` 等路径兼容
 - **可观测性**（`src/support/observability/`）：`Metrics`、`HealthStatus`、`SinkHealthMonitor`、回退状态
 - **校验**（`src/validation/`）：`PathValidator` 路径穿越防护、`LogSanitizer` 日志内容净化
 - **归档防篡改**（`src/support/audit_chain.rs`）：归档 HMAC-SHA256 链，防删除、重排与伪造
