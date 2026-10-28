@@ -1,29 +1,18 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
 //! Processing module - log processing utilities.
+//!
+//! 掩码引擎与 secret-scan 门族已下沉 trait-kit（`trait-kit/masking` feature，
+//! 单一来源供 inklog/limiteron 共用）；本模块 re-export 保持既有公开路径
+//! 与 feature 门控不变。
 
-pub mod masking;
-#[cfg(feature = "fast-masking")]
-pub mod masking_ac;
-pub mod masking_registry;
 pub mod object_pool;
 pub mod pipeline;
 pub mod rate_limiter;
-#[cfg(feature = "secret-scan")]
-pub mod secret_entropy;
-#[cfg(feature = "secret-scan")]
-pub mod secret_patterns;
-#[cfg(feature = "secret-scan")]
-pub mod secret_scan;
 pub mod target_rate_limiter;
 pub mod template;
 pub(crate) mod token_bucket;
 
-pub use masking::secret_scan_masker;
-pub use masking::{DataMasker, DataMaskerBuilder, MaskMatch, MaskRule, MaskRuleBuilder};
-#[cfg(feature = "fast-masking")]
-pub use masking_ac::AcMasker;
-pub use masking_registry::MaskRuleRegistry;
 #[cfg(feature = "cache")]
 pub use object_pool::ObjectPool;
 pub use object_pool::{
@@ -34,12 +23,24 @@ pub use pipeline::{
     IdentityFieldsMiddleware, ProcessingPipeline, SanitizeMiddleware, StressRelief,
 };
 pub use rate_limiter::RateLimiter;
-#[cfg(feature = "secret-scan")]
-pub use secret_entropy::EntropyScanner;
-#[cfg(feature = "secret-scan")]
-pub use secret_patterns::{SecretMatch, SecretPattern, SecretPatternRegistry};
-#[cfg(feature = "secret-scan")]
-pub use secret_scan::SecretScanGate;
 pub use target_rate_limiter::{TargetQuotaVerdict, TargetRateLimiter};
 pub use template::LogTemplate;
 pub use template::OutputFormat;
+pub use trait_kit::masking;
+#[cfg(feature = "fast-masking")]
+pub use trait_kit::masking::AcMasker;
+#[cfg(feature = "secret-scan")]
+pub use trait_kit::masking::EntropyScanner;
+pub use trait_kit::masking::MaskRuleRegistry;
+#[cfg(feature = "secret-scan")]
+pub use trait_kit::masking::SecretScanGate;
+#[cfg(feature = "secret-scan")]
+pub use trait_kit::masking::secret_entropy;
+#[cfg(feature = "secret-scan")]
+pub use trait_kit::masking::secret_patterns;
+#[cfg(feature = "secret-scan")]
+pub use trait_kit::masking::secret_scan;
+pub use trait_kit::masking::{DataMasker, DataMaskerBuilder, secret_scan_masker};
+pub use trait_kit::masking::{MaskMatch, MaskRule, MaskRuleBuilder};
+#[cfg(feature = "secret-scan")]
+pub use trait_kit::masking::{SecretMatch, SecretPattern, SecretPatternRegistry};

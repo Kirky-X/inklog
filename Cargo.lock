@@ -2549,7 +2549,6 @@ name = "inklog"
 version = "0.3.0-rc.11"
 dependencies = [
  "aes-gcm",
- "aho-corasick",
  "anyhow",
  "arrow-array",
  "arrow-schema",
@@ -2567,7 +2566,6 @@ dependencies = [
  "ctor",
  "dbnexus",
  "dirs",
- "fancy-regex",
  "filetime",
  "flate2",
  "fluent-bundle",
@@ -5066,12 +5064,16 @@ dependencies = [
 
 [[package]]
 name = "trait-kit"
-version = "0.5.0-rc.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a15bc3746335eca355dad106884f3f938f66d8ce423f936911465ab4fdec1f"
+version = "0.5.0-rc.11"
 dependencies = [
+ "aho-corasick",
+ "fancy-regex",
  "fluent-bundle",
  "log",
+ "regex",
+ "serde_json",
+ "toml",
+ "tracing",
  "unic-langid",
 ]
 

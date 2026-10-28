@@ -45,7 +45,6 @@ log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
-fancy-regex = { version = "0.19", default-features = false, features = ["std", "perf"] }
 # dbnexus 跨仓地板：地板是已承诺兼容的最低版本，允许滞后；禁 `=` 精确钉（会迫使底层推进时顶层重发，并在下游产生双版本同图）
 dbnexus = { version = "0.6.0-rc.10", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥（见 [features] 说明），全开必然编译失败
@@ -84,7 +83,7 @@ database = ["dep:dbnexus"]
 http = ["dep:axum", "dep:axum-server"]
 cli = ["dep:clap", "dep:glob", "schema"]
 # trait-kit lifecycle/observability 集成（DbNexusAdapter/InklogModule）；需至少一个数据库后端 feature
-kit = ["dep:trait-kit", "dbnexus/kit", "oxcache/kit", "trait-kit/observer"]
+kit = ["trait-kit/async", "trait-kit/lifecycle", "trait-kit/health", "trait-kit/scope", "trait-kit/observer", "dbnexus/kit", "oxcache/kit"]
 # Zstd 压缩轮转日志（可选：避免与自带 zstd 的下游产生 zstd-sys 符号冲突）
 zstd = ["dep:zstd"]
 # 通用业务指标 registry（CounterVec/GaugeVec/HistogramVec + Prometheus 文本导出）
@@ -96,7 +95,9 @@ gzip = ["dep:flate2"]
 # Parquet/Arrow export support for database sink archival.
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
 # Aho-Corasick multi-pattern masking acceleration.
-fast-masking = ["dep:aho-corasick"]
+# Deprecated no-op 别名：Aho-Corasick 加速自 rc.12 起随 trait-kit/masking 常载，
+# 保留 feature 名为兼容（docs.rs 特性表与既有 --features 用法不受影响）
+fast-masking = []
 # Secret 出站脱敏：值形态正则 + 熵扫描 + 逐模式计数，超限 fail-closed
 secret-scan = []
 # dbnexus AuditStorage 端口适配器（审计事件 → DB sink 落库）；不含驱动，可与任一后端组合
@@ -125,13 +126,13 @@ tokio = { workspace = true }
 # supports-colors 不启用：inklog 经 is-terminal 检测 TTY，且该 feature 会同时拉入 supports-color 2 与 3
 owo-colors = { version = "4.4", default-features = false }
 regex = { workspace = true }
-fancy-regex = { workspace = true }
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
-trait-kit = { version = "0.5.0-rc.10", default-features = false, features = ["async", "lifecycle", "health", "scope"], optional = true }
+# 掩码引擎宿主（trait-kit/masking）：inklog::DataMasker 等路径经 re-export 保持兼容
+trait-kit = { version = "0.5.0-rc.11", default-features = false, features = ["masking"] }
 confers = { version = "0.6.0-rc.11", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
@@ -165,7 +166,6 @@ writeable = { version = "0.6", default-features = false, optional = true }
 fluent-bundle = { version = "0.16", default-features = false, optional = true }
 unic-langid = { version = "0.9", default-features = false, optional = true }
 sys-locale = { version = "0.3", default-features = false, optional = true }
-aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 
 [dev-dependencies]
