@@ -208,8 +208,11 @@ fn https_post_json(
     // CR/LF 注入防护：host/path 直接内插进原始请求头，出现换行控制符
     // 即可注入额外头部/拆分请求（http 与 https 两条路径同一守卫）
     if host.contains(['\r', '\n']) || path.contains(['\r', '\n']) {
-        return Err(InklogError::ConfigError(format!(
-            "OTLP endpoint contains CR/LF in host or path: '{endpoint}'"
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("endpoint", endpoint);
+        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+            "sink-otlp_crlf_in_host_or_path",
+            args,
         )));
     }
     let addr = format!("{host}:{port}");

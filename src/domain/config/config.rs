@@ -911,7 +911,7 @@ impl InklogConfig {
             && crate::domain::config::database::dsn_has_redacted_credential(&db.url)
         {
             return Err(InklogError::ConfigError(
-                crate::domain::config::database::REDACTED_CREDENTIAL_ERROR.to_string(),
+                crate::domain::config::database::redacted_credential_error(),
             ));
         }
 

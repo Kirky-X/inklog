@@ -295,8 +295,9 @@ const CREDENTIAL_KEYS: &[&str] = &[
 const REDACTED_CREDENTIAL_MARKERS: &[&str] = &[REDACTED_CREDENTIAL, "REDACTED", "xxxxx"];
 
 /// 口令位已是脱敏占位符时的错误文案（sink 校验与配置校验共用）。
-pub(crate) const REDACTED_CREDENTIAL_ERROR: &str =
-    "database_sink.url password is a redaction placeholder; the real password is missing";
+pub(crate) fn redacted_credential_error() -> String {
+    crate::i18n::tr("config-database_sink_url_redacted_password")
+}
 
 /// 遮蔽 DSN 中的口令与凭据取值。
 ///
@@ -646,7 +647,7 @@ impl DatabaseSinkConfig {
             );
         }
         if dsn_has_redacted_credential(&self.url) {
-            return Err(REDACTED_CREDENTIAL_ERROR.to_string());
+            return Err(redacted_credential_error());
         }
         if self.driver == DatabaseDriver::SQLite {
             if self.pool_size != 1 {

@@ -29,9 +29,6 @@ use crate::support::io::sink::LogSink;
 /// 即过载丢弃——过载以显性丢弃计数呈现，绝不反压缓存操作。
 pub const BRIDGE_CHANNEL_CAPACITY: usize = 1024;
 
-/// 审计事件的日志消息文案（本地静态字面量，不依赖 oxcache 的 i18n 资源）。
-const AUDIT_EVENT_MESSAGE: &str = "cache audit event";
-
 /// oxcache 审计事件 → inklog 结构化日志发布器。
 ///
 /// # Example
@@ -128,7 +125,8 @@ impl OxcacheAuditPublisher {
         let mut record = LogRecord::new(
             level,
             "oxcache::audit".to_string(),
-            AUDIT_EVENT_MESSAGE.to_string(),
+            // 消息文案走 inklog 自身 i18n 目录（不依赖 oxcache 的资源）
+            crate::i18n::tr("audit-cache-event"),
         );
         record.fields.insert(
             "action".to_string(),

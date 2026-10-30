@@ -182,6 +182,7 @@ template-unclosed_placeholder = template contains an unclosed placeholder; it is
 audit-serialize-invariant = AuditEvent serialization must not fail: all variant payloads are serializable basic types
 audit-writer-rx-lock-not-poisoned = writer receiver lock is not poisoned (no panic point in the critical section)
 audit-writer-rx-present-at-startup = writer receiver must be present on first startup
+audit-cache-event = cache audit event
 kit-observer-module_build_failed = inklog build observer: module build failed
 
 # Runtime log messages: sink worker lifecycle and file sink operations
@@ -210,3 +211,4 @@ sink-parquet_feature_not_enabled = parquet feature not enabled: rebuild inklog w
 
 # Network sink endpoint configuration errors
 sink-otlp_invalid_port = bad OTLP port in '{ $endpoint }'
+sink-otlp_crlf_in_host_or_path = OTLP endpoint contains CR/LF in host or path: '{ $endpoint }'

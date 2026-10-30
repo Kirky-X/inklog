@@ -13,6 +13,7 @@ config-invalid_log_level = 无效的日志级别 '{ $level }'。有效级别: { 
 config-file_path_empty = 启用文件 sink 时 file_sink.path 不能为空
 config-file_batch_size_zero = file_sink.batch_size 必须 > 0
 config-http_port_zero = 启用时 http_server.port 不能为 0
+config-database_sink_url_redacted_password = database_sink.url 的口令是脱敏占位符，真实口令缺失
 
 # 环境变量覆盖警告
 config-env_invalid_level = 无效的 INKLOG_GLOBAL_LEVEL '{ $val }'，保留当前值 '{ $current }'

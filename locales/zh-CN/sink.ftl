@@ -182,6 +182,7 @@ template-unclosed_placeholder = 模板含未闭合的占位符；将按字面文
 audit-serialize-invariant = AuditEvent 序列化不应失败：变体载荷均为可序列化基本类型
 audit-writer-rx-lock-not-poisoned = writer 接收端锁不会中毒（临界区无 panic 点）
 audit-writer-rx-present-at-startup = writer 首次启动时接收端必然在位
+audit-cache-event = 缓存审计事件
 kit-observer-module_build_failed = inklog 构建观察者：模块构建失败
 
 # 运行期日志消息：sink worker 生命周期与文件 sink 操作
@@ -210,3 +211,4 @@ sink-parquet_feature_not_enabled = 未启用 parquet 特性：请以 `parquet` �
 
 # 网络 Sink 端点配置错误
 sink-otlp_invalid_port = OTLP 端点端口无效: '{ $endpoint }'
+sink-otlp_crlf_in_host_or_path = OTLP 端点的 host 或 path 含 CR/LF: '{ $endpoint }'

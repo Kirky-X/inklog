@@ -13,6 +13,7 @@ config-invalid_log_level = Invalid log level '{ $level }'. Valid levels: { $vali
 config-file_path_empty = file_sink.path must not be empty when file sink is enabled
 config-file_batch_size_zero = file_sink.batch_size must be > 0
 config-http_port_zero = http_server.port must not be 0 when enabled
+config-database_sink_url_redacted_password = database_sink.url password is a redaction placeholder; the real password is missing
 
 # Environment override warnings
 config-env_invalid_level = Invalid INKLOG_GLOBAL_LEVEL '{ $val }', keeping current value '{ $current }'
