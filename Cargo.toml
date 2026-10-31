@@ -46,7 +46,7 @@ crossbeam-channel = { version = "0.5", default-features = false, features = ["st
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 # dbnexus 跨仓地板：地板是已承诺兼容的最低版本，允许滞后；禁 `=` 精确钉（会迫使底层推进时顶层重发，并在下游产生双版本同图）
-dbnexus = { version = "0.6.0-rc.10", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+dbnexus = { version = "0.6.0-rc.11", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥（见 [features] 说明），全开必然编译失败
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "zstd", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "confers-audit", "config-confers", "otel"]
@@ -132,8 +132,8 @@ serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 # 掩码引擎宿主（trait-kit/masking）：inklog::DataMasker 等路径经 re-export 保持兼容
-trait-kit = { version = "0.5.0-rc.11", default-features = false, features = ["masking"] }
-confers = { version = "0.6.0-rc.11", default-features = false, features = ["toml", "watch"] }
+trait-kit = { version = "0.5.0-rc.12", default-features = false, features = ["masking"] }
+confers = { version = "0.6.0-rc.12", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -144,7 +144,7 @@ is-terminal = { version = "0.4", default-features = false }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
 # oxcache 放宽为 caret（rc.11 起）：vecboost 线需 rc.10，精确 pin 与其区间无交集导致下游解析冲突；rc.8 与 rc.10 已实测兼容（inklog 消费面无变更）
-oxcache = { version = "0.5.0-rc.9", default-features = false, features = ["memory", "serialization", "audit"], optional = true }
+oxcache = { version = "0.5.0-rc.12", default-features = false, features = ["memory", "serialization", "audit"], optional = true }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
