@@ -142,8 +142,8 @@ axum = { version = "0.8", default-features = false, features = ["json", "tokio",
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
 is-terminal = { version = "0.4", default-features = false }
 dirs = { version = "7.0", default-features = false }
-parking_lot = { version = "0.12", default-features = false }
-# oxcache 放宽为 caret（rc.11 起）：vecboost 线需 rc.10，精确 pin 与其区间无交集导致下游解析冲突；rc.8 与 rc.10 已实测兼容（inklog 消费面无变更）
+parking_lot = { version = "0.13", default-features = false }
+# oxcache 放宽为 caret：精确 pin 会与下游区间无交集导致解析冲突；rc.8/rc.10/rc.12 逐级实测兼容（inklog 消费面无变更），地板 rc.12 与 dbnexus rc.11 拉入版对齐避免双版本同图
 oxcache = { version = "0.5.0-rc.12", default-features = false, features = ["memory", "serialization", "audit"], optional = true }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }

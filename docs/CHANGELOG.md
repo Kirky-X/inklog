@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 依赖地板对齐（registry 已发布版本）：`dbnexus` 0.6.0-rc.11、`trait-kit`/`confers` 0.6.0-rc.12 / 0.5.0-rc.12、`oxcache` 0.5.0-rc.12、`parking_lot` 0.13（与 dbnexus rc.11 拉入版对齐，避免双版本同图）；examples 的 `confers` 钉版同步 rc.12。
 - 限流能力自持：新增仓内令牌桶（`support/processing/token_bucket.rs`，容量 = 速率、每秒补充速率个令牌），订阅者级限流（`performance.rate_limit` / `rate_limit.rules`）在默认构建下即生效，不再随 feature 关闭。决策点为同步 O(1)，不再经 `futures::executor::block_on` 桥接异步判定（原实现把同步阻塞留在 async 写路径上，每条日志阻塞一次）。
 - 移除 `limiteron-rate-limit` feature 与对 limiteron 的依赖：inklog 对 limiteron 依赖归零，公开 API 不含任何第三方限流 trait；sink 级限流扩展统一走 inklog 自有的 `SinkRateLimit` 端口。
 

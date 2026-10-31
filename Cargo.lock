@@ -2570,7 +2570,7 @@ dependencies = [
  "opentelemetry",
  "owo-colors",
  "oxcache",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "parquet",
  "pbkdf2",
  "predicates",

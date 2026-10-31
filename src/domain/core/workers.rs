@@ -1040,6 +1040,31 @@ impl LoggerManager {
 mod tests {
     use super::*;
 
+    /// 广播 shutdown：逐通道限时投递，超时（通道满/接收端失联）不视为失败。
+    fn broadcast_shutdown(shutdown_txs: &[crossbeam_channel::Sender<()>]) {
+        for tx in shutdown_txs {
+            let _ = tx.send_timeout((), Duration::from_secs(2));
+        }
+    }
+
+    /// 限时 join 全部 worker；超时未终止返回 false（死锁回归信号），
+    /// 逐个 abort 兜底避免泄漏 worker 拖垮后续测试。
+    fn join_all_with_deadline(handles: Vec<tokio::task::JoinHandle<()>>) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut all_finished = true;
+        for handle in handles {
+            while !handle.is_finished() {
+                if Instant::now() > deadline {
+                    all_finished = false;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            handle.abort();
+        }
+        all_finished
+    }
+
     // should_auto_recover
 
     #[test]
@@ -1336,21 +1361,8 @@ mod tests {
         drop(console_tx);
 
         // 广播 shutdown 并等待所有 worker 终止；限时未结束即视为死锁回归
-        for tx in &shutdown_txs {
-            let _ = tx.send_timeout((), Duration::from_secs(2));
-        }
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut all_finished = true;
-        for handle in handles {
-            while !handle.is_finished() {
-                if Instant::now() > deadline {
-                    all_finished = false;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            handle.abort();
-        }
+        broadcast_shutdown(&shutdown_txs);
+        let all_finished = join_all_with_deadline(handles);
         assert!(all_finished, "workers must terminate without deadlock");
         assert_eq!(metrics.sink_errors(), 0, "console writes must not fail");
     }
@@ -1465,21 +1477,8 @@ mod tests {
         );
 
         // 3) shutdown 语义不变：降级模式下广播后所有 worker 均终止
-        for tx in &shutdown_txs {
-            let _ = tx.send_timeout((), Duration::from_secs(2));
-        }
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut all_finished = true;
-        for handle in handles {
-            while !handle.is_finished() {
-                if Instant::now() > deadline {
-                    all_finished = false;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            handle.abort();
-        }
+        broadcast_shutdown(&shutdown_txs);
+        let all_finished = join_all_with_deadline(handles);
         assert!(
             all_finished,
             "workers must terminate after shutdown even in degraded retry mode"
@@ -1641,21 +1640,8 @@ mod tests {
         drop(error_messages);
 
         // 3) shutdown 语义不变
-        for tx in &shutdown_txs {
-            let _ = tx.send_timeout((), Duration::from_secs(2));
-        }
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut all_finished = true;
-        for handle in handles {
-            while !handle.is_finished() {
-                if Instant::now() > deadline {
-                    all_finished = false;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            handle.abort();
-        }
+        broadcast_shutdown(&shutdown_txs);
+        let all_finished = join_all_with_deadline(handles);
         assert!(all_finished, "workers must terminate after shutdown");
     }
 
@@ -1855,27 +1841,14 @@ mod tests {
 
         // 6) shutdown 排水（db_tx 存活 → 走 shutdown 分支而非 Disconnected）：
         // drain 末尾对 sink 调 shutdown
-        for tx in &shutdown_txs {
-            let _ = tx.send_timeout((), Duration::from_secs(2));
-        }
+        broadcast_shutdown(&shutdown_txs);
         assert!(
             wait_until(Instant::now() + Duration::from_secs(10), || {
                 counters.shutdowns.load(Ordering::SeqCst) >= 1
             }),
             "drain must shut the recovered sink down"
         );
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut all_finished = true;
-        for handle in handles {
-            while !handle.is_finished() {
-                if Instant::now() > deadline {
-                    all_finished = false;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            handle.abort();
-        }
+        let all_finished = join_all_with_deadline(handles);
         assert!(all_finished, "workers must terminate after shutdown");
     }
 
@@ -1898,7 +1871,7 @@ mod tests {
                 let _ = self.entered_tx.send(());
                 if self.gate_armed.swap(0, Ordering::SeqCst) == 1 {
                     // 闸门只拦第一次写：测试先制造"写中 + 通道有余量"的窗口
-                    let _ = self.release_rx.recv_timeout(Duration::from_secs(30));
+                    let _ = self.release_rx.recv_timeout(Duration::from_secs(5));
                 }
                 self.counters.writes.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -1999,9 +1972,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("worker must enter first write");
         custom_tx.send(record(2)).expect("send pending record");
-        for tx in &shutdown_txs {
-            let _ = tx.send_timeout((), Duration::from_secs(2));
-        }
+        broadcast_shutdown(&shutdown_txs);
         release_tx.send(()).expect("release gate");
 
         // 排水完成：两条记录都写入，且 drain 末尾 flush + shutdown 各至少一次
@@ -2016,18 +1987,7 @@ mod tests {
             counters.flushes.load(Ordering::SeqCst),
             counters.shutdowns.load(Ordering::SeqCst)
         );
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut all_finished = true;
-        for handle in handles {
-            while !handle.is_finished() {
-                if Instant::now() > deadline {
-                    all_finished = false;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            handle.abort();
-        }
+        let all_finished = join_all_with_deadline(handles);
         assert!(all_finished, "workers must terminate after shutdown");
     }
 
@@ -2159,21 +2119,8 @@ mod tests {
             "recovered sink must write records"
         );
 
-        for tx in &shutdown_txs {
-            let _ = tx.send_timeout((), Duration::from_secs(2));
-        }
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut all_finished = true;
-        for handle in handles {
-            while !handle.is_finished() {
-                if Instant::now() > deadline {
-                    all_finished = false;
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            handle.abort();
-        }
+        broadcast_shutdown(&shutdown_txs);
+        let all_finished = join_all_with_deadline(handles);
         assert!(all_finished, "workers must terminate after shutdown");
     }
 
