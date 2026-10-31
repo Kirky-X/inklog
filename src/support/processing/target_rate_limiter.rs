@@ -11,7 +11,7 @@
 //! 典型 <8 条，量级在 100ns 以内（benches/inklog_bench.rs 的
 //! `target_rate_limiter_lookup` 组持续锁定该基线）。
 //!
-//! 组桶算法内核单源于 limiteron [`TokenBucket`]（容量 = 速率）。规则
+//! 组桶算法内核单源于仓内令牌桶（容量 = 速率）。规则
 //! 表 → 组的映射保留 inklog 无分配前缀索引（D6 降级路径）：limiteron
 //! `RuleMatcher` 的 `RequestContext` 为 HTTP 形态（user_id/ip/headers 等），
 //! 逐次构造含堆分配，与 <100ns 无分配基线冲突；「自定义 target 提取器」

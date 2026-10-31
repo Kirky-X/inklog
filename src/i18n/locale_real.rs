@@ -832,7 +832,7 @@ mod tests {
         std::fs::write(zh_dir.join("extra.ftl"), "extra-greeting = 你好\n")
             .expect("write valid ftl");
 
-        let (resources, lang_ids) = load_resources_from_dir(&dir.path());
+        let (resources, lang_ids) = load_resources_from_dir(dir.path());
 
         assert!(
             !lang_ids.contains_key("en"),

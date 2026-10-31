@@ -108,7 +108,7 @@
 //!
 //! ## oxcache 审计桥（feature `oxcache-audit`）
 //!
-//! 启用 `oxcache-audit` 后，[`integrations::OxcacheAuditPublisher`] 实现
+//! 启用 `oxcache-audit` 后，`integrations::OxcacheAuditPublisher` 实现
 //! oxcache 的 `AuditEventPublisher` 端口，把缓存审计事件转换为 inklog
 //! 结构化日志，经有界通道交由单一 writer task 写入注入的 sink：
 //!

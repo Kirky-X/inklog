@@ -11,11 +11,10 @@
 //! 返回 `true` 表示预算允许本次写入；写入结果经 [`SinkRateLimit::report`]
 //! 回报，供预算回收或上层熔断。
 //!
-//! 默认路径不依赖 limiteron：突发配额内核由仓内 [`BurstLimiter`] 承担
-//! （无时钟、无补充），与 limiteron `TokenBucketLimiter::new(capacity, 0)`
-//! 的纯预算语义等价。需要 limiteron 原生限流器（速率补充/按目标分桶）时
-//! 启用 `limiteron-rate-limit` feature，经 [`RateLimitedSink::with_limiter`]
-//! 注入。
+//! 突发配额内核由仓内 [`BurstLimiter`] 承担（无时钟、无补充）；
+//! 速率补充/按目标分组的限流经 [`crate::RateLimiter`] /
+//! [`crate::TargetRateLimiter`] 在订阅者层生效，sink 级扩展统一实现
+//! 本端口后经 [`RateLimitedSink::new`] 注入。
 //!
 //! # Example
 //!

@@ -88,7 +88,7 @@ impl HttpServerConfig {
     /// 回环绑定只有本机可达，是管理/观测端点的默认安全形态；非回环绑定
     /// （含 `0.0.0.0` / `[::]` 通配）会把端点暴露给网络上可达的任何对端。
     ///
-    /// 判定与运行期绑定共用 [`bind_socket_addr`]：只有能被绑定成 socket 地址的
+    /// 判定与运行期绑定共用 `bind_socket_addr`：只有能被绑定成 socket 地址的
     /// 主机才算回环，`localhost` 等主机名与畸形方括号写法均判为非回环。
     pub fn is_loopback_host(&self) -> bool {
         bind_socket_addr(&self.host, self.port)

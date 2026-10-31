@@ -11,7 +11,7 @@
 //!
 //! With the feature off, the translation entry points
 //! ([`tr`]/[`tr_args`]) stay available and resolve against the embedded
-//! English fallback table; [`LogI18nFormatter`] and [`I18nError`] do not
+//! English fallback table; `LogI18nFormatter` and `I18nError` do not
 //! exist, and the dependency tree contains no icu/fluent crates.
 //!
 //! # Example

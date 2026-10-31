@@ -5,7 +5,7 @@
 //! Provides a thread-safe rate limiter using the token bucket algorithm
 //! to prevent log flooding and protect downstream systems.
 //!
-//! 算法内核为仓内自持令牌桶 [`TokenBucket`]：`new(rate)` 映射「桶满 rate、
+//! 算法内核为仓内自持令牌桶（`TokenBucket`）：`new(rate)` 映射「桶满 rate、
 //! 每秒补 rate」；决策点同步 O(1)，不经异步桥接（避免在 async 写路径上
 //! 阻塞）；拒绝计数 [`RateLimiter::dropped_count`] 由 inklog 自持。
 
