@@ -961,3 +961,62 @@ mod tests {
         assert!(compiled.iter().all(|(re, _)| re.as_str() != "[invalid"));
     }
 }
+
+#[cfg(test)]
+mod debug_redaction_tests {
+    use crate::InklogError;
+
+    /// `Debug` 与 `Display` 同为错误文本出口：携带敏感载荷的变体经 `{:?}`
+    /// 渲染时必须命中内置脱敏模式（JWT），不携带载荷的变体不得无故引入
+    /// 载荷文本。逐变体构造一次即可覆盖 Debug 的全部分支。
+    #[test]
+    fn debug_redacts_all_variants() {
+        const RAW: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        const PREFIX: &str = "eyJhbGciOi";
+        // (错误值, Debug 渲染是否应携带脱敏标记)
+        let cases: Vec<(InklogError, bool)> = vec![
+            (InklogError::ConfigError(RAW.into()), true),
+            (InklogError::IoError(std::io::Error::other(RAW)), true),
+            (
+                InklogError::SerializationError(
+                    serde_json::from_str::<serde_json::Value>("{bad").unwrap_err(),
+                ),
+                false,
+            ),
+            (
+                InklogError::DatabaseError {
+                    message: RAW.into(),
+                    source: Some(Box::new(std::io::Error::other("boom"))),
+                },
+                true,
+            ),
+            (InklogError::CacheError(RAW.into()), true),
+            (
+                InklogError::EncryptionError {
+                    message: RAW.into(),
+                    source: None,
+                },
+                true,
+            ),
+            (InklogError::Shutdown(RAW.into()), true),
+            (InklogError::ChannelError(RAW.into()), true),
+            (InklogError::CompressionError(RAW.into()), true),
+            (InklogError::RuntimeError(RAW.into()), true),
+            (InklogError::HttpServerError(RAW.into()), true),
+            (InklogError::Unknown(RAW.into()), true),
+        ];
+        for (err, carries_payload) in &cases {
+            let rendered = format!("{err:?}");
+            assert!(
+                !rendered.contains(PREFIX),
+                "Debug output must not leak the raw token: {rendered}"
+            );
+            if *carries_payload {
+                assert!(
+                    rendered.contains("[JWT_TOKEN]"),
+                    "sanitized marker missing in Debug output: {rendered}"
+                );
+            }
+        }
+    }
+}

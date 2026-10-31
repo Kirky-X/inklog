@@ -1433,4 +1433,38 @@ mod trace_id_tests {
         let fresh = LogRecord::new(Level::INFO, "t".to_string(), "m".to_string());
         assert!(fresh.trace_id.is_none() && fresh.span_id.is_none());
     }
+
+    /// Debug 输出必须先脱敏再格式化（与真实管线同一掩码路径）：
+    /// 敏感字段值不得以明文出现在 `{:?}` 渲染中。
+    #[test]
+    fn test_debug_impl_masks_sensitive_fields_before_formatting() {
+        let mut record = LogRecord::new(
+            Level::INFO,
+            "debug::mask".to_string(),
+            "plain message".to_string(),
+        );
+        record.fields.insert(
+            "password".to_string(),
+            Value::String("secret123".to_string()),
+        );
+        record
+            .fields
+            .insert("username".to_string(), Value::String("alice".to_string()));
+        record.file = Some("/tmp/app/main.rs".to_string());
+
+        let rendered = format!("{record:?}");
+
+        assert!(
+            !rendered.contains("secret123"),
+            "Debug output must not leak sensitive field values: {rendered}"
+        );
+        assert!(
+            rendered.contains("***MASKED***"),
+            "sensitive keys must be masked in Debug output: {rendered}"
+        );
+        assert!(
+            rendered.contains("alice") && rendered.contains("plain message"),
+            "non-sensitive content must remain readable: {rendered}"
+        );
+    }
 }

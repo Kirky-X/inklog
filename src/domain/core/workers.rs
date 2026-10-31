@@ -1658,6 +1658,665 @@ mod tests {
         }
         assert!(all_finished, "workers must terminate after shutdown");
     }
+
+    /// worker 生命周期断言用的计数器（write/flush/shutdown 各自递增）。
+    #[derive(Default)]
+    struct ProbeCounters {
+        writes: AtomicUsize,
+        flushes: AtomicUsize,
+        shutdowns: AtomicUsize,
+    }
+
+    /// 计数 sink：工厂可多次产出共享同一组计数器的实例（重建后仍可观测）。
+    struct ProbeSink(Arc<ProbeCounters>);
+
+    #[async_trait::async_trait]
+    impl LogSink for ProbeSink {
+        async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+            self.0.writes.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn flush(&self) -> Result<(), InklogError> {
+            self.0.flushes.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn shutdown(&self) -> Result<(), InklogError> {
+            self.0.shutdowns.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// 测试通道组：file/console 记录通道 + 控制消息收发对。
+    type TestChannels = (
+        Receiver<Arc<LogRecord>>,
+        Receiver<Arc<LogRecord>>,
+        Sender<SinkControlMessage>,
+        Receiver<SinkControlMessage>,
+    );
+
+    /// 构造基础 WorkerParams 共用件：file worker 禁用（控制通道单消费语义下
+    /// 避免 file worker 抢走发往 database 的控制消息）、console 保持默认。
+    fn worker_test_channels() -> TestChannels {
+        let (_file_tx, file_rx) = bounded::<Arc<LogRecord>>(100);
+        let (_console_tx, console_rx) = bounded::<Arc<LogRecord>>(100);
+        let (control_tx, control_rx) = bounded(10);
+        (file_rx, console_rx, control_tx, control_rx)
+    }
+
+    fn wait_until(deadline: Instant, cond: impl Fn() -> bool) -> bool {
+        while Instant::now() < deadline {
+            if cond() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        cond()
+    }
+
+    /// db worker 全生命周期：初始工厂失败降级 → 控制消息恢复失败 →
+    /// 降级工厂退避重试恢复 → 恢复后正常写入 → 空闲 flush → shutdown 排水。
+    /// 发送端保持存活，确保走 shutdown 分支而非 Disconnected 提前退出。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_db_worker_degraded_recovers_via_factory_retry_and_drains_on_shutdown() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to build test runtime");
+
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(crate::FileSinkConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        config.database_sink = Some(crate::domain::config::DatabaseSinkConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        let (file_rx, console_rx, control_tx, control_rx) = worker_test_channels();
+        let (db_tx, db_rx) = bounded::<Arc<LogRecord>>(100);
+        let metrics = Arc::new(Metrics::new());
+        let effective_capacity = Arc::new(AtomicUsize::new(100));
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            config.console_sink.clone().unwrap_or_default(),
+            crate::LogTemplate::new(&config.global.format),
+        )) as Arc<dyn LogSink>;
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
+        let counters = Arc::new(ProbeCounters::default());
+        let factory_calls = Arc::new(AtomicUsize::new(0));
+
+        // 工厂调用序：#0 初始创建失败 → #1 控制消息恢复失败 → #2 起成功
+        // （#2 由降级工厂重试触发，退避 1s）
+        let factory = {
+            let counters = counters.clone();
+            let factory_calls = factory_calls.clone();
+            move || {
+                let n = factory_calls.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    Err(InklogError::ConfigError("db factory down".to_string()))
+                } else {
+                    Ok(Box::new(ProbeSink(counters.clone())) as Box<dyn LogSink>)
+                }
+            }
+        };
+
+        let params = WorkerParams {
+            config,
+            receiver: file_rx,
+            console_receiver: console_rx,
+            control_rx,
+            control_tx: control_tx.clone(),
+            metrics: metrics.clone(),
+            console_sink,
+            error_sink,
+            effective_capacity,
+            file_sink_factory: Box::new(|| {
+                Err(InklogError::ConfigError("unused in test".to_string()))
+            }),
+            db_sink_factory: Box::new(move |_db, _metrics| factory()),
+            database: Some(Arc::new(crate::integrations::MockDatabaseAdapter::new())
+                as Arc<dyn crate::integrations::Database>),
+            db_receiver: Some(db_rx),
+            custom_sinks: Vec::new(),
+        };
+
+        let (handles, shutdown_txs) = runtime
+            .block_on(async { LoggerManager::start_workers(params).expect("start workers") });
+
+        let record = || {
+            Arc::new(LogRecord {
+                timestamp: Utc::now(),
+                level: "INFO".to_string(),
+                target: "db::lifecycle".to_string(),
+                message: "db lifecycle record".to_string(),
+                fields: Default::default(),
+                file: None,
+                line: None,
+                thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
+            })
+        };
+
+        // 1) 降级模式：无 sink 可写，记录计 failed/dropped
+        db_tx.send(record()).expect("send degraded record");
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(5), || {
+                metrics.sink_errors() >= 1
+            }),
+            "degraded record must count a sink error"
+        );
+
+        // 2) 控制消息恢复：工厂第 2 次调用仍失败（recovery_failed 分支）
+        control_tx
+            .send(SinkControlMessage::RecoverSink("database".to_string()))
+            .expect("send recover control message");
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(5), || {
+                factory_calls.load(Ordering::SeqCst) >= 2
+            }),
+            "control message must reach db worker and retry the factory"
+        );
+
+        // 3) 降级工厂重试（1s 退避后）：恢复成功并复位健康状态
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(10), || {
+                metrics
+                    .sink_health()
+                    .get("database")
+                    .is_some_and(|h| h.consecutive_failures == 0)
+            }),
+            "factory retry must recover db sink health, got: {:?}",
+            metrics
+                .sink_health()
+                .get("database")
+                .map(|h| (h.consecutive_failures, h.last_error.clone()))
+        );
+
+        // 4) 恢复后正常写入
+        db_tx.send(record()).expect("send recovered record");
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(5), || {
+                counters.writes.load(Ordering::SeqCst) >= 1
+            }),
+            "recovered sink must write records"
+        );
+
+        // 5) 空闲 flush：recv 超时分支周期性 flush 缓冲
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(5), || {
+                counters.flushes.load(Ordering::SeqCst) >= 1
+            }),
+            "idle worker must flush the sink"
+        );
+
+        // 6) shutdown 排水（db_tx 存活 → 走 shutdown 分支而非 Disconnected）：
+        // drain 末尾对 sink 调 shutdown
+        for tx in &shutdown_txs {
+            let _ = tx.send_timeout((), Duration::from_secs(2));
+        }
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(10), || {
+                counters.shutdowns.load(Ordering::SeqCst) >= 1
+            }),
+            "drain must shut the recovered sink down"
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut all_finished = true;
+        for handle in handles {
+            while !handle.is_finished() {
+                if Instant::now() > deadline {
+                    all_finished = false;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            handle.abort();
+        }
+        assert!(all_finished, "workers must terminate after shutdown");
+    }
+
+    /// 经 start_workers 注册的动态 sink：spawn 分支 + shutdown 排水语义
+    /// （排水写空通道余量，最后 flush + shutdown）。
+    #[test]
+    fn test_custom_sink_spawned_via_start_workers_drains_pending_records_on_shutdown() {
+        /// 首次写入可被闸住的计数 sink：确保 shutdown 信号发出时仍有记录
+        /// 留在通道内，确定性地走排水分支。
+        struct GatedSink {
+            counters: Arc<ProbeCounters>,
+            gate_armed: AtomicUsize,
+            entered_tx: crossbeam_channel::Sender<()>,
+            release_rx: crossbeam_channel::Receiver<()>,
+        }
+
+        #[async_trait::async_trait]
+        impl LogSink for GatedSink {
+            async fn write(&self, _record: &LogRecord) -> Result<(), InklogError> {
+                let _ = self.entered_tx.send(());
+                if self.gate_armed.swap(0, Ordering::SeqCst) == 1 {
+                    // 闸门只拦第一次写：测试先制造"写中 + 通道有余量"的窗口
+                    let _ = self.release_rx.recv_timeout(Duration::from_secs(30));
+                }
+                self.counters.writes.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            async fn flush(&self) -> Result<(), InklogError> {
+                self.counters.flushes.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            async fn shutdown(&self) -> Result<(), InklogError> {
+                self.counters.shutdowns.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to build test runtime");
+
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(crate::FileSinkConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        config.database_sink = None;
+        let (file_rx, console_rx, control_tx, control_rx) = worker_test_channels();
+        let (custom_tx, custom_rx) = bounded::<Arc<LogRecord>>(8);
+        let metrics = Arc::new(Metrics::new());
+        let effective_capacity = Arc::new(AtomicUsize::new(100));
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            config.console_sink.clone().unwrap_or_default(),
+            crate::LogTemplate::new(&config.global.format),
+        )) as Arc<dyn LogSink>;
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
+        let counters = Arc::new(ProbeCounters::default());
+        let (entered_tx, entered_rx) = crossbeam_channel::unbounded::<()>();
+        let (release_tx, release_rx) = crossbeam_channel::unbounded::<()>();
+        let gated = Arc::new(GatedSink {
+            counters: counters.clone(),
+            gate_armed: AtomicUsize::new(1),
+            entered_tx,
+            release_rx,
+        });
+
+        let params = WorkerParams {
+            config,
+            receiver: file_rx,
+            console_receiver: console_rx,
+            control_rx,
+            control_tx: control_tx.clone(),
+            metrics: metrics.clone(),
+            console_sink,
+            error_sink,
+            effective_capacity,
+            file_sink_factory: Box::new(|| {
+                Err(InklogError::ConfigError("unused in test".to_string()))
+            }),
+            #[cfg(feature = "database")]
+            db_sink_factory: Box::new(|_db, _metrics| {
+                Err(InklogError::ConfigError("unused in test".to_string()))
+            }),
+            #[cfg(feature = "database")]
+            database: None,
+            #[cfg(feature = "database")]
+            db_receiver: None,
+            custom_sinks: vec![CustomSinkEntry {
+                name: "custom-drain".to_string(),
+                sink: gated as Arc<dyn LogSink>,
+                receiver: custom_rx,
+            }],
+        };
+
+        let (handles, shutdown_txs) = runtime
+            .block_on(async { LoggerManager::start_workers(params).expect("start workers") });
+
+        let record = |i: usize| {
+            Arc::new(LogRecord {
+                timestamp: Utc::now(),
+                level: "INFO".to_string(),
+                target: "custom::drain".to_string(),
+                message: format!("pending record {i}"),
+                fields: Default::default(),
+                file: None,
+                line: None,
+                thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
+            })
+        };
+
+        // 记录 1 进入写路径（闸住）→ 记录 2 留在通道 → 广播 shutdown → 放闸：
+        // worker 完成记录 1 后在下轮循环顶收到 shutdown，经排水分支写记录 2
+        custom_tx.send(record(1)).expect("send first record");
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker must enter first write");
+        custom_tx.send(record(2)).expect("send pending record");
+        for tx in &shutdown_txs {
+            let _ = tx.send_timeout((), Duration::from_secs(2));
+        }
+        release_tx.send(()).expect("release gate");
+
+        // 排水完成：两条记录都写入，且 drain 末尾 flush + shutdown 各至少一次
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(10), || {
+                counters.writes.load(Ordering::SeqCst) >= 2
+                    && counters.flushes.load(Ordering::SeqCst) >= 1
+                    && counters.shutdowns.load(Ordering::SeqCst) >= 1
+            }),
+            "drain must write pending record then flush+shutdown, counters: writes={} flushes={} shutdowns={}",
+            counters.writes.load(Ordering::SeqCst),
+            counters.flushes.load(Ordering::SeqCst),
+            counters.shutdowns.load(Ordering::SeqCst)
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut all_finished = true;
+        for handle in handles {
+            while !handle.is_finished() {
+                if Instant::now() > deadline {
+                    all_finished = false;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            handle.abort();
+        }
+        assert!(all_finished, "workers must terminate after shutdown");
+    }
+
+    /// 健康检查线程：降级 sink（连续失败 > 3）触发主动恢复广播 + 高失败计数
+    /// 告警；Adaptive 策略下容量自适应分支随巡检周期执行。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_health_check_recovers_unhealthy_db_and_runs_adaptive_capacity() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to build test runtime");
+
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(crate::FileSinkConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        config.database_sink = Some(crate::domain::config::DatabaseSinkConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        config.performance.channel_strategy = crate::ChannelStrategy::Adaptive;
+        let (file_rx, console_rx, control_tx, control_rx) = worker_test_channels();
+        let (db_tx, db_rx) = bounded::<Arc<LogRecord>>(200);
+        let metrics = Arc::new(Metrics::new());
+        let effective_capacity = Arc::new(AtomicUsize::new(200));
+        let console_sink = Arc::new(crate::support::io::ConsoleSink::new(
+            config.console_sink.clone().unwrap_or_default(),
+            crate::LogTemplate::new(&config.global.format),
+        )) as Arc<dyn LogSink>;
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
+        let counters = Arc::new(ProbeCounters::default());
+        let factory_released = Arc::new(AtomicUsize::new(0));
+
+        let factory = {
+            let counters = counters.clone();
+            let factory_released = factory_released.clone();
+            move || {
+                if factory_released.load(Ordering::SeqCst) == 0 {
+                    Err(InklogError::ConfigError("db factory down".to_string()))
+                } else {
+                    Ok(Box::new(ProbeSink(counters.clone())) as Box<dyn LogSink>)
+                }
+            }
+        };
+
+        let params = WorkerParams {
+            config,
+            receiver: file_rx,
+            console_receiver: console_rx,
+            control_rx,
+            control_tx,
+            metrics: metrics.clone(),
+            console_sink,
+            error_sink,
+            effective_capacity,
+            file_sink_factory: Box::new(|| {
+                Err(InklogError::ConfigError("unused in test".to_string()))
+            }),
+            db_sink_factory: Box::new(move |_db, _metrics| factory()),
+            database: Some(Arc::new(crate::integrations::MockDatabaseAdapter::new())
+                as Arc<dyn crate::integrations::Database>),
+            db_receiver: Some(db_rx),
+            custom_sinks: Vec::new(),
+        };
+
+        let (handles, shutdown_txs) = runtime
+            .block_on(async { LoggerManager::start_workers(params).expect("start workers") });
+
+        // 11 条降级记录：连续失败 1（初始）+11 > 10 → 巡检进入高失败告警档
+        for i in 0..11 {
+            db_tx
+                .send(Arc::new(LogRecord {
+                    timestamp: Utc::now(),
+                    level: "INFO".to_string(),
+                    target: "db::health".to_string(),
+                    message: format!("degraded record {i}"),
+                    fields: Default::default(),
+                    file: None,
+                    line: None,
+                    thread_id: "test".to_string(),
+                    trace_id: None,
+                    span_id: None,
+                }))
+                .expect("send degraded record");
+        }
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(5), || {
+                metrics.sink_errors() >= 11
+            }),
+            "degraded records must be counted, got: {}",
+            metrics.sink_errors()
+        );
+
+        // 释放工厂 → 巡检（1s 周期）发现 database 降级（失败 > 3 且无冷却）
+        // → 广播 RecoverSink("database") → db worker 重建成功 → 健康复位
+        factory_released.store(1, Ordering::SeqCst);
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(10), || {
+                metrics
+                    .sink_health()
+                    .get("database")
+                    .is_some_and(|h| h.consecutive_failures == 0)
+            }),
+            "health check must broadcast recovery and reset db sink health"
+        );
+
+        // 恢复后的写入能力（恢复真实生效，而非仅健康标记复位）
+        db_tx
+            .send(Arc::new(LogRecord {
+                timestamp: Utc::now(),
+                level: "INFO".to_string(),
+                target: "db::health".to_string(),
+                message: "post-recovery record".to_string(),
+                fields: Default::default(),
+                file: None,
+                line: None,
+                thread_id: "test".to_string(),
+                trace_id: None,
+                span_id: None,
+            }))
+            .expect("send post-recovery record");
+        assert!(
+            wait_until(Instant::now() + Duration::from_secs(5), || {
+                counters.writes.load(Ordering::SeqCst) >= 1
+            }),
+            "recovered sink must write records"
+        );
+
+        for tx in &shutdown_txs {
+            let _ = tx.send_timeout((), Duration::from_secs(2));
+        }
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut all_finished = true;
+        for handle in handles {
+            while !handle.is_finished() {
+                if Instant::now() > deadline {
+                    all_finished = false;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            handle.abort();
+        }
+        assert!(all_finished, "workers must terminate after shutdown");
+    }
+
+    /// SinkWorker 直测共用装配：file worker 描述符 + 测试 runtime。
+    fn sink_worker_harness<'a>(
+        runtime: &'a tokio::runtime::Runtime,
+        metrics: &'a Metrics,
+        console: &'a Arc<dyn LogSink>,
+        error_sink: &'a Arc<Mutex<Option<Arc<dyn LogSink>>>>,
+    ) -> SinkWorker<'a> {
+        SinkWorker {
+            desc: &FILE_SINK_WORKER,
+            runtime_handle: runtime.handle(),
+            metrics,
+            console_sink: console,
+            error_sink,
+        }
+    }
+
+    /// 自动恢复触发条件满足（连续失败 > 5 且距上次失败 > 60s）：工厂重建成功
+    /// 后 sink 被替换、失败状态复位。
+    #[test]
+    fn test_maybe_auto_recover_rebuilds_sink_and_resets_failure_state() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let metrics = Metrics::new();
+        let console = Arc::new(crate::support::io::ConsoleSink::new(
+            Default::default(),
+            crate::LogTemplate::new("t"),
+        )) as Arc<dyn LogSink>;
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
+        let worker = sink_worker_harness(&runtime, &metrics, &console, &error_sink);
+
+        let counters = Arc::new(ProbeCounters::default());
+        let mut sink: Box<dyn LogSink> = Box::new(ProbeSink(counters.clone()));
+        let mut failures = FailureState {
+            consecutive_failures: 10,
+            last_failure_time: Some(Instant::now() - Duration::from_secs(61)),
+        };
+        let mut factory = || Ok(Box::new(ProbeSink(counters.clone())) as Box<dyn LogSink>);
+
+        assert!(
+            worker.maybe_auto_recover(&mut failures, &mut sink, &mut factory),
+            "qualifying failure state must trigger recovery"
+        );
+        assert_eq!(
+            failures.consecutive_failures, 0,
+            "successful recovery must reset the failure counter"
+        );
+        assert!(
+            failures.last_failure_time.is_none(),
+            "successful recovery must clear the last failure time"
+        );
+        assert!(
+            metrics
+                .sink_health()
+                .get("file")
+                .is_some_and(|h| h.consecutive_failures == 0),
+            "recovery must report healthy sink state"
+        );
+    }
+
+    /// 触发条件满足但工厂重建失败：不复位失败状态，返回 false（保持降级）。
+    #[test]
+    fn test_maybe_auto_recover_factory_failure_keeps_failure_state() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let metrics = Metrics::new();
+        let console = Arc::new(crate::support::io::ConsoleSink::new(
+            Default::default(),
+            crate::LogTemplate::new("t"),
+        )) as Arc<dyn LogSink>;
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
+        let worker = sink_worker_harness(&runtime, &metrics, &console, &error_sink);
+
+        let mut sink: Box<dyn LogSink> = Box::new(ProbeSink(Arc::new(ProbeCounters::default())));
+        let mut failures = FailureState {
+            consecutive_failures: 10,
+            last_failure_time: Some(Instant::now() - Duration::from_secs(61)),
+        };
+        let mut factory = || Err(InklogError::ConfigError("factory still down".to_string()));
+
+        assert!(
+            !worker.maybe_auto_recover(&mut failures, &mut sink, &mut factory),
+            "failed factory rebuild must not claim recovery"
+        );
+        assert_eq!(
+            failures.consecutive_failures, 10,
+            "failed recovery must keep the failure counter"
+        );
+        assert!(
+            failures.last_failure_time.is_some(),
+            "failed recovery must keep the last failure time"
+        );
+    }
+
+    /// 降级工厂重试到期但工厂仍失败：退避档位 +1，sink 保持 None（持续降级）。
+    #[test]
+    fn test_retry_factory_if_due_failure_increments_backoff_step() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let metrics = Metrics::new();
+        let console = Arc::new(crate::support::io::ConsoleSink::new(
+            Default::default(),
+            crate::LogTemplate::new("t"),
+        )) as Arc<dyn LogSink>;
+        let error_sink: Arc<Mutex<Option<Arc<dyn LogSink>>>> = Arc::new(Mutex::new(None));
+        let worker = sink_worker_harness(&runtime, &metrics, &console, &error_sink);
+
+        let mut state = SinkWorkerState {
+            sink: None,
+            failures: FailureState::default(),
+            // 首档退避 1s 已过 → 重试到期
+            factory_attempts: 1,
+            last_factory_attempt: Instant::now() - Duration::from_secs(2),
+            degraded_announced: true,
+        };
+        let mut factory = || Err(InklogError::ConfigError("factory still down".to_string()));
+
+        worker.retry_factory_if_due(&mut state, &mut factory);
+
+        assert!(
+            state.sink.is_none(),
+            "failed factory retry must keep the worker degraded"
+        );
+        assert_eq!(
+            state.factory_attempts, 2,
+            "failed retry must advance the backoff step (1s → 2s)"
+        );
+        assert!(
+            state.degraded_announced,
+            "failed retry must not clear the degraded announcement flag"
+        );
+    }
 }
 
 // 通用 SinkWorker（动态注册 sink）单元测试

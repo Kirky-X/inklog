@@ -1248,3 +1248,241 @@ impl LoggerBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod setter_branch_tests {
+    use crate::LoggerBuilder;
+
+    /// `file_enabled` 双分支：无既有 file_sink 时按 enabled 造默认配置；
+    /// 已有时只翻转 enabled、不覆盖其余字段。
+    #[test]
+    fn test_file_enabled_creates_then_flips() {
+        // 从无到有
+        let builder = LoggerBuilder::new().file_enabled(true);
+        let file = builder
+            .config
+            .file_sink
+            .as_ref()
+            .expect("default file sink");
+        assert!(file.enabled);
+
+        // 已有配置时只翻转开关
+        let builder = LoggerBuilder::new().file_enabled(true).file_enabled(false);
+        let file = builder.config.file_sink.as_ref().expect("created above");
+        assert!(!file.enabled);
+    }
+
+    /// `with_batch_size` 双分支：无既有 database_sink 时按 batch_size 造默认
+    /// 配置；已有时只改 batch_size、URL 保持不变。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_with_batch_size_creates_then_updates() {
+        let builder = LoggerBuilder::new().with_batch_size(128);
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("default db sink");
+        assert_eq!(db.batch_size, 128);
+
+        let builder = LoggerBuilder::new()
+            .database("sqlite::memory:")
+            .with_batch_size(256);
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("created above");
+        assert_eq!(db.batch_size, 256);
+        assert_eq!(db.url, "sqlite::memory:");
+    }
+
+    /// `with_flush_interval_ms` 双分支：无既有 database_sink 时按值造默认
+    /// 配置；已有时只改 flush_interval_ms、URL 保持不变。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_with_flush_interval_ms_creates_then_updates() {
+        let builder = LoggerBuilder::new().with_flush_interval_ms(250);
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("default db sink");
+        assert_eq!(db.flush_interval_ms, 250);
+
+        let builder = LoggerBuilder::new()
+            .database("sqlite::memory:")
+            .with_flush_interval_ms(100);
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("created above");
+        assert_eq!(db.flush_interval_ms, 100);
+        assert_eq!(db.url, "sqlite::memory:");
+    }
+
+    /// `with_table_name` 双分支：同上。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_with_table_name_creates_then_updates() {
+        let builder = LoggerBuilder::new().with_table_name("audit_logs");
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("default db sink");
+        assert_eq!(db.table_name, "audit_logs");
+
+        let builder = LoggerBuilder::new()
+            .database("sqlite::memory:")
+            .with_table_name("other_logs");
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("created above");
+        assert_eq!(db.table_name, "other_logs");
+        assert_eq!(db.url, "sqlite::memory:");
+    }
+
+    /// `with_admin_role` 双分支：同上。
+    #[cfg(feature = "database")]
+    #[test]
+    fn test_with_admin_role_creates_then_updates() {
+        let builder = LoggerBuilder::new().with_admin_role("ops");
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("default db sink");
+        assert_eq!(db.admin_role, "ops");
+
+        let builder = LoggerBuilder::new()
+            .database("sqlite::memory:")
+            .with_admin_role("dba");
+        let db = builder
+            .config
+            .database_sink
+            .as_ref()
+            .expect("created above");
+        assert_eq!(db.admin_role, "dba");
+        assert_eq!(db.url, "sqlite::memory:");
+    }
+
+    /// `console_json` 三分支：默认（console 已存在）只改 output_format；
+    /// console_sink 为 None 时 json=true 造配置、json=false 不凭空创建。
+    #[test]
+    fn test_console_json_updates_creates_and_skips() {
+        // 默认 builder 自带 console sink：只改 output_format
+        let builder = LoggerBuilder::new().console_json(true);
+        let console = builder
+            .config
+            .console_sink
+            .as_ref()
+            .expect("default console sink");
+        assert_eq!(
+            console.output_format,
+            crate::support::processing::template::OutputFormat::Json
+        );
+
+        // console_sink 为 None：json=true 创建
+        let mut builder = LoggerBuilder::new();
+        builder.config.console_sink = None;
+        let builder = builder.console_json(true);
+        let console = builder
+            .config
+            .console_sink
+            .as_ref()
+            .expect("json=true must create the console sink");
+        assert_eq!(
+            console.output_format,
+            crate::support::processing::template::OutputFormat::Json
+        );
+
+        // console_sink 为 None：json=false 不创建
+        let mut builder = LoggerBuilder::new();
+        builder.config.console_sink = None;
+        let builder = builder.console_json(false);
+        assert!(
+            builder.config.console_sink.is_none(),
+            "console_json(false) must not create a console sink from scratch"
+        );
+    }
+
+    /// `console_secret_scan` 分支：console_sink 为 None 时 enabled=true 造配置、
+    /// false 不创建。
+    #[test]
+    fn test_console_secret_scan_creates_only_when_enabled() {
+        let mut builder = LoggerBuilder::new();
+        builder.config.console_sink = None;
+        let builder = builder.console_secret_scan(true);
+        let console = builder
+            .config
+            .console_sink
+            .as_ref()
+            .expect("enabled=true must create the console sink");
+        assert!(console.secret_scan_enabled);
+
+        let mut builder = LoggerBuilder::new();
+        builder.config.console_sink = None;
+        let builder = builder.console_secret_scan(false);
+        assert!(
+            builder.config.console_sink.is_none(),
+            "console_secret_scan(false) must not create a console sink from scratch"
+        );
+    }
+
+    /// `http_auth` 双分支：无 http_server 时造配置并启用 auth；已有时只更新
+    /// auth 字段、端口等既有配置不动。
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_http_auth_creates_then_updates() {
+        let builder = LoggerBuilder::new().http_auth("INKLOG_TEST_TOKEN");
+        let http = builder
+            .config
+            .http_server
+            .as_ref()
+            .expect("default http config");
+        let auth = http.auth.as_ref().expect("auth enabled");
+        assert!(auth.enabled);
+        assert_eq!(auth.token_env, "INKLOG_TEST_TOKEN");
+
+        // 已有 http_server：只换 auth，端口保留
+        let builder = LoggerBuilder::new()
+            .enable_http_server(true)
+            .http_port(9527)
+            .http_auth("OTHER_ENV");
+        let http = builder.config.http_server.as_ref().expect("created above");
+        assert_eq!(http.port, 9527);
+        assert_eq!(
+            http.auth.as_ref().expect("auth updated").token_env,
+            "OTHER_ENV"
+        );
+    }
+
+    /// `http_ip_whitelist` 双分支：同上。
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_http_ip_whitelist_creates_then_updates() {
+        let builder = LoggerBuilder::new().http_ip_whitelist(vec!["127.0.0.1".to_string()]);
+        let http = builder
+            .config
+            .http_server
+            .as_ref()
+            .expect("default http config");
+        assert_eq!(
+            http.ip_whitelist.as_ref().expect("whitelist set"),
+            &vec!["127.0.0.1".to_string()]
+        );
+
+        let builder = LoggerBuilder::new()
+            .enable_http_server(true)
+            .http_ip_whitelist(vec!["10.0.0.0/8".to_string()]);
+        let http = builder.config.http_server.as_ref().expect("created above");
+        assert_eq!(
+            http.ip_whitelist.as_ref().expect("whitelist updated"),
+            &vec!["10.0.0.0/8".to_string()]
+        );
+    }
+}

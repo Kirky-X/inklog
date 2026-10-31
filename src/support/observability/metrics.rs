@@ -2653,4 +2653,75 @@ mod histogram_export_tests {
             FallbackState::Fallback { ref target, .. } if target == "plaintext"
         ));
     }
+
+    /// 全状态机生命周期在「已启用 subscriber」下运行：降级/恢复文案的惰性
+    /// 求值分支（tracing 宏内的 i18n 闭包）随事件真正发出而被执行——
+    /// 无 subscriber 时宏短路跳过参数求值，这些分支不可达。
+    #[test]
+    fn test_health_monitor_lifecycle_emits_transition_events() {
+        use tracing::subscriber::with_default;
+        use tracing_subscriber::filter::LevelFilter;
+
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(LevelFilter::INFO)
+            .with_writer(std::io::sink)
+            .finish();
+
+        with_default(subscriber, || {
+            // 低于阈值：Retry + 告警（failure warning 文案）
+            let monitor = SinkHealthMonitor::new(FallbackConfig {
+                failure_threshold: 2,
+                max_retries: 2,
+                ..FallbackConfig::default()
+            });
+            assert!(matches!(
+                monitor.check_and_fallback("database", false, Some("flaky")),
+                FallbackAction::Retry { attempt: 1, .. }
+            ));
+            // 达到阈值：降级（fallback triggered 文案）
+            assert_eq!(
+                expect_fallback_action(monitor.check_and_fallback("database", false, Some("down"))),
+                "file"
+            );
+            // 恢复尝试（recovering 文案）→ 等待期 Wait → 确认恢复（confirmed 文案）
+            assert!(matches!(
+                monitor.check_and_fallback("database", true, None),
+                FallbackAction::AttemptRecovery { attempt: 1, .. }
+            ));
+            assert!(matches!(
+                monitor.check_and_fallback("database", true, None),
+                FallbackAction::Wait { .. }
+            ));
+            monitor.confirm_recovery("database");
+            assert!(matches!(
+                monitor.get_fallback_state("database"),
+                FallbackState::Active
+            ));
+
+            // max_retries=0：降级后首个健康检查即触发上限告警并停止调度
+            let capped = SinkHealthMonitor::new(FallbackConfig {
+                failure_threshold: 1,
+                max_retries: 0,
+                ..FallbackConfig::default()
+            });
+            assert!(matches!(
+                capped.check_and_fallback("database", false, Some("boom")),
+                FallbackAction::Fallback { .. }
+            ));
+            assert!(matches!(
+                capped.check_and_fallback("database", true, None),
+                FallbackAction::None
+            ));
+
+            // file sink 磁盘满 → console 降级（disk-full 文案）
+            let disk = SinkHealthMonitor::new(FallbackConfig {
+                failure_threshold: 1,
+                ..FallbackConfig::default()
+            });
+            assert_eq!(
+                expect_fallback_action(disk.check_and_fallback("file", false, Some("disk full"))),
+                "console"
+            );
+        });
+    }
 }

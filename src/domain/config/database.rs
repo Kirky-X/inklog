@@ -1067,4 +1067,18 @@ mod tests {
         assert_eq!(config.admin_role, "dba");
         assert_eq!(config.permissions_path, Some("/etc/perms.yaml".to_string()));
     }
+
+    /// 形态不可判定（非 URL、非纯 keyword/value）却出现凭据字段名 → 整体
+    /// 遮蔽；字段名须词边界完整匹配（前后紧邻字母/数字/下划线不算）。
+    #[test]
+    fn test_redact_dsn_undetermined_form_credential_word_boundaries() {
+        // "host" 无 '=' → 整体不是 keyword/value 形态；"password" 词边界命中
+        // → 全串遮蔽，绝不回显疑似口令原文
+        assert_eq!(redact_dsn("host password=hunter2"), "***");
+        // 后缀紧邻字母（passwords）与前缀紧邻字母（mypassword）都不算命中
+        assert_eq!(redact_dsn("host passwords=x"), "host passwords=x");
+        assert_eq!(redact_dsn("host mypassword=x"), "host mypassword=x");
+        // 无凭据字样 → 原样返回
+        assert_eq!(redact_dsn("plain host name"), "plain host name");
+    }
 }

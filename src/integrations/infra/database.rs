@@ -1716,6 +1716,30 @@ mod tests {
         let _ = std::fs::remove_file(&perm_path);
         let _ = std::fs::remove_file(&db_path);
     }
+
+    /// sqlite 库文件落在不存在的父目录 → 建池失败映射为 db-pool_create_failed
+    /// （DatabaseError），不 panic、不带出底层驱动错误类型。
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_with_full_config_unwritable_path_maps_pool_create_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let url = format!(
+            "sqlite:{}/no/such/dir/inklog_pool_fail.db?mode=rwc",
+            dir.path().display()
+        );
+
+        let result = DbNexusAdapter::with_full_config(&url, 1, "logs", None, "admin").await;
+        match result {
+            Err(InklogError::DatabaseError { message, .. }) => {
+                assert!(
+                    message.contains("Failed to create connection pool"),
+                    "pool create failure must map to db-pool_create_failed, got: {message}"
+                );
+            }
+            Err(other) => panic!("Expected DatabaseError, got: {other:?}"),
+            Ok(_) => panic!("pool creation must fail when the parent directory does not exist"),
+        }
+    }
 }
 
 // ============================================================================

@@ -592,7 +592,13 @@ mod tests {
     #[test]
     fn test_tls_and_parquet_keys_render_in_both_locales() {
         init_locale();
-        let cases: &[(&str, Option<&[(&str, &str)]>, &str, &str)] = &[
+        type LocaleCase = (
+            &'static str,
+            Option<&'static [(&'static str, &'static str)]>,
+            &'static str,
+            &'static str,
+        );
+        let cases: &[LocaleCase] = &[
             (
                 "config-tls_cert_path_empty",
                 None,
@@ -808,6 +814,41 @@ mod tests {
             ids_of("en"),
             ids_of("zh-CN"),
             "en and zh-CN cli.ftl must list the same message ids in the same order"
+        );
+    }
+
+    /// 目录加载器对不可解析的 FTL 文件必须跳过该文件而非整体失败：
+    /// 损坏 locale（en）整组无有效资源时不注册；完好 locale（zh-CN）照常加载。
+    #[test]
+    fn test_load_resources_from_dir_skips_unparseable_ftl() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let en_dir = dir.path().join("en");
+        let zh_dir = dir.path().join("zh-CN");
+        std::fs::create_dir_all(&en_dir).expect("create en dir");
+        std::fs::create_dir_all(&zh_dir).expect("create zh dir");
+        // 缺少 "=" 的裸标识符行：Fluent 解析必然失败
+        std::fs::write(en_dir.join("broken.ftl"), "bare-identifier-without-value\n")
+            .expect("write broken ftl");
+        std::fs::write(zh_dir.join("extra.ftl"), "extra-greeting = 你好\n")
+            .expect("write valid ftl");
+
+        let (resources, lang_ids) = load_resources_from_dir(&dir.path());
+
+        assert!(
+            !lang_ids.contains_key("en"),
+            "locale with only unparseable FTL must not be registered"
+        );
+        assert!(
+            !resources.contains_key("en"),
+            "no resources may be registered for the broken locale"
+        );
+        let zh = resources
+            .get("zh-CN")
+            .expect("valid locale must still load from the same dir");
+        assert!(
+            zh.contains_key("extra"),
+            "valid FTL file must be keyed by file stem, got: {:?}",
+            zh.keys().collect::<Vec<_>>()
         );
     }
 }

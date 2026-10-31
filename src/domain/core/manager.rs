@@ -2594,6 +2594,195 @@ worker_threads = 1
         }
     }
 
+    /// Strict 模式：端口被占用导致 TcpListener::bind 失败时，错误传播给调用者
+    /// （bind 已前移到 start_http_server 内同步执行，见 http_server.rs 注释）
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_with_config_http_strict_mode_returns_error_on_port_in_use() {
+        // 占住一个确定可用的端口：保持 listener 存活直到 with_config 返回
+        let holder = std::net::TcpListener::bind("127.0.0.1:0").expect("bind holder");
+        let port = holder.local_addr().expect("local addr").port();
+
+        let mut config = http_test_config(port);
+        config.http_server = Some(crate::HttpServerConfig {
+            error_mode: crate::HttpErrorMode::Strict,
+            ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
+            ..config.http_server.clone().expect("http config")
+        });
+
+        match LoggerManager::with_config(config).await {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("127.0.0.1") || msg.to_lowercase().contains("bind"),
+                    "bind failure error should mention the address, got: {}",
+                    msg
+                );
+            }
+            Ok(_) => panic!("Strict mode must return Err when the port is already in use"),
+        }
+        drop(holder);
+    }
+
+    /// Strict 模式 + TLS：证书文件存在但不是合法 PEM → RustlsConfig 解析失败，
+    /// 错误同步传播（配置期校验只查文件存在性，PEM 合法性由 rustls 揭露）
+    #[cfg(feature = "http")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial_test::serial]
+    async fn test_with_config_https_strict_mode_returns_error_on_invalid_pem() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cert = dir.path().join("cert.pem");
+        let key = dir.path().join("key.pem");
+        std::fs::write(&cert, "this is not a pem certificate\n").expect("write cert");
+        std::fs::write(&key, "this is not a pem key\n").expect("write key");
+
+        let mut config = http_test_config(0);
+        config.http_server = Some(crate::HttpServerConfig {
+            error_mode: crate::HttpErrorMode::Strict,
+            ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
+            tls: Some(crate::config::http::TlsConfig {
+                cert_path: cert.display().to_string(),
+                key_path: key.display().to_string(),
+            }),
+            ..config.http_server.clone().expect("http config")
+        });
+
+        match LoggerManager::with_config(config).await {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.to_lowercase().contains("https") || msg.to_lowercase().contains("key"),
+                    "TLS material failure must surface the cause, got: {}",
+                    msg
+                );
+            }
+            Ok(_) => panic!("Strict mode must return Err on invalid TLS material"),
+        }
+    }
+
+    /// with_config 启用 database sink（sqlite 文件库）：DI 未注入 database 时
+    /// 在当前 runtime 上创建默认 DbNexusAdapter，db 通道与 ops 广播面装配完整，
+    /// 构建成功且 shutdown 干净。
+    #[cfg(feature = "sqlite")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial_test::serial]
+    async fn test_with_config_builds_sqlite_database_sink_end_to_end() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("inklog_mgr_db.db");
+        let url = format!("sqlite:{}?mode=rwc", db_path.display());
+
+        let config = InklogConfig {
+            file_sink: Some(crate::FileSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            console_sink: Some(crate::ConsoleSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            database_sink: Some(crate::DatabaseSinkConfig {
+                enabled: true,
+                url,
+                ..Default::default()
+            }),
+            performance: crate::PerformanceConfig {
+                channel_capacity: 256,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let manager = LoggerManager::with_config(config)
+            .await
+            .expect("sqlite db sink must build via with_config");
+        let _ = manager.shutdown();
+        assert!(
+            db_path.exists(),
+            "sqlite database file must be created during build"
+        );
+    }
+
+    /// 加密 fallback journal + TCP 推送地址：journal 以密钥初始化、推送器仅做
+    /// 语法校验（尽力而为投递不阻塞构建），构建成功。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial_test::serial]
+    async fn test_with_config_encrypted_fallback_journal_with_push_addr_builds() {
+        use base64::Engine as _;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let journal_path = dir.path().join("fallback.journal");
+        // 32 字节可变序列经 base64 编码：classify_key_value 按原始密钥接受，
+        // 且序列熵通过 validate_key_entropy（全同字节会被拒）
+        let key = base64::engine::general_purpose::STANDARD.encode((0u8..32).collect::<Vec<u8>>());
+        // 测试进程 ctor 已固定 locale；env 写入与读取均在 #[serial] 串行段内
+        unsafe {
+            std::env::set_var("INKLOG_TEST_MGR_JOURNAL_KEY", &key);
+        }
+
+        let config = InklogConfig {
+            file_sink: Some(crate::FileSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            console_sink: Some(crate::ConsoleSinkConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            global: crate::GlobalConfig {
+                fallback_journal: true,
+                fallback_journal_path: journal_path.display().to_string(),
+                fallback_journal_encrypt: true,
+                fallback_journal_key_env: Some("INKLOG_TEST_MGR_JOURNAL_KEY".to_string()),
+                // 语法合法即可：投递线程后台连接，失败不影响构建
+                fallback_journal_push_addr: Some("127.0.0.1:9".to_string()),
+                ..Default::default()
+            },
+            performance: crate::PerformanceConfig {
+                channel_capacity: 256,
+                worker_threads: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let result = LoggerManager::with_config(config).await;
+        unsafe {
+            std::env::remove_var("INKLOG_TEST_MGR_JOURNAL_KEY");
+        }
+        // journal 文件惰性创建（首次 spill 才落盘）；本用例验证构建期装配：
+        // 密钥解析 + 熵校验通过、加密 journal 初始化、推送器语法校验接入、
+        // 空 journal replay 不失败，最终构建成功
+        let manager = result.expect("encrypted journal with push addr must build");
+        let _ = manager.shutdown();
+        let _ = journal_path;
+    }
+
+    /// DI provider 返回 file_sink.enabled=false：按显式禁用装配（Some(false)
+    /// 分支），构建成功——provider 未提及（None）时不凭空创建 file_sink 配置。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial_test::serial]
+    async fn test_di_provider_explicit_file_sink_disabled_builds() {
+        use crate::integrations::MockConfig;
+        use crate::integrations::infra::config::Config;
+
+        let config = MockConfig::new();
+        config.set("file_sink.enabled", "false");
+        let deps = LoggerDependencies {
+            cache: None,
+            config: Some(Arc::new(config) as Arc<dyn Config>),
+            custom_sinks: Vec::new(),
+            #[cfg(feature = "database")]
+            database: None,
+        };
+
+        let manager = LoggerManager::build_with_deps(deps)
+            .await
+            .expect("provider-driven file_sink disabled must build");
+        let _ = manager.shutdown();
+    }
+
     /// 暴露面守卫：非回环绑定且无鉴权/白名单 → 构建期拒绝（fail-closed）。
     ///
     /// 守卫必须覆盖库自身的推荐入口（`LoggerManager::with_config` /
