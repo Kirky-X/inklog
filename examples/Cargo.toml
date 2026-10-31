@@ -22,7 +22,7 @@ parquet = ["inklog/parquet"]
 confers-audit = ["inklog/confers-audit", "dep:confers"]
 
 [dependencies]
-inklog = { path = "..", version = "0.3.0-rc.11", features = ["test-utils"] }
+inklog = { path = "..", version = "0.3.0-rc.12", features = ["test-utils"] }
 async-trait = { workspace = true }
 dbnexus = { workspace = true, optional = true }
 tokio = { workspace = true }

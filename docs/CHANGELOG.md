@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.12] - 2026-11-01
+
 ### Added
 
 - `oxcache-audit` feature：承接 oxcache 审计事件（实现 oxcache `AuditEventPublisher` 端口，事件 → `LogRecord` 写入注入的 `LogSink`），保留 fail-open 计数语义（`dropped_count` / `write_failure_count`）。
