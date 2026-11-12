@@ -1,0 +1,10 @@
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0459：libsqlite3-sys 0.37.0（C SQLite CVE-2026-119375，>=0.39.0 修复）——
+    # sqlx 0.9.0 经 dbnexus→sea-orm 链钉定，升级需 sqlx minor 迁移；本地内嵌 SQLite 无远程暴露面。
+    # 家族级豁免（janvi/oxcache 同源同因）；与 deny.toml [advisories].ignore 同源。
+    "RUSTSEC-2026-0459",
+    # RUSTSEC-2026-0442：arrow-data 传递入图（dbnexus arrow 链），无 semver 内修复版，
+    # 等上游 arrow 系发布补丁版后移除。
+    "RUSTSEC-2026-0442",
+]

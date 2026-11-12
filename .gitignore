@@ -15,7 +15,9 @@
 **/*.rs.bk
 
 # Cargo 本地覆盖(.cargo/config.toml 等机器特定配置)
-.cargo/
+.cargo/*
+# 例外：advisory 豁免是仓库级事实（pre-push 裸 cargo-audit 消费），须入库
+!.cargo/audit.toml
 
 # --- Code coverage ---
 coverage/
