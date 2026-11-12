@@ -190,11 +190,6 @@ path = "src/bin/sinks/partition_strategy.rs"
 name = "i18n"
 path = "src/bin/core/i18n.rs"
 
-# 金样本导出器（切换验证一次性工具，验证完随 golden_export.rs 一并删除）
-[[bin]]
-name = "golden_export"
-path = "src/bin/core/golden_export.rs"
-
 [[bin]]
 name = "runtime_ops"
 path = "src/bin/infra/runtime_ops.rs"

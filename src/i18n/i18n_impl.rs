@@ -1,32 +1,14 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::str::FromStr;
+//! Locale-aware formatting delegating to the trait-kit `I18nFormatter`
+//! (ICU4X single source through the family base; `PluralCategory` via
+//! the rc.14 re-export — no self-held `icu` dependency).
 
-use icu::collator::Collator;
-use icu::collator::options::CollatorOptions;
-use icu::datetime::DateTimeFormatter;
-use icu::datetime::fieldsets::YMD;
-use icu::datetime::input::{Date, DateTime, Time};
-use icu::decimal::DecimalFormatter;
-use icu::decimal::input::Decimal;
-use icu::decimal::options::DecimalFormatterOptions;
-use icu::locale::Locale;
-use icu::plurals::{PluralCategory, PluralRules, PluralRulesOptions};
-use writeable::Writeable;
+use std::cmp::Ordering;
+
+use trait_kit::i18n::PluralCategory;
 
 use super::{I18nError, LogI18nFormatter};
-
-// Per-thread cache of locale tag → date formatter. DateTimeFormatter
-// construction loads locale data; entries are keyed by locale tag so
-// distinct locales each get their own formatter.
-thread_local! {
-    static TIMESTAMP_FORMATTERS: RefCell<HashMap<String, DateTimeFormatter<YMD>>> =
-        RefCell::new(HashMap::new());
-}
 
 /// Map a [`PluralCategory`] to its capitalized CLDR name (e.g. `"One"`, `"Other"`).
 fn plural_category_name(category: PluralCategory) -> &'static str {
@@ -61,27 +43,24 @@ impl LogI18nFormatter {
     /// Returns [`I18nError::InvalidLocale`] if the tag cannot be parsed,
     /// or [`I18nError::FormatError`] if ICU4X lacks compiled data for it.
     pub fn new(locale: &str) -> Result<Self, I18nError> {
-        let parsed = Locale::from_str(locale).map_err(|e| I18nError::InvalidLocale {
-            input: locale.to_string(),
-            reason: e.to_string(),
+        let inner = trait_kit::i18n::I18nFormatter::new(locale).map_err(|e| {
+            // 构造失败 = locale 无效或无编译数据：与历史 ICU 直连语义对齐，
+            // 标签解析类失败归类 InvalidLocale，其余保留 FormatError。
+            let text = e.to_string();
+            if text.contains("invalid locale") || text.contains("Invalid extension") {
+                I18nError::InvalidLocale {
+                    input: locale.to_string(),
+                    reason: text,
+                }
+            } else {
+                I18nError::FormatError(format!(
+                    "trait-kit I18nFormatter construction failed: {text}"
+                ))
+            }
         })?;
-
-        let decimal_formatter =
-            DecimalFormatter::try_new(parsed.clone().into(), DecimalFormatterOptions::default())
-                .map_err(|e| I18nError::FormatError(e.to_string()))?;
-
-        let plural_rules =
-            PluralRules::try_new(parsed.clone().into(), PluralRulesOptions::default())
-                .map_err(|e| I18nError::FormatError(e.to_string()))?;
-
-        let collator = Collator::try_new(parsed.clone().into(), CollatorOptions::default())
-            .map_err(|e| I18nError::FormatError(e.to_string()))?;
-
         Ok(Self {
-            locale: parsed,
-            decimal_formatter,
-            plural_rules,
-            collator,
+            inner,
+            locale: locale.to_string(),
         })
     }
 
@@ -98,13 +77,9 @@ impl LogI18nFormatter {
                 reason: "value is not finite (NaN or Infinity)".into(),
             });
         }
-        let repr = format!("{value}");
-        let decimal = Decimal::from_str(&repr).map_err(|e| I18nError::InvalidNumber {
-            input: repr,
-            reason: e.to_string(),
-        })?;
-        let formatted = self.decimal_formatter.format(&decimal);
-        Ok(formatted.write_to_string().into_owned())
+        self.inner
+            .format_number(value)
+            .map_err(|e| I18nError::FormatError(e.to_string()))
     }
 
     /// Return the plural category name for `count` in the formatter's locale
@@ -117,7 +92,11 @@ impl LogI18nFormatter {
     /// This method does not currently fail, but returns `Result` for API
     /// consistency with the other formatting methods.
     pub fn format_event_count(&self, count: u64) -> Result<String, I18nError> {
-        Ok(plural_category_name(self.plural_rules.category_for(count)).to_string())
+        let category = self
+            .inner
+            .plural_category(count)
+            .map_err(|e| I18nError::FormatError(e.to_string()))?;
+        Ok(plural_category_name(category).to_string())
     }
 
     /// Format an ISO calendar date (year / month / day) as a log
@@ -127,25 +106,9 @@ impl LogI18nFormatter {
     /// Returns [`I18nError::DateError`] if any component is out of range,
     /// or [`I18nError::FormatError`] if the formatter cannot be constructed.
     pub fn format_timestamp(&self, year: i32, month: u8, day: u8) -> Result<String, I18nError> {
-        let date =
-            Date::try_new_iso(year, month, day).map_err(|e| I18nError::DateError(e.to_string()))?;
-        let time = Time::try_new(0, 0, 0, 0).map_err(|e| I18nError::DateError(e.to_string()))?;
-        let datetime = DateTime { date, time };
-
-        let locale_key = self.locale.to_string();
-        TIMESTAMP_FORMATTERS.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            let dtf = match cache.entry(locale_key) {
-                Entry::Occupied(entry) => entry.into_mut(),
-                Entry::Vacant(entry) => {
-                    let dtf = DateTimeFormatter::try_new(self.locale.clone().into(), YMD::medium())
-                        .map_err(|e| I18nError::FormatError(e.to_string()))?;
-                    entry.insert(dtf)
-                }
-            };
-            let formatted = dtf.format(&datetime);
-            Ok(formatted.write_to_string().into_owned())
-        })
+        self.inner
+            .format_date(year, month, day)
+            .map_err(|e| I18nError::DateError(e.to_string()))
     }
 
     /// Normalize a log level string to uppercase canonical form
@@ -164,6 +127,8 @@ impl LogI18nFormatter {
     /// This method does not currently fail, but returns `Result` for API
     /// consistency with the other formatting methods.
     pub fn compare_fields(&self, a: &str, b: &str) -> Result<Ordering, I18nError> {
-        Ok(self.collator.compare(a, b))
+        self.inner
+            .compare(a, b)
+            .map_err(|e| I18nError::FormatError(e.to_string()))
     }
 }

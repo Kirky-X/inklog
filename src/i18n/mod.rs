@@ -30,14 +30,6 @@
 //! ```
 
 #[cfg(feature = "i18n")]
-use icu::collator::CollatorBorrowed;
-#[cfg(feature = "i18n")]
-use icu::decimal::DecimalFormatter;
-#[cfg(feature = "i18n")]
-use icu::locale::Locale;
-#[cfg(feature = "i18n")]
-use icu::plurals::PluralRules;
-#[cfg(feature = "i18n")]
 use thiserror::Error;
 
 #[cfg(feature = "i18n")]
@@ -77,10 +69,9 @@ pub enum I18nError {
 /// that repeated formatting calls are allocation-light.
 #[cfg(feature = "i18n")]
 pub struct LogI18nFormatter {
-    locale: Locale,
-    decimal_formatter: DecimalFormatter,
-    plural_rules: PluralRules,
-    collator: CollatorBorrowed<'static>,
+    /// locale 感知格式化统一委托 trait-kit ICU4X 单一来源
+    inner: trait_kit::i18n::I18nFormatter,
+    locale: String,
 }
 
 #[cfg(feature = "i18n")]

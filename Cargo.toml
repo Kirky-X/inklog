@@ -62,8 +62,10 @@ workspace = true
 [features]
 # i18n/cache 在 default 中；关闭两者时改用内嵌英文文案回退
 default = ["i18n", "cache"]
-# 国际化运行时：ICU4X 格式化 + fluent-bundle 翻译 + sys-locale 检测；关闭后 tr/tr_args 回退到内嵌 en 文案
-i18n = ["dep:icu", "dep:writeable", "dep:fluent-bundle", "dep:unic-langid", "dep:sys-locale"]
+# 国际化运行时：消息模板经 trait-kit I18nManager 宿主注册（双写基座）+ 本仓自渲染
+# （FSI 隔离语义逐 placeable 注入，与历史 fluent 引擎字节对齐）；sys-locale 检测；
+# 关闭后 tr/tr_args 回退到内嵌 en 文案
+i18n = ["dep:sys-locale", "trait-kit/i18n"]
 # 缓存后端：裁 icu/fluent 依赖树必须同时关闭 i18n 与 cache，否则 ObjectPool 不导出
 cache = ["dep:oxcache"]
 # oxcache 审计事件 → inklog 结构化日志桥（实现 oxcache AuditEventPublisher 端口）
@@ -132,7 +134,7 @@ serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 # 掩码引擎宿主（trait-kit/masking）：inklog::DataMasker 等路径经 re-export 保持兼容
-trait-kit = { version = "0.5.0-rc.12", default-features = false, features = ["masking"] }
+trait-kit = { version = "0.5.0-rc.14", default-features = false, features = ["masking"] }
 confers = { version = "0.6.0-rc.12", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
@@ -161,10 +163,6 @@ clap = { version = "4.6", default-features = false, features = ["derive", "env",
 glob = { version = "0.3", default-features = false, optional = true }
 ipnet = { version = "2.12", default-features = false, features = ["std"] }
 subtle = { version = "2.6", default-features = false }
-icu = { version = "2.3", default-features = false, features = ["compiled_data"], optional = true }
-writeable = { version = "0.6", default-features = false, optional = true }
-fluent-bundle = { version = "0.16", default-features = false, optional = true }
-unic-langid = { version = "0.9", default-features = false, optional = true }
 sys-locale = { version = "0.3", default-features = false, optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 

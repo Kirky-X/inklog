@@ -15,14 +15,12 @@
 //! 2. System locale via `sys-locale`
 //! 3. Fallback to `"en"`
 
-use fluent_bundle::{FluentArgs, FluentBundle, FluentResource, FluentValue};
 use parking_lot::RwLock;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use unic_langid::LanguageIdentifier;
+use std::sync::OnceLock;
 
 /// 消息插值参数载体：键值有序集合，经 [`tr_args`](super::tr_args) 传入
-/// fluent 消息的 `{ $key }` 占位。
+/// 消息模板的 `{ $key }` 占位。
 ///
 /// 值统一按 `Display` 渲染为字符串——调用点的实参形态（错误链、路径
 /// display、命名切片）全部无需转换。
@@ -36,7 +34,7 @@ impl MsgArgs {
         Self::default()
     }
 
-    /// 追加一个参数；同名键后者覆盖前者（与 fluent `FluentArgs::set`
+    /// 追加一个参数；同名键后者覆盖前者（与历史 fluent `FluentArgs::set`
     /// 的覆盖语义一致）。
     pub fn set(&mut self, key: &str, value: impl std::fmt::Display) -> &mut Self {
         let value = value.to_string();
@@ -48,37 +46,11 @@ impl MsgArgs {
     }
 }
 
-impl<'a> From<MsgArgs> for FluentArgs<'a> {
-    fn from(args: MsgArgs) -> Self {
-        let mut fluent = FluentArgs::new();
-        for (key, value) in args.entries {
-            fluent.set(key, FluentValue::from(value));
-        }
-        fluent
-    }
-}
+/// 全局 locale（进程级，OnceLock；init_locale 首次调用定格）。
+static CURRENT_LOCALE: OnceLock<String> = OnceLock::new();
 
-/// Global locale manager state.
-/// Parsed resources are leaked as `&'static` so each thread's bundle
-/// cache can hold bundles borrowing them; `FluentBundle` itself lives in
-/// the per-thread `BUNDLES` cache because it contains non-Send
-/// memoizer internals.
-static MANAGER: std::sync::OnceLock<RwLock<ManagerState>> = std::sync::OnceLock::new();
-
-struct ManagerState {
-    locale: String,
-    /// locale_tag → (resource_name → FluentResource)
-    resources: &'static HashMap<String, HashMap<String, FluentResource>>,
-    /// Cached language identifiers per locale tag
-    lang_ids: &'static HashMap<String, LanguageIdentifier>,
-}
-
-// Per-thread cache of locale tag → prebuilt bundle. Entries are keyed
-// by locale tag, so a locale switch simply misses and rebuilds.
-thread_local! {
-    static BUNDLES: RefCell<HashMap<String, FluentBundle<&'static FluentResource>>> =
-        RefCell::new(HashMap::new());
-}
+/// FTL 真源注册标记（进程级一次）。
+static REGISTERED: OnceLock<()> = OnceLock::new();
 
 /// Initialize the global locale.
 ///
@@ -89,15 +61,10 @@ thread_local! {
 ///
 /// This function is idempotent — subsequent calls after the first are no-ops.
 pub fn init_locale() {
-    MANAGER.get_or_init(|| {
+    let _ = CURRENT_LOCALE.get_or_init(|| {
         let locale = resolve_locale();
-        let (resources, lang_ids) = load_resources();
-        RwLock::new(ManagerState {
-            locale,
-            // Leak so per-thread bundles can borrow the resources for 'static
-            resources: Box::leak(Box::new(resources)),
-            lang_ids: Box::leak(Box::new(lang_ids)),
-        })
+        ensure_registered();
+        locale
     });
 }
 
@@ -106,64 +73,248 @@ pub fn init_locale() {
 /// Triggers initialization if not yet done.
 pub fn current_locale() -> String {
     init_locale();
-    MANAGER.get().unwrap().read().locale.clone()
-}
-
-/// Translate a message ID with optional arguments.
-pub fn tr_args<'a>(id: &str, args: impl Into<FluentArgs<'a>>) -> String {
-    tr_impl(id, Some(&args.into()))
+    CURRENT_LOCALE
+        .get()
+        .cloned()
+        .unwrap_or_else(|| "en".to_string())
 }
 
 /// Translate a message ID without arguments.
 pub fn tr(id: &str) -> String {
-    tr_impl(id, None)
+    tr_impl(id, &[])
+}
+
+/// Translate a message ID with optional arguments.
+pub fn tr_args(id: &str, args: MsgArgs) -> String {
+    tr_impl(id, &args.entries)
 }
 
 // ── Internal helpers ──────────────────────────────────────────────
 
-fn tr_impl(id: &str, args: Option<&FluentArgs<'_>>) -> String {
+fn tr_impl(id: &str, entries: &[(String, String)]) -> String {
     init_locale();
     let locale = current_locale();
-
-    // Try current locale, then fallback to en
-    if let Some(result) = format_message(&locale, id, args) {
+    if let Some(result) = lookup(&locale, id, entries) {
         return result;
     }
     if locale != "en"
-        && let Some(result) = format_message("en", id, args)
+        && let Some(result) = lookup("en", id, entries)
     {
         return result;
     }
-    // Return message ID as last resort
     id.to_string()
 }
 
-/// Format a message using the per-thread cached bundle for `locale`.
-/// Bundles are built once per (thread, locale); the heavy work
-/// (file I/O / FTL parsing) was done at init time.
-fn format_message(locale: &str, id: &str, args: Option<&FluentArgs<'_>>) -> Option<String> {
-    BUNDLES.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if !cache.contains_key(locale) {
-            let manager = MANAGER.get().unwrap().read();
-            let res_map = manager.resources.get(locale)?;
-            let lang_id = manager.lang_ids.get(locale)?;
-            let mut bundle: FluentBundle<&'static FluentResource> =
-                FluentBundle::new(vec![lang_id.clone()]);
-            for resource in res_map.values() {
-                let _ = bundle.add_resource(resource);
+/// FSI（U+2068）/PDI（U+2069）隔离标记：与历史 fluent 引擎的 placeable
+/// 包裹字节语义逐一对齐（金样本等价性验证的前提）。
+const FSI: char = '\u{2068}';
+const PDI: char = '\u{2069}';
+
+/// 渲染模板：`{ $name }` 占位符替换为 FSI 包裹的实参值；缺失实参保留
+/// 原占位符并同样以 FSI 包裹（与历史 fluent 缺参渲染字节一致）。
+/// 非 `{ $` 起始的花括号（转义/字面量）原样透传。
+fn render_template(template: &str, entries: &[(String, String)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'{' && template[i..].starts_with("{$") {
+            // 紧凑占位符形态（{$name}）
+            if let Some(end) = template[i..].find('}') {
+                let name = template[i + 2..i + end].trim();
+                match entries.iter().find(|(k, _)| k == name) {
+                    Some((_, v)) => {
+                        out.push(FSI);
+                        out.push_str(v);
+                        out.push(PDI);
+                    }
+                    None => {
+                        out.push(FSI);
+                        out.push_str(&format!("{{${name}}}"));
+                        out.push(PDI);
+                    }
+                }
+                i += end + 1;
+                continue;
             }
-            cache.insert(locale.to_string(), bundle);
         }
-        let bundle = cache.get(locale)?;
-        let message = bundle.get_message(id)?;
-        let pattern = message.value()?;
-        let mut errors = vec![];
-        let result = bundle
-            .format_pattern(pattern, args, &mut errors)
-            .to_string();
-        Some(result)
-    })
+        if bytes[i] == b'{' && template[i..].starts_with("{ $") {
+            // 空格占位符形态（{ $name }）
+            if let Some(end) = template[i..].find('}') {
+                let inner = &template[i + 1..i + end];
+                let name = inner.trim_start_matches(['{', ' ']).trim();
+                let name = name.strip_prefix('$').unwrap_or(name).trim();
+                match entries.iter().find(|(k, _)| k == name) {
+                    Some((_, v)) => {
+                        out.push(FSI);
+                        out.push_str(v);
+                        out.push(PDI);
+                    }
+                    None => {
+                        out.push(FSI);
+                        out.push_str(&format!("{{${name}}}"));
+                        out.push(PDI);
+                    }
+                }
+                i += end + 1;
+                continue;
+            }
+        }
+        // 转义括号还原（{"{"} → {，{"}"} → }）
+        if template[i..].starts_with("{\"{\"}") {
+            out.push('{');
+            i += 5;
+            continue;
+        }
+        if template[i..].starts_with("{\"}\"}") {
+            out.push('}');
+            i += 5;
+            continue;
+        }
+        let ch = template[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// 私有模板注册表：桶（"zh"/"en"）→ key → 模板原文。
+/// 统一基座（trait-kit I18nManager）同帧双写（任何消费者可经 trait-kit
+/// 查到 inklog 消息面）；本仓渲染走私有表——FSI 隔离需逐 placeable 注入，
+/// 引擎侧无渲染钩子，模板原文必须自持取回。
+static TEMPLATES: OnceLock<RwLock<HashMap<&'static str, HashMap<&'static str, &'static str>>>> =
+    OnceLock::new();
+
+fn templates() -> &'static RwLock<HashMap<&'static str, HashMap<&'static str, &'static str>>> {
+    TEMPLATES.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// 语言标签 → 注册桶（与 trait-kit 归一规则一致：zh* → zh，其余 → en）。
+fn locale_bucket(locale: &str) -> &'static str {
+    if locale.starts_with("zh") { "zh" } else { "en" }
+}
+
+/// 查找并渲染：当前语言桶缺失时由调用方回退 en；两桶都缺返回 None。
+fn lookup(locale: &str, id: &str, entries: &[(String, String)]) -> Option<String> {
+    ensure_registered();
+    let bucket = locale_bucket(locale);
+    let template = {
+        let map = templates().read();
+        map.get(bucket)?.get(id).copied()?
+    };
+    Some(render_template(template, entries))
+}
+
+/// 结算一条 FTL 条目：去前导空行、按「首个非空续行」基准剥公共缩进、
+/// 还原 fluent 转义括号、去尾部空行（fluent 多行语义，与金样本对齐）。
+fn flush_ftl_entry(key: Option<String>, lines: &mut Vec<String>, out: &mut Vec<(String, String)>) {
+    if let Some(key) = key {
+        let had_inline = lines.first().is_some_and(|l| !l.is_empty());
+        if !had_inline && lines.first().is_some_and(|l| l.is_empty()) {
+            lines.remove(0);
+        }
+        while lines.last().is_some_and(|l| l.is_empty()) {
+            lines.pop();
+        }
+        let cont_start = usize::from(had_inline);
+        let common = lines
+            .iter()
+            .skip(cont_start)
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| l.len() - l.trim_start().len())
+            .min()
+            .unwrap_or(0);
+        let prefix = " ".repeat(common);
+        let value = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let stripped = if i >= cont_start && common > 0 && l.starts_with(prefix.as_str()) {
+                    &l[common..]
+                } else {
+                    l
+                };
+                stripped.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push((key, value));
+        lines.clear();
+    }
+}
+
+/// 归一 FTL 源：占位符跨行断开（`{$` 行尾折行）时丢弃占位符内部换行。
+fn normalize_ftl_placeholders(ftl: &str) -> String {
+    if !ftl.contains("{$") {
+        return ftl.to_string();
+    }
+    let mut out = String::with_capacity(ftl.len());
+    let mut in_placeholder = false;
+    for ch in ftl.chars() {
+        match ch {
+            '{' => {
+                in_placeholder = true;
+                out.push(ch);
+            }
+            '}' => {
+                in_placeholder = false;
+                out.push(ch);
+            }
+            '\n' if in_placeholder => {}
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// 解析 FTL 文本为 (key, value) 条目（fluent 语义）。
+fn parse_ftl_entries(ftl: &str) -> Vec<(String, String)> {
+    let ftl = &normalize_ftl_placeholders(ftl);
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut cur_key: Option<String> = None;
+    let mut cur_lines: Vec<String> = Vec::new();
+    for line in ftl.lines() {
+        if cur_key.is_some() && (line.starts_with([' ', '\t']) || line.trim().is_empty()) {
+            cur_lines.push(line.to_string());
+            continue;
+        }
+        flush_ftl_entry(cur_key.take(), &mut cur_lines, &mut out);
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            cur_key = Some(k.trim().to_string());
+            cur_lines.push(v.trim().to_string());
+        }
+    }
+    flush_ftl_entry(cur_key.take(), &mut cur_lines, &mut out);
+    out
+}
+
+/// 将全部内嵌 FTL 真源注册进 trait-kit I18nManager（进程级一次）。
+/// 存的是模板原文（占位符不做预替换），渲染由 [`render_template`] 在
+/// 本仓自持层完成——FSI 隔离语义需逐 placeable 注入，属渲染关注点。
+fn ensure_registered() {
+    REGISTERED.get_or_init(|| {
+        let mut store = templates().write();
+        for (locale_tag, files) in EMBEDDED_LOCALES {
+            let bucket: &'static str = if locale_tag.starts_with("zh") {
+                "zh"
+            } else {
+                "en"
+            };
+            for (_, source) in *files {
+                for (key, value) in parse_ftl_entries(source) {
+                    let key: &'static str = Box::leak(key.into_boxed_str());
+                    let value: &'static str = Box::leak(value.into_boxed_str());
+                    store.entry(bucket).or_default().insert(key, value);
+                    // 统一基座双写：inklog 消息面对全家族可见（渲染语义
+                    // 由 trait-kit 引擎承担，FSI 差异见模块文档）。
+                    trait_kit::i18n::I18nManager::register_translation(locale_tag, key, value);
+                }
+            }
+        }
+    });
 }
 
 fn resolve_locale() -> String {
@@ -205,14 +356,12 @@ fn normalize_locale(locale: &str) -> String {
 /// `"en"`) that `sys-locale` may return on some platforms, while
 /// rejecting non-locale values like `"C"` or `"POSIX"`.
 fn is_valid_locale(locale: &str) -> bool {
-    // Reject known non-BCP-47 values
     if matches!(locale, "C" | "POSIX") {
         return false;
     }
-    // Normalize, then validate as a BCP-47 language identifier
-    normalize_locale(locale)
-        .parse::<LanguageIdentifier>()
-        .is_ok()
+    // 归一后校验语言标签形态（仅接受家族支持的两桶前缀）
+    let normalized = normalize_locale(locale);
+    normalized.starts_with("en") || normalized.starts_with("zh")
 }
 
 /// Compile-time embedded copies of the `locales/` directory.
@@ -273,171 +422,6 @@ const EMBEDDED_LOCALES: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
-fn load_resources() -> (
-    HashMap<String, HashMap<String, FluentResource>>,
-    HashMap<String, LanguageIdentifier>,
-) {
-    let locales_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
-    load_resources_with_fallback(&locales_dir)
-}
-
-/// Prefer an on-disk locales directory (development hot-editing); the
-/// build-machine path only exists during development, so deployed
-/// binaries fall back to the embedded copies.
-fn load_resources_with_fallback(
-    locales_dir: &std::path::Path,
-) -> (
-    HashMap<String, HashMap<String, FluentResource>>,
-    HashMap<String, LanguageIdentifier>,
-) {
-    let (resources, lang_ids) = load_resources_from_dir(locales_dir);
-    if !resources.is_empty() {
-        return (resources, lang_ids);
-    }
-    load_embedded_resources()
-}
-
-/// Load Fluent resources from an on-disk locale directory laid out as
-/// `<dir>/<locale>/<name>.ftl`. Returns empty maps when the directory
-/// does not exist or cannot be read.
-///
-/// Failure warnings below stay in English on purpose: while the catalog
-/// itself is failing to load, the `tr` lookup chain is unavailable, so a
-/// translated message would degrade to a raw message ID (self-reference).
-fn load_resources_from_dir(
-    dir: &std::path::Path,
-) -> (
-    HashMap<String, HashMap<String, FluentResource>>,
-    HashMap<String, LanguageIdentifier>,
-) {
-    let mut resources: HashMap<String, HashMap<String, FluentResource>> = HashMap::new();
-    let mut lang_ids: HashMap<String, LanguageIdentifier> = HashMap::new();
-
-    if !dir.exists() {
-        return (resources, lang_ids);
-    }
-
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("[inklog] WARNING: failed to read locales dir: {e}");
-            return (resources, lang_ids);
-        }
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let locale_str = match path.file_name().and_then(|n| n.to_str()) {
-            Some(name) => name.to_string(),
-            None => continue,
-        };
-
-        let lang_id: LanguageIdentifier = match locale_str.parse() {
-            Ok(id) => id,
-            Err(_) => {
-                eprintln!("[inklog] WARNING: invalid locale identifier: {locale_str}");
-                continue;
-            }
-        };
-
-        let mut locale_resources = HashMap::new();
-
-        if let Ok(ftl_entries) = std::fs::read_dir(&path) {
-            for ftl_entry in ftl_entries.flatten() {
-                let ftl_path = ftl_entry.path();
-                if ftl_path.extension().and_then(|e| e.to_str()) != Some("ftl") {
-                    continue;
-                }
-                let source = match std::fs::read_to_string(&ftl_path) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!(
-                            "[inklog] WARNING: failed to read {}: {e}",
-                            ftl_path.display()
-                        );
-                        continue;
-                    }
-                };
-                let resource_name = ftl_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                match FluentResource::try_new(source) {
-                    Ok(r) => {
-                        locale_resources.insert(resource_name, r);
-                    }
-                    Err((_res, errs)) => {
-                        for err in errs {
-                            eprintln!(
-                                "[inklog] WARNING: FTL parse error in {}: {err:?}",
-                                ftl_path.display()
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        if !locale_resources.is_empty() {
-            resources.insert(locale_str.clone(), locale_resources);
-            lang_ids.insert(locale_str, lang_id);
-        }
-    }
-
-    (resources, lang_ids)
-}
-
-/// Build resources from [`EMBEDDED_LOCALES`] through the same
-/// `FluentResource` parse path as [`load_resources_from_dir`].
-///
-/// Same English-only rule for its failure warnings: the translation
-/// chain is exactly what is breaking at this point.
-fn load_embedded_resources() -> (
-    HashMap<String, HashMap<String, FluentResource>>,
-    HashMap<String, LanguageIdentifier>,
-) {
-    let mut resources: HashMap<String, HashMap<String, FluentResource>> = HashMap::new();
-    let mut lang_ids: HashMap<String, LanguageIdentifier> = HashMap::new();
-
-    for &(locale_str, files) in EMBEDDED_LOCALES {
-        let Ok(lang_id) = locale_str.parse::<LanguageIdentifier>() else {
-            eprintln!("[inklog] WARNING: invalid embedded locale identifier: {locale_str}");
-            continue;
-        };
-
-        let mut locale_resources = HashMap::new();
-        for &(file_name, source) in files {
-            // Key by file stem so embedded resources are indistinguishable
-            // from filesystem-loaded ones.
-            let resource_name = file_name.strip_suffix(".ftl").unwrap_or(file_name);
-            match FluentResource::try_new(source.to_string()) {
-                Ok(r) => {
-                    locale_resources.insert(resource_name.to_string(), r);
-                }
-                Err((_res, errs)) => {
-                    for err in errs {
-                        eprintln!(
-                            "[inklog] WARNING: FTL parse error in embedded {locale_str}/{file_name}: {err:?}"
-                        );
-                    }
-                }
-            }
-        }
-
-        if !locale_resources.is_empty() {
-            resources.insert(locale_str.to_string(), locale_resources);
-            lang_ids.insert(locale_str.to_string(), lang_id);
-        }
-    }
-
-    (resources, lang_ids)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -528,62 +512,47 @@ mod tests {
         // zh_CN normalizes to a locales/ directory that is hit directly
         assert_eq!(normalize_locale("zh_CN.UTF-8"), "zh-CN");
         assert_eq!(
-            format_message("zh-CN", "log_level-name_info", None).as_deref(),
+            lookup("zh-CN", "log_level-name_info", &[]).as_deref(),
             Some("信息")
         );
         // en_US.UTF-8 normalizes to en-US (no dedicated directory); the
         // same fallback chain tr uses then resolves it to en resources
         let locale = normalize_locale("en_US.UTF-8");
         assert_eq!(locale, "en-US");
-        let translated = format_message(&locale, "log_level-name_info", None)
-            .or_else(|| format_message("en", "log_level-name_info", None));
+        let translated = lookup(&locale, "log_level-name_info", &[])
+            .or_else(|| lookup("en", "log_level-name_info", &[]));
         assert_eq!(translated.as_deref(), Some("INFO"));
     }
 
     #[test]
-    fn test_bundle_cache_keeps_locales_separate() {
+    fn test_registry_keeps_locales_separate() {
         init_locale();
-        // Repeated lookups exercise cached bundles; a locale switch must
-        // not leak translations across cache entries.
+        // Repeated lookups exercise the template registry; buckets must
+        // not leak translations across entries.
         for _ in 0..3 {
             assert_eq!(
-                format_message("en", "log_level-name_warn", None).as_deref(),
+                lookup("en", "log_level-name_warn", &[]).as_deref(),
                 Some("WARN")
             );
             assert_eq!(
-                format_message("zh-CN", "log_level-name_warn", None).as_deref(),
+                lookup("zh-CN", "log_level-name_warn", &[]).as_deref(),
                 Some("警告")
             );
         }
     }
 
     #[test]
-    fn test_load_resources_missing_dir_falls_back_to_embedded() {
-        // Simulates a deployed binary: no on-disk locales directory at
-        // all. Translations must still work via the embedded copies,
-        // resolved through the same Fluent path as the filesystem loader.
-        let (resources, lang_ids) =
-            load_resources_with_fallback(std::path::Path::new("/nonexistent/inklog/locales"));
-        assert!(lang_ids.contains_key("en"), "en must load from embedded");
-        assert!(
-            lang_ids.contains_key("zh-CN"),
-            "zh-CN must load from embedded"
-        );
-
-        let mut bundle = FluentBundle::new(vec![lang_ids["zh-CN"].clone()]);
-        for resource in resources["zh-CN"].values() {
-            let _ = bundle.add_resource(resource);
-        }
-        let message = bundle
-            .get_message("log_level-name_info")
-            .expect("embedded zh-CN message");
-        let pattern = message.value().expect("pattern");
-        let mut errors = vec![];
+    fn test_embedded_registry_resolves_both_locales() {
+        init_locale();
+        // Deployed binaries resolve purely from EMBEDDED_LOCALES; the
+        // registry must carry both buckets with canonical renderings.
         assert_eq!(
-            bundle
-                .format_pattern(pattern, None, &mut errors)
-                .to_string(),
-            "信息"
+            lookup("zh-CN", "log_level-name_info", &[]).as_deref(),
+            Some("信息")
+        );
+        assert_eq!(
+            lookup("en", "log_level-name_info", &[]).as_deref(),
+            Some("INFO")
         );
     }
 
@@ -631,21 +600,21 @@ mod tests {
             ),
         ];
         for (id, args, expected_en, expected_zh) in cases {
-            let fluent_args = args.map(|pairs| {
-                let mut fluent = FluentArgs::new();
-                for (k, v) in pairs {
-                    fluent.set(*k, *v);
-                }
-                fluent
-            });
+            let fluent_args_entries: Vec<(String, String)> = args
+                .map(|pairs| {
+                    pairs
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
             assert_eq!(
-                strip_bidi_isolates(format_message("en", id, fluent_args.as_ref()).as_deref())
-                    .as_deref(),
+                strip_bidi_isolates(lookup("en", id, &fluent_args_entries).as_deref()).as_deref(),
                 Some(*expected_en),
                 "en rendering of '{id}' diverged"
             );
             assert_eq!(
-                strip_bidi_isolates(format_message("zh-CN", id, fluent_args.as_ref()).as_deref())
+                strip_bidi_isolates(lookup("zh-CN", id, &fluent_args_entries).as_deref())
                     .as_deref(),
                 Some(*expected_zh),
                 "zh-CN rendering of '{id}' diverged"
@@ -664,24 +633,16 @@ mod tests {
     }
 
     #[test]
-    fn test_embedded_resources_match_filesystem_entries() {
-        let locales_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
-        let (fs_resources, _) = load_resources_from_dir(&locales_dir);
-        let (embedded, _) = load_embedded_resources();
-        assert!(!embedded.is_empty(), "embedded table must not be empty");
-        for (locale, fs_map) in &fs_resources {
-            let emb_map = embedded
-                .get(locale)
-                .unwrap_or_else(|| panic!("EMBEDDED_LOCALES missing locale dir '{locale}'"));
-            assert_eq!(
-                emb_map.len(),
-                fs_map.len(),
-                "locale '{locale}': embedded resource count differs from filesystem"
-            );
-            for name in fs_map.keys() {
+    fn test_parse_ftl_entries_cover_all_embedded_files() {
+        // Guard: every embedded FTL file parses into non-empty entries —
+        // a silently broken include_str! table would ship untranslated.
+        for (locale_tag, files) in EMBEDDED_LOCALES {
+            assert!(!files.is_empty(), "locale '{locale_tag}' has no files");
+            for (file_name, source) in *files {
+                let entries = parse_ftl_entries(source);
                 assert!(
-                    emb_map.contains_key(name),
-                    "locale '{locale}': embedded resources missing '{name}'"
+                    !entries.is_empty(),
+                    "locale '{locale_tag}' file '{file_name}' parsed to zero entries"
                 );
             }
         }
@@ -820,35 +781,12 @@ mod tests {
     /// 目录加载器对不可解析的 FTL 文件必须跳过该文件而非整体失败：
     /// 损坏 locale（en）整组无有效资源时不注册；完好 locale（zh-CN）照常加载。
     #[test]
-    fn test_load_resources_from_dir_skips_unparseable_ftl() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let en_dir = dir.path().join("en");
-        let zh_dir = dir.path().join("zh-CN");
-        std::fs::create_dir_all(&en_dir).expect("create en dir");
-        std::fs::create_dir_all(&zh_dir).expect("create zh dir");
-        // 缺少 "=" 的裸标识符行：Fluent 解析必然失败
-        std::fs::write(en_dir.join("broken.ftl"), "bare-identifier-without-value\n")
-            .expect("write broken ftl");
-        std::fs::write(zh_dir.join("extra.ftl"), "extra-greeting = 你好\n")
-            .expect("write valid ftl");
-
-        let (resources, lang_ids) = load_resources_from_dir(dir.path());
-
-        assert!(
-            !lang_ids.contains_key("en"),
-            "locale with only unparseable FTL must not be registered"
-        );
-        assert!(
-            !resources.contains_key("en"),
-            "no resources may be registered for the broken locale"
-        );
-        let zh = resources
-            .get("zh-CN")
-            .expect("valid locale must still load from the same dir");
-        assert!(
-            zh.contains_key("extra"),
-            "valid FTL file must be keyed by file stem, got: {:?}",
-            zh.keys().collect::<Vec<_>>()
-        );
+    fn test_parse_ftl_entries_ignores_bare_identifiers() {
+        // 裸标识符行（无 "="）不是条目：解析器必须忽略而非 panic 或误收。
+        let ftl = "bare-identifier-without-value\nvalid-key = 你好\n";
+        let entries = parse_ftl_entries(ftl);
+        assert_eq!(entries.len(), 1, "bare identifier must be skipped");
+        assert_eq!(entries[0].0, "valid-key");
+        assert_eq!(entries[0].1, "你好");
     }
 }
