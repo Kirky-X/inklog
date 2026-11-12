@@ -8,7 +8,7 @@
 
 | 层级 | 承载 | 数量基线 |
 | --- | --- | --- |
-| L1 lib 单元测试 | `src/**` 内 `#[cfg(test)]` | lib 目标 1466 passed（manager/workers/sink/config/i18n 等模块自测）；另有 src/cli/main.rs bin 目标 110 与 examples 包 lib 目标 35，同属 src 内联测试 |
+| L1 lib 单元测试 | `src/**` 内 `#[cfg(test)]` | lib 目标 1466 passed（manager/workers/sink/config/i18n 等模块自测）；另有 src/main.rs bin 目标 110 与 examples 包 lib 目标 35，同属 src 内联测试 |
 | L2 集成测试 | `tests/**`（4 个 `[[test]]` 显式注册 + 4 个顶层自动发现） | integration 102+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 35+1i / docker 27 / cli_integration 17 |
 | L3 E2E 场景 | `tests/e2e/e2e_advanced.rs`（目录承载，不裸放顶层） | 228 passed，按 mod 域隔离 |
 | L4 容器级 | `tests/docker/`（main.rs 自动发现） | 27 passed（sqlite embedded 路径；pg/mysql 用例门控至对应驱动组） |

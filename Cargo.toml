@@ -228,7 +228,7 @@ required-features = ["secret-scan"]
 
 [[bin]]
 name = "inklog-cli"
-path = "src/cli/main.rs"
+path = "src/main.rs"
 required-features = ["cli"]
 
 [profile.release]

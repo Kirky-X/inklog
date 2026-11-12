@@ -464,7 +464,7 @@ pub fn decrypt_directory_compatible(
                     // 展开因果链：e.to_string() 只取最外层 context，会吞掉
                     // 密钥长度/密码长度诊断（与单文件出口 format_error_chain
                     // 同款契约）
-                    args.set("err", crate::cli_impl::format_error_chain(&e));
+                    args.set("err", super::cli_impl::format_error_chain(&e));
                     eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-fail", args));
                     failure_count += 1;
                 }
@@ -625,7 +625,7 @@ pub fn batch_decrypt(input_pattern: &str, output_dir: &PathBuf, key_env: &str) -
             let mut args = inklog::i18n::MsgArgs::new();
             args.set("path", path.display().to_string());
             // 展开因果链：理由同目录模式（e.to_string() 吞底层明细）
-            args.set("err", crate::cli_impl::format_error_chain(&e));
+            args.set("err", super::cli_impl::format_error_chain(&e));
             eprintln!("{}", inklog::i18n::tr_args("cli-decrypt-fail", args));
             failure_count += 1;
         } else {
@@ -1220,7 +1220,7 @@ mod tests {
         unsafe { std::env::remove_var("TEST_CHAIN_KEY") };
 
         let err = result.expect_err("wrong-length key must fail");
-        let rendered = crate::cli_impl::format_error_chain(&err);
+        let rendered = crate::cli::cli_impl::format_error_chain(&err);
         assert!(
             rendered.contains("32 bytes"),
             "key length detail must survive the chain, got: {rendered}"

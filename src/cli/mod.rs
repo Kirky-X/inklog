@@ -160,25 +160,5 @@ impl std::fmt::Display for ConfigType {
     }
 }
 
-fn main() {
-    // 退出码契约：0 = 成功/有匹配，1 = 错误，2 = 无匹配/校验失败
-    let code = run_cli();
-    if code != 0 {
-        std::process::exit(code);
-    }
-}
-
-// 测试进程固定 locale 为 en：与 CI（Linux，LANG 未设）行为一致。
-// bin 测试链接的是非 test 编译的 lib，lib 内的 cfg(test) 分支在此
-// 不生效；ctor 于 main 之前设置文档化最高优先级 override
-// （INKLOG_LOCALE，见 i18n/locale_manager.rs），对全进程测试生效。
-#[cfg(test)]
-mod test_locale_init {
-    #[ctor::ctor(unsafe)]
-    fn set_test_locale() {
-        // 测试进程启动期（单线程、无其他线程读 env），set_var 无 UB 风险
-        unsafe {
-            std::env::set_var("INKLOG_LOCALE", "en");
-        }
-    }
-}
+// 入口薄壳（crate 根 src/main.rs）只做退出码映射；本模块承载
+// clap 定义与子命令分发，见 run_cli。
