@@ -32,6 +32,18 @@ mod database_lifecycle_test;
 mod database_sink_test;
 mod dbnexus_adapter_test;
 
+// 集成测试进程固定 locale 为 en：断言英文错误消息文案（如 "Database"/"pool"），
+// 与 lib 单测的 test_locale_init 同口径（src/lib.rs）。非英文系统（macOS 中文
+// 系统 sys-locale 检测出 zh）下 i18n 引擎渲染中文文案会使断言失败。ctor 于
+// 测试进程启动期设置文档化最高优先级 override（INKLOG_LOCALE）。
+#[ctor::ctor(unsafe)]
+fn set_test_locale() {
+    // 测试进程启动期（单线程、无其他线程读 env），set_var 无 UB 风险
+    unsafe {
+        std::env::set_var("INKLOG_LOCALE", "en");
+    }
+}
+
 /// 读取 `INKLOG_TEST_DB_URL` 环境变量。
 pub fn get_test_db_url() -> Option<String> {
     env::var("INKLOG_TEST_DB_URL").ok()

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <summary>📑 目录</summary>
 
 - [Unreleased](#unreleased)
+- [0.3.0](#030---2026-11-14)
+- [0.3.0-rc.12](#030-rc12---2026-11-01)
 - [0.3.0-rc.11](#030-rc11---2026-10-20)
 - [0.3.0-rc.10](#030-rc10---2026-10-19)
 - [0.3.0-rc.9](#030-rc9---2026-10-10)
@@ -32,6 +34,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 </details>
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-11-14
+
+正式版定版：rc.12 以来 8 个提交（i18n 引擎切 trait-kit 直连、CLI 入口收敛、安全豁免与依赖归一），自研依赖地板转正 minor 精度（`trait-kit "0.5"` / `confers "0.6"` / `dbnexus "0.6"` / `oxcache "0.5"`，registry 已发布 0.5.0 / 0.6.0 / 0.6.0 / 0.5.0）。
+
+### Changed
+
+- **i18n 引擎切 trait-kit 直连（f7ee301）**：消息模板注册 I18nManager 基座（双写）、自持渲染保 FSI 字节语义；格式化层改 trait-kit `I18nFormatter`。金样本 10196 行与旧 fluent 引擎逐字节一致；删 fluent-bundle / icu / writeable / unic-langid 四依赖（依赖树缩减约 150 行 lock 条目，icu_experimental 等 10 个 crate 退出）。
+- **CLI 入口收敛（07c13b7）**：入口迁根 `src/main.rs` 薄壳（cli 定义收敛 `src/cli/mod.rs`），示例补 `golden_export` 金样本导出工具（验证毕移除，数据存 temp/idle-remediation/golden-inklog/）。
+- **依赖地板转正（78f4f9f + 本版定版）**：自研依赖从 rc 钉版转 minor caret 精度，registry 已发布版本全部可见（trait-kit 0.5.0 / confers 0.6.0 / dbnexus 0.6.0 / oxcache 0.5.0）。
+- **CI 动作升级（62cf3ec）**：crates-io-auth-action 1.0.6 + rust-cache 2.9.3（本地取代 dependabot #34/#35）。
+
+### Fixed
+
+- **clippy 门禁清零（b86ef62）**：`i18n/locale_real.rs` tests 模块补 `#[cfg(test)]` 门控，消 lib 构建 dead_code/unused 告警。
+- **安全链路（8448672 / 6769103）**：rustix 升 1.1.6 修 RUSTSEC-2026-0486；libsqlite3-sys / arrow-data 链上游豁免入库；`.cargo/audit.toml` 入库（gitignore 改目录通配+文件例外），双体系豁免对齐。
 
 ## [0.3.0-rc.12] - 2026-11-01
 

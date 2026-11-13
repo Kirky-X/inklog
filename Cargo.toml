@@ -17,7 +17,7 @@ resolver = "2"
 members = [".", "examples"]
 
 [workspace.package]
-version = "0.3.0-rc.12"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Kirky-X <Kirky-X@outlook.com>"]
@@ -46,7 +46,7 @@ crossbeam-channel = { version = "0.5", default-features = false, features = ["st
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
 # 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
 # dbnexus 跨仓地板：地板是已承诺兼容的最低版本，允许滞后；禁 `=` 精确钉（会迫使底层推进时顶层重发，并在下游产生双版本同图）
-dbnexus = { version = "0.6.0-rc.11", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
+dbnexus = { version = "0.6", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥（见 [features] 说明），全开必然编译失败
 [package.metadata.docs.rs]
 features = ["default", "http", "cli", "zstd", "gzip", "parquet", "fast-masking", "sqlite", "kit", "test-utils", "otlp", "net-sink", "kms", "dbnexus-audit", "confers-audit", "config-confers", "otel"]
@@ -134,8 +134,8 @@ serde_json = { workspace = true }
 schemars = { version = "1.2", default-features = false, features = ["derive", "std"], optional = true }
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 # 掩码引擎宿主（trait-kit/masking）：inklog::DataMasker 等路径经 re-export 保持兼容
-trait-kit = { version = "0.5.0-rc.14", default-features = false, features = ["masking"] }
-confers = { version = "0.6.0-rc.13", default-features = false, features = ["toml", "watch"] }
+trait-kit = { version = "0.5", default-features = false, features = ["masking"] }
+confers = { version = "0.6", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -145,8 +145,8 @@ axum-server = { version = "0.8", default-features = false, features = ["tls-rust
 is-terminal = { version = "0.4", default-features = false }
 dirs = { version = "7.0", default-features = false }
 parking_lot = { version = "0.13", default-features = false }
-# oxcache 放宽为 caret：精确 pin 会与下游区间无交集导致解析冲突；rc.8/rc.10/rc.12 逐级实测兼容（inklog 消费面无变更），地板 rc.12 与 dbnexus rc.11 拉入版对齐避免双版本同图
-oxcache = { version = "0.5.0-rc.12", default-features = false, features = ["memory", "serialization", "audit"], optional = true }
+# oxcache 放宽为 caret：精确 pin 会与下游区间无交集导致解析冲突；0.5.x 逐级实测兼容（inklog 消费面无变更），地板与 dbnexus 拉入版对齐避免双版本同图
+oxcache = { version = "0.5", default-features = false, features = ["memory", "serialization", "audit"], optional = true }
 zstd = { version = "0.14", default-features = false, optional = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
