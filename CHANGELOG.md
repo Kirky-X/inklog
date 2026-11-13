@@ -7,6 +7,7 @@
 
 ### Changed
 
+- 全家族接口归一：trait-kit 0.5.0-rc.14（i18n PluralCategory 重导出）、sdforge 0.5.0-rc.11、confers 0.6.0-rc.13（按仓实际涉及项）；公共 API 无破坏，编译与测试门禁全绿。
 - 掩码引擎下沉 trait-kit（`masking` feature，单一来源）：本仓删除
   `masking` / `masking_ac` / `masking_registry` / `secret_scan` / `secret_patterns` /
   `secret_entropy` 六文件，`inklog::DataMasker` / `MaskRule` / `MaskRuleRegistry` /

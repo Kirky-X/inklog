@@ -833,9 +833,9 @@ dependencies = [
 
 [[package]]
 name = "confers"
-version = "0.6.0-rc.12"
+version = "0.6.0-rc.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cc005e9f772c7f1dac1a701379975300ae289fd5a47cee72b21615254937796"
+checksum = "05847095392cf83d9fbcdfe4e0bd9166c85175d0cdf33b3c1783dd174050a4e6"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -872,9 +872,9 @@ dependencies = [
 
 [[package]]
 name = "confers-macros"
-version = "0.6.0-rc.12"
+version = "0.6.0-rc.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36d79f65d1c5385a3edb6e2b8ea9f0d7004c196e26847bbae4eeedffe302f216"
+checksum = "2563affa595319211c8cbea52095f8b808e57c27e002598dcede1545501c3ef1"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",

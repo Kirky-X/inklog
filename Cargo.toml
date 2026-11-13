@@ -135,7 +135,7 @@ schemars = { version = "1.2", default-features = false, features = ["derive", "s
 toml = { version = "1.1", default-features = false, features = ["parse", "display", "serde"] }
 # 掩码引擎宿主（trait-kit/masking）：inklog::DataMasker 等路径经 re-export 保持兼容
 trait-kit = { version = "0.5.0-rc.14", default-features = false, features = ["masking"] }
-confers = { version = "0.6.0-rc.12", default-features = false, features = ["toml", "watch"] }
+confers = { version = "0.6.0-rc.13", default-features = false, features = ["toml", "watch"] }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
