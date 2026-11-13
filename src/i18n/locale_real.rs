@@ -422,6 +422,7 @@ const EMBEDDED_LOCALES: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
