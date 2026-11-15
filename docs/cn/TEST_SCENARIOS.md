@@ -15,7 +15,7 @@
 
 CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`，与 ci.yml 一致）全量结果：**lib 1466 / cli-bin 110 / examples-bin 35 / unit_tests 63 / integration 102+1i / combinations 20 / integration_tests 35+1i / docker 27 / cli_integration 17 / performance 11+3i / e2e_advanced 228 / examples integration_test 6，0 failed**（合计 2120 passed / 5 ignored；examples 包的 integration_test 6 条属 examples crate，不计入 inklog tests/** 基线）。
 
-> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见 [README](../README.md) 测试章节（HEAD deab699：src 内联 1,712 + tests 目录 564 + examples 41 = 2,317 个测试函数）。
+> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见文末 [📐 测试规模](#-测试规模) 章节（HEAD deab699：src 内联 1,712 + tests 目录 564 + examples 41 = 2,317 个测试函数）。
 
 ## 🗂️ 测试目标注册与功能域落点
 
@@ -109,3 +109,7 @@ CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-ma
 | 各测试模块 `assert!`/`panic!` 的消息格式化参数 | 惰性求值，仅在断言失败时执行 |
 
 约束声明：本次覆盖率抬升未删除任何既有测试、未放松任何断言（R-inklog-007 红线）；全部增量来自新增测试（错误分支、边界值、Debug/Display 诊断面、异步生命周期转发、降级状态机）。
+
+## 📐 测试规模
+
+**测试规模**（HEAD 实测，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,712 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,317 个测试函数**；另有 criterion 基准函数 48 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个、`benches/secret_scan_bench.rs` 8 个，按 `.bench_function(` 注册用例计数；其中 1 个按 `otlp` feature 门控，`secret_scan_bench` 需 `secret-scan` feature），基线见 [PERFORMANCE.md](PERFORMANCE.md)。

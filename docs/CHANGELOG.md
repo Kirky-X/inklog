@@ -45,6 +45,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI 入口收敛（07c13b7）**：入口迁根 `src/main.rs` 薄壳（cli 定义收敛 `src/cli/mod.rs`），示例补 `golden_export` 金样本导出工具（验证毕移除，数据存 temp/idle-remediation/golden-inklog/）。
 - **依赖地板转正（78f4f9f + 本版定版）**：自研依赖从 rc 钉版转 minor caret 精度，registry 已发布版本全部可见（trait-kit 0.5.0 / confers 0.6.0 / dbnexus 0.6.0 / oxcache 0.5.0）。
 - **CI 动作升级（62cf3ec）**：crates-io-auth-action 1.0.6 + rust-cache 2.9.3（本地取代 dependabot #34/#35）。
+- 全家族接口归一：trait-kit 0.5.0-rc.14（i18n PluralCategory 重导出）、sdforge 0.5.0-rc.11、confers 0.6.0-rc.13（按仓实际涉及项）；公共 API 无破坏，编译与测试门禁全绿。
+- 掩码引擎下沉 trait-kit（`masking` feature，单一来源）：本仓删除
+  `masking` / `masking_ac` / `masking_registry` / `secret_scan` / `secret_patterns` /
+  `secret_entropy` 六文件，`inklog::DataMasker` / `MaskRule` / `MaskRuleRegistry` /
+  `SecretScanGate` 等公开路径经 re-export 保持兼容；`fast-masking` 保留为 no-op
+  兼容别名（Aho-Corasick 加速随 trait-kit/masking 常载）。掩码 API 错误类型随
+  引擎变为 trait-kit 的 `MaskError`（本仓 `InklogError` 的 `SecretScan*` 变体
+  保留但不再由掩码路径产生）。
+
+### Added
+
+- `trait-kit` 转为必选依赖（`features = ["masking"]`）；`kit` feature 改以
+  `trait-kit/<f>` 引用（依赖已非可选）。
 
 ### Fixed
 

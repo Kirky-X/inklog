@@ -40,7 +40,7 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ### 核心概念
 
-初始化（`LoggerManager` 安装全局 tracing subscriber 与 `log` crate 前端、进程级单例语义）、记录（标准宏无侵入）、Sink（输出目标抽象与内置实现）、配置（TOML + 环境变量优先级）与关闭（`shutdown()` 排空通道）五大核心概念，逐项说明见 [README · 快速开始](../README.md#-快速开始)。
+初始化（`LoggerManager` 安装全局 tracing subscriber 与 `log` crate 前端、进程级单例语义）、记录（标准宏无侵入）、Sink（输出目标抽象与内置实现）、配置（TOML + 环境变量优先级）与关闭（`shutdown()` 排空通道）五大核心概念，逐项说明见文末 [🧭 核心概念](#-核心概念)。
 
 ## ✨ 核心特性
 
@@ -106,9 +106,9 @@ inklog = { version = "0.3.0-rc.9", features = ["zstd", "gzip", "parquet", "fast-
 inklog = { version = "0.3.0-rc.9", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
 ```
 
-完整 feature 清单与说明见 [README](../README.md#-特性标志)。
+完整 feature 清单与说明见文末 [🎨 特性标志](#-特性标志)。
 
-> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 不可同时启用，不适用 `--all-features`；互斥原因与按后端分组的启用方式见 [README · 特性标志](../README.md#-特性标志)。
+> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 不可同时启用，不适用 `--all-features`；互斥原因与按后端分组的启用方式见文末 [🎨 特性标志](#-特性标志)。
 
 > 注：TOML 配置文件加载（`LoggerManager::from_file` / `load`）为内建能力，无需额外 feature。
 
@@ -712,7 +712,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### 运行示例（cargo run --bin）
 
-`examples/` crate 提供 7 类共 40 个可运行示例，完整清单见 [README](../README.md#-示例)。运行方式：
+`examples/` crate 提供 7 类共 40 个可运行示例，完整清单见文末 [💻 完整示例清单](#-完整示例清单)。运行方式：
 
 ```bash
 cargo run --package inklog-examples --bin <名称>
@@ -1250,7 +1250,7 @@ inklog-cli query --path logs/ --level error --since 2026-09-13T00:00:00Z --grep 
 | [⚡ 性能基线](PERFORMANCE.md) | criterion 基准环境与基线数字 |
 | [🧪 测试场景](TEST_SCENARIOS.md) | 测试金字塔与 E2E 场景定义 |
 | [🔒 安全文档](SECURITY.md) | 安全设计、漏洞报告与合规说明 |
-| [📋 更新日志](CHANGELOG.md) | 版本变更记录 |
+| [📋 更新日志](../CHANGELOG.md) | 版本变更记录 |
 | [📦 在线 API 文档](https://docs.rs/inklog) | docs.rs 自动生成的最新文档 |
 
 ### 生态系统
@@ -1264,6 +1264,173 @@ inklog-cli query --path logs/ --level error --since 2026-09-13T00:00:00Z --grep 
 
 - [GitHub Issues](https://github.com/Kirky-X/inklog/issues)：报告 bug 和问题
 - [GitHub Discussions](https://github.com/Kirky-X/inklog/discussions)：提问和分享想法
+
+## 🧭 核心概念
+
+1. **初始化**：`LoggerManager` 负责安装全局 tracing subscriber 与 `log` crate 前端，进程内单例语义（`init_inklog_logger()` 提供便捷入口）。
+2. **记录**：业务代码使用 `tracing::info!` 等标准宏，无侵入。
+3. **Sink**：输出目标抽象（`LogSink` / `AsyncSink` trait），console / file / database / net / otlp 内置实现，可自定义。
+4. **配置**：`InklogConfig` 支持 TOML 文件；`INKLOG_*` 环境变量覆盖仅在经 `InklogConfig::load_with_env_overrides()` 加载时应用（优先级为环境变量 > 配置文件 > 默认值），`LoggerManager::new()` / `LoggerManager::load()` 走 `load_sync()`，不应用 env 覆盖。
+5. **关闭**：应用退出前调用 `shutdown()`，等待通道中剩余日志全部写入。
+
+## 🎨 特性标志
+
+`default = ["i18n", "cache"]`：默认组合为核心能力 + 国际化 + 缓存后端；下列其余 feature 按需显式启用（依据 `Cargo.toml` `[features]` 定义）。以 `default-features = false` 引入即同时关闭 i18n 与 cache，可裁掉 icu/fluent 依赖树，`tr`/`tr_args` 回退到内嵌英文文案表。
+
+| 标志 | 默认 | 说明 |
+|------|:----:|------|
+| `i18n` | ✅ | 国际化运行时：ICU4X 本地化格式化 + fluent-bundle 翻译 + `INKLOG_LOCALE` 覆盖 |
+| `cache` | ✅ | 缓存后端：oxcache 适配器（`OxCacheAdapter`）与 `ObjectPool`；oxcache 的 icu/fluent 依赖非可选，裁掉 icu/fluent 需同时关闭 `i18n` 与 `cache`（即 `default-features = false`） |
+| `sqlite` | ❌ | SQLite 数据库后端（经 dbnexus，rustls 运行时） |
+| `postgres` | ❌ | PostgreSQL 数据库后端（经 dbnexus） |
+| `mysql` | ❌ | MySQL 数据库后端（经 dbnexus） |
+| `duckdb` | ❌ | DuckDB 数据库后端（经 dbnexus）。🚫 暂不可用：上游 zip 全系 yank 致 libduckdb-sys（zip ^6）解析失败，请勿启用 |
+| `http` | ❌ | Axum HTTP 健康与指标端点（axum + axum-server，TLS 走 rustls） |
+| `cli` | ❌ | `inklog-cli` 命令行工具（clap + glob，隐含 `schema`） |
+| `schema` | ❌ | 配置 JSON Schema 导出（schemars derive + `InklogConfig::json_schema()`）；`cli` 隐式启用 |
+| `kit` | ❌ | trait-kit 生命周期与可观测集成（`InklogModule`），需至少一个数据库后端 feature |
+| `zstd` | ❌ | Zstd 压缩轮转日志文件（zstd）；`compression` 为其 deprecated 兼容别名 |
+| `gzip` | ❌ | Gzip 压缩后端（flate2 纯 Rust；未启用 `zstd` 时 FileSink 轮转回退 gzip） |
+| `parquet` | ❌ | Parquet/Arrow 导出（数据库 Sink 归档） |
+| `fast-masking` | ❌ | Aho-Corasick 多模式脱敏加速 |
+| `secret-scan` | ❌ | Secret 出站脱敏门：值形态正则注册表（sk-/PEM/AKIA 等裸 secret）+ 值熵扫描 + 逐模式计数与超限 fail-closed（`mask_checked`）+ 中文敏感键名 |
+| `dbnexus-audit` | ❌ | dbnexus AuditStorage 端口适配器，审计事件经 inklog DB sink 落库，可与任一后端组合 |
+| `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数；confers 0.6.0-rc.6 为非 optional 核心依赖（INKLOG_* env 覆盖映射经 confers 源链），本 feature 增开 confers 的 `toml`/`watch` 特性（兼容保留） |
+| `confers-audit` | ❌ | confers `AuditSink` 端口的 inklog 实现，配置审计事件写入 inklog 结构化 sink；confers 为非 optional 核心依赖，本 feature 增开 confers 的 `audit` 特性 |
+| `oxcache-audit` | ❌ | oxcache `AuditEventPublisher` 端口的 inklog 实现（`OxcacheAuditPublisher`）：缓存审计事件经有界通道由单一 writer task 写入注入的 sink |
+| 限流 | ✅ | 按速率 / 按 target 分组的限流模块（`RateLimiter` / `TargetRateLimiter`）与 sink 级限流装饰器（`RateLimitedSink`）默认构建即生效：内核为仓内令牌桶（容量 = 速率、每秒补充速率个令牌），sink 级突发配额用 `BurstLimiter`。inklog 不依赖任何外部限流库，扩展走自有 `SinkRateLimit` 端口 |
+| `kms` | ❌ | KMS 密钥提供者（`EnvKeyProvider` / `ConfersKeyProvider` / Vault transit MVP）；confers 为非 optional 核心依赖，本 feature 增开 confers 的 `encryption`/`cloud-kms` 特性 |
+| `net-sink` | ❌ | 网络转发 Sink（TCP 可 TLS + UDP，断线缓冲与自动重连） |
+| `insecure-tls` | ❌ | 允许在**发布构建**中禁用 TLS 证书校验（`danger_accept_invalid_certs`）；默认关闭——跳过证书校验后链路只加密不认证，中间人可完整读取并篡改外发日志。调试构建（`debug_assertions`）无需本特性即可使用该开关 |
+| `otlp` | ❌ | OTLP/HTTP JSON 日志导出 MVP（手写传输，零新增依赖） |
+| `otel` | ❌ | 真 OpenTelemetry 链路上下文：从 span extensions 读取 SpanContext（宿主 tracing-opentelemetry layer 写入）；宿主 otel 版本需与 inklog 对齐（当前 opentelemetry 0.33，配套 tracing-opentelemetry 0.34），未对齐时静默回退根 span 派生 |
+| `metrics-registry` | ❌ | 通用业务指标 registry（CounterVec / GaugeVec / HistogramVec + Prometheus 文本导出） |
+| `test-utils` | ❌ | 测试面 mock 导出（`MockCache` / `MockConfig` / `MockDatabaseAdapter`），不入 default 与任何生产组合 |
+
+> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 互斥（经 dbnexus 强制，embedded 与 server-side 驱动不得混用），不适用 `--all-features`，请按后端分组启用。
+>
+> 🚫 **请勿启用 `duckdb` 特性**（2026-10-16 起）：上游 `zip` crate 在 crates.io 全系 yank（仅 9.0.3 可用），`duckdb` 链经 `libduckdb-sys`（锁定 `zip ^6`）无法完成依赖解析，从零启用会在依赖解析阶段直接报错。已提交 `Cargo.lock` 的存量项目不受影响。等待 duckdb-rs 上游发布适配 zip 9.x 的版本后解除，此前请改用 `sqlite` / `postgres` / `mysql` 后端。
+
+## 💻 完整示例清单
+
+[`examples/`](../../examples/) 是 workspace 内的独立 crate（`inklog-examples`），按目录分为 7 类共 40 个示例。在仓库根目录运行：
+
+<details>
+<summary>📄 代码 · bash</summary>
+
+```bash
+cargo run --package inklog-examples --bin <名称>
+```
+
+</details>
+
+#### 配置（config）
+
+| 示例 | 说明 | 特性要求 |
+|------|------|----------|
+| `config_file` | 配置文件加载（Layer 1 本地资源） | 无 |
+| `config_inspect` | 配置检查：`sinks_enabled()` 与 `LoggerManager::load()` | 无 |
+| `env_overrides` | 环境变量覆盖配置加载 | 无 |
+| `confers_audit` | confers 审计桥：AuditSink 端口事件接入 inklog sink | `confers-audit` |
+
+#### 核心（core）
+
+<details>
+<summary>📋 表格</summary>
+
+| 示例 | 说明 | 特性要求 |
+|------|------|----------|
+| `basic` | 基础用法：初始化、级别、结构化字段、健康检查、优雅关闭 | 无 |
+| `builder` | Builder 模式配置 | 无 |
+| `all_features` | 完整功能演示 | 无 |
+| `production` | 生产环境配置 | 无 |
+| `template` | 日志模板 | 无 |
+| `error_handling` | 错误处理（Layer 0 零依赖） | 无 |
+| `i18n` | 国际化格式化 | 无 |
+
+</details>
+
+#### Sink 与输出（sinks）
+
+<details>
+<summary>📋 表格</summary>
+
+| 示例 | 说明 | 特性要求 |
+|------|------|----------|
+| `console` | Console Sink | 无 |
+| `file` | File Sink | 无 |
+| `rotation` | 日志轮转（Layer 1 本地资源） | 无 |
+| `ring_buffered_file` | ChannelBufferedFileSink（Layer 1 本地资源） | 无 |
+| `archive_format` | 归档格式（Layer 0 零依赖） | 无 |
+| `compression` | Zstd 压缩与解压缩 | `compression` |
+| `parquet_archive` | Parquet 归档 | `parquet` + 任一数据库后端 |
+| `partition_strategy` | 数据库分区策略 | 无 |
+
+</details>
+
+#### 数据库（database）
+
+| 示例 | 说明 | 特性要求 |
+|------|------|----------|
+| `database` | Database Sink（SQLite 内存库） | 任一数据库后端（示例文档用 `sqlite`） |
+| `database_pg_mysql` | PostgreSQL/MySQL 数据库驱动演示 | 无 |
+| `di_example` | 依赖注入模式 | `sqlite`（经 required-features 强制） |
+
+#### 基础设施（infra）
+
+<details>
+<summary>📋 表格</summary>
+
+| 示例 | 说明 | 特性要求 |
+|------|------|----------|
+| `channel_strategy` | 自适应 Channel 策略 | 无 |
+| `circuit_breaker` | 断路器（Layer 2 外部服务） | 无 |
+| `fallback` | Sink 降级机制 | 无 |
+| `log_adapter` | `log` crate 适配桥（Layer 0 零依赖） | 无 |
+| `log_level` | LogLevel 解析、比较与 Display | 无 |
+| `metrics` | 健康监控与指标收集（Layer 2 外部服务） | 无 |
+| `object_pool` | 对象池（Layer 0 零依赖） | 无 |
+| `output_format` | 输出格式（Layer 0 零依赖） | 无 |
+| `performance` | 性能演示 | 无 |
+| `rate_limiter` | 速率限制器（Layer 0 零依赖） | 默认（无需 feature） |
+| `runtime_ops` | LoggerManager 运行时操作 API | 无 |
+
+</details>
+
+#### 网络（network）
+
+| 示例 | 说明 | 特性要求 |
+|------|------|----------|
+| `http` | HTTP 健康检查与指标端点演示 | `http`（经 required-features 强制） |
+| `http_auth` | HTTP 认证与 IP 白名单配置 | 无 |
+| `tls_config` | TLS 配置 | 无 |
+
+#### 安全（security）
+
+| 示例 | 说明 | 特性要求 |
+|------|------|----------|
+| `encryption` | 日志加密 | 无 |
+| `log_sanitizer` | 日志内容净化（Layer 0 零依赖） | 无 |
+| `masking` | 数据脱敏 | 无 |
+| `path_validator` | 路径验证器（Layer 0 零依赖） | 无 |
+
+<div align="center">
+
+**[📂 浏览全部示例 →](../../examples/)**
+
+</div>
+
+## 🗺️ 开发路线图
+
+以下为既有发布安排整理的阶段性目标（节奏随工作区整体发布计划调整）：
+
+| 状态 | 目标 | 说明 |
+|:----:|------|------|
+| 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.9 → 0.3.0 正式版 |
+| 📋 | 工作区依赖传导同步 | trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0 |
+| ✅ | CI 测试矩阵按数据库后端分组 | docker 流水线按 sqlite/postgres/mysql/duckdb 四后端分组验证（duckdb 为 embedded 后端，无需容器服务） |
+| ✅ | 补齐 MySQL 集成测试环境 | MySQL 8 服务已入 docker/docker-compose.test.yml，CI mysql 分支可跑集成测试 |
+| ✅ | 提升测试覆盖率 | llvm-cov CI 口径 95.4%+（行覆盖），门禁 80→85→90→95 分阶段抬升至 95% |
 
 ---
 

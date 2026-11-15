@@ -1106,7 +1106,7 @@ inklog = { version = "0.3.0-rc.11", features = ["test-utils"] }
 
 ## 💡 示例参考
 
-`examples/` crate 提供 7 类共 40 个可运行示例（完整清单见 [README](../README.md#-示例)），运行方式：
+`examples/` crate 提供 7 类共 40 个可运行示例（完整清单见 [用户指南 · 完整示例清单](USER_GUIDE.md#-完整示例清单)），运行方式：
 
 ```bash
 cargo run --package inklog-examples --bin <名称>
