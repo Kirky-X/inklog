@@ -118,15 +118,15 @@ cargo bench --bench inklog_bench
 - 突发吞吐 ≈6.5 ns/条（`throughput_burst`，500 条摊薄），背压在容量边界显性转价（`backpressure_100_capacity` 73 µs）；
 - 对象池取还本身为 ns 级（LogRecord 72 ns / String 3.8 ns）；`zero_allocation` 热路径对比显示此尺度下启用池无优势（150 ns vs 96 ns，池维护开销可见）——池的价值定位在更大对象与高分配频率场景，热路径默认未池化。
 
-## 🔍 与 0.3.0-rc.3 新增能力的对照
+## 🔍 与 0.3.0 新增能力的对照
 
-0.3.0-rc.3 新增能力（动态 Sink 注册、运行时级别热调、采样器、令牌桶限流、中间件链）均为 Sink 侧装饰器或旁路逻辑：
+0.3.0 新增能力（动态 Sink 注册、运行时级别热调、采样器、令牌桶限流、中间件链）均为 Sink 侧装饰器或旁路逻辑：
 
 - 记录进入 Sink 前的装饰器成本落在**每 Sink 线程**上，不叠加到 subscriber 热路径；
 - `Sampler::should_emit` 与 `SinkRateLimit::try_acquire` 为原子计数/CAS，无锁；
 - `reload` 换装只在调用 `set_level` 时发生（事件驱动），对 `on_event` 零影响。
 
-结论：写入主链路（加密/轮转/批量）性能不回退；`write_path/template_render_text` 与 0.3.0-rc.3 之前的模板渲染语义一致，可直接对照。
+结论：写入主链路（加密/轮转/批量）性能不回退；`write_path/template_render_text` 与 0.3.0 之前的模板渲染语义一致，可直接对照。
 
 ## 🔁 复现
 

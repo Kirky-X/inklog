@@ -45,7 +45,7 @@ This document is an item-by-item reference of the public API across inklog's `0.
 
 ```rust
 use inklog::{
-    // 核心类型
+    // Core types
     LoggerManager,
     LoggerBuilder,
     LoggerDependencies,
@@ -53,7 +53,7 @@ use inklog::{
     LogRecord,
     LogLevel,
 
-    // 配置类型
+    // Configuration types
     config::{
         GlobalConfig,
         ConsoleSinkConfig,
@@ -65,17 +65,17 @@ use inklog::{
         ParquetConfig,
     },
 
-    // 错误类型
+    // Error types
     InklogError,
     InklogResult,
 
-    // 健康监控
+    // Health monitoring
     HealthStatus,
     Metrics,
     SinkStatus,
     SinkHealth,
 
-    // Sink 抽象
+    // Sink abstractions
     LogSink,
     AsyncSink,
 };
@@ -383,14 +383,14 @@ The root configuration struct, supporting TOML files; `INKLOG_*` environment var
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InklogConfig {
     pub global: GlobalConfig,
-    pub console_sink: Option<ConsoleSinkConfig>,   // 默认 Some(default())
+    pub console_sink: Option<ConsoleSinkConfig>,   // defaults to Some(default())
     pub file_sink: Option<FileSinkConfig>,
     pub database_sink: Option<DatabaseSinkConfig>,
     pub performance: PerformanceConfig,
     pub http_server: Option<HttpServerConfig>,
-    pub target_levels: HashMap<String, String>,    // per-target 级别预设
-    pub sampling: SamplingConfig,                  // 采样策略（默认空 = 内置兜底）
-    pub rate_limit: RateLimitConfig,               // per-target 前缀配额组（默认空 = 不接线）
+    pub target_levels: HashMap<String, String>,    // per-target level presets
+    pub sampling: SamplingConfig,                  // sampling policy (default empty = builtin fallback)
+    pub rate_limit: RateLimitConfig,               // per-target prefix quota groups (default empty = not wired)
 }
 ```
 
@@ -439,14 +439,14 @@ pub struct InklogConfig {
 
 ```rust
 pub struct GlobalConfig {
-    pub level: String,                    // 默认 "info"
-    pub format: String,                   // 默认 "{timestamp} [{level}] {target} - {message}"
-    pub masking_enabled: bool,            // 默认 true（推荐新名 `sanitizer_enabled`，旧名为 serde 兼容别名，序列化始终输出旧名）
-    pub auto_fallback: bool,              // 默认 true
-    pub fallback_initial_delay_ms: u64,   // 默认 1000
-    pub fallback_max_delay_ms: u64,       // 默认 60000
-    pub fallback_max_retries: u32,        // 默认 10
-    pub output_format: OutputFormat,      // 默认 Text
+    pub level: String,                    // default "info"
+    pub format: String,                   // default "{timestamp} [{level}] {target} - {message}"
+    pub masking_enabled: bool,            // default true (new name `sanitizer_enabled` recommended; the old name is a serde compatibility alias and serialization always emits the old name)
+    pub auto_fallback: bool,              // default true
+    pub fallback_initial_delay_ms: u64,   // default 1000
+    pub fallback_max_delay_ms: u64,       // default 60000
+    pub fallback_max_retries: u32,        // default 10
+    pub output_format: OutputFormat,      // default Text
 }
 ```
 
@@ -456,12 +456,12 @@ The `OutputFormat` enum: `Text` (template rendering), `Json` (NDJSON, colors dis
 
 ```rust
 pub struct ConsoleSinkConfig {
-    pub enabled: bool,               // 默认 true
-    pub colored: bool,               // 默认 true（NO_COLOR / TERM=dumb 时自动禁用）
-    pub stderr_levels: Vec<String>,  // 默认 ["error", "warn"]
-    pub masking_enabled: bool,       // 默认 true（推荐新名 `pii_masking_enabled`，旧名为 serde 兼容别名，序列化始终输出旧名）
-    pub secret_scan_enabled: bool,   // 默认 false；需 `secret-scan` 特性，且与 masking_enabled 叠加生效（PII 关则整体无掩码）
-    pub output_format: OutputFormat, // 默认 Text
+    pub enabled: bool,               // default true
+    pub colored: bool,               // default true (auto-disabled when NO_COLOR / TERM=dumb)
+    pub stderr_levels: Vec<String>,  // default ["error", "warn"]
+    pub masking_enabled: bool,       // default true (new name `pii_masking_enabled` recommended; the old name is a serde compatibility alias and serialization always emits the old name)
+    pub secret_scan_enabled: bool,   // default false; requires the `secret-scan` feature and stacks with masking_enabled (if PII masking is off, no masking happens at all)
+    pub output_format: OutputFormat, // default Text
 }
 ```
 
@@ -469,25 +469,25 @@ pub struct ConsoleSinkConfig {
 
 ```rust
 pub struct FileSinkConfig {
-    pub enabled: bool,                        // 默认 true
-    pub path: PathBuf,                        // 默认 "logs/app.log"
-    pub max_size: String,                     // 默认 "100MB"
-    pub rotation_time: String,                // 默认 "daily"（hourly / daily / weekly）
-    pub keep_files: u32,                      // 默认 30
-    pub compress: bool,                       // 默认 true
-    pub compression_level: i32,               // 默认 3（1-22）
-    pub encrypt: bool,                        // 默认 false
-    pub encryption_key_env: Option<String>,   // 默认 None
-    pub encryption_key_file: Option<String>,  // 默认 None；加密密钥文件路径（`encrypt` 开启时生效，env 设置时优先覆盖）——unix 权限必须 0600，组/其他可读在密钥解析期显性拒绝
-    pub retention_days: u32,                  // 默认 30
-    pub max_total_size: String,               // 默认 "1GB"
-    pub cleanup_interval_minutes: u64,        // 默认 60
-    pub batch_size: usize,                    // 默认 100
-    pub flush_interval_ms: u64,               // 默认 100
-    pub fsync: bool,                          // 默认 false；每批写盘后 `sync_all`（fsync）：崩溃一致性增强，吞吐优先默认关，等保/审计场景建议开启
-    pub audit_chain_enabled: bool,            // 默认 false；归档审计链（HMAC-SHA256 前向链）：轮转成功后向 `<stem>.chain.jsonl` manifest 追加 `{path, sha256, timestamp}`，并写穿链外封条 `<stem>.chain.seal.json`（条目总数 + 尾哈希，用于检出截尾）；可检测归档篡改/删除/重排/截尾；密钥读 `INKLOG_AUDIT_KEY`，缺失时链禁用并告警
-    pub masking_enabled: bool,                // 默认 true（推荐新名 `pii_masking_enabled`，旧名为 serde 兼容别名）
-    pub output_format: OutputFormat,          // 默认 Text
+    pub enabled: bool,                        // default true
+    pub path: PathBuf,                        // default "logs/app.log"
+    pub max_size: String,                     // default "100MB"
+    pub rotation_time: String,                // default "daily" (hourly / daily / weekly)
+    pub keep_files: u32,                      // default 30
+    pub compress: bool,                       // default true
+    pub compression_level: i32,               // default 3 (1-22)
+    pub encrypt: bool,                        // default false
+    pub encryption_key_env: Option<String>,   // default None
+    pub encryption_key_file: Option<String>,  // default None; path to the encryption key file (takes effect when `encrypt` is on; an env setting overrides it) — unix permissions must be 0600, group/other-readable is explicitly rejected at key parsing time
+    pub retention_days: u32,                  // default 30
+    pub max_total_size: String,               // default "1GB"
+    pub cleanup_interval_minutes: u64,        // default 60
+    pub batch_size: usize,                    // default 100
+    pub flush_interval_ms: u64,               // default 100
+    pub fsync: bool,                          // default false; `sync_all` (fsync) after each batch write: crash-consistency hardening; off by default for throughput, recommended for compliance/audit scenarios
+    pub audit_chain_enabled: bool,            // default false; archive audit chain (HMAC-SHA256 forward chain): after a successful rotation appends `{path, sha256, timestamp}` to the `<stem>.chain.jsonl` manifest and writes through the chain seal `<stem>.chain.seal.json` (total entry count + tail hash, to detect truncation); detects archive tampering/deletion/reordering/truncation; the key is read from `INKLOG_AUDIT_KEY`; when missing, the chain is disabled with a warning
+    pub masking_enabled: bool,                // default true (new name `pii_masking_enabled` recommended; the old name is a serde compatibility alias)
+    pub output_format: OutputFormat,          // default Text
 }
 ```
 
@@ -499,11 +499,11 @@ The configuration input of `ChannelBufferedFileSink` (the channel-buffered high-
 
 ```rust
 pub struct ChannelBufferedConfig {
-    pub base_config: FileSinkConfig,                 // 默认 FileSinkConfig::default()（轮转/压缩/加密/脱敏全部继承其语义）
-    pub channel_capacity: usize,                     // 默认 10_000（生产者与 writer 线程间的有界通道容量）
-    pub backpressure_strategy: BackpressureStrategy, // 默认 Block
-    pub flush_batch_size: usize,                     // 默认 1000（攒批阈值）
-    pub flush_interval_ms: u64,                      // 默认 100（时隙阈值）
+    pub base_config: FileSinkConfig,                 // default FileSinkConfig::default() (rotation/compression/encryption/masking all inherit its semantics)
+    pub channel_capacity: usize,                     // default 10_000 (bounded channel capacity between producers and the writer thread)
+    pub backpressure_strategy: BackpressureStrategy, // default Block
+    pub flush_batch_size: usize,                     // default 1000 (batching threshold)
+    pub flush_interval_ms: u64,                      // default 100 (time-slice threshold)
 }
 ```
 
@@ -521,20 +521,20 @@ Drop counts are exposed via `metrics() -> ChannelBufferedMetrics`; undelivered e
 
 ```rust
 pub struct DatabaseSinkConfig {
-    pub name: String,                     // 默认 "default"
-    pub enabled: bool,                    // 默认 false
-    pub driver: DatabaseDriver,           // 默认 SQLite
-    pub url: String,                      // 默认 "sqlite::memory:"
-    pub pool_size: u32,                   // 默认 10（SQLite 自动设为 1）
-    pub batch_size: usize,                // 默认 100
-    pub flush_interval_ms: u64,           // 默认 500
-    pub partition: PartitionStrategy,     // 默认 Monthly
-    pub table_name: String,               // 默认 "logs"
-    pub archive_format: ArchiveFormat,    // 默认 Json
-    pub parquet_config: ParquetConfig,    // 默认 default()
-    pub permissions_path: Option<String>, // 默认 None（RBAC 权限配置）
-    pub admin_role: String,               // 默认 "admin"
-    pub secret_scan_enabled: bool,        // 默认 false；需 `secret-scan` 特性，未启用时该标记被忽略（校验阶段发 warn）
+    pub name: String,                     // default "default"
+    pub enabled: bool,                    // default false
+    pub driver: DatabaseDriver,           // default SQLite
+    pub url: String,                      // default "sqlite::memory:"
+    pub pool_size: u32,                   // default 10 (auto-set to 1 for SQLite)
+    pub batch_size: usize,                // default 100
+    pub flush_interval_ms: u64,           // default 500
+    pub partition: PartitionStrategy,     // default Monthly
+    pub table_name: String,               // default "logs"
+    pub archive_format: ArchiveFormat,    // default Json
+    pub parquet_config: ParquetConfig,    // default default()
+    pub permissions_path: Option<String>, // default None (RBAC permission config)
+    pub admin_role: String,               // default "admin"
+    pub secret_scan_enabled: bool,        // default false; requires the `secret-scan` feature; ignored when not enabled (validation emits a warn)
 }
 ```
 
@@ -596,15 +596,15 @@ HTTP endpoint configuration (requires the `http` feature).
 
 ```rust
 pub struct HttpServerConfig {
-    pub enabled: bool,                    // 默认 false
-    pub host: String,                     // 默认 "127.0.0.1"
-    pub port: u16,                        // 默认 9090
-    pub metrics_path: String,             // 默认 "/metrics"
-    pub health_path: String,              // 默认 "/health"
-    pub error_mode: HttpErrorMode,        // 默认 Strict
-    pub auth: Option<HttpAuthConfig>,     // 默认 None
-    pub ip_whitelist: Option<Vec<String>>,// 默认 None
-    pub tls: Option<TlsConfig>,           // 默认 None
+    pub enabled: bool,                    // default false
+    pub host: String,                     // default "127.0.0.1"
+    pub port: u16,                        // default 9090
+    pub metrics_path: String,             // default "/metrics"
+    pub health_path: String,              // default "/health"
+    pub error_mode: HttpErrorMode,        // default Strict
+    pub auth: Option<HttpAuthConfig>,     // default None
+    pub ip_whitelist: Option<Vec<String>>,// default None
+    pub tls: Option<TlsConfig>,           // default None
 }
 ```
 
@@ -620,15 +620,15 @@ pub struct HttpServerConfig {
 
 ```rust
 pub struct PerformanceConfig {
-    pub channel_capacity: usize,        // 默认 10000
-    pub worker_threads: usize,          // 默认 3
-    pub channel_strategy: ChannelStrategy, // 默认 Fixed
-    pub expand_threshold_percent: u8,   // 默认 80
-    pub shrink_threshold_percent: u8,   // 默认 20
-    pub shrink_wait_seconds: u64,       // 默认 30
-    pub min_capacity: usize,            // 默认 1000
-    pub max_capacity: usize,            // 默认 50000
-    pub rate_limit: Option<u64>,        // 默认 None（条/秒上限）
+    pub channel_capacity: usize,        // default 10000
+    pub worker_threads: usize,          // default 3
+    pub channel_strategy: ChannelStrategy, // default Fixed
+    pub expand_threshold_percent: u8,   // default 80
+    pub shrink_threshold_percent: u8,   // default 20
+    pub shrink_wait_seconds: u64,       // default 30
+    pub min_capacity: usize,            // default 1000
+    pub max_capacity: usize,            // default 50000
+    pub rate_limit: Option<u64>,        // default None (entries/sec cap)
 }
 ```
 
@@ -734,7 +734,7 @@ pub enum SinkStatus {
 Method:
 
 ```rust
-pub fn is_operational(&self) -> bool  // Healthy 或 Degraded 视为可操作
+pub fn is_operational(&self) -> bool  // Healthy or Degraded counts as operational
 ```
 
 ### SinkHealth
@@ -824,14 +824,14 @@ Database connection pool status snapshot (passed through by `DbNexusAdapter::poo
 pub struct LogRecord {
     pub timestamp: DateTime<Utc>,
     pub level: String,               // "trace"/"debug"/"info"/"warn"/"error"
-    pub target: String,              // 模块路径
+    pub target: String,              // module path
     pub message: String,
     pub fields: HashMap<String, Value>,
     pub file: Option<String>,
     pub line: Option<u32>,
     pub thread_id: String,
-    pub trace_id: Option<String>,    // 从当前 tracing span 提取
-    pub span_id: Option<String>,     // 无 OTel 时沿 parent 链派生 16 位 hex
+    pub trace_id: Option<String>,    // extracted from the current tracing span
+    pub span_id: Option<String>,     // derived as 16-char hex along the parent chain when OTel is absent
 }
 ```
 
@@ -871,11 +871,11 @@ A value-shape regex registry: recognizes bare secrets without key-name context (
 pub struct SecretPatternRegistry { /* ... */ }
 
 impl SecretPatternRegistry {
-    pub fn with_builtins() -> Self;                                        // 九类内置形态
+    pub fn with_builtins() -> Self;                                        // nine builtin pattern families
     pub fn register(&mut self, name: &str, pattern: &str, replacement: &str)
-        -> Result<(), InklogError>;                                        // 重名查重 + 正则编译校验
+        -> Result<(), InklogError>;                                        // duplicate-name check + regex compile validation
     pub fn patterns(&self) -> &[SecretPattern];
-    pub fn scan(&self, text: &str) -> Vec<SecretMatch>;                    // 纯检测：模式名 + 字节区间
+    pub fn scan(&self, text: &str) -> Vec<SecretMatch>;                    // detection only: pattern name + byte range
 }
 
 pub struct SecretMatch { pub pattern: String, pub start: usize, pub end: usize }
@@ -889,10 +889,10 @@ A value entropy scanner: applies Shannon-entropy judgment to text tokens (base64
 pub struct EntropyScanner { /* ... */ }
 
 impl EntropyScanner {
-    pub fn new() -> Self;                                                  // 阈值 4.5 bits/char、最短 20 字符
+    pub fn new() -> Self;                                                  // threshold 4.5 bits/char, minimum 20 chars
     pub fn with_config(threshold_bits: f64, min_token_chars: usize) -> Self;
     pub fn shannon_entropy(input: &str) -> f64;
-    pub fn scan(&self, text: &str) -> Vec<(usize, usize)>;                 // 高熵 token 字节区间
+    pub fn scan(&self, text: &str) -> Vec<(usize, usize)>;                 // byte ranges of high-entropy tokens
 }
 ```
 
@@ -905,11 +905,11 @@ pub struct SecretScanGate { /* ... */ }
 
 impl SecretScanGate {
     pub fn new(registry: SecretPatternRegistry) -> Self;
-    pub fn with_entropy(self, scanner: EntropyScanner) -> Self;            // 默认关闭
-    pub fn with_match_limit(self, limit: usize) -> Self;                   // 默认 64（单条输入单模式命中上限）
-    pub fn mask(&self, text: &str) -> String;                              // fail-closed：替换 + 计数（超限整体遮蔽）
-    pub fn mask_checked(&self, text: &str) -> Result<String, InklogError>; // 超限 Err，输出不可用
-    pub fn scan(&self, text: &str) -> Vec<SecretMatch>;                    // 纯检测，不计数
+    pub fn with_entropy(self, scanner: EntropyScanner) -> Self;            // disabled by default
+    pub fn with_match_limit(self, limit: usize) -> Self;                   // default 64 (per-input, per-pattern hit cap)
+    pub fn mask(&self, text: &str) -> String;                              // fail-closed: replace + count (oversized input fully masked)
+    pub fn mask_checked(&self, text: &str) -> Result<String, InklogError>; // over-limit returns Err, output unavailable
+    pub fn scan(&self, text: &str) -> Vec<SecretMatch>;                    // detection only, no counting
     pub fn hit_counts(&self) -> Vec<(String, u64)>;
     pub fn hit_count(&self, pattern: &str) -> Option<u64>;
     pub fn total_hits(&self) -> u64;
@@ -951,7 +951,7 @@ The unified abstraction for all output targets; methods take `&self` (interior m
 pub trait LogSink: Send + Sync {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError>;
     async fn flush(&self) -> Result<(), InklogError>;
-    fn is_healthy(&self) -> bool { true }  // 默认恒健康，建议覆写
+    fn is_healthy(&self) -> bool { true }  // healthy by default; overriding recommended
     async fn shutdown(&self) -> Result<(), InklogError>;
 }
 ```
@@ -1005,7 +1005,7 @@ impl<T: LogSink + ?Sized> AsyncSink for T {}
 pub struct LoggerDependencies {
     pub cache: Option<Arc<dyn Cache>>,
     pub config: Option<Arc<dyn Config>>,
-    /// 动态注册的第三方 sink（经 `LoggerBuilder::add_sink` 注册）
+    /// Third-party sinks registered dynamically (registered via `LoggerBuilder::add_sink`)
     pub custom_sinks: Vec<Arc<dyn LogSink>>,
     #[cfg(feature = "database")]
     pub database: Option<Arc<dyn Database>>,
@@ -1057,7 +1057,7 @@ The three mocks are gated by the `test-utils` feature (visible directly to inlin
 
 ```toml
 [dev-dependencies]
-inklog = { version = "0.3.0-rc.11", features = ["test-utils"] }
+inklog = { version = "0.3.0", features = ["test-utils"] }
 ```
 
 ### MockCache
@@ -1109,7 +1109,7 @@ An in-memory Database based on `RwLock<Vec<LogRecord>>`.
 The `examples/` crate provides 40 runnable examples in 7 categories (full list in [User Guide · Complete Example List](USER_GUIDE.md#-complete-example-list)); run them with:
 
 ```bash
-cargo run --package inklog-examples --bin <名称>
+cargo run --package inklog-examples --bin <name>
 ```
 
 Selected examples matching this document:

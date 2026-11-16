@@ -289,7 +289,7 @@ How the database thread builds its independent runtime:
 ```rust
 let rt = tokio::runtime::Builder::new_multi_thread()
     .thread_name("inklog-db-worker")
-    .enable_all()  // 包括 I/O 和时间驱动器
+    .enable_all()  // including I/O and timer drivers
     .build()?;
 ```
 
@@ -304,9 +304,9 @@ let rt = tokio::runtime::Builder::new_multi_thread()
 | Stop channel | 1 | the `shutdown()` stop signal (2-second timeout send) |
 
 ```rust
-let (sender, receiver) = bounded(capacity);           // 主通道
+let (sender, receiver) = bounded(capacity);           // main channel
 let (console_sender, console_receiver) = bounded(capacity);
-let (control_tx, control_rx) = bounded(10);           // 控制通道
+let (control_tx, control_rx) = bounded(10);           // control channel
 ```
 
 **Queue behavior**:
@@ -321,8 +321,8 @@ let (control_tx, control_rx) = bounded(10);           // 控制通道
 pub struct CircuitBreaker {
     state: CircuitState,      // Closed | Open | HalfOpen
     failure_count: u32,
-    failure_threshold: u32,   // 默认 5
-    reset_timeout: Duration,  // 默认 30 秒
+    failure_threshold: u32,   // default 5
+    reset_timeout: Duration,  // default 30 seconds
 }
 ```
 
@@ -386,7 +386,7 @@ CREATE TABLE IF NOT EXISTS logs (
     level TEXT NOT NULL,
     target TEXT NOT NULL,
     message TEXT NOT NULL,
-    fields TEXT,          -- 结构化字段（JSON 文本）
+    fields TEXT,          -- structured fields (JSON text)
     file TEXT,
     line INTEGER,
     thread_id TEXT NOT NULL
@@ -468,7 +468,7 @@ impl LogSink for SlackSink {
                 .join("\n")
         });
         self.buffer.lock().unwrap().clear();
-        // 发送到远程 API（示意）
+        // Send to the remote API (illustrative)
         let _ = (self.webhook_url.clone(), payload);
         Ok(())
     }
@@ -526,12 +526,12 @@ Implement `RecordMiddleware` / `EnrichMiddleware` / `LevelFilterMiddleware` and 
 
 | Feature | Dependency | Purpose |
 |---------|------|------|
-| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6.0-rc.6 | database connection pools and raw-SQL execution (backends mutually exclusive) |
+| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6 | database connection pools and raw-SQL execution (backends mutually exclusive) |
 | `http` | axum 0.8, axum-server 0.8 | HTTP endpoints (TLS via rustls) |
 | `cli` | clap, glob | `inklog-cli` |
 | `compression` / `gzip` | zstd / flate2 | Zstd / Gzip compression |
 | `parquet` | parquet, arrow-array, arrow-schema | Parquet/Arrow archival |
-| `fast-masking` | aho-corasick | accelerated multi-pattern masking |
+| `fast-masking` | — (deprecated no-op alias) | acceleration ships with trait-kit/masking, no separate dependency |
 | `net-sink` | rustls | TCP/UDP forwarding sinks |
 | `config-confers` / `kms` | confers | configuration loading and watch, KMS key providers |
 | `kit` | trait-kit | lifecycle and observability integration |
@@ -558,5 +558,5 @@ Mapped to `src/` modules:
 
 ---
 
-**Document version**: 3.1 (matches inklog 0.3.0-rc.9)
+**Document version**: 3.1 (matches inklog 0.3.0)
 **[⬆ Back to Top](#️-inklog-architecture)**

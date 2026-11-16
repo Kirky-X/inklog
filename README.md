@@ -117,7 +117,7 @@ Or declare it explicitly in `Cargo.toml` (`default = ["i18n", "cache"]`; core ca
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.11"
+inklog = "0.3.0"
 ```
 
 </details>
@@ -266,7 +266,7 @@ inklog builds on these outstanding open-source projects:
 - [Project Fluent](https://projectfluent.org/) and [ICU](https://icu4x.unicode.org/): internationalized message formatting
 - [criterion](https://github.com/bheisler/criterion.rs): statistically rigorous benchmarking
 
-Database, cache, configuration, and lifecycle integrations are provided by the sibling workspace projects dbnexus, oxcache, confers, and trait-kit; rate limiting, retry, and circuit-breaking primitives come from limiteron. confers 0.6.0-rc.6 (`default-features = false`, `toml` + `watch` features) stays a **non-optional core dependency** — the `INKLOG_*` environment override mapping is single-sourced to confers. limiteron is no longer a dependency from this release: the limiting kernel is the in-crate token bucket (capacity = rate, refilled at the rate per second, semantically equal to limiteron `TokenBucketLimiter::new(rate, rate)`), sink-level burst quota still uses `BurstLimiter` (pure-budget semantics, no clock, no refill), the sink worker pool retry counts are inklog-side constants, and the rate/target-grouped limit modules work in the default build — inklog depends on no external limiting library.
+Database, cache, configuration, and lifecycle integrations are provided by the sibling workspace projects dbnexus, oxcache, confers, and trait-kit; rate limiting, retry, and circuit-breaking primitives come from limiteron. confers 0.6 (`default-features = false`, `toml` + `watch` features) stays a **non-optional core dependency** — the `INKLOG_*` environment override mapping is single-sourced to confers. limiteron is no longer a dependency from this release: the limiting kernel is the in-crate token bucket (capacity = rate, refilled at the rate per second, semantically equal to limiteron `TokenBucketLimiter::new(rate, rate)`), sink-level burst quota still uses `BurstLimiter` (pure-budget semantics, no clock, no refill), the sink worker pool retry counts are inklog-side constants, and the rate/target-grouped limit modules work in the default build — inklog depends on no external limiting library.
 
 ---
 

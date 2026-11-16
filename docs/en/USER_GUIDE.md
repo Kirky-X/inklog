@@ -85,29 +85,29 @@ Add the following to `Cargo.toml` (`default = ["i18n", "cache"]`; core capabilit
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.9"
+inklog = "0.3.0"
 ```
 
 ### Enabling Optional Features
 
 ```toml
-# HTTP 端点
-inklog = { version = "0.3.0-rc.9", features = ["http"] }
+# HTTP endpoint
+inklog = { version = "0.3.0", features = ["http"] }
 
-# CLI 工具
-inklog = { version = "0.3.0-rc.9", features = ["cli"] }
+# CLI tool
+inklog = { version = "0.3.0", features = ["cli"] }
 
-# 数据库支持（四选一，互斥）
-inklog = { version = "0.3.0-rc.9", features = ["sqlite"] }
-inklog = { version = "0.3.0-rc.9", features = ["postgres"] }
-inklog = { version = "0.3.0-rc.9", features = ["mysql"] }
-inklog = { version = "0.3.0-rc.9", features = ["duckdb"] }
+# Database support (pick one of four, mutually exclusive)
+inklog = { version = "0.3.0", features = ["sqlite"] }
+inklog = { version = "0.3.0", features = ["postgres"] }
+inklog = { version = "0.3.0", features = ["mysql"] }
+inklog = { version = "0.3.0", features = ["duckdb"] }
 
-# 压缩与性能
-inklog = { version = "0.3.0-rc.9", features = ["zstd", "gzip", "parquet", "fast-masking"] }
+# Compression and performance
+inklog = { version = "0.3.0", features = ["zstd", "gzip", "parquet", "fast-masking"] }
 
-# 集成与扩展
-inklog = { version = "0.3.0-rc.9", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
+# Integration and extension
+inklog = { version = "0.3.0", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
 ```
 
 For the full feature list and descriptions, see [🎨 Feature Flags](#-feature-flags) at the end of this guide.
@@ -127,7 +127,7 @@ use inklog::LoggerManager;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 默认配置初始化并安装全局 subscriber（Console Sink，级别 info）
+    // Initialize with default config and install the global subscriber (console sink, level info)
     let logger = LoggerManager::new().await?;
 
     tracing::trace!("这是一条追踪消息");
@@ -137,9 +137,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::warn!("这是一条警告消息");
     tracing::error!("这是一条错误消息");
 
-    // 退出前排空通道并关闭全部 Sink
+    // Drain the channel and shut down all sinks before exit
     logger.shutdown()?;
-    std::mem::forget(logger); // 已显式关闭，阻止 Drop 重复关闭
+    std::mem::forget(logger); // Already shut down explicitly; prevents a duplicate shutdown in Drop
     Ok(())
 }
 ```
@@ -166,18 +166,18 @@ use inklog::{FileSinkConfig, InklogConfig, LoggerManager};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 确保日志目录存在
+    // Make sure the log directory exists
     std::fs::create_dir_all("logs")?;
 
-    // 配置文件 Sink
+    // Configure the file sink
     let file_config = FileSinkConfig {
         enabled: true,
         path: "logs/app.log".into(),
-        max_size: "10MB".into(),       // 文件达到 10MB 时轮转
-        rotation_time: "daily".into(), // 每天轮转
-        keep_files: 7,                 // 保留 7 个轮转文件
-        compress: true,                // 压缩轮转文件（Zstd，需 compression feature；未启用时回退 gzip）
-        encrypt: false,                // 不加密
+        max_size: "10MB".into(),       // Rotate when the file reaches 10MB
+        rotation_time: "daily".into(), // Rotate daily
+        keep_files: 7,                 // Keep 7 rotated files
+        compress: true,                // Compress rotated files (Zstd via the compression feature; falls back to gzip when disabled)
+        encrypt: false,                // No encryption
         ..Default::default()
     };
 
@@ -210,8 +210,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         driver: DatabaseDriver::SQLite,
         url: "sqlite://logs/app.db".to_string(),
         pool_size: 5,
-        batch_size: 100,           // 每批写入 100 条日志
-        flush_interval_ms: 1000,   // 每秒刷新一次
+        batch_size: 100,           // Write 100 logs per batch
+        flush_interval_ms: 1000,   // Flush once per second
         ..Default::default()
     };
 
@@ -347,10 +347,10 @@ Setting `fsync = true` or `output_format = "Json"` falls back to `FileSink` auto
 let file_config = FileSinkConfig {
     enabled: true,
     path: "logs/app.log".into(),
-    max_size: "50MB".into(),        // 达到 50MB 时轮转
-    rotation_time: "daily".into(),  // 每天轮转
-    keep_files: 14,                 // 保留 14 个轮转文件
-    compress: true,                 // 压缩旧日志
+    max_size: "50MB".into(),        // Rotate at 50MB
+    rotation_time: "daily".into(),  // Rotate daily
+    keep_files: 14,                 // Keep 14 rotated files
+    compress: true,                 // Compress old logs
     ..Default::default()
 };
 ```
@@ -361,10 +361,10 @@ When rotation triggers, the current file is renamed into a timestamped archive (
 
 ```text
 logs/
-├── app.log                      # 当前活动文件（明文）
-├── app_20260913_143022.log      # 已轮转
-├── app_20260912_080000.log.zst  # 已压缩（compression / gzip feature）
-└── app_20260911_080000.log.zst.enc  # 已压缩并加密（encrypt = true）
+├── app.log                      # Current active file (plaintext)
+├── app_20260913_143022.log      # Rotated
+├── app_20260912_080000.log.zst  # Compressed (compression / gzip feature)
+└── app_20260911_080000.log.zst.enc  # Compressed and encrypted (encrypt = true)
 ```
 
 > Encryption and compression apply only to **rotated archives**; the active file stays in plaintext; the processing order is compress first (`.zst`), then encrypt (`.enc`). Decrypt with `inklog-cli decrypt` — see the [🔒 Security Documentation](SECURITY.md).
@@ -423,7 +423,7 @@ let config = InklogConfig {
     global: GlobalConfig {
         level: "info".into(),
         format: "{timestamp} {level} {message}".to_string(),
-        masking_enabled: true,  // 启用数据脱敏（默认开启）
+        masking_enabled: true,  // Enable data masking (on by default)
         ..Default::default()
     },
     ..Default::default()
@@ -431,9 +431,9 @@ let config = InklogConfig {
 
 let _logger = LoggerManager::with_config(config).await?;
 
-// 敏感数据将自动脱敏
+// Sensitive data is masked automatically
 log::info!("用户邮箱: user@example.com");
-// 输出: 用户邮箱: **@**.***
+// Output: 用户邮箱: **@**.***
 ```
 
 #### Custom Masking Rules
@@ -468,7 +468,7 @@ let registry = MaskRuleRegistry::with_builtins();
 let masker = DataMasker::builder().with_registry(registry).build();
 
 let sink = ConsoleSink::new(console_config, template).with_masker(masker);
-// FileSink / ChannelBufferedFileSink 同样提供 with_masker 注入
+// FileSink / ChannelBufferedFileSink likewise provide with_masker injection
 ```
 
 Note: derived instances created by `FileSink` rotation do not inherit the injected masker (they fall back to the built-in rule set); for `ChannelBufferedFileSink`, injection overrides the default construction controlled by `base_config.masking_enabled`.
@@ -507,7 +507,7 @@ let config = InklogConfig {
         metrics_path: "/metrics".to_string(),
         health_path: "/health".to_string(),
         error_mode: HttpErrorMode::Strict,
-        // 非回环绑定：必须给出访问控制之一
+        // Non-loopback binding: one of the access controls is required
         ip_whitelist: Some(vec!["10.0.0.0/8".to_string()]),
         ..Default::default()
     }),
@@ -516,8 +516,8 @@ let config = InklogConfig {
 
 let _logger = LoggerManager::with_config(config).await?;
 
-// 健康检查端点: http://0.0.0.0:8080/health
-// 指标端点: http://0.0.0.0:8080/metrics
+// Health endpoint: http://0.0.0.0:8080/health
+// Metrics endpoint: http://0.0.0.0:8080/metrics
 ```
 
 `LoggerBuilder` can also wire access control directly (`http_auth` / `http_ip_whitelist`):
@@ -527,7 +527,7 @@ let _logger = LoggerManager::builder()
     .enable_http_server(true)
     .http_host("0.0.0.0")
     .http_port(8080)
-    .http_auth("INKLOG_HTTP_AUTH_TOKEN")   // token 值取自环境变量
+    .http_auth("INKLOG_HTTP_AUTH_TOKEN")   // token value is read from the environment variable
     .http_ip_whitelist(vec!["10.0.0.0/8".to_string()])
     .build()
     .await?;
@@ -604,8 +604,8 @@ use inklog::{InklogConfig, config::PerformanceConfig};
 
 let config = InklogConfig {
     performance: PerformanceConfig {
-        channel_capacity: 20000,  // 增加通道容量
-        worker_threads: 4,        // 增加工作线程
+        channel_capacity: 20000,  // Increase channel capacity
+        worker_threads: 4,        // Increase worker threads
         ..Default::default()
     },
     ..Default::default()
@@ -627,12 +627,12 @@ use inklog::LoggerManager;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _logger = LoggerManager::new().await?;
 
-    // 记录不同级别的日志
+    // Log at different levels
     tracing::info!("信息消息：应用已启动");
     tracing::warn!("警告消息：配置文件使用默认值");
     tracing::error!("错误消息：无法连接到数据库");
 
-    // 使用 target 指定日志来源
+    // Use target to identify the log source
     tracing::info!(target: "auth", "用户登录");
     tracing::info!(target: "database", "查询执行");
 
@@ -649,7 +649,7 @@ For the complete file-sink initialization example (including the `FileSinkConfig
 Encrypt rotated archives with AES-256-GCM (set the key environment variable first):
 
 ```bash
-# 生成 32 字节高熵密钥（Base64 编码）
+# Generate a 32-byte high-entropy key (Base64-encoded)
 export INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 ```
 
@@ -666,7 +666,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_size: "10MB".into(),
         rotation_time: "daily".into(),
         keep_files: 5,
-        encrypt: true,  // 启用加密（作用于轮转归档）
+        encrypt: true,  // Enable encryption (applies to rotated archives)
         encryption_key_env: Some("INKLOG_ENCRYPTION_KEY".into()),
         ..Default::default()
     };
@@ -696,7 +696,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = InklogConfig {
         global: GlobalConfig {
             level: "debug".into(),
-            // 自定义格式：含文件位置信息
+            // Custom format: includes file location info
             format: "[{timestamp}] [{level}] {target} - {message} | {file}:{line}".to_string(),
             masking_enabled: true,
             ..Default::default()
@@ -719,7 +719,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 The `examples/` crate provides 40 runnable examples in 7 categories; the full list is in [💻 Complete Example List](#-complete-example-list) at the end. Run them with:
 
 ```bash
-cargo run --package inklog-examples --bin <名称>
+cargo run --package inklog-examples --bin <name>
 ```
 
 Selected examples:
@@ -750,13 +750,13 @@ use inklog::LoggerManager;
 
 let manager = LoggerManager::new().await?;
 
-// 调整全局级别
+// Adjust the global level
 manager.set_level(None, "debug")?;
 
-// 调整指定 target 的级别（如降噪第三方库）
+// Adjust the level for a specific target (e.g., quiet a third-party crate)
 manager.set_level(Some("hyper"), "warn")?;
 
-// 查看当前生效的过滤器
+// Inspect the currently active filter
 println!("{}", manager.current_level_filter_string());
 ```
 
@@ -770,7 +770,7 @@ use std::sync::Arc;
 
 let logger = LoggerBuilder::new()
     .level("info")
-    .add_sink(Arc::new(MyCustomSink::new()))  // 自定义 Sink（impl LogSink）
+    .add_sink(Arc::new(MyCustomSink::new()))  // Custom sink (impl LogSink)
     .build()
     .await?;
 ```
@@ -809,8 +809,8 @@ The database sink buffers logs and persists them in a batch when either conditio
 ```rust
 let database_sink = DatabaseSinkConfig {
     enabled: true,
-    batch_size: 500,        // 每 500 条写入
-    flush_interval_ms: 2000, // 或每 2 秒写入
+    batch_size: 500,        // Write every 500 entries
+    flush_interval_ms: 2000, // or every 2 seconds
     ..Default::default()
 };
 ```
@@ -820,14 +820,14 @@ let database_sink = DatabaseSinkConfig {
 inklog provides a circuit breaker, three-level fallback (DB → File → Console), and automatic recovery; the health-check thread patrols every 1 second (unhealthy-sink rebuild cooldown 30 s, requiring more than 3 consecutive failures) and rebuilds sinks automatically when conditions are met.
 
 ```rust
-// 手动恢复特定 Sink
+// Manually recover a specific sink
 logger.recover_sink("file")?;
 
-// 恢复所有不健康的 Sink
+// Recover all unhealthy sinks
 let recovered = logger.trigger_recovery_for_unhealthy_sinks()?;
 println!("已恢复的 Sink: {:?}", recovered);
 
-// 查看健康状态
+// Inspect health status
 let health = logger.get_health_status();
 println!("整体状态: {:?}", health.overall_status);
 println!("Channel 使用率: {:.2}%", health.channel_usage * 100.0);
@@ -839,11 +839,11 @@ For the complete failure-handling and recovery flow, see the "Failure Fallback a
 
 inklog provides three mock implementations — `MockCache` / `MockConfig` / `MockDatabaseAdapter` — for unit and integration tests, with no real infrastructure services needed.
 
-> Mock types are gated by the `test-utils` feature (since v0.3.0-rc.2, the default public API contains no mocks); external test consumers must enable it explicitly:
+> Mock types are gated by the `test-utils` feature (since v0.3.0, the default public API contains no mocks); external test consumers must enable it explicitly:
 
 ```toml
 [dev-dependencies]
-inklog = { version = "0.3.0-rc.9", features = ["test-utils"] }
+inklog = { version = "0.3.0", features = ["test-utils"] }
 ```
 
 #### Dependency Injection Test Pattern
@@ -859,17 +859,17 @@ async fn test_with_mocks() -> Result<(), Box<dyn std::error::Error>> {
     let deps = LoggerDependencies {
         cache: Some(Arc::new(MockCache::new())),
         config: Some(Arc::new(MockConfig::new().with_value("level", "debug"))),
-        custom_sinks: Vec::new(), // 必填：无第三方 sink 时置空（经 LoggerBuilder::add_sink 注册则携带对应列表）
+        custom_sinks: Vec::new(), // Required: leave empty when no third-party sinks (populated when registered via LoggerBuilder::add_sink)
         database: Some(database.clone()),
     };
 
-    // LoggerManager::with_dependencies 自 0.3.0 起已弃用（DI 入口收敛到 builder，调用会产生 deprecated 告警）：
-    // 新代码改用 LoggerManager::builder() 链式构建
+    // LoggerManager::with_dependencies is deprecated since 0.3.0 (DI entry converged to the builder; calls emit a deprecation warning):
+    // New code should use the LoggerManager::builder() chain instead
     let logger = LoggerManager::with_dependencies(deps).await?;
 
     log::info!("Test message");
 
-    // 验证日志被写入 Mock 数据库
+    // Verify the logs were written to the mock database
     assert_eq!(database.record_count(), 1);
     Ok(())
 }
@@ -893,8 +893,8 @@ async fn test_cache_operations() -> Result<(), inklog::InklogError> {
     assert!(cache.delete("key1").await?);
     assert_eq!(cache.get("key1").await?, None);
 
-    // 延迟模拟（测试超时场景）
-    let slow_cache = MockCache::with_delay(100); // 100ms 延迟
+    // Delay simulation (timeout test scenario)
+    let slow_cache = MockCache::with_delay(100); // 100ms delay
     Ok(())
 }
 ```
@@ -913,7 +913,7 @@ fn test_config_operations() {
     assert_eq!(config.get_string("level"), Some("debug".to_string()));
     assert_eq!(config.get_int("port"), Some(8080));
 
-    // 运行时修改配置（测试动态配置场景）
+    // Modify config at runtime (dynamic config test scenario)
     config.set("level", "error");
     assert_eq!(config.get_string("level"), Some("error".to_string()));
 }
@@ -933,15 +933,15 @@ async fn test_database_operations() {
         LogRecord::new(tracing::Level::ERROR, "app".to_string(), "Test message 2".to_string()),
     ];
 
-    // 批量插入
+    // Bulk insert
     let count = db.insert_batch(&records).await.unwrap();
     assert_eq!(count, 2);
 
-    // 健康状态控制（测试降级场景）
+    // Health status control (degradation test scenario)
     db.set_healthy(false);
     assert!(!db.is_healthy().await);
 
-    // 清空记录（测试隔离）
+    // Clear records (test isolation)
     db.clear();
     assert_eq!(db.record_count(), 0);
 }
@@ -968,16 +968,16 @@ impl TestContext {
         let deps = LoggerDependencies {
             cache: Some(Arc::new(MockCache::new())),
             config: Some(Arc::new(MockConfig::new())),
-            custom_sinks: Vec::new(), // 必填字段
+            custom_sinks: Vec::new(), // Required field
             database: Some(self.database.clone()),
         };
-        // 已弃用入口（since 0.3.0）：仅用于隔离测试的依赖注入演示，调用会产生 deprecated 告警；
-        // 生产代码请改用 LoggerManager::builder()
+        // Deprecated entry point (since 0.3.0): dependency-injection demo for isolated tests only; calls emit a deprecation warning;
+        // production code should use LoggerManager::builder() instead
         LoggerManager::with_dependencies(deps).await
     }
 
     fn reset(&self) {
-        self.database.clear(); // 清空数据库
+        self.database.clear(); // Clear the database
     }
 }
 
@@ -986,9 +986,9 @@ async fn test_isolated() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = TestContext::new();
     let _logger = ctx.create_logger().await?;
 
-    // 执行测试...
+    // Run the test...
 
-    ctx.reset(); // 重置状态，不影响其他测试
+    ctx.reset(); // Reset state without affecting other tests
     Ok(())
 }
 ```
@@ -1119,11 +1119,11 @@ use inklog::{InklogConfig, config::GlobalConfig};
 
 let config = InklogConfig {
     global: GlobalConfig {
-        level: "debug".into(),  // 降低级别
+        level: "debug".into(),  // Lower the level
         ..Default::default()
     },
     console_sink: Some(inklog::config::ConsoleSinkConfig {
-        enabled: true,  // 确保控制台 Sink 启用
+        enabled: true,  // Make sure the console sink is enabled
         ..Default::default()
     }),
     ..Default::default()
@@ -1144,8 +1144,8 @@ let config = InklogConfig {
 let file_config = inklog::FileSinkConfig {
     enabled: true,
     path: "logs/app.log".into(),
-    max_size: "10MB".into(),        // 降低阈值
-    rotation_time: "hourly".into(), // 缩短间隔
+    max_size: "10MB".into(),        // Lower the threshold
+    rotation_time: "hourly".into(), // Shorten the interval
     keep_files: 10,
     ..Default::default()
 };
@@ -1165,7 +1165,7 @@ let file_config = inklog::FileSinkConfig {
 ```rust
 let database_sink = inklog::DatabaseSinkConfig {
     enabled: true,
-    url: "sqlite://logs/app.db".to_string(), // 使用本地数据库排查
+    url: "sqlite://logs/app.db".to_string(), // Use a local database for troubleshooting
     pool_size: 5,
     batch_size: 10,
     flush_interval_ms: 1000,
@@ -1184,7 +1184,7 @@ let database_sink = inklog::DatabaseSinkConfig {
 3. "password mode" files from the v1 era cannot be recovered because no salt was stored — migrate to v2.
 
 ```bash
-# 使用 CLI 工具解密
+# Decrypt with the CLI tool
 inklog-cli decrypt \
   --input logs/app_20260913_143022.log.zst.enc \
   --output decrypted/ \
@@ -1206,7 +1206,7 @@ Yes. inklog ships a built-in `LogLogger` bridge; standard macros like `log::info
 ```rust
 let config = InklogConfig {
     global: inklog::config::GlobalConfig {
-        masking_enabled: false, // 禁用脱敏
+        masking_enabled: false, // Disable masking
         ..Default::default()
     },
     ..Default::default()
@@ -1296,10 +1296,10 @@ inklog-cli query --path logs/ --level error --since 2026-09-13T00:00:00Z --grep 
 | `zstd` | ❌ | Zstd compression for rotated log files (zstd); `compression` is a deprecated compatibility alias kept for existing `--features compression` usage |
 | `gzip` | ❌ | Gzip compression backend (pure-Rust flate2; FileSink falls back to gzip for rotation when `compression` is off) |
 | `parquet` | ❌ | Parquet/Arrow export for database sink archival |
-| `fast-masking` | ❌ | Aho-Corasick accelerated multi-pattern masking |
+| `fast-masking` | ❌ | Deprecated no-op compatibility alias: Aho-Corasick acceleration ships always-on with trait-kit/masking; the feature name is kept only for existing `--features` usage |
 | `secret-scan` | ❌ | Secret outbound masking gate: value-shape pattern registry (bare `sk-`/PEM/AKIA secrets) + value entropy scanning + per-pattern counting with fail-closed limit (`mask_checked`) + Chinese sensitive key names |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage port adapter; audit events persisted through the inklog DB sink, combinable with any backend |
-| `config-confers` | ❌ | Configuration loaded via confers + watch hot-reload of level and rotation parameters; confers 0.6.0-rc.6 is a non-optional core dependency (the `INKLOG_*` env override mapping goes through the confers source chain), this feature additionally enables confers' `toml`/`watch` features (kept for compatibility) |
+| `config-confers` | ❌ | Configuration loaded via confers + watch hot-reload of level and rotation parameters; confers 0.6 is a non-optional core dependency (the `INKLOG_*` env override mapping goes through the confers source chain), this feature additionally enables confers' `toml`/`watch` features (kept for compatibility) |
 | `confers-audit` | ❌ | inklog implementation of the confers `AuditSink` port; configuration audit events are written into the inklog structured sink; confers is a non-optional core dependency, this feature additionally enables confers' `audit` feature |
 | `oxcache-audit` | ❌ | inklog implementation of the oxcache `AuditEventPublisher` port (`OxcacheAuditPublisher`): cache audit events are handed to a single writer task over a bounded channel and written into the injected sink |
 | Rate limiting | ✅ | The rate-based and per-target quota limiting modules (`RateLimiter` / `TargetRateLimiter`) and the sink-level rate-limit decorator (`RateLimitedSink`) work in the default build: the kernel is the in-crate token bucket (capacity = rate, refilled at the rate per second), and sink-level burst quota uses `BurstLimiter`. inklog depends on no external rate-limiting library; extensions go through the crate's own `SinkRateLimit` port |
@@ -1323,7 +1323,7 @@ inklog-cli query --path logs/ --level error --since 2026-09-13T00:00:00Z --grep 
 <summary>📄 Code · bash</summary>
 
 ```bash
-cargo run --package inklog-examples --bin <名称>
+cargo run --package inklog-examples --bin <name>
 ```
 
 </details>
@@ -1430,11 +1430,11 @@ Phased goals compiled from the existing release plan (timing may adjust with the
 
 | Status | Goal | Notes |
 |:----:|------|------|
-| 📋 | v0.3.0 stable release | Complete the 0.3.0-rc.9 → 0.3.0 stable release |
-| 📋 | Workspace dependency lockstep | trait-kit 0.5.0, oxcache 0.5.0, dbnexus 0.6.0 |
+| ✅ | v0.3.0 stable release | The 0.3.0 stable release is published (2026-11-14) |
+| ✅ | Workspace dependency lockstep | trait-kit 0.5, oxcache 0.5, dbnexus 0.6 (all stable, caret ranges in Cargo.toml) |
 | ✅ | CI test matrix grouped by database backend | The Docker pipeline validates the four mutually exclusive backends (sqlite/postgres/mysql/duckdb); duckdb is embedded and needs no container service |
 | ✅ | Provision the MySQL integration environment | A MySQL 8 service is provided in docker/docker-compose.test.yml; the CI mysql branch runs the integration tests |
-| ✅ | Raise test coverage | llvm-cov CI-scope line coverage 95.4%+, gate raised in stages 80→85→90→95 to 95% |
+| ✅ | Raise test coverage | llvm-cov CI-scope line coverage 95.79% (re-measured locally 2026-11-16), gate raised in stages 80→85→90→95 to 95% |
 
 ---
 

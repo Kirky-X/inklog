@@ -201,7 +201,7 @@ pub fn get_encryption_key(env_var: &str) -> Result<Zeroizing<[u8; 32]>, InklogEr
 **Environment variable configuration**:
 
 ```bash
-# 生成并设置加密密钥（推荐）
+# Generate and set the encryption key (recommended)
 export INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 ```
 
@@ -276,7 +276,7 @@ export INKLOG_ENCRYPTION_KEY_V2=$NEW_KEY
 3. **Migrate old archives**: decrypt old files with the CLI (supports v1/v2 and zstd/gzip unpacking); re-persist decrypted output with the new key or import it into the database as needed:
 
 ```bash
-# 使用旧密钥解密（支持 --batch 批量与 --recursive 目录递归）
+# Decrypt with the old key (supports --batch for bulk and --recursive for directories)
 inklog-cli decrypt \
   --input logs/ \
   --output temp_decrypted/ \
@@ -315,13 +315,13 @@ inklog-cli decrypt \
 ### Decryption (CLI tool)
 
 ```bash
-# 解密单个文件
+# Decrypt a single file
 inklog-cli decrypt \
   --input logs/app_20260913_143022.log.zst.enc \
   --output logs/app_decrypted.log \
   --key-env INKLOG_DECRYPT_KEY
 
-# 批量解密目录
+# Decrypt a directory in bulk
 inklog-cli decrypt \
   --input logs/ \
   --output decrypted/ \
@@ -392,29 +392,29 @@ Sensitive field-name detection (15 word-boundary regexes, case-insensitive; with
 ```rust
 static SENSITIVE_FIELD_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
     vec![
-        // 认证凭据
+        // Authentication credentials
         regex::Regex::new(r"(?i)\b(password|passwd|pwd)\b").unwrap(),
-        // token/bearer/auth：前置字符须为分隔符或行首（避免 "cakey" 类误判）
+        // token/bearer/auth: the preceding character must be a separator or line start (avoids false hits like "cakey")
         regex::Regex::new(r"(?i)(?:[^a-zA-Z0-9_])?(token|bearer|auth)\b").unwrap(),
         regex::Regex::new(r"(?i)\b(secret|credential)\b").unwrap(),
-        // API 密钥
+        // API keys
         regex::Regex::new(r"(?i)\b(api[_-]?key|apikey|api[_-]?secret)\b").unwrap(),
         regex::Regex::new(r"(?i)\b(access[_-]?key|access[_-]?key[_-]?id)\b").unwrap(),
         regex::Regex::new(r"(?i)\b(secret[_-]?key|private[_-]?key|public[_-]?key)\b").unwrap(),
         regex::Regex::new(r"(?i)\b(encryption[_-]?key|decryption[_-]?key|master[_-]?key)\b").unwrap(),
         regex::Regex::new(r"(?i)\b(session[_-]?key|session[_-]?id|session[_-]?token)\b").unwrap(),
-        // OAuth 相关
+        // OAuth related
         regex::Regex::new(r"(?i)\b(oauth|oauth[_-]?token|oauth[_-]?secret)\b").unwrap(),
         regex::Regex::new(r"(?i)\b(jwt(_[a-zA-Z0-9]+)?|bearer[_-]?token)\b").unwrap(),
-        // AWS 凭据
+        // AWS credentials
         regex::Regex::new(r"(?i)\b(aws[_-]?secret|aws[_-]?key|aws[_-]?token|aws[_-]?credentials)\b").unwrap(),
-        // 数据库连接
+        // Database connections
         regex::Regex::new(r"(?i)\b(database[_-]?url|db[_-]?password|db[_-]?user|connection[_-]?string)\b").unwrap(),
-        // 支付和个人身份信息
+        // Payment and PII
         regex::Regex::new(r"(?i)\b(credit[_-]?card|card[_-]?number|cvv|ssn|social[_-]?security)\b").unwrap(),
-        // 客户端凭据
+        // Client credentials
         regex::Regex::new(r"(?i)\b(client[_-]?secret|client[_-]?id)\b").unwrap(),
-        // 其他敏感信息
+        // Other sensitive data
         regex::Regex::new(r"(?i)\b(refresh[_-]?token|pin|pin[_-]?code|two[_-]?factor|totp|backup[_-]?code|recovery[_-]?code)\b").unwrap(),
     ]
 });
@@ -441,7 +441,7 @@ Extend flexibly via `MaskRuleBuilder`, `DataMaskerBuilder`, and `MaskRuleRegistr
 ```rust
 use inklog::{DataMasker, MaskRule, MaskRuleBuilder, MaskRuleRegistry};
 
-// 创建自定义规则
+// Create a custom rule
 let custom_rule = MaskRule::builder("employee_id")
     .pattern(r"\bEMP-\d{6}\b")
     .replacement("EMP-***")
@@ -449,14 +449,14 @@ let custom_rule = MaskRule::builder("employee_id")
     .build()
     .expect("Invalid pattern");
 
-// 在内置规则基础上组装脱敏器
+// Assemble a masker on top of the builtin rules
 let masker = DataMasker::builder()
     .add_rule(custom_rule)
-    .disable_builtin("bank_card")  // 禁用特定内置规则
+    .disable_builtin("bank_card")  // Disable a specific builtin rule
     .build();
 
 let result = masker.mask("Employee: EMP-123456");
-// 结果: "Employee: EMP-***"
+// Result: "Employee: EMP-***"
 ```
 
 Managing rules with `MaskRuleRegistry`:
@@ -464,10 +464,10 @@ Managing rules with `MaskRuleRegistry`:
 ```rust
 use inklog::{MaskRule, MaskRuleBuilder, MaskRuleRegistry};
 
-// 创建包含所有内置规则的注册中心
+// Create a registry containing all builtin rules
 let mut registry = MaskRuleRegistry::with_builtins();
 
-// 注册自定义规则
+// Register a custom rule
 let custom = MaskRule::builder("custom_pattern")
     .pattern(r"CUSTOM-\d+")
     .replacement("***CUSTOM***")
@@ -476,10 +476,10 @@ let custom = MaskRule::builder("custom_pattern")
     .unwrap();
 registry.register(custom).unwrap();
 
-// 启用/禁用特定规则
+// Enable/disable specific rules
 registry.set_enabled("email", false);
 
-// 获取当前活跃规则（按优先级排序）
+// Get currently active rules (sorted by priority)
 let active = registry.active_rules();
 ```
 
@@ -510,11 +510,11 @@ use inklog::masking::DataMasker;
 
 let masker = DataMasker::new();
 
-// 字符串脱敏
+// Mask a string
 let masked = masker.mask("Contact admin@example.com at 13812345678");
-// 结果: "Contact **@**.*** at ***-****-****"
+// Result: "Contact **@**.*** at ***-****-****"
 
-// JSON 结构递归脱敏
+// Recursively mask a JSON structure
 use serde_json::json;
 
 let mut data = json!({
@@ -525,7 +525,7 @@ let mut data = json!({
 });
 
 masker.mask_value(&mut data);
-// password 字段经敏感字段名检测被完全脱敏
+// The password field is fully masked via sensitive-key-name detection
 ```
 
 ### Enabling via Configuration
@@ -533,11 +533,11 @@ masker.mask_value(&mut data);
 ```toml
 # inklog_config.toml
 [global]
-masking_enabled = true  # 启用数据脱敏（默认: true）
+masking_enabled = true  # Enable data masking (default: true)
 ```
 
 ```bash
-# 环境变量
+# Environment variables
 export INKLOG_GLOBAL_MASKING_ENABLED=true
 ```
 
@@ -557,8 +557,8 @@ let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins())
     .with_match_limit(64);
 let probe = gate.clone();
 
-// 注入 sink 出站掩码点（console/file/net/ring_buffered/database 均经
-// with_masker 挂接；database 自 0.3.0-rc.6 起支持）
+// Wire in the sink outbound masking point (console/file/net/ring_buffered/database
+// all hook in via with_masker; database supported since 0.3.0)
 let masker = DataMasker::builder().with_secret_scan(gate).build();
 
 let out = masker.mask_checked("token=sk-proj-abcdefghijklmnopqrstuvwxyz123456")?;
@@ -569,7 +569,7 @@ With this feature enabled, `DataMasker` key-name detection also covers Chinese s
 
 #### Wiring and Semantic Boundaries (required reading)
 
-- **Declarative enabling (since 0.3.0-rc.6)**: `console_sink.secret_scan_enabled` and
+- **Declarative enabling (since 0.3.0)**: `console_sink.secret_scan_enabled` and
   `database_sink.secret_scan_enabled` (both default `false`) hook `secret_scan_masker()` (built-in PII rules + the outbound gate) into the built-in sink assembly path —
   no more manual assembly of custom sinks; the builder equivalents are `LoggerBuilder::console_secret_scan(bool)` /
   `LoggerBuilder::database_secret_scan(bool)`. When the `secret-scan` feature is off,
@@ -596,10 +596,10 @@ Encryption keys are wrapped in `Zeroizing` throughout (see `get_encryption_key`)
 ```rust
 use zeroize::Zeroizing;
 
-// 环境变量值 / 派生密钥自动清零
+// Env values / derived keys are zeroized automatically
 let key = Zeroizing::new(std::env::var("INKLOG_ENCRYPTION_KEY")?);
-// ... 使用密钥 ...
-// key 离开作用域时自动清零内存
+// ... use the key ...
+// key memory is zeroized automatically when it goes out of scope
 ```
 
 **Cleanup guarantees**:
@@ -658,10 +658,10 @@ inklog enforces strict access control at the file, database, and network layers.
 
 ```rust
 let mut opt = ConnectOptions::new(url);
-opt.max_connections(pool_size)                 // 最大连接数限制
-   .min_connections(2)                         // 最小连接数
-   .connect_timeout(Duration::from_secs(5))    // 连接超时
-   .idle_timeout(Duration::from_secs(8));      // 空闲超时
+opt.max_connections(pool_size)                 // Max connection limit
+   .min_connections(2)                         // Min connections
+   .connect_timeout(Duration::from_secs(5))    // Connect timeout
+   .idle_timeout(Duration::from_secs(8));      // Idle timeout
 ```
 
 - **Connection-count limits**: protects against resource-exhaustion attacks;
@@ -671,19 +671,19 @@ opt.max_connections(pool_size)                 // 最大连接数限制
 **Principle of least privilege** (recommended database users):
 
 ```sql
--- PostgreSQL: 创建专用日志用户并授予最小权限
+-- PostgreSQL: create a dedicated log user and grant minimal privileges
 CREATE USER inklog_writer WITH PASSWORD 'secure_password';
 GRANT CONNECT ON DATABASE logs TO inklog_writer;
 GRANT USAGE ON SCHEMA public TO inklog_writer;
 GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO inklog_writer;
-GRANT CREATE ON SCHEMA public TO inklog_writer;  -- 分区创建（如需要）
+GRANT CREATE ON SCHEMA public TO inklog_writer;  -- Partition creation (if needed)
 ```
 
 ```sql
 -- MySQL
 CREATE USER 'inklog_writer'@'%' IDENTIFIED BY 'secure_password';
 GRANT INSERT, SELECT ON logs.* TO 'inklog_writer'@'%';
-GRANT CREATE ON logs.* TO 'inklog_writer'@'%';  -- 分区创建
+GRANT CREATE ON logs.* TO 'inklog_writer'@'%';  -- Partition creation
 ```
 
 **SQLite**: filesystem permission control (0600), local access only.
@@ -710,13 +710,13 @@ inklog enforces strict network security for database and forwarding-sink communi
 
 ```rust
 let url = "postgres://user:pass@localhost/logs?sslmode=require".to_string();
-// sslmode 选项:
-// - disable: 禁用 SSL (不推荐)
-// - allow: 优先 SSL,失败则不加密
-// - prefer: 优先 SSL,失败则明文
-// - require: 必须使用 SSL (推荐)
-// - verify-ca: 验证 CA 证书
-// - verify-full: 验证 CA 和主机名 (最安全)
+// sslmode options:
+// - disable: disable SSL (not recommended)
+// - allow: try SSL first, no encryption on failure
+// - prefer: try SSL first, plaintext on failure
+// - require: SSL required (recommended)
+// - verify-ca: verify the CA certificate
+// - verify-full: verify CA and hostname (most secure)
 ```
 
 **MySQL SSL**:
@@ -738,7 +738,7 @@ let url = "mysql://user:pass@localhost/logs?ssl_mode=REQUIRED".to_string();
 ### Firewall Rule Recommendations
 
 ```bash
-# PostgreSQL pg_hba.conf (仅允许应用服务器访问)
+# PostgreSQL pg_hba.conf (allow only the app server)
 hostssl logs    inklog_writer    10.0.1.0/24    scram-sha-256
 ```
 
@@ -784,7 +784,7 @@ PHI fields (patient IDs, diagnoses, medications, etc.) can be covered by custom 
 ```rust
 use inklog::MaskRule;
 
-// 为 PHI 字段注册自定义脱敏规则
+// Register custom masking rules for PHI fields
 let patient_rule = MaskRule::builder("patient_id")
     .pattern(r"\bPID-\d{8}\b")
     .replacement("PID-***")
@@ -816,9 +816,9 @@ let patient_rule = MaskRule::builder("patient_id")
 #### Payment Card Data Protection
 
 ```rust
-// ✅ 自动脱敏信用卡号（Luhn 校验通过的卡号才脱敏）
+// ✅ Automatically mask credit card numbers (only Luhn-valid numbers are masked)
 log::info!("Payment processed: card_number=6222021234567890123");
-// 输出: Payment processed: card_number=****-****-****-0123
+// Output: Payment processed: card_number=****-****-****-0123
 ```
 
 #### PCI-DSS Requirement Mapping
@@ -842,10 +842,10 @@ log::info!("Payment processed: card_number=6222021234567890123");
 - ❌ Full card numbers (record only the last 4 digits)
 
 ```rust
-// ✅ 正确的做法
+// ✅ Correct approach
 log::info!("Payment authorized: card_last4=0123, amount=100.00");
 
-// ❌ 错误的做法（将被自动脱敏兜底，但不应依赖）
+// ❌ Wrong approach (the automatic masking fallback catches it, but do not rely on that)
 log::info!("Payment: card_number=6222021234567890123, cvv=123");
 ```
 
@@ -881,7 +881,7 @@ log::info!("Payment: card_number=6222021234567890123, cvv=123");
 **Recommended**:
 
 ```bash
-# 使用 .env 文件（不要提交到 git）
+# Use a .env file (do not commit it to git)
 echo "INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
 echo ".env" >> .gitignore
 ```
@@ -893,7 +893,7 @@ echo ".env" >> .gitignore
 ### 2. File and Directory Security
 
 ```bash
-# 敏感文件 0600，目录 0700（inklog 创建的校验日志文件已默认 0600）
+# Sensitive files 0600, directories 0700 (verification log files created by inklog already default to 0600)
 chmod 600 /etc/inklog/config.toml
 chmod 700 /var/log/inklog/
 ```
@@ -902,9 +902,9 @@ chmod 700 /var/log/inklog/
 
 ```text
 /var/log/inklog/
-├── app.log                     # 活动日志
-├── app_20260913_143022.log.zst.enc  # 加密归档
-└── backup/                     # 轮换备份
+├── app.log                     # Active log
+├── app_20260913_143022.log.zst.enc  # Encrypted archive
+└── backup/                     # Rotation backup
     └── 2026-09/
 ```
 
@@ -918,21 +918,21 @@ chmod 700 /var/log/inklog/
 
 ```toml
 [global]
-level = "info"           # 生产环境不记录 DEBUG/TRACE
-masking_enabled = true   # 默认启用
+level = "info"           # No DEBUG/TRACE in production
+masking_enabled = true   # Enabled by default
 
 [file_sink]
-encrypt = true           # 启用轮转归档加密
-retention_days = 30      # 限制保留期限
+encrypt = true           # Enable rotated-archive encryption
+retention_days = 30      # Cap the retention period
 ```
 
 ### 5. Dependency Security
 
 ```bash
-cargo deny check advisories   # 已知漏洞
-cargo deny check bans         # 重复依赖
-cargo deny check licenses     # 许可证
-cargo audit                   # RustSec 公告
+cargo deny check advisories   # Known vulnerabilities
+cargo deny check bans         # Duplicate dependencies
+cargo deny check licenses     # Licenses
+cargo audit                   # RustSec advisories
 ```
 
 On the application side, commit `Cargo.lock` to pin exact versions.
@@ -944,7 +944,7 @@ use inklog::LoggerManager;
 
 let logger = LoggerManager::with_config(config).await?;
 
-// 定期检查日志系统健康状态
+// Check log system health periodically
 let health = logger.get_health_status();
 if let Some(file_health) = health.sinks.get("file") {
     if !file_health.status.is_operational() {
@@ -968,7 +968,7 @@ In production, enable the `http` feature and scrape metrics such as `inklog_sink
 [global]
 level = "info"
 format = "{timestamp} [{level}] {target} - {message}"
-masking_enabled = true  # 启用数据脱敏
+masking_enabled = true  # Enable data masking
 
 [console_sink]
 enabled = true
@@ -981,7 +981,7 @@ rotation_time = "daily"
 keep_files = 30
 compress = true
 compression_level = 3
-encrypt = true                            # 启用加密
+encrypt = true                            # Enable encryption
 encryption_key_env = "INKLOG_ENCRYPTION_KEY"
 retention_days = 30
 max_total_size = "1GB"
@@ -1000,37 +1000,37 @@ table_name = "logs"
 **Environment variable example (.env, never committed)**:
 
 ```bash
-# 全局配置
+# Global configuration
 INKLOG_GLOBAL_LEVEL=info
 INKLOG_GLOBAL_MASKING_ENABLED=true
 
-# 文件加密
+# File encryption
 INKLOG_ENCRYPTION_KEY=$(openssl rand -base64 32)
 
-# 数据库连接
+# Database connection
 INKLOG_DATABASE_SINK_URL=postgres://inklog_writer:${DB_PASSWORD}@localhost/logs?sslmode=require
 INKLOG_DATABASE_SINK_POOL_SIZE=10
 
-# 解密密钥
+# Decryption key
 INKLOG_DECRYPT_KEY=$INKLOG_ENCRYPTION_KEY
 ```
 
 ### B. CLI Security Command Cheat Sheet
 
 ```bash
-# 生成配置模板
+# Generate a config template
 inklog-cli generate --config-type full --output ./config/
 
-# 验证配置
+# Validate the config
 inklog-cli validate --config ./config/inklog_config.toml
 
-# 解密日志文件
+# Decrypt log files
 inklog-cli decrypt \
   --input logs/encrypted.log.zst.enc \
   --output logs/decrypted.log \
   --key-env INKLOG_DECRYPT_KEY
 
-# 批量解密目录（递归）
+# Decrypt a directory in bulk (recursive)
 inklog-cli decrypt \
   --input logs/ \
   --output decrypted/ \
@@ -1038,30 +1038,30 @@ inklog-cli decrypt \
   --recursive \
   --key-env INKLOG_DECRYPT_KEY
 
-# 检索本地日志（自动解密解包）
+# Search local logs (auto decrypt/unpack)
 inklog-cli query --path logs/ --level error --since 2026-09-13T00:00:00Z
 ```
 
 ### C. Security Check Commands
 
 ```bash
-# 1. 运行测试（CI 口径，数据库后端互斥不适用 --all-features）
+# 1. Run tests (CI scope; mutually exclusive DB backends mean --all-features does not apply)
 cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
 
-# 2. Clippy 与格式检查
+# 2. Clippy and format checks
 cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking" -- -D warnings
 cargo fmt --all -- --check
 
-# 3. 安全审计
+# 3. Security audits
 cargo deny check advisories
 cargo deny check bans
 cargo deny check licenses
 cargo audit
 
-# 4. 代码覆盖率（门禁 ≥ 95%）
+# 4. Code coverage (gate ≥ 95%)
 cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 95
 
-# 5. 检查日志文件权限
+# 5. Check log file permissions
 find logs/ -type f -exec chmod 600 {} \;
 find logs/ -type d -exec chmod 700 {} \;
 ```
@@ -1091,10 +1091,10 @@ find logs/ -type d -exec chmod 700 {} \;
 **Solution**:
 
 ```bash
-# 验证密钥环境变量内容（长度应为 44 的 Base64 串）
+# Verify the key env var contents (should be a 44-char Base64 string)
 echo -n "$INKLOG_DECRYPT_KEY" | wc -c
 
-# 确认使用与加密时一致的密钥
+# Confirm the same key as at encryption time is used
 export INKLOG_DECRYPT_KEY=$INKLOG_ENCRYPTION_KEY
 ```
 
@@ -1103,7 +1103,7 @@ export INKLOG_DECRYPT_KEY=$INKLOG_ENCRYPTION_KEY
 **Solution**:
 
 ```bash
-# 修复文件权限
+# Fix file permissions
 chmod 600 logs/*.enc
 chown $(whoami):$(whoami) logs/*.enc
 ```

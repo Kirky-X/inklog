@@ -1057,7 +1057,7 @@ pub trait Database: Send + Sync {
 
 ```toml
 [dev-dependencies]
-inklog = { version = "0.3.0-rc.11", features = ["test-utils"] }
+inklog = { version = "0.3.0", features = ["test-utils"] }
 ```
 
 ### MockCache

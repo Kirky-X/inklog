@@ -81,29 +81,29 @@ inklog 是为 Rust 生产环境设计的日志基础设施库：应用代码继�
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.9"
+inklog = "0.3.0"
 ```
 
 ### 启用可选 feature
 
 ```toml
 # HTTP 端点
-inklog = { version = "0.3.0-rc.9", features = ["http"] }
+inklog = { version = "0.3.0", features = ["http"] }
 
 # CLI 工具
-inklog = { version = "0.3.0-rc.9", features = ["cli"] }
+inklog = { version = "0.3.0", features = ["cli"] }
 
 # 数据库支持（四选一，互斥）
-inklog = { version = "0.3.0-rc.9", features = ["sqlite"] }
-inklog = { version = "0.3.0-rc.9", features = ["postgres"] }
-inklog = { version = "0.3.0-rc.9", features = ["mysql"] }
-inklog = { version = "0.3.0-rc.9", features = ["duckdb"] }
+inklog = { version = "0.3.0", features = ["sqlite"] }
+inklog = { version = "0.3.0", features = ["postgres"] }
+inklog = { version = "0.3.0", features = ["mysql"] }
+inklog = { version = "0.3.0", features = ["duckdb"] }
 
 # 压缩与性能
-inklog = { version = "0.3.0-rc.9", features = ["zstd", "gzip", "parquet", "fast-masking"] }
+inklog = { version = "0.3.0", features = ["zstd", "gzip", "parquet", "fast-masking"] }
 
 # 集成与扩展
-inklog = { version = "0.3.0-rc.9", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
+inklog = { version = "0.3.0", features = ["net-sink", "otlp", "kms", "config-confers", "dbnexus-audit", "kit"] }
 ```
 
 完整 feature 清单与说明见文末 [🎨 特性标志](#-特性标志)。
@@ -835,11 +835,11 @@ println!("Channel 使用率: {:.2}%", health.channel_usage * 100.0);
 
 inklog 提供 `MockCache` / `MockConfig` / `MockDatabaseAdapter` 三个 Mock 实现，用于单元测试与集成测试，无需启动真实基础设施服务。
 
-> Mock 类型由 `test-utils` feature 门控（v0.3.0-rc.2 起，默认公共 API 不含 Mock），外部测试消费者需显式启用：
+> Mock 类型由 `test-utils` feature 门控（v0.3.0 起，默认公共 API 不含 Mock），外部测试消费者需显式启用：
 
 ```toml
 [dev-dependencies]
-inklog = { version = "0.3.0-rc.9", features = ["test-utils"] }
+inklog = { version = "0.3.0", features = ["test-utils"] }
 ```
 
 #### 依赖注入测试模式
@@ -1292,10 +1292,10 @@ inklog-cli query --path logs/ --level error --since 2026-09-13T00:00:00Z --grep 
 | `zstd` | ❌ | Zstd 压缩轮转日志文件（zstd）；`compression` 为其 deprecated 兼容别名 |
 | `gzip` | ❌ | Gzip 压缩后端（flate2 纯 Rust；未启用 `zstd` 时 FileSink 轮转回退 gzip） |
 | `parquet` | ❌ | Parquet/Arrow 导出（数据库 Sink 归档） |
-| `fast-masking` | ❌ | Aho-Corasick 多模式脱敏加速 |
+| `fast-masking` | ❌ | 已废弃的 no-op 兼容别名：Aho-Corasick 加速已随 trait-kit/masking 常载（默认生效），保留 feature 名仅为兼容既有 `--features` 用法 |
 | `secret-scan` | ❌ | Secret 出站脱敏门：值形态正则注册表（sk-/PEM/AKIA 等裸 secret）+ 值熵扫描 + 逐模式计数与超限 fail-closed（`mask_checked`）+ 中文敏感键名 |
 | `dbnexus-audit` | ❌ | dbnexus AuditStorage 端口适配器，审计事件经 inklog DB sink 落库，可与任一后端组合 |
-| `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数；confers 0.6.0-rc.6 为非 optional 核心依赖（INKLOG_* env 覆盖映射经 confers 源链），本 feature 增开 confers 的 `toml`/`watch` 特性（兼容保留） |
+| `config-confers` | ❌ | 配置经 confers 加载 + watch 热更新级别与轮转参数；confers 0.6 为非 optional 核心依赖（INKLOG_* env 覆盖映射经 confers 源链），本 feature 增开 confers 的 `toml`/`watch` 特性（兼容保留） |
 | `confers-audit` | ❌ | confers `AuditSink` 端口的 inklog 实现，配置审计事件写入 inklog 结构化 sink；confers 为非 optional 核心依赖，本 feature 增开 confers 的 `audit` 特性 |
 | `oxcache-audit` | ❌ | oxcache `AuditEventPublisher` 端口的 inklog 实现（`OxcacheAuditPublisher`）：缓存审计事件经有界通道由单一 writer task 写入注入的 sink |
 | 限流 | ✅ | 按速率 / 按 target 分组的限流模块（`RateLimiter` / `TargetRateLimiter`）与 sink 级限流装饰器（`RateLimitedSink`）默认构建即生效：内核为仓内令牌桶（容量 = 速率、每秒补充速率个令牌），sink 级突发配额用 `BurstLimiter`。inklog 不依赖任何外部限流库，扩展走自有 `SinkRateLimit` 端口 |
@@ -1426,11 +1426,11 @@ cargo run --package inklog-examples --bin <名称>
 
 | 状态 | 目标 | 说明 |
 |:----:|------|------|
-| 📋 | v0.3.0 正式发布 | 完成 0.3.0-rc.9 → 0.3.0 正式版 |
-| 📋 | 工作区依赖传导同步 | trait-kit 0.5.0、oxcache 0.5.0、dbnexus 0.6.0 |
+| ✅ | v0.3.0 正式发布 | 0.3.0 正式版已发布（2026-11-14） |
+| ✅ | 工作区依赖传导同步 | trait-kit 0.5、oxcache 0.5、dbnexus 0.6（均已稳定，Cargo.toml caret 区间） |
 | ✅ | CI 测试矩阵按数据库后端分组 | docker 流水线按 sqlite/postgres/mysql/duckdb 四后端分组验证（duckdb 为 embedded 后端，无需容器服务） |
 | ✅ | 补齐 MySQL 集成测试环境 | MySQL 8 服务已入 docker/docker-compose.test.yml，CI mysql 分支可跑集成测试 |
-| ✅ | 提升测试覆盖率 | llvm-cov CI 口径 95.4%+（行覆盖），门禁 80→85→90→95 分阶段抬升至 95% |
+| ✅ | 提升测试覆盖率 | llvm-cov CI 口径 95.79%（行覆盖，2026-11-16 本机复测），门禁 80→85→90→95 分阶段抬升至 95% |
 
 ---
 

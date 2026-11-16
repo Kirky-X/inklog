@@ -8,14 +8,14 @@ This document captures inklog's test pyramid baseline, test target registry, E2E
 
 | Layer | Carrier | Count baseline |
 | --- | --- | --- |
-| L1 lib unit tests | `#[cfg(test)]` inside `src/**` | 1466 passed in the lib target (self-tests of manager/workers/sink/config/i18n and other modules); the src/main.rs bin target adds 110 and the examples crate lib target adds 35, all counting as inline src tests |
-| L2 integration tests | `tests/**` (4 explicit `[[test]]` registrations + 4 top-level auto-discovered) | integration 102+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 35+1i / docker 27 / cli_integration 17 |
+| L1 lib unit tests | `#[cfg(test)]` inside `src/**` | 1435 passed in the lib target (self-tests of manager/workers/sink/config/i18n and other modules); the src/main.rs bin target adds 115 and the examples crate lib target adds 35, all counting as inline src tests |
+| L2 integration tests | `tests/**` (4 explicit `[[test]]` registrations + 4 top-level auto-discovered) | integration 103+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 35+1i / docker 27 / cli_integration 22 |
 | L3 E2E scenarios | `tests/e2e/e2e_advanced.rs` (directory-hosted, never bare at the top level) | 228 passed, isolated by mod domain |
 | L4 container level | `tests/docker/` (auto-discovered by main.rs) | 27 passed (sqlite embedded path; pg/mysql cases gated to their driver groups) |
 
-Full results for the CI main scope (`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`, matching ci.yml): **lib 1466 / cli-bin 110 / examples-bin 35 / unit_tests 63 / integration 102+1i / combinations 20 / integration_tests 35+1i / docker 27 / cli_integration 17 / performance 11+3i / e2e_advanced 228 / examples integration_test 6, 0 failed** (2120 passed / 5 ignored in total; the 6 examples-crate integration_test entries belong to the examples crate and are not counted in the inklog tests/** baseline).
+Full results for the CI main scope (`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`, matching ci.yml): **lib 1435 / cli-bin 115 / examples-bin 35 / unit_tests 63 / integration 103+1i / combinations 20 / integration_tests 35+1i / docker 27 / cli_integration 22 / performance 11+3i / e2e_advanced 228 / examples integration_test 6, 0 failed** (2100 passed / 5 ignored in total; the 6 examples-crate integration_test entries belong to the examples crate and are not counted in the inklog tests/** baseline).
 
-> **Scope note**: the table above lists actual `cargo test` execution counts under the corresponding feature combination; the current total-size scope counted statically by test functions lives in the [📐 Test Suite Size](#-test-suite-size) section at the end of this document (HEAD deab699: 1,712 inline in src + 564 in tests + 41 in examples = 2,317 test functions).
+> **Scope note**: the table above lists actual `cargo test` execution counts under the corresponding feature combination; the current total-size scope counted statically by test functions lives in the [📐 Test Suite Size](#-test-suite-size) section at the end of this document (HEAD 4e4233c: 1,625 inline in src + 571 in tests + 41 in examples = 2,237 test functions).
 
 ## 🗂️ Test Target Registration and Functional Domain Mapping
 
@@ -74,9 +74,9 @@ The following are real runtime behaviors that test writing and assertions must f
 
 | Combination | Coverage | Result |
 | --- | --- | --- |
-| sqlite+http+cli+kit+compression+gzip+parquet+fast-masking+test-utils (CI main scope) | all 12 targets | 2120 passed / 0 failed / 5 ignored |
+| sqlite+http+cli+kit+compression+gzip+parquet+fast-masking+test-utils (CI main scope) | all 12 targets | 2100 passed / 0 failed / 5 ignored |
 | performance re-run alone ×2 | stable re-verification of the performance target | 11+3i ×2 all green |
-| integration serial (--test-threads=1) | shutdown regression verification | 95+1i all green (31.81s) |
+| integration serial (--test-threads=1) | shutdown regression verification | 103+1i all green (re-measured locally 2026-11-16, 225.63s) |
 | default features (no db) | lib/e2e_advanced/performance compile | compile + run pass |
 | driver exclusivity | sqlite/postgres/mysql/duckdb are mutually exclusive (dbnexus forbids mixing) | `--all-features` not applicable |
 
@@ -88,15 +88,15 @@ The following are real runtime behaviors that test writing and assertions must f
 | clippy | `cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking test-utils" -- -D warnings` | zero warnings |
 | doc | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --features "sqlite http cli kit compression parquet fast-masking"` | zero warnings |
 | deny | `cargo deny check` | 4 checks ok (licenses bound to the LICENSE hash via clarify: inklog/oxcache/oxcache_macros/trait-kit/dbnexus) |
-| audit | `cargo audit` | rc=0 (514 crates, no hits) |
+| audit | `cargo audit` | rc=0 (548 crates, no hits) |
 | MSRV | rust-version = 1.97.1 (workspace-wide, CI dtolnay/rust-toolchain@1.97.1) | consistent |
-| coverage | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95` (same scope for CI/pre-push) | 95.40% (recorded line-coverage measurement; the 85/90 stages have no separate commits or recorded measurements) |
+| coverage | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95` (same scope for CI/pre-push) | 95.79% (recorded line-coverage measurement, re-measured locally 2026-11-16; the 85/90 stages have no separate commits or recorded measurements) |
 
 ## 📉 Coverage Scope and Untestable Combinations
 
 The gate scope is `--lib` (inline src tests) + an explicit feature combination; `tests/` integration tests and docker container-level cases (postgres/mysql need container services) run independently and do not count toward the line-coverage gate. The four database backends are mutually exclusive (the dbnexus red line), so there is no `--all-features` scope; compile-time protection for exclusive combinations is provided by the lib.rs `compile_error!` guards. Bare default (no explicit features) is likewise not a valid scope: with `tests/cli_integration.rs` fully disabled by `#![cfg(feature = "cli")]` it becomes a zero-coverage empty target and llvm-cov crashes at the reporting stage — the pre-push coverage gate therefore uses the same explicit-features scope as CI (lefthook.yml).
 
-The following behaviors are untestable or defensively retained under the line-coverage scope and are excluded from coverage targets (as of v0.3.0-rc.6, measured by llvm-cov):
+The following behaviors are untestable or defensively retained under the line-coverage scope and are excluded from coverage targets (as of v0.3.0, measured by llvm-cov):
 
 | Location | Nature |
 | --- | --- |
@@ -112,4 +112,4 @@ Constraint statement: this coverage raise deleted no existing tests and relaxed 
 
 ## 📐 Test Suite Size
 
-**Test suite size** (measured at HEAD, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,712 inline in `src/` + 564 in `tests/` + 41 in `examples/` for a total of **2,317 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature). The baseline lives in [PERFORMANCE.md](PERFORMANCE.md).
+**Test suite size** (measured at HEAD, counted via `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'`): 1,625 inline in `src/` + 571 in `tests/` + 41 in `examples/` for a total of **2,237 test functions**, plus 48 criterion benchmark functions (33 in `benches/inklog_bench.rs`, 7 in `benches/rc4_pipeline_bench.rs`, 8 in `benches/secret_scan_bench.rs`, counted by `.bench_function(` registrations; 1 of them gated behind the `otlp` feature, and `secret_scan_bench` requires the `secret-scan` feature). The baseline lives in [PERFORMANCE.md](PERFORMANCE.md).

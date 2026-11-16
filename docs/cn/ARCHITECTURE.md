@@ -526,12 +526,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | feature | 依赖 | 用途 |
 |---------|------|------|
-| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6.0-rc.6 | 数据库连接池与裸 SQL 执行（后端互斥） |
+| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6 | 数据库连接池与裸 SQL 执行（后端互斥） |
 | `http` | axum 0.8、axum-server 0.8 | HTTP 端点（TLS 走 rustls） |
 | `cli` | clap、glob | `inklog-cli` |
 | `compression` / `gzip` | zstd / flate2 | Zstd / Gzip 压缩 |
 | `parquet` | parquet、arrow-array、arrow-schema | Parquet/Arrow 归档 |
-| `fast-masking` | aho-corasick | 多模式脱敏加速 |
+| `fast-masking` | —（已废弃 no-op 别名） | 加速随 trait-kit/masking 常载，无独立依赖 |
 | `net-sink` | rustls | TCP/UDP 转发 Sink |
 | `config-confers` / `kms` | confers | 配置加载与 watch、KMS 密钥提供 |
 | `kit` | trait-kit | 生命周期与可观测集成 |
@@ -558,5 +558,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-**文档版本**: 3.1（对应 inklog 0.3.0-rc.9）
+**文档版本**: 3.1（对应 inklog 0.3.0）
 **[⬆ 返回顶部](#️-inklog-架构设计)**

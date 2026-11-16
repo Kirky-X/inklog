@@ -118,15 +118,15 @@ Key points:
 - Burst throughput ≈6.5 ns/record (`throughput_burst`, amortized over 500 records), and backpressure turns into explicit cost at the capacity boundary (`backpressure_100_capacity` 73 µs);
 - Object-pool checkout/check-in is itself ns-level (LogRecord 72 ns / String 3.8 ns); the `zero_allocation` hot-path comparison shows no advantage at this scale with the pool enabled (150 ns vs 96 ns — pool maintenance overhead is visible) — the pool targets larger objects and high allocation frequency; the hot path is not pooled by default.
 
-## 🔍 Comparison Against New 0.3.0-rc.3 Capabilities
+## 🔍 Comparison Against New 0.3.0 Capabilities
 
-The capabilities added in 0.3.0-rc.3 (dynamic sink registration, runtime level hot-reload, sampler, token-bucket rate limiting, middleware chain) are all sink-side decorators or bypass logic:
+The capabilities added in 0.3.0 (dynamic sink registration, runtime level hot-reload, sampler, token-bucket rate limiting, middleware chain) are all sink-side decorators or bypass logic:
 
 - Decorator costs before a record enters a sink land on the **per-sink thread**, never stacking onto the subscriber hot path;
 - `Sampler::should_emit` and `SinkRateLimit::try_acquire` are atomic counters/CAS, lock-free;
 - `reload` swapping happens only when `set_level` is called (event-driven), with zero impact on `on_event`.
 
-Conclusion: the write main path (encryption/rotation/batching) does not regress; `write_path/template_render_text` keeps the same template-rendering semantics as before 0.3.0-rc.3 and can be compared directly.
+Conclusion: the write main path (encryption/rotation/batching) does not regress; `write_path/template_render_text` keeps the same template-rendering semantics as before 0.3.0 and can be compared directly.
 
 ## 🔁 Reproduction
 

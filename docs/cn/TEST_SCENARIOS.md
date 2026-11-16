@@ -8,14 +8,14 @@
 
 | 层级 | 承载 | 数量基线 |
 | --- | --- | --- |
-| L1 lib 单元测试 | `src/**` 内 `#[cfg(test)]` | lib 目标 1466 passed（manager/workers/sink/config/i18n 等模块自测）；另有 src/main.rs bin 目标 110 与 examples 包 lib 目标 35，同属 src 内联测试 |
-| L2 集成测试 | `tests/**`（4 个 `[[test]]` 显式注册 + 4 个顶层自动发现） | integration 102+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 35+1i / docker 27 / cli_integration 17 |
+| L1 lib 单元测试 | `src/**` 内 `#[cfg(test)]` | lib 目标 1435 passed（manager/workers/sink/config/i18n 等模块自测）；另有 src/main.rs bin 目标 115 与 examples 包 lib 目标 35，同属 src 内联测试 |
+| L2 集成测试 | `tests/**`（4 个 `[[test]]` 显式注册 + 4 个顶层自动发现） | integration 103+1i / unit_tests 63 / combinations 20 / performance 11+3i / integration_tests 35+1i / docker 27 / cli_integration 22 |
 | L3 E2E 场景 | `tests/e2e/e2e_advanced.rs`（目录承载，不裸放顶层） | 228 passed，按 mod 域隔离 |
 | L4 容器级 | `tests/docker/`（main.rs 自动发现） | 27 passed（sqlite embedded 路径；pg/mysql 用例门控至对应驱动组） |
 
-CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`，与 ci.yml 一致）全量结果：**lib 1466 / cli-bin 110 / examples-bin 35 / unit_tests 63 / integration 102+1i / combinations 20 / integration_tests 35+1i / docker 27 / cli_integration 17 / performance 11+3i / e2e_advanced 228 / examples integration_test 6，0 failed**（合计 2120 passed / 5 ignored；examples 包的 integration_test 6 条属 examples crate，不计入 inklog tests/** 基线）。
+CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-masking test-utils"`，与 ci.yml 一致）全量结果：**lib 1435 / cli-bin 115 / examples-bin 35 / unit_tests 63 / integration 103+1i / combinations 20 / integration_tests 35+1i / docker 27 / cli_integration 22 / performance 11+3i / e2e_advanced 228 / examples integration_test 6，0 failed**（合计 2100 passed / 5 ignored；examples 包的 integration_test 6 条属 examples crate，不计入 inklog tests/** 基线）。
 
-> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见文末 [📐 测试规模](#-测试规模) 章节（HEAD deab699：src 内联 1,712 + tests 目录 564 + examples 41 = 2,317 个测试函数）。
+> **口径说明**：上表为对应 feature 组合下 `cargo test` 的实际执行数；按测试函数静态统计的当前总规模口径见文末 [📐 测试规模](#-测试规模) 章节（HEAD 4e4233c：src 内联 1,625 + tests 目录 571 + examples 41 = 2,237 个测试函数）。
 
 ## 🗂️ 测试目标注册与功能域落点
 
@@ -74,9 +74,9 @@ CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-ma
 
 | 组合 | 覆盖 | 结果 |
 | --- | --- | --- |
-| sqlite+http+cli+kit+compression+gzip+parquet+fast-masking+test-utils（CI 主口径） | 全 12 目标 | 2120 passed / 0 failed / 5 ignored |
+| sqlite+http+cli+kit+compression+gzip+parquet+fast-masking+test-utils（CI 主口径） | 全 12 目标 | 2100 passed / 0 failed / 5 ignored |
 | 单独 performance 复跑 ×2 | performance 目标稳定复验 | 11+3i ×2 全绿 |
-| integration 串行（--test-threads=1） | shutdown 回归验证 | 95+1i 全绿（31.81s） |
+| integration 串行（--test-threads=1） | shutdown 回归验证 | 103+1i 全绿（2026-11-16 本机复测 225.63s） |
 | 默认 features（无 db） | lib/e2e_advanced/performance 可编译 | 编译+运行通过 |
 | 驱动互斥 | sqlite/postgres/mysql/duckdb 互斥（dbnexus 禁混合） | 不适用 --all-features |
 
@@ -88,15 +88,15 @@ CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-ma
 | clippy | `cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking test-utils" -- -D warnings` | 零告警 |
 | doc | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --features "sqlite http cli kit compression parquet fast-masking"` | 零告警 |
 | deny | `cargo deny check` | 4 项 ok（licenses 经 clarify 绑定 LICENSE hash：inklog/oxcache/oxcache_macros/trait-kit/dbnexus） |
-| audit | `cargo audit` | rc=0（514 crate 无命中） |
+| audit | `cargo audit` | rc=0（548 crate 无命中） |
 | MSRV | rust-version = 1.97.1（workspace 统一，CI dtolnay/rust-toolchain@1.97.1） | 一致 |
-| coverage | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95`（CI/pre-push 同口径） | 95.40%（行覆盖实测留档值；85/90 两级无独立提交与实测留痕） |
+| coverage | `cargo llvm-cov --features "sqlite http cli kit zstd gzip parquet fast-masking" --lib --fail-under-lines 95`（CI/pre-push 同口径） | 95.79%（行覆盖实测留档值，2026-11-16 本机复测；85/90 两级无独立提交与实测留痕） |
 
 ## 📉 覆盖率口径与不可测组合标注
 
 门禁口径为 `--lib`（src 内联测试）+ 显式 feature 组合；`tests/` 集成测试与 docker 容器级用例（postgres/mysql 需容器服务）独立执行，不计入行覆盖门禁。四数据库后端互斥（dbnexus 红线），不存在 `--all-features` 口径；互斥组合的编译期防护由 lib.rs `compile_error!` 守卫承担。裸 default（不带显式 features）同样不构成可用口径：`tests/cli_integration.rs` 被 `#![cfg(feature = "cli")]` 整体禁用后成为零覆盖空 target，llvm-cov 报告阶段崩溃——pre-push 覆盖率门禁因此与 CI 同用显式 features 口径（lefthook.yml）。
 
-以下行为在行覆盖口径下不可测或防御性保留，不计入覆盖目标（截至 v0.3.0-rc.6，llvm-cov 实测）：
+以下行为在行覆盖口径下不可测或防御性保留，不计入覆盖目标（截至 v0.3.0，llvm-cov 实测）：
 
 | 位置 | 性质 |
 | --- | --- |
@@ -112,4 +112,4 @@ CI 主口径（`--features "sqlite http cli kit compression gzip parquet fast-ma
 
 ## 📐 测试规模
 
-**测试规模**（HEAD 实测，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,712 个 + `tests/` 目录 564 个 + `examples/` 41 个，共 **2,317 个测试函数**；另有 criterion 基准函数 48 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个、`benches/secret_scan_bench.rs` 8 个，按 `.bench_function(` 注册用例计数；其中 1 个按 `otlp` feature 门控，`secret_scan_bench` 需 `secret-scan` feature），基线见 [PERFORMANCE.md](PERFORMANCE.md)。
+**测试规模**（HEAD 实测，按 `grep -rEc '#\[(tokio::)?test\b' --include='*.rs'` 统计）：`src/` 内联 1,625 个 + `tests/` 目录 571 个 + `examples/` 41 个，共 **2,237 个测试函数**；另有 criterion 基准函数 48 个（`benches/inklog_bench.rs` 33 个、`benches/rc4_pipeline_bench.rs` 7 个、`benches/secret_scan_bench.rs` 8 个，按 `.bench_function(` 注册用例计数；其中 1 个按 `otlp` feature 门控，`secret_scan_bench` 需 `secret-scan` feature），基线见 [PERFORMANCE.md](PERFORMANCE.md)。

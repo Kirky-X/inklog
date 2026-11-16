@@ -117,7 +117,7 @@ cargo add inklog
 
 ```toml
 [dependencies]
-inklog = "0.3.0-rc.11"
+inklog = "0.3.0"
 ```
 
 </details>
@@ -266,7 +266,7 @@ inklog 的实现依赖这些优秀的开源项目：
 - [Project Fluent](https://projectfluent.org/) 与 [ICU](https://icu4x.unicode.org/)：国际化消息格式
 - [criterion](https://github.com/bheisler/criterion.rs)：统计严谨的基准测试框架
 
-数据库、缓存、配置与生命周期集成分别由同工作区项目 dbnexus、oxcache、confers、trait-kit 提供；限流/重试/熔断原理由 limiteron 提供。confers 0.6.0-rc.6（`default-features = false`，`toml` + `watch` 特性）仍是**非 optional 核心依赖**——INKLOG_* 环境变量覆盖映射单源于 confers。limiteron 依赖自本版起**移除**：限流内核改由仓内令牌桶自持（容量 = 速率、每秒补充速率个令牌，语义等价 limiteron `TokenBucketLimiter::new(rate, rate)`），sink 级突发配额仍用 `BurstLimiter`（纯预算语义，无时钟无补充），sink worker 池重试数值为 inklog 侧常量；按速率/按 target 分组的限流模块默认构建即生效，inklog 不再依赖任何外部限流库。
+数据库、缓存、配置与生命周期集成分别由同工作区项目 dbnexus、oxcache、confers、trait-kit 提供；限流/重试/熔断原理由 limiteron 提供。confers 0.6（`default-features = false`，`toml` + `watch` 特性）仍是**非 optional 核心依赖**——INKLOG_* 环境变量覆盖映射单源于 confers。limiteron 依赖自本版起**移除**：限流内核改由仓内令牌桶自持（容量 = 速率、每秒补充速率个令牌，语义等价 limiteron `TokenBucketLimiter::new(rate, rate)`），sink 级突发配额仍用 `BurstLimiter`（纯预算语义，无时钟无补充），sink worker 池重试数值为 inklog 侧常量；按速率/按 target 分组的限流模块默认构建即生效，inklog 不再依赖任何外部限流库。
 
 ---
 

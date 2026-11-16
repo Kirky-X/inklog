@@ -558,7 +558,7 @@ let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins())
 let probe = gate.clone();
 
 // 注入 sink 出站掩码点（console/file/net/ring_buffered/database 均经
-// with_masker 挂接；database 自 0.3.0-rc.6 起支持）
+// with_masker 挂接；database 自 0.3.0 起支持）
 let masker = DataMasker::builder().with_secret_scan(gate).build();
 
 let out = masker.mask_checked("token=sk-proj-abcdefghijklmnopqrstuvwxyz123456")?;
@@ -569,7 +569,7 @@ assert_eq!(probe.hit_count("openai_sk"), Some(1));
 
 #### 接线边界与语义边界（必读）
 
-- **声明式启用（0.3.0-rc.6 起）**：`console_sink.secret_scan_enabled` 与
+- **声明式启用（0.3.0 起）**：`console_sink.secret_scan_enabled` 与
   `database_sink.secret_scan_enabled`（均默认 `false`）在内置 sink 组装路径
   挂接 `secret_scan_masker()`（内置 PII 规则 + 出站门），无需再手工组装
   自定义 sink；builder 对应 `LoggerBuilder::console_secret_scan(bool)` /

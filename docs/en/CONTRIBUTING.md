@@ -234,14 +234,14 @@ impl LogSink for MockSink {
 #### 4. Run the tests
 
 ```bash
-cargo test --lib --features <对应特性>
+cargo test --lib --features <relevant-features>
 ```
 
 #### 5. Commit
 
 ```bash
-git add <涉及的具体文件>
-git commit -m "feat(<模块>): <描述>"
+git add <the-specific-files>
+git commit -m "feat(<module>): <description>"
 ```
 
 #### 6. Analyze
@@ -347,9 +347,9 @@ For the test pyramid, the E2E scenario list, and static gates, see the [🧪 Tes
 ### Formatting and Lint
 
 ```bash
-cargo fmt --all                                                        # 格式化
-cargo fmt --all -- --check                                             # 检查（不修改）
-cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking" -- -D warnings  # 零告警
+cargo fmt --all                                                        # Format
+cargo fmt --all -- --check                                             # Check (no changes)
+cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking" -- -D warnings  # Zero warnings
 ```
 
 ### Naming Conventions
@@ -363,13 +363,13 @@ cargo clippy --all-targets --features "sqlite http cli kit compression gzip parq
 All public APIs must have documentation comments (rustdoc):
 
 ```rust
-/// 文件日志 Sink 实现。
+/// File log sink implementation.
 ///
-/// 提供：
-/// - 自动日志轮转（基于大小或时间）
-/// - 压缩支持（Zstd / Gzip）
-/// - AES-256-GCM 加密
-/// - 断路器保护
+/// Provides:
+/// - Automatic log rotation (size- or time-based)
+/// - Compression support (Zstd / Gzip)
+/// - AES-256-GCM encryption
+/// - Circuit-breaker protection
 pub struct FileSink {
     config: FileSinkConfig,
 }
@@ -431,7 +431,7 @@ When changing code, update in sync:
 3. **Commit**: follow Conventional Commits (enforced by the commit-msg hook):
 
 ```bash
-git add <具体文件>
+git add <specific-files>
 git commit -m "feat(file): add zstd compression support
 
 - Add zstd codec to compression options
@@ -500,19 +500,19 @@ Thanks to [tracing](https://github.com/tokio-rs/tracing), [tokio](https://tokio.
 ### Common Commands
 
 ```bash
-# 开发循环
+# Development loop
 cargo check --features sqlite
 cargo test --workspace --features "sqlite http cli kit compression gzip parquet fast-masking test-utils"
 
-# 完整检查（提交前）
+# Full check (before committing)
 cargo fmt --all -- --check
 cargo clippy --all-targets --features "sqlite http cli kit compression gzip parquet fast-masking" -- -D warnings
 cargo deny check
 
-# 覆盖率
+# Coverage
 cargo llvm-cov --features "sqlite http cli kit compression gzip parquet fast-masking" --lib --fail-under-lines 95
 
-# 基准
+# Benchmarks
 cargo bench --bench rc4_pipeline_bench
 cargo bench --bench inklog_bench
 ```
@@ -522,20 +522,20 @@ cargo bench --bench inklog_bench
 ```text
 inklog/
 ├── src/
-│   ├── lib.rs              # 公共 API 入口与 re-exports
+│   ├── lib.rs              # Public API entry and re-exports
 │   ├── error.rs            # InklogError / InklogResult
 │   ├── log_level.rs        # LogLevel
-│   ├── domain/             # 领域层（core: manager/builder/subscriber/workers；config；types: log_record）
-│   ├── support/            # 支撑层（io/sink 全家桶、processing: masking/template/object_pool、observability、audit_chain）
+│   ├── domain/             # Domain layer (core: manager/builder/subscriber/workers; config; types: log_record)
+│   ├── support/            # Support layer (full io/sink family, processing: masking/template/object_pool, observability, audit_chain)
 │   ├── validation/         # PathValidator / LogSanitizer
-│   ├── integrations/       # 适配层（oxcache / confers / dbnexus / trait-kit、Mock 实现）
-│   ├── i18n/               # Fluent + ICU 消息本地化
+│   ├── integrations/       # Adapter layer (oxcache / confers / dbnexus / trait-kit, Mock implementations)
+│   ├── i18n/               # Fluent + ICU message localization
 │   └── cli/                # inklog-cli（decrypt / generate / validate / query）
-├── locales/                # i18n 资源（zh-CN / en）
-├── tests/                  # 集成 / E2E / 组合 / docker / 性能测试
-├── benches/                # criterion 基准（inklog_bench、rc4_pipeline_bench）
-├── examples/               # inklog-examples crate（7 类 40 个示例）
-└── docs/                   # 文档（本目录）
+├── locales/                # i18n resources (zh-CN / en)
+├── tests/                  # Integration / E2E / combinations / docker / performance tests
+├── benches/                # criterion benchmarks (inklog_bench, rc4_pipeline_bench)
+├── examples/               # inklog-examples crate (7 categories, 40 examples)
+└── docs/                   # Documentation (this directory)
 ```
 
 ---
