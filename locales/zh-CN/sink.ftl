@@ -212,3 +212,5 @@ sink-parquet_feature_not_enabled = 未启用 parquet 特性：请以 `parquet` �
 # 网络 Sink 端点配置错误
 sink-otlp_invalid_port = OTLP 端点端口无效: '{ $endpoint }'
 sink-otlp_crlf_in_host_or_path = OTLP 端点的 host 或 path 含 CR/LF: '{ $endpoint }'
+anchor-key-missing = 已启用 anchor_enabled 但未设置 INKLOG_AUDIT_ANCHOR_KEY；跳过落锚（仅封条模式）
+anchor-append-failed = 锚记录写入 { $path } 失败：{ $err }

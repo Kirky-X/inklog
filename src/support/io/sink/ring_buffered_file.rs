@@ -118,6 +118,8 @@ pub struct ChannelBufferedFileSink {
     /// 归档审计链（audit_chain_enabled 时启用；轮转成功后 append 并写穿
     /// manifest，与 FileSink 同一范式）
     audit_chain: Option<Arc<Mutex<ArchiveChain>>>,
+    /// 独立锚上下文（anchor_enabled 且锚密钥在位时启用；构建期冻结）
+    anchor: Option<Arc<crate::support::io::sink::file::AnchorContext>>,
     /// 轮转产物加密密钥材料（encrypt 时构造期已显性解析；None = 不加密）
     key_material: Option<KeyMaterial>,
 }
@@ -236,6 +238,27 @@ impl ChannelBufferedFileSink {
             None
         };
 
+        // 独立锚上下文：anchor_enabled 时从独立 env（INKLOG_AUDIT_ANCHOR_KEY）
+        // 构建签名器；缺密钥 warn 后仅 seal 不锚（与 FileSink 同范式降级）
+        let anchor = if config.base_config.anchor_enabled {
+            match crate::support::audit_chain::HmacAnchorSigner::from_env() {
+                Ok(Some(signer)) => Some(Arc::new(crate::support::io::sink::file::AnchorContext {
+                    signer: Arc::new(signer),
+                    every: config.base_config.anchor_every.max(1),
+                })),
+                Ok(None) => {
+                    tracing::warn!("{}", crate::i18n::tr("anchor-key-missing"));
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "{}", crate::i18n::tr("anchor-key-missing"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let rotation = Self::rotation_params(&config.base_config);
         let masker = config
             .base_config
@@ -273,6 +296,7 @@ impl ChannelBufferedFileSink {
             rotation,
             last_rotation: Arc::new(Mutex::new(Instant::now())),
             audit_chain,
+            anchor,
             key_material,
         };
 
@@ -355,6 +379,7 @@ impl ChannelBufferedFileSink {
         let current_file_bytes = self.current_file_bytes.clone();
         let last_rotation = self.last_rotation.clone();
         let audit_chain = self.audit_chain.clone();
+        let anchor = self.anchor.clone();
         let key_material = self.key_material.clone();
         let base_path = self.config.base_config.path.clone();
         let base_config = self.config.base_config.clone();
@@ -432,6 +457,7 @@ impl ChannelBufferedFileSink {
                         &current_file_bytes,
                         &last_rotation,
                         &audit_chain,
+                        anchor.as_deref(),
                         &base_config,
                         key_material.as_ref(),
                     );
@@ -492,6 +518,7 @@ impl ChannelBufferedFileSink {
                         &current_file_bytes,
                         &last_rotation,
                         &audit_chain,
+                        anchor.as_deref(),
                         &base_config,
                         key_material.as_ref(),
                     );
@@ -626,12 +653,16 @@ impl ChannelBufferedFileSink {
     /// → 审计链接记 → 后台压缩/加密。命名与归档产物范式与 FileSink 一致
     /// （复用其 resolve_rotation_target / sha256_file / process_rotated）。
     /// 加密用构造期解析的 `key_material`（`None` = 未启用加密）。
+    // 锚上下文随链传递：参数已到 8 个（链 + 锚 + 轮转记账），打包成
+    // 上下文结构体会破坏与 FileSink register_rotated_archive 的参数对称性
+    #[allow(clippy::too_many_arguments)]
     fn rotate_locked(
         file: &mut Option<BufWriter<File>>,
         base_path: &PathBuf,
         current_file_bytes: &AtomicU64,
         last_rotation: &Mutex<Instant>,
         audit_chain: &Option<Arc<Mutex<ArchiveChain>>>,
+        anchor: Option<&crate::support::io::sink::file::AnchorContext>,
         base_config: &FileSinkConfig,
         key_material: Option<&KeyMaterial>,
     ) {
@@ -695,6 +726,7 @@ impl ChannelBufferedFileSink {
             let config = base_config.clone();
             let archive_path = rotated_path.clone();
             let audit_chain = audit_chain.clone();
+            let anchor = anchor.cloned();
             let base_path = base_path.clone();
             let key_material = key_material.cloned();
             let _ = thread::spawn(move || {
@@ -704,6 +736,7 @@ impl ChannelBufferedFileSink {
                             chain,
                             &base_path,
                             &archive_path,
+                            anchor.as_ref(),
                         );
                     }
                     if (config.compress || config.encrypt)

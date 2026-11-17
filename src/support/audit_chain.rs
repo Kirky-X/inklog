@@ -350,6 +350,30 @@ pub fn verify_anchors(
     }
 }
 
+/// 以签名器为当前链状态生成锚记录（file.rs / ring_buffered_file.rs 写侧
+/// 共用：时间戳与 hex 编码在此单点完成，两个 sink 路径产物逐字节同构）。
+pub fn create_anchor_record(
+    signer: &dyn AnchorSigner,
+    index: u64,
+    chain_head: &str,
+    count: u64,
+) -> Result<AnchorRecord, InklogError> {
+    let input = AnchorInput {
+        chain_head: chain_head.to_string(),
+        count,
+        timestamp: chrono::Utc::now().timestamp(),
+    };
+    let sig = signer.sign(&input)?;
+    Ok(AnchorRecord {
+        index,
+        chain_head: chain_head.to_string(),
+        count,
+        timestamp: input.timestamp,
+        scheme: signer.scheme().to_string(),
+        sig: hex_encode(&sig),
+    })
+}
+
 /// 归档防篡改 HMAC 链。
 pub struct ArchiveChain {
     key: Vec<u8>,

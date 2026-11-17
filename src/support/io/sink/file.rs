@@ -113,6 +113,8 @@ pub struct FileSink {
     masker: DataMasker,
     /// 归档审计链（audit_chain_enabled 时启用；轮转成功后 append 并写穿 manifest）
     audit_chain: Option<Arc<parking_lot::Mutex<crate::support::audit_chain::ArchiveChain>>>,
+    /// 独立锚上下文（anchor_enabled 且锚密钥在位时启用；构建期冻结）
+    anchor: Option<Arc<AnchorContext>>,
     /// 可变内部状态（Arc 共享给轮转定时线程执行空闲 flush）
     inner: Arc<RwLock<FileSinkInner>>,
 }
@@ -162,6 +164,11 @@ impl FileSink {
         crate::support::audit_chain::seal_path_for_manifest(&Self::audit_manifest_path(log_path))
     }
 
+    /// 锚文件路径：`<stem>.chain.jsonl` → `<stem>.chain.anchor.jsonl`。
+    pub(crate) fn anchor_file_path(log_path: &std::path::Path) -> std::path::PathBuf {
+        crate::support::audit_chain::anchor_path_for_manifest(&Self::audit_manifest_path(log_path))
+    }
+
     /// Creates a new FileSink with the given configuration.
     pub fn new(config: FileSinkConfig) -> Result<Self, InklogError> {
         let rotation_interval = match config.rotation_time.as_str() {
@@ -180,6 +187,27 @@ impl FileSink {
                 ))),
                 _ => {
                     warn!("{}", crate::i18n::tr("audit-chain-key-missing"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // 独立锚上下文：anchor_enabled 时从独立 env（INKLOG_AUDIT_ANCHOR_KEY）
+        // 构建签名器；缺密钥 warn 后仅 seal 不锚（与链密钥缺失同范式降级）
+        let anchor = if config.anchor_enabled {
+            match crate::support::audit_chain::HmacAnchorSigner::from_env() {
+                Ok(Some(signer)) => Some(Arc::new(AnchorContext {
+                    signer: Arc::new(signer),
+                    every: config.anchor_every.max(1),
+                })),
+                Ok(None) => {
+                    warn!("{}", crate::i18n::tr("anchor-key-missing"));
+                    None
+                }
+                Err(e) => {
+                    warn!(error = %e, "{}", crate::i18n::tr("anchor-key-missing"));
                     None
                 }
             }
@@ -216,6 +244,7 @@ impl FileSink {
             lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
             audit_chain,
+            anchor,
             inner: Arc::new(RwLock::new(inner)),
         };
 
@@ -1027,7 +1056,7 @@ impl FileSink {
         // 归档审计链：轮转成功即登记（path + SHA-256 + 时间戳），写穿 manifest
         // （共享单一事实源 register_rotated_archive，与 CBFS 同一实现）
         if let Some(chain) = self.audit_chain.as_ref() {
-            register_rotated_archive(chain, &self.config.path, &new_path);
+            register_rotated_archive(chain, &self.config.path, &new_path, self.anchor.as_deref());
         }
 
         // 压缩/加密归档后处理（后台线程；单一事实源 process_rotated）
@@ -1465,10 +1494,19 @@ fn compress_rotated(
 /// sha256 轮转产物 → 追加链条目 → 全量写穿 manifest。
 /// sha256 失败以 `sink_degraded` ops 事件显性告警——与条目内 "unavailable"
 /// 占位（链仍可验、仅摘要缺失）区分，产物不可摘要本身即需告警的状态。
+/// 锚定上下文：sink 构建期从配置冻结（独立锚签名器 + 落锚间隔）。
+/// `every` 为 0 时按 1 处理（构建期兜底，validate 已显性拒绝 0）。
+#[derive(Clone)]
+pub(crate) struct AnchorContext {
+    pub(crate) signer: Arc<dyn crate::support::audit_chain::AnchorSigner>,
+    pub(crate) every: u32,
+}
+
 pub(crate) fn register_rotated_archive(
     chain: &parking_lot::Mutex<crate::support::audit_chain::ArchiveChain>,
     base_path: &Path,
     rotated_path: &Path,
+    anchor: Option<&AnchorContext>,
 ) {
     let digest = FileSink::sha256_file(rotated_path);
     if digest.is_none() {
@@ -1533,6 +1571,47 @@ pub(crate) fn register_rotated_archive(
                 "{}",
                 crate::i18n::tr_args("sink-audit_seal_write_failed", args)
             );
+        }
+    }
+
+    // 独立锚落盘（audit-anchor-failover-integrity T004）：锚覆盖间隔命中
+    // 即把链头用**独立锚密钥**签名后追加到 `<stem>.chain.anchor.jsonl`。
+    // 追加型不复写：锚是「链被整体重写」的检测锚点，历史锚必须留存。
+    // 封条在本路径每次轮转都会重写（seal() 对非空链恒 Some），「新 seal
+    // 时同步落锚」由 count % anchor_every == 0 覆盖（every=1 即每次轮转
+    // 必锚）。锚密钥缺失在构建期已降级为 None（warn），此处不重复告警。
+    // 写失败按审计降级处理（warn 不阻断轮转，与 manifest/seal 失败同判）。
+    if let Some(ctx) = anchor {
+        let count = chain.entries().len() as u64;
+        if count > 0
+            && count.is_multiple_of(u64::from(ctx.every))
+            && let Some(last) = chain.entries().last()
+        {
+            match crate::support::audit_chain::create_anchor_record(
+                ctx.signer.as_ref(),
+                last.index,
+                &last.hmac,
+                count,
+            ) {
+                Ok(record) => {
+                    let anchor_path = FileSink::anchor_file_path(base_path);
+                    let line = serde_json::to_string(&record).unwrap_or_default();
+                    let append_result = fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&anchor_path)
+                        .and_then(|mut file| writeln!(file, "{line}"));
+                    if let Err(e) = append_result {
+                        let mut args = crate::i18n::MsgArgs::new();
+                        args.set("path", anchor_path.display().to_string());
+                        args.set("err", &e);
+                        error!("{}", crate::i18n::tr_args("anchor-append-failed", args));
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, "{}", crate::i18n::tr("anchor-append-failed"));
+                }
+            }
         }
     }
 }
@@ -1900,6 +1979,7 @@ impl Clone for FileSink {
             lost_records: AtomicU64::new(0),
             masker: DataMasker::new(),
             audit_chain: self.audit_chain.clone(),
+            anchor: self.anchor.clone(),
             inner: Arc::new(RwLock::new(inner)),
         }
     }
@@ -1972,6 +2052,7 @@ mod tests {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             write_unhealthy: AtomicBool::new(false),
             lost_records: AtomicU64::new(0),
+            anchor: None,
             masker: DataMasker::new(),
             audit_chain: None,
             inner: Arc::new(RwLock::new(inner)),
@@ -3472,6 +3553,116 @@ mod tests {
         assert!(
             !ArchiveChain::verify_entries(&tampered, b"audit-chain-test-key-01"),
             "tampered manifest must fail verification"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_anchor_appends_on_rotation_and_verifies() {
+        use crate::support::audit_chain::{AnchorRecord, HmacAnchorSigner, verify_anchors};
+
+        unsafe {
+            std::env::set_var("INKLOG_AUDIT_KEY", "audit-chain-test-key-01");
+            std::env::set_var("INKLOG_AUDIT_ANCHOR_KEY", "anchor-test-key-01");
+        }
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("anchored.log");
+        let config = FileSinkConfig {
+            path: path.clone(),
+            max_size: "200".to_string(),
+            audit_chain_enabled: true,
+            anchor_enabled: true,
+            anchor_every: 1,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // 200 字节上限：数条记录即触发轮转，每条链条目同步落一个锚
+        for i in 0..12 {
+            let rec = crate::LogRecord::new(
+                tracing::Level::INFO,
+                "anchor::test".to_string(),
+                format!("anchor chain record {i} with some padding text"),
+            );
+            rt.block_on(sink.write(&rec)).unwrap();
+        }
+        rt.block_on(sink.flush()).unwrap();
+        rt.block_on(sink.shutdown()).unwrap();
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+            std::env::remove_var("INKLOG_AUDIT_ANCHOR_KEY");
+        }
+
+        let manifest = FileSink::audit_manifest_path(&path);
+        let data = std::fs::read_to_string(&manifest).expect("manifest must exist");
+        let entries: Vec<crate::support::audit_chain::ArchiveChainEntry> = data
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!entries.is_empty(), "at least one rotation expected");
+
+        // 锚文件逐行解析：anchor_every=1 ⇒ 锚数 == 链条目数（每次轮转必锚）
+        let anchor_path = FileSink::anchor_file_path(&path);
+        let anchor_data = std::fs::read_to_string(&anchor_path).expect("anchor file must exist");
+        let anchors: Vec<AnchorRecord> = anchor_data
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            anchors.len(),
+            entries.len(),
+            "anchor_every=1 must anchor every chain entry"
+        );
+        // 全部锚与链对齐：sign→verify 往返 + 链头一致 + 计数一致
+        let signer = HmacAnchorSigner::new(b"anchor-test-key-01".to_vec());
+        let verdict = verify_anchors(&anchors, &entries, &signer);
+        assert!(
+            verdict.all_valid(),
+            "anchors must verify against the manifest: {verdict:?}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_anchor_disabled_writes_no_anchor_file() {
+        unsafe {
+            std::env::set_var("INKLOG_AUDIT_KEY", "audit-chain-test-key-01");
+        }
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("unanchored.log");
+        let config = FileSinkConfig {
+            path: path.clone(),
+            max_size: "200".to_string(),
+            audit_chain_enabled: true,
+            anchor_enabled: false,
+            ..Default::default()
+        };
+        let sink = FileSink::new(config).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        for i in 0..12 {
+            let rec = crate::LogRecord::new(
+                tracing::Level::INFO,
+                "anchor::test".to_string(),
+                format!("no anchor record {i} with some padding text"),
+            );
+            rt.block_on(sink.write(&rec)).unwrap();
+        }
+        rt.block_on(sink.flush()).unwrap();
+        rt.block_on(sink.shutdown()).unwrap();
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+        }
+        assert!(
+            !FileSink::anchor_file_path(&path).exists(),
+            "anchor_enabled=false must not create an anchor file"
         );
     }
 

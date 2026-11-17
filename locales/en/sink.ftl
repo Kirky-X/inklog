@@ -212,3 +212,5 @@ sink-parquet_feature_not_enabled = parquet feature not enabled: rebuild inklog w
 # Network sink endpoint configuration errors
 sink-otlp_invalid_port = bad OTLP port in '{ $endpoint }'
 sink-otlp_crlf_in_host_or_path = OTLP endpoint contains CR/LF in host or path: '{ $endpoint }'
+anchor-key-missing = anchor_enabled but INKLOG_AUDIT_ANCHOR_KEY is not set; anchors skipped (seal-only mode)
+anchor-append-failed = failed to append anchor record to { $path }: { $err }
