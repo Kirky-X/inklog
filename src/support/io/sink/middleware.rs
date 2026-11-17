@@ -30,6 +30,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use zeroize::Zeroize;
 
 use crate::support::io::LogSink;
 use crate::support::query::level_rank;
@@ -188,6 +189,78 @@ impl RecordMiddleware for EnrichMiddleware {
 
     fn process(&self, record: &mut LogRecord) -> MiddlewareVerdict {
         record.fields.insert(self.key.clone(), self.value.clone());
+        MiddlewareVerdict::Continue
+    }
+}
+
+/// 占位模板唯一替换槽：出现处被替换为命中字段名。
+const SENSITIVE_PLACEHOLDER_SLOT: &str = "{field}";
+
+/// 源头敏感字段改写中间件：扇出前把已注册字段名的值替换为占位串
+/// `<redacted:{field}>`（模板可经 [`SensitiveRedaction::with_placeholder_template`]
+/// 定制，`{field}` 为唯一替换槽）。
+///
+/// 替换而非删除：字段键保留、值变占位串，下游结构化输出（JSON/Parquet
+/// schema）字段形状稳定。字符串值先 `zeroize()` 原串字节再替换（原串
+/// 内存被覆盖后才释放）；非字符串值（数字/布尔/嵌套 JSON）整值替换——
+/// serde_json 树内明文无稳定地址保证，无法逐叶子 zeroize（设计边界，
+/// 见 change source-level-sensitive-fields design.md §1）。
+///
+/// 热路径无锁：`fields` 为构建期冻结的只读集合（Arc 共享），成本 =
+/// 每字段一次 set 查找；未注册字段零额外分配。恒返回 `Continue`（改写
+/// 件契约：不裁决丢弃）。
+///
+/// 与 sink 层正则掩码（`DataMasker`）是两层独立防御：本中间件按字段名
+/// 精确匹配，正则层按内容兜底 message 与漏网字段。
+pub struct SensitiveRedaction {
+    fields: Arc<std::collections::HashSet<String>>,
+    /// 占位模板，默认 `"<redacted:{field}>"`；`{field}` 为唯一替换槽
+    placeholder_template: String,
+}
+
+impl SensitiveRedaction {
+    /// 以字段名集合构建（构建期冻结，进程内共享经 `Arc`）。
+    pub fn new(fields: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            fields: Arc::new(fields.into_iter().map(Into::into).collect()),
+            placeholder_template: format!("<redacted:{SENSITIVE_PLACEHOLDER_SLOT}>"),
+        }
+    }
+
+    /// 已注册敏感字段数（诊断用）。
+    pub fn field_count(&self) -> usize {
+        self.fields.len()
+    }
+
+    /// 构建期冻结的字段名集合（subscriber 装配期合并去重用）。
+    pub fn fields(&self) -> &Arc<std::collections::HashSet<String>> {
+        &self.fields
+    }
+
+    /// 生成命中字段的占位串。
+    fn placeholder_for(&self, field: &str) -> String {
+        self.placeholder_template
+            .replace(SENSITIVE_PLACEHOLDER_SLOT, field)
+    }
+}
+
+impl RecordMiddleware for SensitiveRedaction {
+    fn name(&self) -> &str {
+        "sensitive-redaction"
+    }
+
+    fn process(&self, record: &mut LogRecord) -> MiddlewareVerdict {
+        for (key, value) in record.fields.iter_mut() {
+            if !self.fields.contains(key) {
+                continue;
+            }
+            // 先构造占位串、再 zeroize 原串字节——保证原串被覆盖后才释放
+            let placeholder = self.placeholder_for(key);
+            if let serde_json::Value::String(original) = value {
+                original.zeroize();
+            }
+            *value = serde_json::Value::String(placeholder);
+        }
         MiddlewareVerdict::Continue
     }
 }
@@ -544,5 +617,29 @@ mod tests {
         let debug = format!("{chain:?}");
         assert!(debug.contains("enrich"), "debug must list middleware names");
         assert!(debug.contains("reround"));
+    }
+
+    #[test]
+    fn test_sensitive_redaction_replaces_registered_string_field() {
+        // 命中字段名的字符串值替换为默认占位串；未命中字段值不变
+        let mw = SensitiveRedaction::new(["email"]);
+        let mut r = record(Level::INFO, "user signup");
+        r.fields
+            .insert("email".to_string(), serde_json::json!("alice@example.com"));
+        r.fields
+            .insert("user_id".to_string(), serde_json::json!(42));
+        assert_eq!(mw.process(&mut r), MiddlewareVerdict::Continue);
+        assert_eq!(
+            r.fields.get("email").unwrap(),
+            &serde_json::json!("<redacted:email>"),
+            "registered string field must be replaced by the placeholder"
+        );
+        assert_eq!(
+            r.fields.get("user_id").unwrap(),
+            &serde_json::json!(42),
+            "unregistered field value must stay untouched"
+        );
+        assert_eq!(mw.field_count(), 1);
+        assert_eq!(mw.name(), "sensitive-redaction");
     }
 }
