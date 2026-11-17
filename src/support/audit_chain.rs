@@ -279,6 +279,77 @@ pub fn anchor_path_for_manifest(manifest: &std::path::Path) -> std::path::PathBu
     }
 }
 
+/// 锚校验结论（分段，机器可判——CLI `--json` 与 MCP 工具共用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnchorVerdict {
+    /// 锚总数
+    pub total: usize,
+    /// 通过校验的锚数（`anchors_valid: N/N` 报告的分子）
+    pub valid: usize,
+    /// 首个未通过校验的锚：(锚数组下标, 该锚声明的链条目 index)；
+    /// 定位"链在哪个覆盖点之后被替换/截断"
+    pub first_mismatch: Option<(usize, u64)>,
+}
+
+impl AnchorVerdict {
+    /// 全部锚通过且至少存在一个锚（无锚按失败处理，fail-closed）。
+    pub fn all_valid(&self) -> bool {
+        self.total > 0 && self.valid == self.total
+    }
+}
+
+/// 逐锚校验锚文件记录与链条目的一致性。
+///
+/// 每个锚必须同时满足：
+/// (a) 签名对锚定输入有效（签名器校验，hex 解码后送验）；
+/// (b) `count == index + 1`（锚声明覆盖到 index，条目总数自洽）；
+/// (c) `entries[index].hmac == chain_head`——链在该锚覆盖点之后被整体
+///     替换或截断重建时此断言失败，是防整体重写的判定核心；
+/// (d) index 严格单调递增（锚追加顺序即链增长顺序）。
+///
+/// `index` 越界（≥ entries 长度）按 (c) 失败定位。任何单项失败只判定
+/// 该锚不通过并记录首个失配位置，不影响其余锚的独立判定。
+pub fn verify_anchors(
+    anchors: &[AnchorRecord],
+    entries: &[ArchiveChainEntry],
+    signer: &dyn AnchorSigner,
+) -> AnchorVerdict {
+    let mut valid = 0usize;
+    let mut first_mismatch = None;
+    let mut prev_index: Option<u64> = None;
+    for (pos, anchor) in anchors.iter().enumerate() {
+        let signature_ok = match hex_decode(&anchor.sig) {
+            Some(sig) => signer.verify(
+                &AnchorInput {
+                    chain_head: anchor.chain_head.clone(),
+                    count: anchor.count,
+                    timestamp: anchor.timestamp,
+                },
+                &sig,
+            ),
+            None => false,
+        };
+        let head_ok = entries
+            .get(anchor.index as usize)
+            .is_some_and(|entry| entry.hmac == anchor.chain_head);
+        let ok = anchor.count == anchor.index + 1
+            && prev_index.is_none_or(|prev| anchor.index > prev)
+            && head_ok
+            && signature_ok;
+        if ok {
+            valid += 1;
+        } else if first_mismatch.is_none() {
+            first_mismatch = Some((pos, anchor.index));
+        }
+        prev_index = Some(anchor.index);
+    }
+    AnchorVerdict {
+        total: anchors.len(),
+        valid,
+        first_mismatch,
+    }
+}
+
 /// 归档防篡改 HMAC 链。
 pub struct ArchiveChain {
     key: Vec<u8>,
@@ -763,5 +834,133 @@ mod tests {
         let line = serde_json::to_string(&record).unwrap();
         let parsed: AnchorRecord = serde_json::from_str(&line).unwrap();
         assert_eq!(parsed, record);
+    }
+
+    // ---- 独立锚：verify_anchors（T002）----
+
+    /// 构建 n 条链条目并为每个覆盖点签发对齐锚（index=count-1=链尾）。
+    fn aligned_chain_and_anchors(
+        key: &[u8],
+        anchor_key: &[u8],
+        n: usize,
+    ) -> (Vec<ArchiveChainEntry>, Vec<AnchorRecord>) {
+        let mut chain = ArchiveChain::new(key);
+        for i in 0..n {
+            chain.append(&event("rotate", &format!("app.{i:03}.log")));
+        }
+        let entries = chain.entries().to_vec();
+        let signer = HmacAnchorSigner::new(anchor_key.to_vec());
+        let anchors = entries
+            .iter()
+            .map(|entry| {
+                let input = AnchorInput {
+                    chain_head: entry.hmac.clone(),
+                    count: entry.index + 1,
+                    timestamp: 1_760_000_000 + entry.index as i64,
+                };
+                let sig = signer.sign(&input).unwrap();
+                AnchorRecord {
+                    index: entry.index,
+                    chain_head: entry.hmac.clone(),
+                    count: entry.index + 1,
+                    timestamp: input.timestamp,
+                    scheme: signer.scheme().to_string(),
+                    sig: hex_encode(&sig),
+                }
+            })
+            .collect();
+        (entries, anchors)
+    }
+
+    #[test]
+    fn test_verify_anchors_all_aligned_passes() {
+        let (entries, anchors) = aligned_chain_and_anchors(b"chain-key", b"anchor-key", 3);
+        let signer = HmacAnchorSigner::new(b"anchor-key".to_vec());
+        let verdict = verify_anchors(&anchors, &entries, &signer);
+        assert_eq!(verdict.total, 3);
+        assert_eq!(verdict.valid, 3);
+        assert_eq!(verdict.first_mismatch, None);
+        assert!(verdict.all_valid());
+    }
+
+    #[test]
+    fn test_verify_anchors_detects_tail_rewrite_with_resigned_seal() {
+        let (mut entries, anchors) = aligned_chain_and_anchors(b"chain-key", b"anchor-key", 3);
+        // 攻击者持链密钥：替换尾部条目并重签自洽封条——链内校验与 seal
+        // 全部通过，但旧锚的 chain_head 与新尾哈希不再一致
+        entries[2].event = event("rotate", "evil.log");
+        let mut chain = ArchiveChain::new(b"chain-key");
+        chain.entries.clear();
+        // 直接重算被替换条目的 hmac（攻击者可对任意事件重签整链）
+        entries[2].hmac = {
+            let salt = hex_decode(&entries[2].salt).unwrap();
+            let prev = hex_decode(&entries[2].prev_hash).unwrap();
+            let mut message = Vec::new();
+            message.extend_from_slice(&salt);
+            message.extend_from_slice(&prev);
+            message.extend_from_slice(entries[2].event.as_bytes());
+            hex_encode(&hmac_sha256(b"chain-key", &message))
+        };
+        let seal = ArchiveChainSeal {
+            count: entries.len() as u64,
+            tail_hash: entries[2].hmac.clone(),
+            salt: entries[0].salt.clone(),
+            hmac: {
+                let salt = hex_decode(&entries[0].salt).unwrap();
+                let mut message = Vec::new();
+                message.extend_from_slice(&salt);
+                message.extend_from_slice(&entries.len().to_be_bytes());
+                message.extend_from_slice(entries[2].hmac.as_bytes());
+                hex_encode(&hmac_sha256(b"chain-key", &message))
+            },
+        };
+        assert!(ArchiveChain::verify_entries(&entries, b"chain-key"));
+        assert!(ArchiveChain::verify_seal(&seal, &entries, b"chain-key"));
+
+        let signer = HmacAnchorSigner::new(b"anchor-key".to_vec());
+        let verdict = verify_anchors(&anchors, &entries, &signer);
+        assert!(
+            !verdict.all_valid(),
+            "stale anchor must fail after tail rewrite"
+        );
+        assert_eq!(
+            verdict.first_mismatch,
+            Some((2, 2)),
+            "first mismatch must locate the rewritten coverage point"
+        );
+    }
+
+    #[test]
+    fn test_verify_anchors_locates_each_violation_kind() {
+        let (entries, anchors) = aligned_chain_and_anchors(b"chain-key", b"anchor-key", 3);
+        let signer = HmacAnchorSigner::new(b"anchor-key".to_vec());
+
+        // (a) 签名被篡改 → 锚 1 失配
+        let mut tampered = anchors.clone();
+        tampered[1].sig = hex_encode(&[0x00_u8; CHAIN_HASH_LEN]);
+        let verdict = verify_anchors(&tampered, &entries, &signer);
+        assert_eq!(verdict.first_mismatch, Some((1, 1)));
+
+        // (b) count 与 index 不一致 → 锚 1 失配
+        let mut tampered = anchors.clone();
+        tampered[1].count = 5;
+        let verdict = verify_anchors(&tampered, &entries, &signer);
+        assert_eq!(verdict.first_mismatch, Some((1, 1)));
+
+        // (c) index 越界（截尾场景）→ 锚 2 失配
+        let truncated = &entries[..2];
+        let verdict = verify_anchors(&anchors, truncated, &signer);
+        assert_eq!(verdict.first_mismatch, Some((2, 2)));
+
+        // (d) index 非单调 → 锚 2 失配
+        let mut tampered = anchors.clone();
+        tampered[2].index = 1;
+        let verdict = verify_anchors(&tampered, &entries, &signer);
+        assert_eq!(verdict.first_mismatch, Some((2, 1)));
+
+        // 无锚 fail-closed
+        let verdict = verify_anchors(&[], &entries, &signer);
+        assert_eq!(verdict.total, 0);
+        assert!(!verdict.all_valid());
     }
 }
