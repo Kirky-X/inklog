@@ -139,6 +139,19 @@ enum Commands {
         #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
         key_env: String,
     },
+
+    #[command(name = "doctor")]
+    #[command(about = inklog::i18n::tr("cli-doctor-about"))]
+    Doctor {
+        // 安全姿态评估（当前唯一评估目标）
+        #[arg(long)]
+        #[arg(help = inklog::i18n::tr("cli-doctor-help-security"))]
+        security: bool,
+
+        #[arg(short, long)]
+        #[arg(help = inklog::i18n::tr("cli-doctor-help-config"))]
+        config: Option<PathBuf>,
+    },
 }
 
 /// Configuration template type for the generate command.

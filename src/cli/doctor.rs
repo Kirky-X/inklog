@@ -12,16 +12,12 @@ use std::path::PathBuf;
 use inklog::support::security::{PostureReport, PostureStatus, assess_security_posture};
 
 /// 配置文件默认路径（对齐 `validate` 子命令行为）。
-// dead_code 临时豁免：T007（Commands::Doctor 分发接线）后移除
-#[allow(dead_code)]
 const DEFAULT_CONFIG_PATH: &str = "inklog_config.toml";
 
 /// 执行 `doctor --security`。
 ///
 /// 退出码：`0` = 姿态健康（无 Critical），`1` = 存在 Critical 或发生错误
 /// （错误经 `run_cli` 统一映射为 1）。
-// dead_code 临时豁免：T007（Commands::Doctor 分发接线）后移除
-#[allow(dead_code)]
 pub(crate) fn run_doctor_security(config_path: Option<PathBuf>, json: bool) -> Result<i32> {
     let config_path = config_path.unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH));
     let config = load_config(&config_path)?;
@@ -38,8 +34,6 @@ pub(crate) fn run_doctor_security(config_path: Option<PathBuf>, json: bool) -> R
 /// 读取并解析配置（复用 `InklogConfig::from_str` 的解析+校验路径）。
 ///
 /// 文件缺失或配置非法 → Err（与 `validate` 的显性错误行为一致）。
-// dead_code 临时豁免：T007（Commands::Doctor 分发接线）后移除
-#[allow(dead_code)]
 fn load_config(config_path: &std::path::Path) -> Result<inklog::InklogConfig> {
     if !config_path.exists() {
         let mut args = inklog::i18n::MsgArgs::new();
@@ -57,8 +51,6 @@ fn load_config(config_path: &std::path::Path) -> Result<inklog::InklogConfig> {
 }
 
 /// `--json` 结构化输出（机器可读契约）。
-// dead_code 临时豁免：T007（Commands::Doctor 分发接线）后移除
-#[allow(dead_code)]
 fn build_json_report(report: &PostureReport, config_path: &std::path::Path) -> serde_json::Value {
     serde_json::json!({
         "command": "doctor",
@@ -72,8 +64,6 @@ fn build_json_report(report: &PostureReport, config_path: &std::path::Path) -> s
 }
 
 /// 人类可读输出：逐行 `✓/!/✗/- capability: detail`，未达标项附修复提示。
-// dead_code 临时豁免：T007（Commands::Doctor 分发接线）后移除
-#[allow(dead_code)]
 fn print_human_report(report: &PostureReport) {
     for check in &report.checks {
         let status_key = match check.status {
@@ -112,8 +102,6 @@ fn print_human_report(report: &PostureReport) {
 }
 
 /// `tr_args` 消费 MsgArgs；渲染用副本避免移动借用中的字段。
-// dead_code 临时豁免：T007（Commands::Doctor 分发接线）后移除
-#[allow(dead_code)]
 fn clone_args(args: &inklog::i18n::MsgArgs) -> inklog::i18n::MsgArgs {
     let mut out = inklog::i18n::MsgArgs::new();
     for (k, v) in args.to_map() {

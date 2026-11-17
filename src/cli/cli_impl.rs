@@ -6,7 +6,7 @@ use inklog::support::audit_chain::{ArchiveChain, ArchiveChainEntry, ArchiveChain
 use std::path::PathBuf;
 
 use super::query::QueryArgs;
-use super::{Cli, Commands, decrypt, generate, query, validate};
+use super::{Cli, Commands, decrypt, doctor, generate, query, validate};
 
 /// 展开 anyhow 因果链为单行错误信息：每层 `InklogError` 走本地化文案，
 /// 其余层按 Display 原样。避免 `to_string()` 只取最外层而吞掉底层明细
@@ -236,6 +236,16 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
         }
 
         Commands::VerifyChain { manifest, key_env } => verify_chain_manifest(&manifest, &key_env),
+
+        Commands::Doctor { security, config } => {
+            if !security {
+                return Err(anyhow::anyhow!(
+                    "{}",
+                    inklog::i18n::tr("cli-doctor-err-no-target")
+                ));
+            }
+            doctor::run_doctor_security(config, args.json)
+        }
         Commands::Query {
             path,
             since,
