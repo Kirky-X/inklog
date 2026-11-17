@@ -235,7 +235,18 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             }
         }
 
-        Commands::VerifyChain { manifest, key_env } => verify_chain_manifest(&manifest, &key_env),
+        Commands::VerifyChain {
+            manifest,
+            key_env,
+            anchor,
+            anchor_key_env,
+        } => verify_chain_manifest(
+            &manifest,
+            &key_env,
+            anchor.as_deref(),
+            anchor_key_env.as_deref(),
+            args.json,
+        ),
 
         Commands::Doctor { security, config } => {
             if !security {
@@ -278,7 +289,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
 /// 与「封条缺失 / manifest 为空 / manifest 与封条不同代 / 校验期间发生
 /// 轮转」——判定进 `ChainVerdict`，输出文案与单测断言共用同一份结论。
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ChainVerdict {
+pub(crate) enum ChainVerdict {
     /// 链完整
     Intact,
     /// 链被篡改（删除/重排/内容修改）
@@ -293,22 +304,38 @@ enum ChainVerdict {
 
 impl ChainVerdict {
     /// 退出码：`0` = 链完整，`2` = 其余（无法证明完整性）。
-    fn exit_code(&self) -> i32 {
+    pub(crate) fn exit_code(&self) -> i32 {
         match self {
             ChainVerdict::Intact => 0,
             _ => 2,
         }
     }
+
+    /// `--json` `status` 字段值（链+封条段；机器可判的分段结论）。
+    fn json_status(&self) -> &'static str {
+        match self {
+            ChainVerdict::Intact => "ok",
+            ChainVerdict::Tampered => "tampered",
+            ChainVerdict::Empty => "empty",
+            ChainVerdict::SealUnreadable { .. } => "seal-unreadable",
+            ChainVerdict::GenerationMismatch { .. } => "generation-mismatch",
+        }
+    }
 }
 
 /// 校验结论 + 判定依据。
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ChainVerification {
-    verdict: ChainVerdict,
+///
+/// `pub(crate)`：`verify_chain`/`verify_chain_pair` 下沉为可复用单元，
+/// MCP 工具（change mcp-log-tools 的 inklog_audit_verify）直接消费。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ChainVerification {
+    pub(crate) verdict: ChainVerdict,
     /// 参与判定的 manifest 条目数
-    entry_count: usize,
+    pub(crate) entry_count: usize,
     /// 首次读取的 manifest 与封条目目数不符、重读后配对一致——校验期间发生轮转
-    rotated: bool,
+    pub(crate) rotated: bool,
+    /// 与封条判定同一代的 entries 快照（锚校验段共用，避免二次读取错代）
+    pub(crate) entries: Vec<ArchiveChainEntry>,
 }
 
 /// 一代 manifest + 封条的读取结果。
@@ -316,31 +343,222 @@ struct ChainVerification {
 /// manifest 与封条是两次独立读取，而写入侧两文件分两次落盘（非原子成对
 /// 发布），轮转可能落在两次读之间——快照承载「某次读取看到的一代」。
 #[derive(Debug, Clone)]
-struct ChainSnapshot {
+pub(crate) struct ChainSnapshot {
     /// manifest 条目
-    entries: Vec<ArchiveChainEntry>,
+    pub(crate) entries: Vec<ArchiveChainEntry>,
     /// 封条；`Err` 为读取或解析失败原因
-    seal: Result<ArchiveChainSeal, String>,
+    pub(crate) seal: Result<ArchiveChainSeal, String>,
 }
 
-/// `verify-chain`：重算 HMAC 链并核对 manifest 完整性。
+/// `verify-chain`：重算 HMAC 链并核对 manifest 完整性，附加锚校验段。
 ///
-/// 退出码契约：`0` = 链完整，`1` = 错误，`2` = 篡改/校验失败。
-fn verify_chain_manifest(manifest: &std::path::Path, key_env: &str) -> Result<i32> {
-    let outcome = verify_chain(manifest, || {
-        std::env::var(key_env)
-            .with_context(|| inklog::i18n::tr("cli-verify-chain-err-key-missing"))
-            .map(String::into_bytes)
-    })?;
-    print_verdict(manifest, &outcome);
-    Ok(outcome.verdict.exit_code())
+/// 退出码契约：`0` = 链完整（含锚段通过/未锚定），`1` = 错误，
+/// `2` = 篡改/校验失败（含锚段失败）。
+fn verify_chain_manifest(
+    manifest: &std::path::Path,
+    key_env: &str,
+    anchor: Option<&std::path::Path>,
+    anchor_key_env: Option<&str>,
+    json: bool,
+) -> Result<i32> {
+    // 锚密钥解析：--anchor-key-env 值为「持有锚密钥的环境变量名」（与
+    // --key-env 同约定）；变量缺失 → None（锚文件存在时按无法验证处理）
+    let anchor_key = anchor_key_env
+        .and_then(|name| std::env::var(name).ok())
+        .map(String::into_bytes);
+    let report = verify_chain_with_anchors(
+        manifest,
+        || {
+            std::env::var(key_env)
+                .with_context(|| inklog::i18n::tr("cli-verify-chain-err-key-missing"))
+                .map(String::into_bytes)
+        },
+        anchor,
+        anchor_key,
+    )?;
+    print_verdict(manifest, &report);
+    if json {
+        println!("{}", report.json(manifest));
+    }
+    Ok(report.exit_code())
+}
+
+/// 锚校验段结论（verify-chain 第三段；`--json` 与 MCP 工具共用）。
+///
+/// fail-closed 原则与封条一致：锚文件存在但无法验证（密钥缺失/文件不可读）
+/// 即无法证明完整性，按失败处理。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AnchorSection {
+    /// 锚校验已执行（锚密钥可用）
+    Verified(inklog::support::audit_chain::AnchorVerdict),
+    /// 未锚定：默认探测无锚文件且未显式指定 --anchor（不影响既有退出码语义）
+    NoAnchor,
+    /// 锚文件存在但锚密钥不可用——无法验证
+    NoKey,
+    /// 锚文件不可读或含不可解析记录
+    Unreadable { err: String },
+}
+
+impl AnchorSection {
+    /// 锚段对整体退出码的覆盖：失败 → `Some(2)`；通过/未锚定 → `None`
+    /// （沿用链判定退出码）。
+    fn exit_code_override(&self) -> Option<i32> {
+        match self {
+            AnchorSection::Verified(v) if v.all_valid() => None,
+            AnchorSection::NoAnchor => None,
+            AnchorSection::Verified(_)
+            | AnchorSection::NoKey
+            | AnchorSection::Unreadable { .. } => Some(2),
+        }
+    }
+
+    /// `--json` 字段：`(anchor_status, anchors_valid)`。`anchors_valid` 为
+    /// `"N/M"` 计数字符串，仅在校验实际执行（`Verified`）时携带。
+    fn json_fields(&self) -> (&'static str, Option<String>) {
+        match self {
+            AnchorSection::Verified(v) => {
+                let counts = format!("{}/{}", v.valid, v.total);
+                if v.all_valid() {
+                    ("ok", Some(counts))
+                } else {
+                    ("fail", Some(counts))
+                }
+            }
+            AnchorSection::NoAnchor => ("no-anchor", None),
+            AnchorSection::NoKey | AnchorSection::Unreadable { .. } => ("fail", None),
+        }
+    }
+
+    /// 人类可读的失败明细（fail 文案 `{ $detail }` 参数；数据性描述，
+    /// 与 seal-unreadable 的 `{ $err }` 同为先例）。
+    fn fail_detail(&self) -> String {
+        match self {
+            AnchorSection::Verified(v) => {
+                let mut detail = format!("{}/{} anchors valid", v.valid, v.total);
+                if let Some((position, index)) = v.first_mismatch {
+                    detail.push_str(&format!(
+                        "; first mismatch: anchor #{} (chain index {})",
+                        position, index
+                    ));
+                }
+                detail
+            }
+            AnchorSection::NoKey => "anchor key unavailable (--anchor-key-env)".to_string(),
+            AnchorSection::Unreadable { err } => format!("anchor file unreadable: {err}"),
+            AnchorSection::NoAnchor => String::new(),
+        }
+    }
+}
+
+/// verify-chain 分段报告：链+封条结论 + 锚校验段。
+///
+/// CLI（人类可读 / `--json`）与 MCP 工具（inklog_audit_verify 分段结论）
+/// 共用同一判定，避免双实现漂移。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ChainReport {
+    /// 链 + 封条段
+    pub(crate) outcome: ChainVerification,
+    /// 锚段
+    pub(crate) anchor: AnchorSection,
+}
+
+impl ChainReport {
+    /// 整体退出码：锚段失败覆盖为 2，否则沿用链判定退出码。
+    pub(crate) fn exit_code(&self) -> i32 {
+        self.outcome
+            .verdict
+            .exit_code()
+            .max(self.anchor.exit_code_override().unwrap_or(0))
+    }
+
+    /// `--json` 分段结论（各段独立字段，机器可判；与 MCP 工具同构）。
+    pub(crate) fn json(&self, manifest: &std::path::Path) -> serde_json::Value {
+        let (anchor_status, anchors_valid) = self.anchor.json_fields();
+        let mut value = serde_json::json!({
+            "command": "verify-chain",
+            "manifest": manifest.display().to_string(),
+            "entries": self.outcome.entry_count,
+            "status": self.outcome.verdict.json_status(),
+            "anchor_status": anchor_status,
+        });
+        if let Some(valid) = anchors_valid {
+            value["anchors_valid"] = serde_json::json!(valid);
+        }
+        value
+    }
+}
+
+/// 校验主体（链 + 封条 + 锚段），CLI 与 MCP 工具共用的可复用单元。
+///
+/// `anchor_path` `None` = 默认探测 manifest 同目录 `<stem>.anchor.jsonl`；
+/// `anchor_key` `None` = 锚密钥不可用（锚文件存在时按无法验证处理）。
+pub(crate) fn verify_chain_with_anchors(
+    manifest: &std::path::Path,
+    key: impl FnOnce() -> Result<Vec<u8>>,
+    anchor_path: Option<&std::path::Path>,
+    anchor_key: Option<Vec<u8>>,
+) -> Result<ChainReport> {
+    let outcome = verify_chain(manifest, key)?;
+    let anchor = verify_anchor_section(manifest, anchor_path, anchor_key, &outcome.entries);
+    Ok(ChainReport { outcome, anchor })
+}
+
+/// 锚校验段执行：探测/显式锚文件 → 读取 → `verify_anchors`。
+///
+/// 锚校验复用链判定读到的同一份 entries 快照——锚与链必须对同一代
+/// manifest 判定，二次读取可能在轮转竞态下产生假失配。
+fn verify_anchor_section(
+    manifest: &std::path::Path,
+    anchor_path: Option<&std::path::Path>,
+    anchor_key: Option<Vec<u8>>,
+    entries: &[ArchiveChainEntry],
+) -> AnchorSection {
+    let resolved = match anchor_path {
+        Some(path) => Some(path.to_path_buf()),
+        None => {
+            let probe = inklog::support::audit_chain::anchor_path_for_manifest(manifest);
+            probe.exists().then_some(probe)
+        }
+    };
+    let Some(path) = resolved else {
+        return AnchorSection::NoAnchor;
+    };
+    let records = match read_anchor_records(&path) {
+        Ok(records) => records,
+        Err(err) => return AnchorSection::Unreadable { err },
+    };
+    let Some(key) = anchor_key else {
+        return AnchorSection::NoKey;
+    };
+    AnchorSection::Verified(inklog::support::audit_chain::verify_anchors(
+        &records,
+        entries,
+        &inklog::support::audit_chain::HmacAnchorSigner::new(key),
+    ))
+}
+
+/// 读取并解析锚文件（JSONL，每行一条 [`inklog::support::audit_chain::AnchorRecord`]）。
+fn read_anchor_records(
+    path: &std::path::Path,
+) -> std::result::Result<Vec<inklog::support::audit_chain::AnchorRecord>, String> {
+    let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut records = Vec::new();
+    for (lineno, line) in data.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record: inklog::support::audit_chain::AnchorRecord =
+            serde_json::from_str(line).map_err(|e| format!("line {}: {e}", lineno + 1))?;
+        records.push(record);
+    }
+    Ok(records)
 }
 
 /// 校验主体：密钥惰性求值。
 ///
 /// 空 manifest 的判据与密钥无关——先判空再取密钥：缺 key 且 manifest 为空
 /// 时也稳定给退出码 2 与「空 manifest」诊断（诊断优先级：空链先于密钥缺失）。
-fn verify_chain(
+pub(crate) fn verify_chain(
     manifest: &std::path::Path,
     key: impl FnOnce() -> Result<Vec<u8>>,
 ) -> Result<ChainVerification> {
@@ -350,6 +568,7 @@ fn verify_chain(
             verdict: ChainVerdict::Empty,
             entry_count: 0,
             rotated: false,
+            entries: Vec::new(),
         });
     }
     let key = key()?;
@@ -369,7 +588,7 @@ fn verify_chain_with_key(manifest: &std::path::Path, key: &[u8]) -> Result<Chain
 /// 条目数不符时用 `reread` 重读一次再判定：写入侧 manifest 与封条分两次
 /// 落盘，轮转落在两次读之间即读到「manifest=N 而 seal=N+1」这类错配，
 /// 不重读就判篡改会把写入侧的不一致误报为人为篡改。
-fn verify_chain_pair(
+pub(crate) fn verify_chain_pair(
     key: &[u8],
     first: ChainSnapshot,
     reread: impl FnOnce() -> Result<ChainSnapshot>,
@@ -382,14 +601,17 @@ fn verify_chain_pair(
                 verdict: ChainVerdict::SealUnreadable { err },
                 entry_count: entries.len(),
                 rotated: false,
+                entries,
             });
         }
     };
     if seal.count == entries.len() as u64 {
+        let verdict = chain_verdict(&entries, &seal, key);
         return Ok(ChainVerification {
-            verdict: chain_verdict(&entries, &seal, key),
+            verdict,
             entry_count: entries.len(),
             rotated: false,
+            entries,
         });
     }
 
@@ -402,15 +624,18 @@ fn verify_chain_pair(
                 verdict: ChainVerdict::SealUnreadable { err },
                 entry_count: entries.len(),
                 rotated: false,
+                entries,
             });
         }
     };
     if seal.count == entries.len() as u64 {
         // 重读后配对一致：校验期间发生轮转，按重读后的实际结果判定
+        let verdict = chain_verdict(&entries, &seal, key);
         return Ok(ChainVerification {
-            verdict: chain_verdict(&entries, &seal, key),
+            verdict,
             entry_count: entries.len(),
             rotated: true,
+            entries,
         });
     }
     // 重读后仍不配对：manifest 与封条不属于同一代——无法证明完整性
@@ -420,6 +645,7 @@ fn verify_chain_pair(
         },
         entry_count: entries.len(),
         rotated: false,
+        entries,
     })
 }
 
@@ -479,8 +705,9 @@ fn read_seal(seal_path: &std::path::Path) -> Result<ArchiveChainSeal, String> {
         .and_then(|raw| serde_json::from_str::<ArchiveChainSeal>(&raw).map_err(|e| e.to_string()))
 }
 
-/// 输出校验结论（本地化文案）。
-fn print_verdict(manifest: &std::path::Path, outcome: &ChainVerification) {
+/// 输出校验结论（本地化文案）：链+封条段 + 锚校验段。
+fn print_verdict(manifest: &std::path::Path, report: &ChainReport) {
+    let outcome = &report.outcome;
     if outcome.rotated {
         println!(
             "{}: {}",
@@ -533,6 +760,32 @@ fn print_verdict(manifest: &std::path::Path, outcome: &ChainVerification) {
                 inklog::i18n::tr_args("cli-verify-chain-generation-mismatch", args),
                 manifest.display()
             );
+        }
+    }
+    print_anchor_section(&report.anchor);
+}
+
+/// 输出锚校验段（本地化文案）。
+fn print_anchor_section(section: &AnchorSection) {
+    match section {
+        AnchorSection::Verified(v) if v.all_valid() => {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("count", format!("{}/{}", v.valid, v.total));
+            println!(
+                "{}",
+                inklog::i18n::tr_args("cli-verify-chain-anchor-ok", args)
+            );
+        }
+        AnchorSection::Verified(_) | AnchorSection::NoKey | AnchorSection::Unreadable { .. } => {
+            let mut args = inklog::i18n::MsgArgs::new();
+            args.set("detail", section.fail_detail());
+            println!(
+                "{}",
+                inklog::i18n::tr_args("cli-verify-chain-anchor-fail", args)
+            );
+        }
+        AnchorSection::NoAnchor => {
+            println!("{}", inklog::i18n::tr("cli-verify-chain-anchor-no-anchor"));
         }
     }
 }
@@ -905,6 +1158,217 @@ mod verify_chain_tests {
             outcome.verdict.exit_code(),
             2,
             "unparsable seal must yield exit code 2"
+        );
+    }
+}
+
+/// 锚校验段（verify-chain 第三段）单测——T006。
+///
+/// 密钥与锚密钥一律显式传入：进程内不改环境变量（edition 2024 下
+/// POSIX `setenv` 非线程安全，与其他线程 `getenv` 并发即未定义行为）。
+#[cfg(test)]
+mod anchor_verify_tests {
+    use super::*;
+    use inklog::support::audit_chain::{
+        HmacAnchorSigner, anchor_path_for_manifest, create_anchor_record,
+    };
+
+    /// 构造 n 条条目的链并落盘 manifest + 封条，返回（manifest, entries）。
+    fn build_chain(
+        dir: &std::path::Path,
+        stem: &str,
+        key: &[u8],
+        n: usize,
+    ) -> (PathBuf, Vec<ArchiveChainEntry>) {
+        let mut chain = ArchiveChain::new(key);
+        for i in 0..n {
+            chain.append(&format!("{{\"n\":{i}}}"));
+        }
+        let manifest = dir.join(format!("{stem}.chain.jsonl"));
+        let body: String = chain
+            .entries()
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&manifest, body).unwrap();
+        let seal_path = inklog::support::audit_chain::seal_path_for_manifest(&manifest);
+        std::fs::write(
+            &seal_path,
+            serde_json::to_string(&chain.seal().expect("seal")).unwrap(),
+        )
+        .unwrap();
+        (manifest, chain.entries().to_vec())
+    }
+
+    /// 为链条目生成合法锚记录并落盘（JSONL，路径 = 默认探测位）。
+    fn write_anchor_file(manifest: &std::path::Path, entries: &[ArchiveChainEntry], key: &[u8]) {
+        let signer = HmacAnchorSigner::new(key.to_vec());
+        let records: Vec<_> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| create_anchor_record(&signer, i as u64, &e.hmac, i as u64 + 1).unwrap())
+            .collect();
+        let body = records
+            .iter()
+            .map(|r| serde_json::to_string(r).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(anchor_path_for_manifest(manifest), body).unwrap();
+    }
+
+    /// 锚全通过 → 退出码不变（链 intact → 0），json 锚段 ok 且 3/3。
+    #[test]
+    fn test_anchor_all_valid_keeps_exit_code() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (manifest, entries) = build_chain(dir.path(), "anchored", b"chain-key-t006", 3);
+        write_anchor_file(&manifest, &entries, b"anchor-key-t006");
+
+        let report = verify_chain_with_anchors(
+            &manifest,
+            || Ok(b"chain-key-t006".to_vec()),
+            None,
+            Some(b"anchor-key-t006".to_vec()),
+        )
+        .unwrap();
+        let AnchorSection::Verified(verdict) = &report.anchor else {
+            panic!("anchor file present + key available: anchor section must verify");
+        };
+        assert!(verdict.all_valid(), "all anchors must pass");
+        assert_eq!(report.exit_code(), 0, "valid anchors must keep exit code 0");
+
+        let json = report.json(&manifest);
+        assert_eq!(json["anchor_status"], "ok");
+        assert_eq!(json["anchors_valid"], "3/3");
+    }
+
+    /// 持链钥攻击者重写全部条目并重签 seal（manifest/seal 全部合法），
+    /// 沿用旧锚 → 锚段失配：退出码非 0 且 json anchors_valid=="0/3"。
+    #[test]
+    fn test_anchor_mismatch_fails_with_anchors_valid_json() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // 旧链与旧锚（锚记录引用旧链头）
+        let mut old = ArchiveChain::new(b"chain-key-t006");
+        for i in 0..3 {
+            old.append(&format!("{{\"n\":{i}}}"));
+        }
+        let signer = HmacAnchorSigner::new(b"anchor-key-t006".to_vec());
+        let stale_records: Vec<_> = old
+            .entries()
+            .iter()
+            .enumerate()
+            .map(|(i, e)| create_anchor_record(&signer, i as u64, &e.hmac, i as u64 + 1).unwrap())
+            .collect();
+
+        // 攻击者用同一链钥重写条目内容，重签 manifest + seal（链内校验全通过）
+        let mut rewritten = ArchiveChain::new(b"chain-key-t006");
+        for i in 0..3 {
+            rewritten.append(&format!("{{\"n\":{i},\"rewritten\":true}}"));
+        }
+        let manifest = dir.path().join("rewritten.chain.jsonl");
+        let body: String = rewritten
+            .entries()
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&manifest, body).unwrap();
+        let seal_path = inklog::support::audit_chain::seal_path_for_manifest(&manifest);
+        std::fs::write(
+            &seal_path,
+            serde_json::to_string(&rewritten.seal().expect("seal")).unwrap(),
+        )
+        .unwrap();
+        let anchor_body = stale_records
+            .iter()
+            .map(|r| serde_json::to_string(r).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(anchor_path_for_manifest(&manifest), anchor_body).unwrap();
+
+        let report = verify_chain_with_anchors(
+            &manifest,
+            || Ok(b"chain-key-t006".to_vec()),
+            None,
+            Some(b"anchor-key-t006".to_vec()),
+        )
+        .unwrap();
+        assert_eq!(
+            report.exit_code(),
+            2,
+            "rewritten chain with stale anchors must fail closed"
+        );
+
+        let json = report.json(&manifest);
+        assert_eq!(json["anchor_status"], "fail");
+        assert_eq!(json["anchors_valid"], "0/3");
+        assert_eq!(
+            json["status"], "ok",
+            "chain+seal section alone stays intact: only the anchor section fails"
+        );
+    }
+
+    /// 无锚文件 → 锚段报「未锚定」，不改变既有退出码语义；json 无 anchors_valid。
+    #[test]
+    fn test_no_anchor_file_keeps_exit_code() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (manifest, _) = build_chain(dir.path(), "noanchor", b"chain-key-t006", 2);
+
+        let report =
+            verify_chain_with_anchors(&manifest, || Ok(b"chain-key-t006".to_vec()), None, None)
+                .unwrap();
+        assert_eq!(report.anchor, AnchorSection::NoAnchor);
+        assert_eq!(
+            report.exit_code(),
+            0,
+            "not-anchored must not alter exit code"
+        );
+
+        let json = report.json(&manifest);
+        assert_eq!(json["anchor_status"], "no-anchor");
+        assert!(
+            json.get("anchors_valid").is_none(),
+            "anchors_valid must be absent when no anchor file exists"
+        );
+    }
+
+    /// 显式 --anchor 指向缺失文件：无法验证用户明确要求的锚 → fail-closed。
+    #[test]
+    fn test_explicit_anchor_missing_fails_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (manifest, _) = build_chain(dir.path(), "explicit", b"chain-key-t006", 1);
+        let missing = dir.path().join("absent.anchor.jsonl");
+
+        let report = verify_chain_with_anchors(
+            &manifest,
+            || Ok(b"chain-key-t006".to_vec()),
+            Some(&missing),
+            Some(b"anchor-key-t006".to_vec()),
+        )
+        .unwrap();
+        assert!(
+            matches!(report.anchor, AnchorSection::Unreadable { .. }),
+            "explicit anchor path that cannot be read must be unreadable"
+        );
+        assert_eq!(report.exit_code(), 2);
+    }
+
+    /// 锚文件存在但锚密钥不可用 → 无法验证（fail-closed，退出码 2）。
+    #[test]
+    fn test_anchor_without_key_fails_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (manifest, entries) = build_chain(dir.path(), "nokey", b"chain-key-t006", 2);
+        write_anchor_file(&manifest, &entries, b"anchor-key-t006");
+
+        let report =
+            verify_chain_with_anchors(&manifest, || Ok(b"chain-key-t006".to_vec()), None, None)
+                .unwrap();
+        assert_eq!(report.anchor, AnchorSection::NoKey);
+        assert_eq!(
+            report.exit_code(),
+            2,
+            "present anchors without a key cannot be verified: fail closed"
         );
     }
 }

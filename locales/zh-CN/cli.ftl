@@ -181,6 +181,8 @@ cli-query-err-no-path = query 至少需要一个 --path（文件或目录）
 cli-verify-chain-about = 校验归档审计链（HMAC-SHA256）manifest 是否被篡改
 cli-verify-chain-help-manifest = 审计链 manifest（<stem>.chain.jsonl）
 cli-verify-chain-help-key-env = 存放审计链密钥的环境变量名
+cli-verify-chain-help-anchor = 锚文件（缺省探测 manifest 同目录 <stem>.anchor.jsonl，存在即校验）
+cli-verify-chain-help-anchor-key-env = 持有 HMAC 锚密钥的环境变量名（传变量名，非密钥值）
 cli-verify-chain-err-manifest-unreadable = 无法读取审计链 manifest
 cli-verify-chain-err-line-invalid = manifest 行格式非法
 cli-verify-chain-err-key-missing = 审计链密钥环境变量未设置
@@ -191,6 +193,9 @@ cli-verify-chain-seal-unreadable = 无法读取链封条（{ $path }）：{ $err
 cli-verify-chain-ok-detail = { $chain }: { $path }（{ $count } 个条目）
 cli-verify-chain-rotated-during-verify = 校验期间归档链被重写（manifest 与封条重读后配对一致）——以下为重读后的结果
 cli-verify-chain-generation-mismatch = 链封条与 manifest 不匹配（封条覆盖 { $seal_count } 个条目，manifest 实际 { $count } 个）：两者不同步（轮转中断或条目被删除）——无法证明完整性
+cli-verify-chain-anchor-ok = 锚校验通过（{ $count }）——独立密钥锚定确认链头
+cli-verify-chain-anchor-fail = 锚校验失败：{ $detail }——完整性无法证明
+cli-verify-chain-anchor-no-anchor = 链未锚定（manifest 同目录无 <stem>.anchor.jsonl）——锚保护未启用
 
 # CLI generate schema 错误
 

@@ -181,6 +181,8 @@ cli-query-err-no-path = query requires at least one --path (file or directory)
 cli-verify-chain-about = Verify the archive audit chain (HMAC-SHA256) manifest for tampering
 cli-verify-chain-help-manifest = Audit chain manifest (<stem>.chain.jsonl)
 cli-verify-chain-help-key-env = Environment variable name holding the audit chain key
+cli-verify-chain-help-anchor = Anchor file (default: probe <stem>.anchor.jsonl next to the manifest; verified when present)
+cli-verify-chain-help-anchor-key-env = Environment variable name holding the HMAC anchor key (pass the variable name, not the key value)
 cli-verify-chain-err-manifest-unreadable = Cannot read audit chain manifest
 cli-verify-chain-err-line-invalid = Invalid manifest line
 cli-verify-chain-err-key-missing = Audit key environment variable is not set
@@ -191,6 +193,9 @@ cli-verify-chain-seal-unreadable = chain seal unreadable ({ $path }): { $err } �
 cli-verify-chain-ok-detail = { $chain }: { $path } ({ $count } entries)
 cli-verify-chain-rotated-during-verify = archive chain was rewritten during verification (manifest and seal re-read and matched) — result below
 cli-verify-chain-generation-mismatch = chain seal does not match manifest (seal covers { $seal_count } entries, manifest has { $count } entries): manifest and seal are out of sync (rotation interrupted or entries removed) — integrity cannot be proven
+cli-verify-chain-anchor-ok = anchors verified ok ({ $count }) — independent-key anchoring confirms the chain head
+cli-verify-chain-anchor-fail = anchors FAILED: { $detail } — integrity cannot be proven
+cli-verify-chain-anchor-no-anchor = chain not anchored (no <stem>.anchor.jsonl next to the manifest) — anchor protection disabled
 
 # CLI generate schema errors
 

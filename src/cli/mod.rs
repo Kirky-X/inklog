@@ -138,6 +138,17 @@ enum Commands {
         #[arg(help = inklog::i18n::tr("cli-verify-chain-help-key-env"))]
         #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
         key_env: String,
+
+        /// 锚文件（缺省时探测 manifest 同目录 `<stem>.anchor.jsonl`，存在即校验）
+        #[arg(long)]
+        #[arg(help = inklog::i18n::tr("cli-verify-chain-help-anchor"))]
+        anchor: Option<PathBuf>,
+
+        /// 环境变量名，持有 HMAC 锚密钥（与 --key-env 同约定：传变量名而非密钥值）
+        #[arg(long, env = "INKLOG_AUDIT_ANCHOR_KEY")]
+        #[arg(help = inklog::i18n::tr("cli-verify-chain-help-anchor-key-env"))]
+        #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        anchor_key_env: Option<String>,
     },
 
     #[command(name = "doctor")]
