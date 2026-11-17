@@ -369,7 +369,57 @@ where
 /// 开销）+ 当前配置 + 当前环境变量。密钥明文不进入任何 `detail_args`。
 pub fn assess_security_posture(config: &crate::domain::config::InklogConfig) -> PostureReport {
     PostureReport {
-        checks: vec![check_pii_masking(config), check_file_encryption(config)],
+        checks: vec![
+            check_pii_masking(config),
+            check_file_encryption(config),
+            check_audit_chain(config),
+        ],
+    }
+}
+
+/// audit-chain：`audit_chain_enabled` + `INKLOG_AUDIT_KEY` 非空——与
+/// `FileSink::new`（file.rs）的判定同判：开链而 key 缺失时 sink 侧是
+/// warn 后静默禁用链，本检查把它显性化为 Critical。
+///
+/// 双满足 Ok / 开链无 key Critical / 未开链 Warn / 无 enabled file sink Ok。
+fn check_audit_chain(config: &crate::domain::config::InklogConfig) -> PostureCheck {
+    const AUDIT_KEY_ENV: &str = "INKLOG_AUDIT_KEY";
+
+    let Some(file) = config.file_sink.as_ref().filter(|f| f.enabled) else {
+        return PostureCheck {
+            id: "audit-chain",
+            capability: "posture-audit-chain",
+            status: PostureStatus::Ok,
+            detail_key: "posture-audit-chain-detail-no-sink",
+            detail_args: crate::i18n::MsgArgs::new(),
+            remedy_key: None,
+        };
+    };
+
+    // 与 file.rs 同判：仅「变量存在且非空」视为 key 可得（空串按缺失处理）
+    let key_available = std::env::var(AUDIT_KEY_ENV).is_ok_and(|k| !k.is_empty());
+    let (status, detail_key, remedy) = match (file.audit_chain_enabled, key_available) {
+        (true, true) => (PostureStatus::Ok, "posture-audit-chain-detail-ok", None),
+        (true, false) => (
+            PostureStatus::Critical,
+            "posture-audit-chain-detail-key-missing",
+            Some("posture-audit-chain-remedy"),
+        ),
+        (false, _) => (
+            PostureStatus::Warn,
+            "posture-audit-chain-detail-off",
+            Some("posture-audit-chain-remedy"),
+        ),
+    };
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("env", AUDIT_KEY_ENV);
+    PostureCheck {
+        id: "audit-chain",
+        capability: "posture-audit-chain",
+        status,
+        detail_key,
+        detail_args: args,
+        remedy_key: remedy,
     }
 }
 
@@ -642,6 +692,94 @@ mod posture_assess_tests {
         config.file_sink = None;
         let report = assess_security_posture(&config);
         let check = find(&report, "file-encryption");
+        assert_eq!(check.status, PostureStatus::Ok);
+    }
+
+    #[test]
+    #[serial]
+    fn test_audit_chain_enabled_without_key_is_critical() {
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+        }
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            audit_chain_enabled: true,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "audit-chain");
+        assert_eq!(check.status, PostureStatus::Critical);
+        assert_eq!(check.remedy_key, Some("posture-audit-chain-remedy"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_audit_chain_enabled_with_key_is_ok_and_leaks_no_key_value() {
+        unsafe {
+            std::env::set_var("INKLOG_AUDIT_KEY", "posture-test-audit-secret");
+        }
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            audit_chain_enabled: true,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "audit-chain");
+        assert_eq!(check.status, PostureStatus::Ok);
+        // 证据不得携带密钥明文：只允许出现变量名
+        let json = serde_json::to_value(check).unwrap();
+        let rendered = json.to_string();
+        assert!(
+            !rendered.contains("posture-test-audit-secret"),
+            "detail must not embed the key value"
+        );
+        assert!(rendered.contains("INKLOG_AUDIT_KEY"));
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_audit_chain_empty_key_counts_as_missing() {
+        unsafe {
+            std::env::set_var("INKLOG_AUDIT_KEY", "");
+        }
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            audit_chain_enabled: true,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "audit-chain");
+        assert_eq!(check.status, PostureStatus::Critical);
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+        }
+    }
+
+    #[test]
+    fn test_audit_chain_disabled_is_warn() {
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            audit_chain_enabled: false,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "audit-chain");
+        assert_eq!(check.status, PostureStatus::Warn);
+    }
+
+    #[test]
+    fn test_audit_chain_no_file_sink_is_ok() {
+        let mut config = InklogConfig::default();
+        config.file_sink = None;
+        let report = assess_security_posture(&config);
+        let check = find(&report, "audit-chain");
         assert_eq!(check.status, PostureStatus::Ok);
     }
 }
