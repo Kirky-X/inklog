@@ -436,6 +436,39 @@ log::info!("用户邮箱: user@example.com");
 // Output: 用户邮箱: **@**.***
 ```
 
+#### Source-Level Sensitive Field Redaction
+
+The regex rule set above masks sensitive **content** found in messages and field values. When a structured field's **name** is known in advance, inklog provides a second, earlier layer: source-level redaction replaces the whole field value before the record enters the pipeline — the raw value never reaches any sink or downstream middleware.
+
+```rust
+use inklog::{LoggerManager, mark_sensitive_fields};
+
+// Register process-level sensitive fields BEFORE the logger is built
+// (each subscriber snapshots the registry at construction time).
+mark_sensitive_fields(["email", "phone"]);
+
+let _logger = LoggerManager::builder().level("info").build().await;
+
+tracing::info!(target: "app::auth", message = "login", email = "user@example.com", phone = "13812345678");
+// Field values on disk: "email": "<redacted:email>", "phone": "<redacted:phone>"
+```
+
+Per-subscriber declaration (merged with the process-level registry) is available via `LoggerSubscriber::with_sensitive_fields(["email"])`; the `SensitiveRedaction` middleware itself is exported from the crate root for custom sink pipelines.
+
+Two-layer semantics:
+
+| Layer | Matches | When it runs | Result |
+|-------|---------|--------------|--------|
+| Source redaction (`mark_sensitive_fields` / `with_sensitive_fields`) | field **names**, exact match | first in the middleware chain, before user middleware and governance | whole value → `<redacted:{field}>` |
+| Regex masking (PII rules, `masking_enabled`) | value **content** | sink egress | rule replacement (e.g. `[CARD_NUM]`) |
+
+Boundaries:
+
+- The placeholder template defaults to `<redacted:{field}>`; `SensitiveRedaction::with_placeholder_template` customizes it (e.g. `"{field}:redacted"`).
+- A field whose value is a JSON object or array is replaced **wholesale** with the placeholder string — nested values are not traversed or partially masked.
+- Non-string values (numbers, booleans, objects) are replaced as well: any registered field name yields the placeholder regardless of value type.
+- The source layer runs before the regex layer: a placeholder contains no raw value, so the regex rules leave it untouched (marker idempotence).
+
 #### Custom Masking Rules
 
 Customize rules via `MaskRuleBuilder` / `DataMaskerBuilder` / `MaskRuleRegistry`; the full API is in the [📘 API Reference](API_REFERENCE.md):

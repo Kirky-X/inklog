@@ -65,7 +65,7 @@ inklog is logging infrastructure built for production: application code keeps us
 </tr>
 <tr>
 <td width="50%" style="vertical-align:top; padding: 12px">🗄️ <b>Database Output</b><br><span style="color:#64748B">Batched inserts, connection pooling, partitioned tables via the dbnexus adapter for four backends</span></td>
-<td width="50%" style="vertical-align:top; padding: 12px">🎭 <b>Data Masking</b><br><span style="color:#64748B">Sensitive field-name detection + regex rule set, with <code>fast-masking</code> multi-pattern acceleration</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🎭 <b>Data Masking</b><br><span style="color:#64748B">Source-level redaction (<code>mark_sensitive_fields</code>) replaces registered field values before fan-out; the regex rule set masks embedded PII as a fallback, with <code>fast-masking</code> multi-pattern acceleration</span></td>
 </tr>
 <tr>
 <td width="50%" style="vertical-align:top; padding: 12px">🎨 <b>Template Formatting</b><br><span style="color:#64748B"><code>{timestamp}</code> <code>{level}</code> <code>{message}</code> <code>{trace_id}</code> placeholders</span></td>

@@ -432,6 +432,39 @@ log::info!("用户邮箱: user@example.com");
 // 输出: 用户邮箱: **@**.***
 ```
 
+#### 源头敏感字段脱敏
+
+上文正则规则集脱敏的是消息与字段值里出现的敏感**内容**。当结构化字段的**字段名**事先已知时，inklog 提供更早的第二层：源头脱敏在记录进入管线前整值替换字段值——原始值不会到达任何 sink 或下游中间件。
+
+```rust
+use inklog::{LoggerManager, mark_sensitive_fields};
+
+// 在构建 logger 之前注册进程级敏感字段
+// （每个订阅者在构建期对注册表做快照）。
+mark_sensitive_fields(["email", "phone"]);
+
+let _logger = LoggerManager::builder().level("info").build().await;
+
+tracing::info!(target: "app::auth", message = "login", email = "user@example.com", phone = "13812345678");
+// 落盘字段值: "email": "<redacted:email>", "phone": "<redacted:phone>"
+```
+
+按订阅者声明（与进程级注册表合并）经 `LoggerSubscriber::with_sensitive_fields(["email"])`；`SensitiveRedaction` 中间件本身也从 crate 根导出，供自定义 sink 管线使用。
+
+两层语义：
+
+| 层 | 匹配 | 执行时机 | 结果 |
+|-------|---------|--------------|--------|
+| 源头脱敏（`mark_sensitive_fields` / `with_sensitive_fields`） | 字段**名**精确匹配 | 中间件链头，先于用户治理件 | 整值 → `<redacted:{field}>` |
+| 正则掩码（PII 规则，`masking_enabled`） | 值**内容** | sink 出口 | 规则替换（如 `[CARD_NUM]`） |
+
+边界：
+
+- 占位模板默认 `<redacted:{field}>`；`SensitiveRedaction::with_placeholder_template` 可自定义（如 `"{field}:redacted"`）。
+- 字段值为 JSON 对象或数组时**整值**替换为占位串——不深入遍历、不做部分掩码。
+- 非字符串值（数字、布尔、对象）同样整值替换：命中字段名即产出占位串，与值类型无关。
+- 源头层先于正则层执行：占位串不含原始值，正则规则不再改写它（标记幂等）。
+
 #### 自定义脱敏规则
 
 通过 `MaskRuleBuilder` / `DataMaskerBuilder` / `MaskRuleRegistry` 自定义规则，完整 API 见 [📘 API 参考](API_REFERENCE.md)：
