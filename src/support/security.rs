@@ -935,26 +935,57 @@ mod posture_assess_tests {
         assert_eq!(check.status, PostureStatus::Ok);
     }
 
-    /// 默认 feature 组合下：无数据库后端、无 secret-scan——两项均
-    /// Unavailable（feature 缺失的显性化，非错误）。
+    /// 编译期能力检查项：状态必须与 `cfg!` 编译快照一致。默认 feature
+    /// 组合下四项全 Unavailable；CI 测试口径（`--features "sqlite ..."`）
+    /// 下 db-backend 为 Ok——断言跟随快照而非硬编码，任意 feature 组合
+    /// 下均成立。
     #[test]
     fn test_compile_time_checks_default_features() {
         let config = InklogConfig::default();
         let report = assess_security_posture(&config);
+        let db_compiled = cfg!(any(
+            feature = "sqlite",
+            feature = "postgres",
+            feature = "mysql",
+            feature = "duckdb"
+        ));
         assert_eq!(
             find(&report, "db-backend").status,
-            PostureStatus::Unavailable,
-            "default feature set compiles no database backend"
+            if db_compiled {
+                PostureStatus::Ok
+            } else {
+                PostureStatus::Unavailable
+            },
+            "db-backend status must match the compiled backend snapshot"
         );
         assert_eq!(
             find(&report, "secret-scan").status,
-            PostureStatus::Unavailable,
-            "default feature set compiles no secret-scan"
+            if cfg!(feature = "secret-scan") {
+                PostureStatus::Ok
+            } else {
+                PostureStatus::Unavailable
+            },
+            "secret-scan status must match the compiled feature snapshot"
         );
-        assert_eq!(find(&report, "kms").status, PostureStatus::Unavailable);
+        assert_eq!(
+            find(&report, "kms").status,
+            if cfg!(feature = "kms") {
+                PostureStatus::Ok
+            } else {
+                PostureStatus::Unavailable
+            }
+        );
         assert_eq!(
             find(&report, "net-sink-tls").status,
-            PostureStatus::Unavailable
+            if cfg!(feature = "net-sink") {
+                if cfg!(feature = "insecure-tls") {
+                    PostureStatus::Warn
+                } else {
+                    PostureStatus::Ok
+                }
+            } else {
+                PostureStatus::Unavailable
+            }
         );
         // 检查项全集与固定顺序
         let ids: Vec<&str> = report.checks.iter().map(|c| c.id).collect();
