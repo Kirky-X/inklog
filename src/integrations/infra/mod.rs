@@ -29,7 +29,7 @@
 //!     cache: &dyn Cache,
 //!     config: &dyn Config,
 //!     db: &dyn Database,
-//!) -> Result<(), Box<dyn std::error::Error>> {
+//! ) -> Result<(), Box<dyn std::error::Error>> {
 //!     // 从配置获取参数
 //!     let batch_size = config.get_int("batch.size").unwrap_or(100);
 //!

@@ -3475,7 +3475,8 @@ mod tests {
 
     #[test]
     fn test_idle_flush_lands_within_one_tick() {
-        // R-rel-003：空闲期（无后续写入）batch 中的记录在一个 tick 内落盘
+        // 空闲期（无后续写入）batch 中的记录在一个 tick 内落盘
+
         let dir = tempdir().unwrap();
         let path = dir.path().join("idle.log");
         let config = FileSinkConfig {

@@ -28,7 +28,7 @@
 //!     "business_requests_total",
 //!     "Business requests by endpoint",
 //!     &["endpoint"],
-//!);
+//! );
 //! requests.child(&["/api/v1/login"]).inc();
 //! let text = registry.export_prometheus();
 //! assert!(text.contains("business_requests_total{endpoint=\"/api/v1/login\"} 1"));

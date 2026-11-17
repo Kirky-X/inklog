@@ -78,7 +78,6 @@ async fn integration_file_then_crypto_roundtrip() {
     // 2. 用 crypto_ops 加密（持有锁以保护环境变量）
     let _guard = ENV_LOCK.lock().unwrap();
     let key = generate_temp_key();
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
     encrypt_log_file(plain_str, enc_str, "LOG_ENCRYPTION_KEY").expect("encryption failed");
 
@@ -100,7 +99,6 @@ async fn integration_file_then_crypto_roundtrip() {
         );
     }
 
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
 }
 
@@ -213,7 +211,6 @@ fn integration_crypto_tamper_detection() {
 
     std::fs::write(&plain, "sensitive content: user password = hunter2").unwrap();
     let key = generate_temp_key();
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
     encrypt_log_file(
         plain.to_str().unwrap(),
@@ -235,6 +232,5 @@ fn integration_crypto_tamper_detection() {
         "decryption should fail after ciphertext tampering"
     );
 
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
 }

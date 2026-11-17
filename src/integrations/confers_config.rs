@@ -13,7 +13,7 @@
 //! let watcher = ConfersConfigWatcher::spawn(
 //!     "inklog_config.toml".into(),
 //!     |values| tracing::info!(level = %values.level, "config reloaded"),
-//!).await?;
+//! ).await?;
 //! assert_eq!(watcher.current().level, "info");
 //! ```
 

@@ -815,7 +815,7 @@ mod tests {
 mod output_permission_tests {
     use super::*;
 
-    /// R-sec-001：压缩产物（.gz）必须以 0600 创建。
+    /// 压缩产物（.gz）必须以 0600 创建。
     #[test]
     fn test_gzip_output_created_with_0600() {
         use std::os::unix::fs::PermissionsExt;

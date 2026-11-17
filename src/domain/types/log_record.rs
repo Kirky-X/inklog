@@ -53,7 +53,7 @@ use tracing::{Event, Level};
 ///     Level::INFO,
 ///     "myapp::service".to_string(),
 ///     "User logged in successfully".to_string(),
-///);
+/// );
 ///
 /// assert_eq!(record.level, "INFO");
 /// assert_eq!(record.target, "myapp::service");
@@ -175,7 +175,7 @@ impl LogRecord {
     ///     Level::INFO,
     ///     "module".to_string(),
     ///     "message".to_string(),
-    ///);
+    /// );
     ///
     /// record.reset();
     ///
@@ -219,7 +219,7 @@ impl LogRecord {
     ///     Level::WARN,
     ///     "myapp::cache".to_string(),
     ///     "Cache miss for key: user_123".to_string(),
-    ///);
+    /// );
     ///
     /// assert_eq!(record.level, "WARN");
     /// assert_eq!(record.target, "myapp::cache");
@@ -514,11 +514,11 @@ impl LogRecord {
     ///     Level::INFO,
     ///     "auth".to_string(),
     ///     "Login attempt: user@example.com".to_string(),
-    ///);
+    /// );
     /// record.fields.insert(
     ///     "password".to_string(),
     ///     Value::String("secret123".to_string()),
-    ///);
+    /// );
     ///
     /// record.mask_sensitive_fields();
     ///
@@ -526,7 +526,7 @@ impl LogRecord {
     /// assert_eq!(
     ///     record.fields.get("password").unwrap(),
     ///     &Value::String("***MASKED***".to_string())
-    ///);
+    /// );
     /// ```
     pub fn mask_sensitive_fields(&mut self) {
         let masker = DataMasker::new();

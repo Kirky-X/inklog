@@ -22,7 +22,7 @@
 //! let inner: Arc<dyn inklog::LogSink> = Arc::new(ConsoleSink::new(
 //!     Default::default(),
 //!     LogTemplate::new("{timestamp} [{level}] {message}"),
-//!));
+//! ));
 //! let sink: Arc<dyn inklog::LogSink> =
 //!     Arc::new(MiddlewareSink::new(inner, chain));
 //! ```

@@ -109,7 +109,7 @@ pub(crate) struct LevelDirectives {
     extra_raw: Option<String>,
 }
 
-/// C3：file 配置是否走 ChannelBufferedFileSink（R-inklog-003 收窄）。
+/// C3：file 配置是否走 ChannelBufferedFileSink（收窄）。
 /// CBFS 已覆盖轮转（size/time）/压缩/加密/审计链/保留清理（与 FileSink
 /// 同一后处理单一事实源）；仍需 FileSink 的仅剩逐批 fsync 与 JSON 出站
 /// 格式（另有磁盘空间守卫/熔断降级为无配置旋钮的固有能力差异，见
@@ -716,7 +716,7 @@ impl LoggerManager {
 
         // C4 磁盘持久化 fallback journal：构建期重放一次（记录带 replayed=true
         // 防重放循环）后清空；随后把 journal 挂到 subscriber 供运行期溢出落盘。
-        // R-inklog-002：按配置接线可选加密与推送端口；加密而 key 缺失/无效
+        // 按配置接线可选加密与推送端口；加密而 key 缺失/无效
         // 在此显性失败（Err 向上传播终止构建，禁止静默明文落盘）。
         let mut fallback_journal: Option<Arc<crate::support::fallback_journal::FallbackJournal>> =
             None;
@@ -958,7 +958,7 @@ impl LoggerManager {
             error_sink: error_sink.clone(),
             effective_capacity: effective_capacity.clone(),
             file_sink_factory: Box::new(move || {
-                // R-inklog-003 收窄：CBFS 覆盖轮转/压缩/加密/审计链/保留清理，
+                // 收窄：CBFS 覆盖轮转/压缩/加密/审计链/保留清理，
                 // 仅 fsync 与 JSON 出站格式回落 FileSink。能力矩阵见
                 // docs/USER_GUIDE.md。
                 let simple = file_uses_channel_buffered(&file_sink_cfg);
@@ -4298,7 +4298,7 @@ mod set_level_tests {
 
     #[test]
     fn test_file_uses_channel_buffered_predicate() {
-        // R-inklog-003 收窄：轮转/压缩/加密/审计链均由 CBFS 覆盖，不再回落；
+        // 收窄：轮转/压缩/加密/审计链均由 CBFS 覆盖，不再回落；
         // 仅逐批 fsync 与 JSON 出站格式仍回落 FileSink（能力矩阵见
         // docs/USER_GUIDE.md「文件写入双路径」——注意 CBFS 时间轮转为滚动
         // 间隔近似，FileSink 为日历对齐，矩阵已如实标注差异）

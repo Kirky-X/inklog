@@ -25,6 +25,9 @@ ignore = [
     # RUSTSEC-2026-0442（2026-11-12 入库）：arrow-data 传递入图（dbnexus arrow 链），
     # 无 semver 内修复版，等上游 arrow 系发布补丁版后移除。
     "RUSTSEC-2026-0442",
+    # RUSTSEC-2026-0543（2026-11-17 入库）：chrono 全版本 unmaintained（upstream chronotope/chrono#1768），
+    # patched=[] 无升级路径；依赖替换（jiff/time）归依赖治理 change。家族级豁免（confers 2026-11-17 同日先行）。
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]

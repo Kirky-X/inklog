@@ -326,7 +326,6 @@ pub use tokio;
 pub use tracing;
 
 // Convenience init functions with singleton semantics
-// ============================================================================
 
 use std::sync::OnceLock;
 

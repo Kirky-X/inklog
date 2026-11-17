@@ -966,7 +966,8 @@ mod tests {
 
     #[test]
     fn test_traceparent_field_parsing_and_priority() {
-        // R-trace-002：合法 traceparent 字段 → 提取；非法/版本 ff → 回退派生
+        // 合法 traceparent 字段 → 提取；非法/版本 ff → 回退派生
+
         let (_console_tx, _console_rx) = bounded(10);
         let (async_tx, async_rx) = bounded(10);
         let metrics = Arc::new(Metrics::new());

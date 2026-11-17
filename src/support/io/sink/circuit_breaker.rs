@@ -404,7 +404,8 @@ mod tests {
     fn test_half_open_admits_multiple_probes() {
         // 半开多探针：HalfOpen 态连续两次（及以上）can_execute 均放行——
         // 探针间互不排斥（limiteron sync 版为单探针 admit，此项为适配缺口，
-        // D7 保留现状路径下由 inklog 状态机直接承载）
+        // 保留现状路径下由 inklog 状态机直接承载）
+
         let cb = CircuitBreaker::new(1, StdDuration::from_millis(50), 2);
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);

@@ -239,7 +239,6 @@ mod tests {
         write_plaintext(plain_path, content);
 
         let key = generate_temp_key();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
 
         encrypt_log_file(plain_path, enc_path, "LOG_ENCRYPTION_KEY").expect("encryption failed");
@@ -250,7 +249,6 @@ mod tests {
             "decrypted result should match the original"
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 
@@ -264,7 +262,6 @@ mod tests {
 
         write_plaintext(plain.to_str().unwrap(), "hello world");
         let key = generate_temp_key();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
         encrypt_log_file(
             plain.to_str().unwrap(),
@@ -283,7 +280,6 @@ mod tests {
             "nonce should not be all zero"
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 
@@ -297,7 +293,6 @@ mod tests {
 
         write_plaintext(plain.to_str().unwrap(), "secret content");
         let key1 = generate_temp_key();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key1) };
         encrypt_log_file(
             plain.to_str().unwrap(),
@@ -308,7 +303,6 @@ mod tests {
 
         // 用另一个密钥解密
         let key2 = generate_temp_key();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key2) };
         let result = decrypt_file(enc.to_str().unwrap(), "LOG_ENCRYPTION_KEY");
         assert!(result.is_err(), "decryption with the wrong key should fail");
@@ -320,7 +314,6 @@ mod tests {
             err_msg
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 
@@ -372,7 +365,6 @@ mod tests {
         let content = "plaintext containing keyword1 and keyword2";
         write_plaintext(plain.to_str().unwrap(), content);
         let key = generate_temp_key();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("LOG_ENCRYPTION_KEY", &key) };
         encrypt_log_file(
             plain.to_str().unwrap(),
@@ -397,7 +389,6 @@ mod tests {
         );
         assert!(missing.is_err(), "missing keywords should fail");
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("LOG_ENCRYPTION_KEY") };
     }
 }

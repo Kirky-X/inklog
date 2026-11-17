@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: MIT
-//! 磁盘持久化 fallback 队列（deferred-capabilities C4 + R-inklog-002）。
+//! 磁盘持久化 fallback 队列（deferred-capabilities C4）。
 //!
 //! ERROR/FATAL 兜底缓冲（内存 100 条 LRU）溢出/淘汰的记录落盘 journal，
 //! 进程启动时经 [`FallbackJournal::replay`] 重放一次后清空——关键日志跨进程
@@ -570,7 +570,7 @@ impl FallbackJournal {
         }
     }
 
-    /// 以加密模式打开 journal（R-inklog-002）。
+    /// 以加密模式打开 journal。
     ///
     /// 文件格式：`JOURNAL_MAGIC`(8) + version(2, le) + algo(2, le) +
     /// salt(16) 头 + 逐段 `nonce(12) + ct_len(4, le) + AES-256-GCM 密文`。
@@ -1226,7 +1226,7 @@ mod tests {
         assert_eq!(skipped, 0);
     }
 
-    // journal 加密与推送（R-inklog-002）
+    // journal 加密与推送
     // nonce 唯一性策略（实现前固化）：随机 96-bit/段，CSPRNG 生成；
     // 单测以同 key 跨段/跨文件收集 nonce 断言无重复。
     // key 来源优先级：env > 配置文件；配置文件 key unix 权限必须 0600。

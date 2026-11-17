@@ -230,11 +230,8 @@ fn show_env_override_demo() {
                 &[("key", &key), ("value", &value)]
             )
         );
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var(env_vars[0].0, env_vars[0].1) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var(env_vars[1].0, env_vars[1].1) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var(env_vars[2].0, env_vars[2].1) };
     }
 
@@ -306,7 +303,6 @@ fn show_env_override_demo() {
     );
 
     for (key, _) in env_vars {
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var(key) };
     }
     println!(

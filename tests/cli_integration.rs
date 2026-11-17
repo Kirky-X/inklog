@@ -311,9 +311,7 @@ fn test_cli_query_missing_path_errors() {
         .stderr(predicate::str::contains("path").or(predicate::str::contains("Error")));
 }
 
-// ============================================================================
 // 全子命令 --json 机器可读输出
-// ============================================================================
 
 #[test]
 fn test_cli_validate_json_output() {

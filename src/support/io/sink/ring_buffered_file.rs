@@ -111,7 +111,7 @@ pub struct ChannelBufferedFileSink {
     /// 可增长到 `max_bytes + 既有体积` 才触发 size 轮转。如需严格阈值，
     /// 改为构造期用文件元数据初始化（行为变更需评审）。
     current_file_bytes: Arc<AtomicU64>,
-    /// 轮转参数（size/time，R-inklog-003）
+    /// 轮转参数（size/time）
     rotation: RotationParams,
     /// 上次轮转时刻（io 线程判定 time 触发；测试可注入合成时刻）
     last_rotation: Arc<Mutex<Instant>>,
@@ -192,7 +192,7 @@ impl ChannelBufferedFileSink {
             )));
         }
 
-        // R-inklog-003：加密密钥在构造期显性解析——显式启用加密而 key
+        // 加密密钥在构造期显性解析——显式启用加密而 key
         // 缺失/无效在此返回 Err（禁止静默明文落盘）。key 来源 env 优先、
         // 其次配置文件（encryption_key_file，unix 权限 0600），与 fallback
         // journal / FileSink 共享同一解析范式；默认 env 名与 FileSink 一致。
@@ -415,7 +415,7 @@ impl ChannelBufferedFileSink {
                     }
                 }
 
-                // R-inklog-003：批次落盘后判定轮转（size/time 任一触发）
+                // 批次落盘后判定轮转（size/time 任一触发）
                 let due = {
                     let last = last_rotation.lock();
                     rotation_due(
@@ -440,7 +440,7 @@ impl ChannelBufferedFileSink {
 
             // Drain remaining messages from the channel before exiting.
             // Use try_recv to avoid blocking after shutdown flag is set.
-            // R-inklog-003：drain 与主循环同一轮转判定与 current_file_bytes
+            // drain 与主循环同一轮转判定与 current_file_bytes
             // 记账——此前 drain 绕过 rotation_due，shutdown 时通道积压可无限
             // 越过 max_size（size 轮转断言偶发失败、活动文件超限的根因）。
             loop {
@@ -624,7 +624,7 @@ impl ChannelBufferedFileSink {
 
     /// 执行轮转（须持文件锁）：flush → 改名（冲突安全）→ 重开 → 重置计数
     /// → 审计链接记 → 后台压缩/加密。命名与归档产物范式与 FileSink 一致
-    ///（复用其 resolve_rotation_target / sha256_file / process_rotated）。
+    /// （复用其 resolve_rotation_target / sha256_file / process_rotated）。
     /// 加密用构造期解析的 `key_material`（`None` = 未启用加密）。
     fn rotate_locked(
         file: &mut Option<BufWriter<File>>,
@@ -1754,7 +1754,7 @@ mod tests {
         let _ = sink.shutdown().await;
     }
 
-    // R-inklog-003：CBFS 高级能力（轮转 size/time、压缩、加密、审计链、
+    // CBFS 高级能力（轮转 size/time、压缩、加密、审计链、
     // 保留清理）。manager 回落判定相应收窄后，此处为唯一文件写路径行为
     // 基准（FileSink 仅保留 fsync/JSON 出站/磁盘空间守卫）。
 
@@ -1913,7 +1913,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_encrypt_without_key_fails_explicitly() {
-        // 复用 journal 加密（R-inklog-002）的 key 管理范式：显式启用加密而
+        // 复用 journal 加密的 key 管理范式：显式启用加密而
         // key 缺失 → 构造期显性失败
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ring_enc_nokey.log");
@@ -2197,7 +2197,7 @@ mod tests {
         sink.shutdown().await.unwrap();
     }
 
-    // 新旧路径行为对拍（R-inklog-003）：同一批记录经 FileSink 与 CBFS
+    // 新旧路径行为对拍：同一批记录经 FileSink 与 CBFS
     // 落盘后（level, target, message) 三元组集合一致。
     // 注：两侧时间戳渲染格式不同（FileSink rfc3339 / 模板毫秒 UTC），
     // 对拍剥离时间戳；格式语义差异由模板文档承载。

@@ -398,7 +398,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = generate_temp_key();
 
     let key_env = "LOG_ENCRYPTION_KEY";
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var(key_env, &key) };
     println!(
         "✓ temporary key generated and written to the environment variable: {}",
@@ -440,7 +439,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cleanup(&encrypted_path);
 
     // 移除环境变量
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::remove_var(key_env) };
     println!(
         "{}",

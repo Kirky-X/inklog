@@ -270,7 +270,6 @@ async fn show_search_paths() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(&config_path, TOML_CONFIG)?;
 
     print_section(&tr("example-config-file-3-1-setting-the-inklog-config"));
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("INKLOG_CONFIG_PATH", config_path.to_str().unwrap()) };
     println!(
         "{}",
@@ -292,7 +291,6 @@ async fn show_search_paths() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 清理环境变量
-    // FIXME: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::remove_var("INKLOG_CONFIG_PATH") };
     println!("{}", tr("example-config-file-inklog-config-path-env-var"));
 
