@@ -373,7 +373,159 @@ pub fn assess_security_posture(config: &crate::domain::config::InklogConfig) -> 
             check_pii_masking(config),
             check_file_encryption(config),
             check_audit_chain(config),
+            check_secret_scan(),
+            check_net_sink_tls(),
+            check_journal_crypto(config),
+            check_db_backend(),
+            check_kms(),
         ],
+    }
+}
+
+/// secret-scan：编译期 feature 快照（`cfg!` 常量展开，运行时零开销）。
+fn check_secret_scan() -> PostureCheck {
+    compile_time_check(
+        "secret-scan",
+        "posture-secret-scan",
+        cfg!(feature = "secret-scan"),
+        "posture-secret-scan-detail-on",
+        "posture-secret-scan-detail-off",
+        Some("posture-secret-scan-remedy"),
+    )
+}
+
+/// net-sink-tls：`net-sink` 编译态 + `insecure-tls` 弱化告警。
+///
+/// 未编译 net-sink Unavailable / TLS 校验正常 Ok / insecure-tls Warn。
+fn check_net_sink_tls() -> PostureCheck {
+    let (status, detail_key, remedy) = if cfg!(feature = "net-sink") {
+        if cfg!(feature = "insecure-tls") {
+            (
+                PostureStatus::Warn,
+                "posture-net-sink-tls-detail-insecure",
+                Some("posture-net-sink-tls-remedy"),
+            )
+        } else {
+            (PostureStatus::Ok, "posture-net-sink-tls-detail-on", None)
+        }
+    } else {
+        (
+            PostureStatus::Unavailable,
+            "posture-net-sink-tls-detail-off",
+            None,
+        )
+    };
+    PostureCheck {
+        id: "net-sink-tls",
+        capability: "posture-net-sink-tls",
+        status,
+        detail_key,
+        detail_args: crate::i18n::MsgArgs::new(),
+        remedy_key: remedy,
+    }
+}
+
+/// journal-crypto：fallback journal 加密（`JournalCryptoConfig` 同款配置字段）。
+///
+/// journal 关闭 Ok（无落盘） / 开启且加密 Ok（key 缺失在构造期已显性失败，
+/// 非本检查职责）/ 开启但明文 Warn。
+fn check_journal_crypto(config: &crate::domain::config::InklogConfig) -> PostureCheck {
+    const DEFAULT_JOURNAL_KEY_ENV: &str = "INKLOG_JOURNAL_KEY";
+
+    let (status, detail_key, remedy) = match (
+        config.global.fallback_journal,
+        config.global.fallback_journal_encrypt,
+    ) {
+        (false, _) => (PostureStatus::Ok, "posture-journal-crypto-detail-off", None),
+        (true, true) => (PostureStatus::Ok, "posture-journal-crypto-detail-on", None),
+        (true, false) => (
+            PostureStatus::Warn,
+            "posture-journal-crypto-detail-plaintext",
+            Some("posture-journal-crypto-remedy"),
+        ),
+    };
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set(
+        "env",
+        config
+            .global
+            .fallback_journal_key_env
+            .as_deref()
+            .unwrap_or(DEFAULT_JOURNAL_KEY_ENV),
+    );
+    PostureCheck {
+        id: "journal-crypto",
+        capability: "posture-journal-crypto",
+        status,
+        detail_key,
+        detail_args: args,
+        remedy_key: remedy,
+    }
+}
+
+/// db-backend：四个互斥后端 feature 的 `cfg!` 快照（多选在 cargo 层已
+/// 禁止，此处仅陈述快照）：编译 0 个 Unavailable / 恰 1 个 Ok。
+fn check_db_backend() -> PostureCheck {
+    let backends: Vec<&'static str> = [
+        ("sqlite", cfg!(feature = "sqlite")),
+        ("postgres", cfg!(feature = "postgres")),
+        ("mysql", cfg!(feature = "mysql")),
+        ("duckdb", cfg!(feature = "duckdb")),
+    ]
+    .into_iter()
+    .filter(|(_, on)| *on)
+    .map(|(name, _)| name)
+    .collect();
+
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("names", backends.join("/"));
+    let (status, detail_key) = if backends.is_empty() {
+        (PostureStatus::Unavailable, "posture-db-backend-detail-off")
+    } else {
+        (PostureStatus::Ok, "posture-db-backend-detail-on")
+    };
+    PostureCheck {
+        id: "db-backend",
+        capability: "posture-db-backend",
+        status,
+        detail_key,
+        detail_args: args,
+        remedy_key: None,
+    }
+}
+
+/// kms：`kms` feature 编译态快照。
+fn check_kms() -> PostureCheck {
+    compile_time_check(
+        "kms",
+        "posture-kms",
+        cfg!(feature = "kms"),
+        "posture-kms-detail-on",
+        "posture-kms-detail-off",
+        Some("posture-kms-remedy"),
+    )
+}
+
+/// 纯编译期能力检查的公共形态（feature 开 Ok / 关 Unavailable）。
+fn compile_time_check(
+    id: &'static str,
+    capability: &'static str,
+    enabled: bool,
+    detail_on: &'static str,
+    detail_off: &'static str,
+    remedy_off: Option<&'static str>,
+) -> PostureCheck {
+    PostureCheck {
+        id,
+        capability,
+        status: if enabled {
+            PostureStatus::Ok
+        } else {
+            PostureStatus::Unavailable
+        },
+        detail_key: if enabled { detail_on } else { detail_off },
+        detail_args: crate::i18n::MsgArgs::new(),
+        remedy_key: if enabled { None } else { remedy_off },
     }
 }
 
@@ -781,6 +933,85 @@ mod posture_assess_tests {
         let report = assess_security_posture(&config);
         let check = find(&report, "audit-chain");
         assert_eq!(check.status, PostureStatus::Ok);
+    }
+
+    /// 默认 feature 组合下：无数据库后端、无 secret-scan——两项均
+    /// Unavailable（feature 缺失的显性化，非错误）。
+    #[test]
+    fn test_compile_time_checks_default_features() {
+        let config = InklogConfig::default();
+        let report = assess_security_posture(&config);
+        assert_eq!(
+            find(&report, "db-backend").status,
+            PostureStatus::Unavailable,
+            "default feature set compiles no database backend"
+        );
+        assert_eq!(
+            find(&report, "secret-scan").status,
+            PostureStatus::Unavailable,
+            "default feature set compiles no secret-scan"
+        );
+        assert_eq!(find(&report, "kms").status, PostureStatus::Unavailable);
+        assert_eq!(
+            find(&report, "net-sink-tls").status,
+            PostureStatus::Unavailable
+        );
+        // 检查项全集与固定顺序
+        let ids: Vec<&str> = report.checks.iter().map(|c| c.id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "pii-masking",
+                "file-encryption",
+                "audit-chain",
+                "secret-scan",
+                "net-sink-tls",
+                "journal-crypto",
+                "db-backend",
+                "kms",
+            ]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_journal_crypto_states_and_no_key_leak() {
+        unsafe {
+            std::env::set_var("INKLOG_POSTURE_JOURNAL_KEY", "journal-key-secret-value");
+        }
+        // journal 关闭 → Ok
+        let mut config = InklogConfig::default();
+        config.global.fallback_journal = false;
+        config.global.fallback_journal_encrypt = true;
+        let report = assess_security_posture(&config);
+        assert_eq!(find(&report, "journal-crypto").status, PostureStatus::Ok);
+
+        // journal 开启且加密 → Ok；证据只带变量名，不带密钥值
+        let mut config = InklogConfig::default();
+        config.global.fallback_journal = true;
+        config.global.fallback_journal_encrypt = true;
+        config.global.fallback_journal_key_env = Some("INKLOG_POSTURE_JOURNAL_KEY".to_string());
+        let report = assess_security_posture(&config);
+        let check = find(&report, "journal-crypto");
+        assert_eq!(check.status, PostureStatus::Ok);
+        let rendered = serde_json::to_value(check).unwrap().to_string();
+        assert!(
+            !rendered.contains("journal-key-secret-value"),
+            "journal detail must not embed the key value"
+        );
+        assert!(rendered.contains("INKLOG_POSTURE_JOURNAL_KEY"));
+
+        // journal 开启但明文 → Warn
+        let mut config = InklogConfig::default();
+        config.global.fallback_journal = true;
+        config.global.fallback_journal_encrypt = false;
+        let report = assess_security_posture(&config);
+        let check = find(&report, "journal-crypto");
+        assert_eq!(check.status, PostureStatus::Warn);
+        assert_eq!(check.remedy_key, Some("posture-journal-crypto-remedy"));
+        unsafe {
+            std::env::remove_var("INKLOG_POSTURE_JOURNAL_KEY");
+        }
     }
 }
 
