@@ -112,8 +112,12 @@ impl LoggerSubscriber {
         // 进程级敏感字段注册快照（初始化期 mark_sensitive_fields 声明）：
         // 空集合零开销跳过，行为与未声明完全一致
         let registered = crate::support::security::sensitive_fields();
-        let sensitive_redaction = (!registered.is_empty())
-            .then(|| Arc::new(SensitiveRedaction::new(registered.iter().cloned())));
+        let sensitive_redaction = (!registered.is_empty()).then(|| {
+            Arc::new(
+                SensitiveRedaction::new(registered.iter().cloned())
+                    .with_metrics(Arc::clone(&metrics)),
+            )
+        });
         Self {
             console_sender,
             async_sender,
@@ -234,7 +238,9 @@ impl LoggerSubscriber {
             None => std::collections::HashSet::new(),
         };
         merged.extend(fields.into_iter().map(Into::into));
-        self.sensitive_redaction = Some(Arc::new(SensitiveRedaction::new(merged)));
+        self.sensitive_redaction = Some(Arc::new(
+            SensitiveRedaction::new(merged).with_metrics(Arc::clone(&self.metrics)),
+        ));
         self
     }
 

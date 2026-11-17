@@ -216,6 +216,8 @@ pub struct SensitiveRedaction {
     fields: Arc<std::collections::HashSet<String>>,
     /// 占位模板，默认 `"<redacted:{field}>"`；`{field}` 为唯一替换槽
     placeholder_template: String,
+    /// 替换计数（`sensitive_redacted_total`）；None = 不计数
+    metrics: Option<Arc<crate::support::observability::Metrics>>,
 }
 
 impl SensitiveRedaction {
@@ -224,7 +226,14 @@ impl SensitiveRedaction {
         Self {
             fields: Arc::new(fields.into_iter().map(Into::into).collect()),
             placeholder_template: format!("<redacted:{SENSITIVE_PLACEHOLDER_SLOT}>"),
+            metrics: None,
         }
+    }
+
+    /// 绑定指标（每次占位替换递增 `sensitive_redacted_total`）。
+    pub fn with_metrics(mut self, metrics: Arc<crate::support::observability::Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// 已注册敏感字段数（诊断用）。
@@ -267,6 +276,9 @@ impl RecordMiddleware for SensitiveRedaction {
                 original.zeroize();
             }
             *value = serde_json::Value::String(placeholder);
+            if let Some(ref metrics) = self.metrics {
+                metrics.inc_sensitive_redacted();
+            }
         }
         MiddlewareVerdict::Continue
     }
@@ -681,6 +693,28 @@ mod tests {
             r.fields.get("token").unwrap(),
             &serde_json::json!("token:redacted"),
             "custom placeholder template must be honored"
+        );
+    }
+
+    #[test]
+    fn test_sensitive_redaction_counts_each_replacement() {
+        // 3 个命中字段（跨字符串/数字/嵌套 JSON 形态）→ 计数恰为 3；
+        // 未命中字段不计
+        let metrics = Arc::new(Metrics::new());
+        let mw = SensitiveRedaction::new(["a", "b", "c"]).with_metrics(metrics.clone());
+        let mut r = record(Level::INFO, "mixed");
+        r.fields
+            .insert("a".to_string(), serde_json::json!("str-value"));
+        r.fields.insert("b".to_string(), serde_json::json!(7));
+        r.fields
+            .insert("c".to_string(), serde_json::json!({ "nested": "secret" }));
+        r.fields
+            .insert("plain".to_string(), serde_json::json!("untouched"));
+        assert_eq!(mw.process(&mut r), MiddlewareVerdict::Continue);
+        assert_eq!(
+            metrics.sensitive_redacted(),
+            3,
+            "each replaced field must increment sensitive_redacted_total exactly once"
         );
     }
 }

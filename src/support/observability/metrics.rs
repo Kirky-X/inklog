@@ -46,6 +46,7 @@
 //! | `inklog_logs_dropped_total` | Counter | 总丢弃日志数 |
 //! | `inklog_sampled_out_total` | Counter | 采样淘汰日志数 |
 //! | `inklog_user_middleware_dropped_total` | Counter | 用户治理中间件丢弃日志数 |
+//! | `inklog_sensitive_redacted_total` | Counter | 源头敏感字段改写次数 |
 //! | `inklog_sink_errors_total` | Counter | 总错误数 |
 //! | `inklog_latency_p50_us` | Gauge | P50 延迟（微秒）|
 //! | `inklog_latency_p95_us` | Gauge | P95 延迟（微秒）|
@@ -275,6 +276,7 @@ pub struct MetricsSnapshot {
     pub logs_dropped: u64,
     pub sampled_out: u64,
     pub user_middleware_dropped: u64,
+    pub sensitive_redacted: u64,
     pub channel_blocked: u64,
     pub sink_errors: u64,
     pub db_batch_size: i64,
@@ -330,6 +332,7 @@ pub struct Metrics {
     pub(crate) logs_dropped_total: AtomicU64,
     pub(crate) sampled_out_total: AtomicU64,
     pub(crate) user_middleware_dropped_total: AtomicU64,
+    pub(crate) sensitive_redacted_total: AtomicU64,
     pub(crate) channel_send_blocked_total: AtomicU64,
     pub(crate) sink_errors_total: AtomicU64,
     pub(crate) lock_contention_total: AtomicU64,
@@ -364,6 +367,7 @@ impl Default for Metrics {
             logs_dropped_total: AtomicU64::new(0),
             sampled_out_total: AtomicU64::new(0),
             user_middleware_dropped_total: AtomicU64::new(0),
+            sensitive_redacted_total: AtomicU64::new(0),
             channel_send_blocked_total: AtomicU64::new(0),
             sink_errors_total: AtomicU64::new(0),
             lock_contention_total: AtomicU64::new(0),
@@ -424,6 +428,15 @@ impl Metrics {
         self.user_middleware_dropped_total.load(Ordering::Relaxed)
     }
 
+    /// Returns the total number of sensitive field values replaced by the
+    /// source-level redaction middleware.
+    ///
+    /// 归因细分：仅统计 [`SensitiveRedaction`](crate::support::io::sink::middleware::SensitiveRedaction)
+    /// 占位替换次数（每次命中字段替换 +1，未命中字段不计）。
+    pub fn sensitive_redacted(&self) -> u64 {
+        self.sensitive_redacted_total.load(Ordering::Relaxed)
+    }
+
     /// Returns the total number of times the channel was blocked.
     pub fn channel_blocked(&self) -> u64 {
         self.channel_send_blocked_total.load(Ordering::Relaxed)
@@ -480,6 +493,11 @@ impl Metrics {
 
     pub fn inc_sampled_out(&self) {
         self.sampled_out_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_sensitive_redacted(&self) {
+        self.sensitive_redacted_total
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn inc_user_middleware_dropped(&self) {
@@ -660,6 +678,7 @@ impl Metrics {
                 logs_dropped: self.logs_dropped_total.load(Ordering::Relaxed),
                 sampled_out: self.sampled_out_total.load(Ordering::Relaxed),
                 user_middleware_dropped: self.user_middleware_dropped_total.load(Ordering::Relaxed),
+                sensitive_redacted: self.sensitive_redacted_total.load(Ordering::Relaxed),
                 channel_blocked: self.channel_send_blocked_total.load(Ordering::Relaxed),
                 sink_errors: self.sink_errors_total.load(Ordering::Relaxed),
                 db_batch_size: self.db_batch_size.get(),
@@ -705,6 +724,15 @@ impl Metrics {
         s.push_str(&format!(
             "inklog_user_middleware_dropped_total {}\n",
             self.user_middleware_dropped_total.load(Ordering::Relaxed)
+        ));
+
+        s.push_str(
+            "# HELP inklog_sensitive_redacted_total Sensitive field values replaced by source redaction\n",
+        );
+        s.push_str("# TYPE inklog_sensitive_redacted_total counter\n");
+        s.push_str(&format!(
+            "inklog_sensitive_redacted_total {}\n",
+            self.sensitive_redacted_total.load(Ordering::Relaxed)
         ));
 
         s.push_str("# HELP inklog_channel_blocked_total Total times channel was blocked\n");
