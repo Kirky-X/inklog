@@ -216,6 +216,11 @@ harness = false
 name = "rc4_pipeline_bench"
 harness = false
 
+# 源头敏感字段改写热路径基准（命中 3 字段 vs 未命中 0 字段）
+[[bench]]
+name = "sensitive_redaction_bench"
+harness = false
+
 # secret-scan 出站门热路径基准，仅 secret-scan 下编译
 [[bench]]
 name = "secret_scan_bench"
