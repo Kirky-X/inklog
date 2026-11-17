@@ -232,6 +232,13 @@ impl SensitiveRedaction {
         self.fields.len()
     }
 
+    /// 定制占位模板（builder 风格）：`{field}` 为唯一替换槽，缺槽时
+    /// 模板按原样输出（不含字段名，可辨识性由调用方负责）。
+    pub fn with_placeholder_template(mut self, template: String) -> Self {
+        self.placeholder_template = template;
+        self
+    }
+
     /// 构建期冻结的字段名集合（subscriber 装配期合并去重用）。
     pub fn fields(&self) -> &Arc<std::collections::HashSet<String>> {
         &self.fields
@@ -641,5 +648,39 @@ mod tests {
         );
         assert_eq!(mw.field_count(), 1);
         assert_eq!(mw.name(), "sensitive-redaction");
+    }
+
+    #[test]
+    fn test_sensitive_redaction_replaces_nested_json_wholesale() {
+        // 非字符串值（嵌套 JSON）整值替换为占位串：字段形状保持
+        // String，内部明文子树随整体替换离开记录
+        let mw = SensitiveRedaction::new(["credentials"]);
+        let mut r = record(Level::INFO, "auth attempt");
+        r.fields.insert(
+            "credentials".to_string(),
+            serde_json::json!({ "password": "hunter2", "mfa_code": 123456 }),
+        );
+        assert_eq!(mw.process(&mut r), MiddlewareVerdict::Continue);
+        assert_eq!(
+            r.fields.get("credentials").unwrap(),
+            &serde_json::json!("<redacted:credentials>"),
+            "nested JSON value must be replaced wholesale by the placeholder"
+        );
+    }
+
+    #[test]
+    fn test_sensitive_redaction_custom_placeholder_template() {
+        // 自定义模板 "{field}:redacted" 生效（{field} 为唯一替换槽）
+        let mw = SensitiveRedaction::new(["token"])
+            .with_placeholder_template("{field}:redacted".to_string());
+        let mut r = record(Level::INFO, "api call");
+        r.fields
+            .insert("token".to_string(), serde_json::json!("sk-live-abc"));
+        assert_eq!(mw.process(&mut r), MiddlewareVerdict::Continue);
+        assert_eq!(
+            r.fields.get("token").unwrap(),
+            &serde_json::json!("token:redacted"),
+            "custom placeholder template must be honored"
+        );
     }
 }
