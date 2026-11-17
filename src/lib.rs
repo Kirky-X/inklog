@@ -223,6 +223,9 @@ pub use support::security::{
     ConfersKeyProvider, EnvKeyProvider, KeyProvider, VaultTransitConfig, vault_transit_provider,
 };
 
+// 安全姿态评估（核心，无 feature 门控）
+pub use support::security::{PostureCheck, PostureReport, PostureStatus, assess_security_posture};
+
 // Sink trait and type re-exports for public API completeness
 #[cfg(feature = "gzip")]
 pub use support::io::sink::GzipCompression;
