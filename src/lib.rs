@@ -206,7 +206,7 @@ pub mod support;
 // Sink 中间件链
 pub use support::io::sink::middleware::{
     EnrichMiddleware, LevelFilterMiddleware, MiddlewareChain, MiddlewareSink, MiddlewareVerdict,
-    RecordMiddleware,
+    RecordMiddleware, SensitiveRedaction,
 };
 #[cfg(feature = "otlp")]
 pub use support::io::sink::otlp::{OtlpConfig, OtlpSink};
@@ -225,6 +225,9 @@ pub use support::security::{
 
 // 安全姿态评估（核心，无 feature 门控）
 pub use support::security::{PostureCheck, PostureReport, PostureStatus, assess_security_posture};
+
+// 进程级敏感字段注册（源头脱敏声明面，核心，无 feature 门控）
+pub use support::security::{mark_sensitive_fields, sensitive_fields};
 
 // Sink trait and type re-exports for public API completeness
 #[cfg(feature = "gzip")]
