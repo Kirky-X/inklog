@@ -202,3 +202,63 @@ example-confers-audit-title = confers audit bridge (confers-audit feature)
 example-confers-audit-write-events = Writing audit events (three kinds: key access / decrypt / config load)
 example-confers-audit-result = Bridge result: accepted={ $accepted } dropped={ $dropped } write_failures={ $failures }
 example-confers-audit-chain-dir = Local audit chain file directory: { $path }
+
+# doctor 子命令（安全姿态评估）
+
+cli-doctor-about = Assess the security posture of the current build, config and environment
+cli-doctor-help-security = Run the security posture assessment
+cli-doctor-help-config = Path to configuration file
+cli-doctor-err-no-target = doctor requires a target, e.g. --security
+cli-doctor-check-ok = ✓ { $capability }: { $detail }
+cli-doctor-check-warn = ! { $capability }: { $detail }
+cli-doctor-check-critical = ✗ { $capability }: { $detail }
+cli-doctor-check-unavailable = - { $capability }: { $detail }
+
+# 姿态检查项能力名与证据/修复文案
+
+posture-pii-masking = PII masking
+posture-pii-masking-detail-no-sinks = no enabled sinks — nothing persisted
+posture-pii-masking-detail-all = enabled on all { $count } active sinks ({ $names })
+posture-pii-masking-detail-partial = enabled on only some of { $count } active sinks (unmasked: { $unmasked })
+posture-pii-masking-detail-none = disabled on all { $count } active sinks ({ $names })
+posture-pii-masking-remedy = set masking_enabled = true (or pii_masking_enabled) on every enabled sink
+
+posture-file-encryption = File encryption
+posture-file-encryption-detail-no-sink = no enabled file sink — not applicable
+posture-file-encryption-detail-on = enabled and the key source resolves (env { $env })
+posture-file-encryption-detail-off = disabled — log files at rest are plaintext
+posture-file-encryption-detail-key-missing = enabled but the key source is missing or invalid (env { $env })
+posture-file-encryption-remedy = set the encryption key env ({ $env }) or encryption_key_file
+
+posture-audit-chain = Audit chain
+posture-audit-chain-detail-no-sink = no enabled file sink — not applicable
+posture-audit-chain-detail-ok = enabled and { $env } is set
+posture-audit-chain-detail-key-missing = audit_chain_enabled = true but { $env } is not set — the chain is silently disabled at runtime
+posture-audit-chain-detail-off = disabled — archive tampering cannot be detected
+posture-audit-chain-remedy = set { $env } (HMAC key) before starting inklog
+
+posture-secret-scan = Secret scan
+posture-secret-scan-detail-on = compiled in (secret-scan feature)
+posture-secret-scan-detail-off = not compiled in (secret-scan feature off)
+posture-secret-scan-remedy = rebuild with --features secret-scan to mask bare API keys
+
+posture-net-sink-tls = Network sink TLS
+posture-net-sink-tls-detail-on = compiled in with certificate verification active
+posture-net-sink-tls-detail-insecure = insecure-tls feature enabled — certificate verification is disabled
+posture-net-sink-tls-detail-off = not compiled in (net-sink feature off)
+posture-net-sink-tls-remedy = rebuild without --features insecure-tls
+
+posture-journal-crypto = Fallback journal encryption
+posture-journal-crypto-detail-on = enabled (key env { $env })
+posture-journal-crypto-detail-off = fallback journal disabled
+posture-journal-crypto-detail-plaintext = enabled but unencrypted — spilled records are plaintext (key env would be { $env })
+posture-journal-crypto-remedy = set global.fallback_journal_encrypt = true and provide the key
+
+posture-db-backend = Database backend
+posture-db-backend-detail-on = compiled in: { $names }
+posture-db-backend-detail-off = not compiled in (no database backend feature)
+
+posture-kms = KMS key provider
+posture-kms-detail-on = compiled in (kms feature)
+posture-kms-detail-off = not compiled in (kms feature off)
+posture-kms-remedy = rebuild with --features kms for external key providers

@@ -202,3 +202,63 @@ example-confers-audit-title = confers 审计桥（confers-audit feature）
 example-confers-audit-write-events = 写入审计事件（三类：密钥访问/解密/配置加载）
 example-confers-audit-result = 桥接结果：accepted={ $accepted } dropped={ $dropped } write_failures={ $failures }
 example-confers-audit-chain-dir = 本地审计链文件目录：{ $path }
+
+# doctor 子命令（安全姿态评估）
+
+cli-doctor-about = 评估当前构建、配置与环境的安全姿态
+cli-doctor-help-security = 执行安全姿态评估
+cli-doctor-help-config = 配置文件路径
+cli-doctor-err-no-target = doctor 需要指定评估目标，如 --security
+cli-doctor-check-ok = ✓ { $capability }: { $detail }
+cli-doctor-check-warn = ! { $capability }: { $detail }
+cli-doctor-check-critical = ✗ { $capability }: { $detail }
+cli-doctor-check-unavailable = - { $capability }: { $detail }
+
+# 姿态检查项能力名与证据/修复文案
+
+posture-pii-masking = PII 掩码
+posture-pii-masking-detail-no-sinks = 无启用的 sink——没有持久化输出
+posture-pii-masking-detail-all = 全部 { $count } 个活跃 sink 均已启用（{ $names }）
+posture-pii-masking-detail-partial = { $count } 个活跃 sink 中仅部分启用（未掩码: { $unmasked }）
+posture-pii-masking-detail-none = 全部 { $count } 个活跃 sink 均未启用（{ $names }）
+posture-pii-masking-remedy = 为每个启用的 sink 设置 masking_enabled = true（或 pii_masking_enabled）
+
+posture-file-encryption = 文件加密
+posture-file-encryption-detail-no-sink = 无启用的文件 sink——不适用
+posture-file-encryption-detail-on = 已启用且密钥来源可解析（env { $env }）
+posture-file-encryption-detail-off = 未启用——落盘日志为明文
+posture-file-encryption-detail-key-missing = 已启用但密钥来源缺失或无效（env { $env }）
+posture-file-encryption-remedy = 设置加密密钥环境变量（{ $env }）或 encryption_key_file
+
+posture-audit-chain = 审计链
+posture-audit-chain-detail-no-sink = 无启用的文件 sink——不适用
+posture-audit-chain-detail-ok = 已启用且 { $env } 已设置
+posture-audit-chain-detail-key-missing = audit_chain_enabled = true 但 { $env } 未设置——运行时链将被静默禁用
+posture-audit-chain-detail-off = 未启用——无法检测归档篡改
+posture-audit-chain-remedy = 在启动 inklog 前设置 { $env }（HMAC 密钥）
+
+posture-secret-scan = Secret 扫描
+posture-secret-scan-detail-on = 已编译进（secret-scan feature）
+posture-secret-scan-detail-off = 未编译进（secret-scan feature 关闭）
+posture-secret-scan-remedy = 以 --features secret-scan 重新构建以掩码裸 API 密钥
+
+posture-net-sink-tls = 网络出口 TLS
+posture-net-sink-tls-detail-on = 已编译进且证书校验生效
+posture-net-sink-tls-detail-insecure = insecure-tls feature 已启用——证书校验被禁用
+posture-net-sink-tls-detail-off = 未编译进（net-sink feature 关闭）
+posture-net-sink-tls-remedy = 去掉 --features insecure-tls 重新构建
+
+posture-journal-crypto = Fallback journal 加密
+posture-journal-crypto-detail-on = 已启用（key env { $env }）
+posture-journal-crypto-detail-off = fallback journal 未启用
+posture-journal-crypto-detail-plaintext = 已启用但未加密——溢出记录为明文（key env 应为 { $env }）
+posture-journal-crypto-remedy = 设置 global.fallback_journal_encrypt = true 并提供密钥
+
+posture-db-backend = 数据库后端
+posture-db-backend-detail-on = 已编译进: { $names }
+posture-db-backend-detail-off = 未编译进（无数据库后端 feature）
+
+posture-kms = KMS 密钥提供者
+posture-kms-detail-on = 已编译进（kms feature）
+posture-kms-detail-off = 未编译进（kms feature 关闭）
+posture-kms-remedy = 以 --features kms 重新构建以支持外部密钥提供者
