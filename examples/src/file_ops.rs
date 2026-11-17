@@ -39,6 +39,8 @@ pub fn create_file_config(path: &str, max_size: &str, compress: bool) -> FileSin
         flush_interval_ms: 1000,
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     }
