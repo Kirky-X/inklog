@@ -363,6 +363,289 @@ where
     out.end()
 }
 
+/// 评估入口：纯只读，不产生副作用、不读 env 以外的外部资源。
+///
+/// 评估时点为调用瞬间：编译期 feature 快照（`cfg!` 常量展开，运行时零
+/// 开销）+ 当前配置 + 当前环境变量。密钥明文不进入任何 `detail_args`。
+pub fn assess_security_posture(config: &crate::domain::config::InklogConfig) -> PostureReport {
+    PostureReport {
+        checks: vec![check_pii_masking(config), check_file_encryption(config)],
+    }
+}
+
+/// pii-masking：遍历 console/file sink（仅 enabled 的 sink 计入——未启用
+/// 的 sink 不产出，掩码与否无意义）。
+///
+/// 全启用 Ok / 部分启用 Warn / 全未启用 Critical；无 enabled sink 时 Ok
+/// （无产出即无 PII 落地面）。
+fn check_pii_masking(config: &crate::domain::config::InklogConfig) -> PostureCheck {
+    let mut sinks: Vec<(&str, bool)> = Vec::new();
+    if let Some(console) = config.console_sink.as_ref().filter(|c| c.enabled) {
+        sinks.push(("console", console.masking_enabled));
+    }
+    if let Some(file) = config.file_sink.as_ref().filter(|f| f.enabled) {
+        sinks.push(("file", file.masking_enabled));
+    }
+
+    let (status, detail_key, remedy) = match sinks.len() {
+        0 => (
+            PostureStatus::Ok,
+            "posture-pii-masking-detail-no-sinks",
+            None,
+        ),
+        _ if sinks.iter().all(|(_, m)| *m) => {
+            (PostureStatus::Ok, "posture-pii-masking-detail-all", None)
+        }
+        _ if sinks.iter().any(|(_, m)| *m) => (
+            PostureStatus::Warn,
+            "posture-pii-masking-detail-partial",
+            Some("posture-pii-masking-remedy"),
+        ),
+        _ => (
+            PostureStatus::Critical,
+            "posture-pii-masking-detail-none",
+            Some("posture-pii-masking-remedy"),
+        ),
+    };
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("count", sinks.len());
+    args.set(
+        "names",
+        sinks
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join("/"),
+    );
+    args.set(
+        "unmasked",
+        sinks
+            .iter()
+            .filter(|(_, m)| !*m)
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join("/"),
+    );
+    PostureCheck {
+        id: "pii-masking",
+        capability: "posture-pii-masking",
+        status,
+        detail_key,
+        detail_args: args,
+        remedy_key: remedy,
+    }
+}
+
+/// file-encryption：`FileSinkConfig.encrypt` + key 来源可解析（env 优先、
+/// 其次 key 文件，与 `FileSink` 实际取钥同范式：`resolve_key_material`）。
+///
+/// 启用且 key 可得 Ok / 启用无 key Critical / 未启用 Warn / 未配置 file
+/// sink Ok（无文件产出）。
+fn check_file_encryption(config: &crate::domain::config::InklogConfig) -> PostureCheck {
+    use crate::support::io::sink::encryption::resolve_key_material;
+
+    const DEFAULT_KEY_ENV: &str = "LOG_ENCRYPTION_KEY";
+
+    let Some(file) = config.file_sink.as_ref().filter(|f| f.enabled) else {
+        return PostureCheck {
+            id: "file-encryption",
+            capability: "posture-file-encryption",
+            status: PostureStatus::Ok,
+            detail_key: "posture-file-encryption-detail-no-sink",
+            detail_args: crate::i18n::MsgArgs::new(),
+            remedy_key: None,
+        };
+    };
+
+    let mut args = crate::i18n::MsgArgs::new();
+    let key_env = file
+        .encryption_key_env
+        .as_deref()
+        .unwrap_or(DEFAULT_KEY_ENV);
+    args.set("env", key_env);
+    let (status, detail_key, remedy) = if !file.encrypt {
+        (
+            PostureStatus::Warn,
+            "posture-file-encryption-detail-off",
+            Some("posture-file-encryption-remedy"),
+        )
+    } else {
+        match resolve_key_material(
+            key_env,
+            file.encryption_key_file
+                .as_deref()
+                .map(std::path::Path::new),
+        ) {
+            Ok(_) => (PostureStatus::Ok, "posture-file-encryption-detail-on", None),
+            // key 缺失/无效与 sink 构造失败同判（file.rs 宁缺毋滥语义）
+            Err(_) => (
+                PostureStatus::Critical,
+                "posture-file-encryption-detail-key-missing",
+                Some("posture-file-encryption-remedy"),
+            ),
+        }
+    };
+    PostureCheck {
+        id: "file-encryption",
+        capability: "posture-file-encryption",
+        status,
+        detail_key,
+        detail_args: args,
+        remedy_key: remedy,
+    }
+}
+
+#[cfg(test)]
+mod posture_assess_tests {
+    use super::*;
+    use crate::domain::config::ConsoleSinkConfig;
+    use crate::domain::config::FileSinkConfig;
+    use crate::domain::config::InklogConfig;
+    use serial_test::serial;
+
+    fn find<'a>(report: &'a PostureReport, id: &str) -> &'a PostureCheck {
+        report
+            .checks
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap_or_else(|| panic!("check {id} must exist"))
+    }
+
+    #[test]
+    fn test_pii_masking_all_enabled_is_ok() {
+        let mut config = InklogConfig::default();
+        config.console_sink = Some(ConsoleSinkConfig {
+            enabled: true,
+            masking_enabled: true,
+            ..Default::default()
+        });
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            masking_enabled: true,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "pii-masking");
+        assert_eq!(check.status, PostureStatus::Ok);
+    }
+
+    #[test]
+    fn test_pii_masking_partial_is_warn() {
+        let mut config = InklogConfig::default();
+        config.console_sink = Some(ConsoleSinkConfig {
+            enabled: true,
+            masking_enabled: true,
+            ..Default::default()
+        });
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            masking_enabled: false,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "pii-masking");
+        assert_eq!(check.status, PostureStatus::Warn);
+        assert_eq!(check.remedy_key, Some("posture-pii-masking-remedy"));
+    }
+
+    #[test]
+    fn test_pii_masking_none_enabled_is_critical() {
+        let mut config = InklogConfig::default();
+        config.console_sink = Some(ConsoleSinkConfig {
+            enabled: true,
+            masking_enabled: false,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "pii-masking");
+        assert_eq!(check.status, PostureStatus::Critical);
+    }
+
+    #[test]
+    fn test_pii_masking_disabled_sinks_excluded() {
+        // disabled 的 file sink 不计入：console 掩码开启即 Ok
+        let mut config = InklogConfig::default();
+        config.console_sink = Some(ConsoleSinkConfig {
+            enabled: true,
+            masking_enabled: true,
+            ..Default::default()
+        });
+        config.file_sink = Some(FileSinkConfig {
+            enabled: false,
+            masking_enabled: false,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "pii-masking");
+        assert_eq!(check.status, PostureStatus::Ok);
+    }
+
+    #[test]
+    #[serial]
+    fn test_file_encryption_enabled_with_resolvable_key_is_ok() {
+        unsafe {
+            std::env::set_var(
+                "INKLOG_POSTURE_TEST_KEY",
+                "a-strong-posture-test-passphrase",
+            );
+        }
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            encrypt: true,
+            encryption_key_env: Some("INKLOG_POSTURE_TEST_KEY".to_string()),
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "file-encryption");
+        assert_eq!(check.status, PostureStatus::Ok);
+        unsafe {
+            std::env::remove_var("INKLOG_POSTURE_TEST_KEY");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_file_encryption_enabled_without_key_is_critical() {
+        unsafe {
+            std::env::remove_var("INKLOG_POSTURE_TEST_KEY");
+        }
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            encrypt: true,
+            encryption_key_env: Some("INKLOG_POSTURE_TEST_KEY".to_string()),
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "file-encryption");
+        assert_eq!(check.status, PostureStatus::Critical);
+        assert_eq!(check.remedy_key, Some("posture-file-encryption-remedy"));
+    }
+
+    #[test]
+    fn test_file_encryption_disabled_is_warn() {
+        let mut config = InklogConfig::default();
+        config.file_sink = Some(FileSinkConfig {
+            enabled: true,
+            encrypt: false,
+            ..Default::default()
+        });
+        let report = assess_security_posture(&config);
+        let check = find(&report, "file-encryption");
+        assert_eq!(check.status, PostureStatus::Warn);
+    }
+
+    #[test]
+    fn test_file_encryption_no_file_sink_is_ok() {
+        let mut config = InklogConfig::default();
+        config.file_sink = None;
+        let report = assess_security_posture(&config);
+        let check = find(&report, "file-encryption");
+        assert_eq!(check.status, PostureStatus::Ok);
+    }
+}
+
 #[cfg(test)]
 mod posture_type_tests {
     use super::*;
