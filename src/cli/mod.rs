@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 mod cli_impl;
 mod decrypt;
+mod doctor;
 mod generate;
 mod query;
 mod validate;

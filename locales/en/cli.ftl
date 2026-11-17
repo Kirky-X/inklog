@@ -262,3 +262,5 @@ posture-kms = KMS key provider
 posture-kms-detail-on = compiled in (kms feature)
 posture-kms-detail-off = not compiled in (kms feature off)
 posture-kms-remedy = rebuild with --features kms for external key providers
+cli-doctor-summary-ok = posture sound: no critical findings ({ $critical } critical, { $warn } warn)
+cli-doctor-summary-unsound = posture UNSOUND: { $critical } critical, { $warn } warn — see remedies above

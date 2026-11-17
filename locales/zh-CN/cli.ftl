@@ -262,3 +262,5 @@ posture-kms = KMS 密钥提供者
 posture-kms-detail-on = 已编译进（kms feature）
 posture-kms-detail-off = 未编译进（kms feature 关闭）
 posture-kms-remedy = 以 --features kms 重新构建以支持外部密钥提供者
+cli-doctor-summary-ok = 姿态健康：无 Critical 发现（{ $critical } 项 Critical，{ $warn } 项 Warn）
+cli-doctor-summary-unsound = 姿态不健康：{ $critical } 项 Critical，{ $warn } 项 Warn——见上方修复提示
