@@ -532,3 +532,159 @@ fn test_cli_verify_chain_generation_mismatch_exits_2() {
     .code(2)
     .stdout(predicate::str::contains("does not match manifest"));
 }
+
+// doctor 子命令（安全姿态评估）
+
+/// 合法配置 + INKLOG_AUDIT_KEY 设置 → 退出码 0 且 json sound==true。
+#[test]
+fn test_cli_doctor_security_sound_json_exit_0() {
+    let dir = TempDir::new().expect("tempdir");
+    let config_path = dir.path().join("sound.toml");
+    fs::write(
+        &config_path,
+        r#"
+[global]
+level = "info"
+
+[file_sink]
+enabled = true
+path = "logs/app.log"
+audit_chain_enabled = true
+"#,
+    )
+    .expect("write config");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env("INKLOG_AUDIT_KEY", "integration-test-audit-key");
+    let output = cmd
+        .args([
+            "doctor",
+            "--security",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .code(0)
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output).expect("doctor --json must emit one JSON object");
+    assert_eq!(parsed["command"], "doctor");
+    assert_eq!(parsed["target"], "security");
+    assert_eq!(
+        parsed["sound"],
+        serde_json::json!(true),
+        "sound must be true"
+    );
+    // 审计链双满足 → ok
+    let audit = parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .find(|c| c["id"] == "audit-chain")
+        .expect("audit-chain check present");
+    assert_eq!(audit["status"], "ok");
+}
+
+/// audit_chain_enabled 但无 INKLOG_AUDIT_KEY → 退出码 1 且对应 check
+/// status=="critical"。
+#[test]
+fn test_cli_doctor_security_audit_key_missing_json_exit_1() {
+    let dir = TempDir::new().expect("tempdir");
+    let config_path = dir.path().join("critical.toml");
+    fs::write(
+        &config_path,
+        r#"
+[global]
+level = "info"
+
+[file_sink]
+enabled = true
+path = "logs/app.log"
+audit_chain_enabled = true
+"#,
+    )
+    .expect("write config");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env_remove("INKLOG_AUDIT_KEY");
+    let output = cmd
+        .args([
+            "doctor",
+            "--security",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output).expect("doctor --json must emit one JSON object");
+    assert_eq!(parsed["sound"], serde_json::json!(false));
+    let audit = parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .find(|c| c["id"] == "audit-chain")
+        .expect("audit-chain check present");
+    assert_eq!(audit["status"], "critical");
+    // 证据不携带密钥明文（本例无 key，字段级防御性断言）
+    let rendered = audit.to_string();
+    assert!(!rendered.contains("integration-test-audit-key"));
+}
+
+/// 人类可读（非 json）模式：critical 场景逐行输出 + 退出码 1。
+#[test]
+fn test_cli_doctor_security_human_mode_exit_1() {
+    let dir = TempDir::new().expect("tempdir");
+    let config_path = dir.path().join("human.toml");
+    fs::write(
+        &config_path,
+        r#"
+[global]
+level = "info"
+
+[file_sink]
+enabled = true
+path = "logs/app.log"
+audit_chain_enabled = true
+"#,
+    )
+    .expect("write config");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.env_remove("INKLOG_AUDIT_KEY");
+    cmd.args([
+        "doctor",
+        "--security",
+        "--config",
+        config_path.to_str().unwrap(),
+    ])
+    .assert()
+    .code(1)
+    .stdout(predicate::str::contains("Audit chain"))
+    .stdout(predicate::str::contains("INKLOG_AUDIT_KEY"));
+}
+
+/// 未指定评估目标（无 --security）→ 显性错误退出码 1。
+#[test]
+fn test_cli_doctor_without_target_is_error() {
+    let dir = TempDir::new().expect("tempdir");
+    let config_path = dir.path().join("plain.toml");
+    fs::write(&config_path, "[global]\nlevel = \"info\"\n").expect("write config");
+
+    let mut cmd = Command::cargo_bin("inklog-cli").expect("inklog-cli binary not found");
+    cmd.env("INKLOG_LOCALE", "en");
+    cmd.args(["doctor", "--config", config_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--security"));
+}
