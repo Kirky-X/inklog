@@ -20,5 +20,6 @@ mod http;
 mod log;
 mod parquet;
 mod recovery;
+mod sensitive_redaction_test;
 mod stability;
 mod verification;
