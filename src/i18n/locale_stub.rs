@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// 消息插值参数载体，形态与 i18n 组合的 [`MsgArgs`](self::MsgArgs) 一致。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MsgArgs {
     entries: Vec<(String, String)>,
 }
@@ -19,6 +19,12 @@ pub struct MsgArgs {
 impl MsgArgs {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 参数键值有序视图（PostureCheck 等结构化载体的序列化/比较用；
+    /// 与 i18n 组合的语义一致）。
+    pub fn to_map(&self) -> std::collections::BTreeMap<String, String> {
+        self.entries.iter().cloned().collect()
     }
 
     /// 追加一个参数；同名键后者覆盖前者（与 i18n 组合的语义一致）。

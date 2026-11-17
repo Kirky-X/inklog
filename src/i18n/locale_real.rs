@@ -24,7 +24,7 @@ use std::sync::OnceLock;
 ///
 /// 值统一按 `Display` 渲染为字符串——调用点的实参形态（错误链、路径
 /// display、命名切片）全部无需转换。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MsgArgs {
     entries: Vec<(String, String)>,
 }
@@ -32,6 +32,12 @@ pub struct MsgArgs {
 impl MsgArgs {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 参数键值有序视图（PostureCheck 等结构化载体的序列化/比较用；
+    /// 同名键后者覆盖前者）。
+    pub fn to_map(&self) -> std::collections::BTreeMap<String, String> {
+        self.entries.iter().cloned().collect()
     }
 
     /// 追加一个参数；同名键后者覆盖前者（与历史 fluent `FluentArgs::set`
