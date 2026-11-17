@@ -2118,6 +2118,77 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_anchor_records_rotations() {
+        use crate::support::audit_chain::{HmacAnchorSigner, verify_anchors};
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("ring_anchor.log");
+        unsafe {
+            std::env::set_var("INKLOG_AUDIT_KEY", "cbfs-audit-chain-key-01");
+            std::env::set_var("INKLOG_AUDIT_ANCHOR_KEY", "cbfs-anchor-key-01");
+        }
+        let mut cfg = rotation_cfg(path.clone(), "1KB", "daily");
+        cfg.base_config.audit_chain_enabled = true;
+        cfg.base_config.anchor_enabled = true;
+        cfg.base_config.anchor_every = 1;
+        let sink = ChannelBufferedFileSink::new(cfg, LogTemplate::default()).unwrap();
+
+        for i in 0..40 {
+            sink.write(&make_record(&format!("anchor-rot-{i}-{}", "z".repeat(30))))
+                .await
+                .unwrap();
+        }
+        sink.shutdown().await.unwrap();
+
+        // 锚文件与 manifest 同范式派生（<stem>.chain.anchor.jsonl），落锚在
+        // 轮转后台线程执行（与登记同点）——shutdown 不 join 后台线程 → 轮询
+        let manifest = dir.path().join("ring_anchor.chain.jsonl");
+        let anchor_path = dir.path().join("ring_anchor.chain.anchor.jsonl");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let (body, anchor_body) = loop {
+            let body = std::fs::read_to_string(&manifest).unwrap_or_default();
+            let anchor_body = std::fs::read_to_string(&anchor_path).unwrap_or_default();
+            if (!body.is_empty() && !anchor_body.is_empty())
+                || std::time::Instant::now() >= deadline
+            {
+                break (body, anchor_body);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        assert!(!body.is_empty(), "audit chain manifest must have entries");
+        assert!(!anchor_body.is_empty(), "anchor file must have records");
+
+        let entries: Vec<crate::support::audit_chain::ArchiveChainEntry> = body
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()
+            .expect("manifest must be valid JSONL");
+        let anchors: Vec<crate::support::audit_chain::AnchorRecord> = anchor_body
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()
+            .expect("anchor file must be valid JSONL");
+        // anchor_every=1 ⇒ 锚数 == 链条目数（每次轮转必锚）
+        assert_eq!(
+            anchors.len(),
+            entries.len(),
+            "anchor_every=1 must anchor every chain entry"
+        );
+        let signer = HmacAnchorSigner::new(b"cbfs-anchor-key-01".to_vec());
+        let verdict = verify_anchors(&anchors, &entries, &signer);
+        assert!(
+            verdict.all_valid(),
+            "CBFS anchors must verify against the manifest: {verdict:?}"
+        );
+
+        unsafe {
+            std::env::remove_var("INKLOG_AUDIT_KEY");
+            std::env::remove_var("INKLOG_AUDIT_ANCHOR_KEY");
+        }
+    }
+
     #[cfg(any(feature = "zstd", feature = "gzip"))]
     #[tokio::test]
     async fn test_compressed_rotation_roundtrip() {
