@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 use crate::LogRecord;
 use crate::Metrics;
-use crate::support::io::sink::middleware::{MiddlewareVerdict, RecordMiddleware};
+use crate::support::io::sink::middleware::{
+    MiddlewareVerdict, RecordMiddleware, SensitiveRedaction,
+};
 use crate::support::processing::pipeline::is_critical_level;
 use crate::support::processing::target_rate_limiter::TargetRateLimiter;
 use crate::support::processing::{GlobalRateLimitMiddleware, RateLimiter, TargetQuotaMiddleware};
@@ -60,6 +62,7 @@ impl Clone for LoggerSubscriber {
             stress_relief: Arc::clone(&self.stress_relief),
             fallback_pending: Arc::clone(&self.fallback_pending),
             journal: self.journal.clone(),
+            sensitive_redaction: self.sensitive_redaction.clone(),
         }
     }
 }
@@ -91,6 +94,11 @@ pub struct LoggerSubscriber {
     /// 磁盘持久化 fallback journal（deferred-capabilities C4）：
     /// LRU 淘汰的关键日志落盘，进程启动重放。None = 未启用（零开销）。
     journal: Option<Arc<crate::support::fallback_journal::FallbackJournal>>,
+    /// 源头敏感字段改写件（链头：先于治理轮与改写轮执行）。独立于
+    /// `ProcessingPipeline` 两环——治理环 `Reround` 会短路剩余治理件，
+    /// 敏感改写不得被配额放行路径跳过（安全语义优先于治理语义）。
+    /// None = 无声明字段，on_event 零开销跳过。
+    sensitive_redaction: Option<Arc<SensitiveRedaction>>,
 }
 
 impl LoggerSubscriber {
@@ -112,6 +120,7 @@ impl LoggerSubscriber {
             stress_relief,
             fallback_pending: Arc::new(AtomicBool::new(false)),
             journal: None,
+            sensitive_redaction: None,
         }
     }
 
@@ -202,6 +211,25 @@ impl LoggerSubscriber {
     ) -> Self {
         self.pipeline
             .register_rewrite_front(Arc::new(IdentityFieldsMiddleware::new(fields)));
+        self
+    }
+
+    /// 声明敏感字段名集合：在订阅器扇出前把命名字段的值替换为占位串
+    /// `<redacted:{field}>`（字符串值先 zeroize 原串字节）。
+    ///
+    /// 装配位置：内部处理链最前——先于 `with_middleware` 用户治理件与
+    /// 全部内置改写轮执行，任何用户件/sink 克隆读到的记录均已不含原始
+    /// 值。重复调用合并去重（与既有声明的字段名并集）。
+    pub fn with_sensitive_fields(
+        mut self,
+        fields: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let mut merged: std::collections::HashSet<String> = match &self.sensitive_redaction {
+            Some(existing) => (**existing.fields()).clone(),
+            None => std::collections::HashSet::new(),
+        };
+        merged.extend(fields.into_iter().map(Into::into));
+        self.sensitive_redaction = Some(Arc::new(SensitiveRedaction::new(merged)));
         self
     }
 
@@ -454,6 +482,13 @@ where
         let mut record = LogRecord::from_event(event);
         // 从当前 span 上下文提取 trace_id/span_id（未启用 span 时零成本直通）
         Self::extract_trace_context(&ctx, &mut record);
+
+        // 源头敏感字段改写（链头）：先于治理轮执行——用户治理件可能读走
+        // 记录，且治理环 Reround 短路不得跳过改写（安全语义优先于治理
+        // 语义）。无声明字段时零开销跳过。改写件恒 Continue，无需裁决。
+        if let Some(redaction) = self.sensitive_redaction.as_ref() {
+            redaction.process(&mut record);
+        }
 
         // 处理管道：治理轮（target 配额 → 全局限流 → 压力采样救援）裁决
         // 丢弃即短路发送，丢弃计数在治理件内完成；改写轮（身份注入 →
@@ -2068,6 +2103,67 @@ mod trace_context_tests {
             record.span_id.as_deref(),
             Some("b7ad6b7169203331"),
             "explicit span_id field must win (OTel compatibility)"
+        );
+    }
+
+    /// 用户治理中间件探针：记录 process 时抓取 email 字段当前值，
+    /// 验证源头改写先于用户件执行。
+    struct EmailProbeMiddleware {
+        seen: parking_lot::Mutex<Vec<serde_json::Value>>,
+    }
+
+    impl crate::support::io::sink::middleware::RecordMiddleware for EmailProbeMiddleware {
+        fn name(&self) -> &str {
+            "email-probe"
+        }
+        fn process(&self, record: &mut LogRecord) -> MiddlewareVerdict {
+            self.seen.lock().push(
+                record
+                    .fields
+                    .get("email")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            MiddlewareVerdict::Continue
+        }
+    }
+
+    #[test]
+    fn test_with_sensitive_fields_redacts_before_user_middleware() {
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let probe = Arc::new(EmailProbeMiddleware {
+            seen: parking_lot::Mutex::new(Vec::new()),
+        });
+
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics)
+            .with_sensitive_fields(["email"])
+            .with_middleware(probe.clone());
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(
+                target: "t::sensitive",
+                message = "signup",
+                email = "alice@example.com"
+            );
+        });
+
+        // sink 收到的记录：email 已是占位串（扇出前改写）
+        let received = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            received.fields.get("email").unwrap(),
+            &serde_json::json!("<redacted:email>"),
+            "subscriber output must carry the placeholder, not the raw email"
+        );
+        // 用户治理件读到的记录：同样已不含原始值（链头先于用户件）
+        assert_eq!(
+            *probe.seen.lock(),
+            vec![serde_json::json!("<redacted:email>")],
+            "user middleware must never observe the raw sensitive value"
         );
     }
 }
