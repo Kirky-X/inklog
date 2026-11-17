@@ -101,6 +101,10 @@ name = "masking"
 path = "src/bin/security/masking.rs"
 
 [[bin]]
+name = "sensitive_fields"
+path = "src/bin/security/sensitive_fields.rs"
+
+[[bin]]
 name = "di_example"
 path = "src/bin/database/di_example.rs"
 required-features = ["sqlite"]

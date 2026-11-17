@@ -2102,3 +2102,12 @@ example-rotation-compress = compress      = { $compress }
 example-rotation-5-2-custom-rotation = 5.2 自定义轮转配置（小文件 + 每小时）
 example-rotation-path = path          = { $value }
 example-rotation-compression-level = compression_level = { $compression_level }
+example-sensitive-inklog-source-level-redaction-examples = inklog 源头敏感字段脱敏示例
+example-sensitive-1-register-before-build = 1. 在构建 logger 之前注册敏感字段（构建期快照）
+example-sensitive-registered-count = mark_sensitive_fields(["email", "phone"]) → 注册表已有 { $count } 个字段
+example-sensitive-2-emit-records-with-fields = 2. 产生携带敏感字段 + 普通字段的 NDJSON 文件日志
+example-sensitive-emitted-two-records = 已产生 2 条记录（email/phone 已注册，username 未注册）
+example-sensitive-3-read-back-and-verify = 3. 读回落盘 NDJSON 并核对占位串
+example-sensitive-disk-line = { $line }
+example-sensitive-placeholders-on-disk-raw-values-absent = 占位串已落盘、原始值不存在、普通字段原样保留 — 通过
+example-sensitive-all-examples-completed = 全部源头脱敏示例完成

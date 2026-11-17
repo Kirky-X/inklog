@@ -2102,3 +2102,12 @@ example-rotation-compress = compress      = { $compress }
 example-rotation-5-2-custom-rotation = 5.2 custom rotation configuration (small file + hourly)
 example-rotation-path = path          = { $value }
 example-rotation-compression-level = compression_level = { $compression_level }
+example-sensitive-inklog-source-level-redaction-examples = inklog source-level sensitive field redaction examples
+example-sensitive-1-register-before-build = 1. Register sensitive fields BEFORE the logger is built (construction-time snapshot)
+example-sensitive-registered-count = mark_sensitive_fields(["email", "phone"]) → registry holds { $count } field(s)
+example-sensitive-2-emit-records-with-fields = 2. Emit NDJSON file records carrying registered fields + one plain field
+example-sensitive-emitted-two-records = emitted 2 records (email/phone registered, username plain)
+example-sensitive-3-read-back-and-verify = 3. Read back the NDJSON file and verify placeholders
+example-sensitive-disk-line = { $line }
+example-sensitive-placeholders-on-disk-raw-values-absent = placeholders on disk, raw values absent, plain fields verbatim — OK
+example-sensitive-all-examples-completed = all source-level redaction examples completed

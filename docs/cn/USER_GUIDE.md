@@ -463,7 +463,8 @@ tracing::info!(target: "app::auth", message = "login", email = "user@example.com
 - 占位模板默认 `<redacted:{field}>`；`SensitiveRedaction::with_placeholder_template` 可自定义（如 `"{field}:redacted"`）。
 - 字段值为 JSON 对象或数组时**整值**替换为占位串——不深入遍历、不做部分掩码。
 - 非字符串值（数字、布尔、对象）同样整值替换：命中字段名即产出占位串，与值类型无关。
-- 源头层先于正则层执行：占位串不含原始值，正则规则不再改写它（标记幂等）。
+- 源头层先于正则层执行：占位串不含原始值，正则内容规则不再改写它（标记幂等）。
+- 若已注册字段的**字段名**同时是 sink 侧敏感字段名（如 `api_token`——含 `token` 词元），sink 出口的按名掩码会整值替换为 `***MASKED***`：原始值仍然不出盘，但落盘标记与源头占位串不同。需要 `<redacted:{field}>` 标记原样留存时，避开与 sink 敏感名同名的注册名。
 
 #### 自定义脱敏规则
 

@@ -467,7 +467,8 @@ Boundaries:
 - The placeholder template defaults to `<redacted:{field}>`; `SensitiveRedaction::with_placeholder_template` customizes it (e.g. `"{field}:redacted"`).
 - A field whose value is a JSON object or array is replaced **wholesale** with the placeholder string — nested values are not traversed or partially masked.
 - Non-string values (numbers, booleans, objects) are replaced as well: any registered field name yields the placeholder regardless of value type.
-- The source layer runs before the regex layer: a placeholder contains no raw value, so the regex rules leave it untouched (marker idempotence).
+- The source layer runs before the regex layer: a placeholder contains no raw value, so the regex content rules leave it untouched (marker idempotence).
+- If a registered field's **name** is itself a sink-side sensitive field name (e.g. `api_token` — the `token` token), the sink egress name-based masking replaces the whole value with `***MASKED***`: the raw value still never appears, but the on-disk marker differs from the source placeholder. Prefer registered names that are not sink-sensitive names when the `<redacted:{field}>` marker must survive verbatim.
 
 #### Custom Masking Rules
 
