@@ -44,8 +44,8 @@ tempfile = { version = "3.27", default-features = false }
 log = { version = "0.4", default-features = false, features = ["std"] }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"] }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"] }
-# 掩码规则引擎：需要 lookahead/lookbehind 环视（regex crate 不支持），见 masking.rs
-# dbnexus 跨仓地板：地板是已承诺兼容的最低版本，允许滞后；禁 `=` 精确钉（会迫使底层推进时顶层重发，并在下游产生双版本同图）
+# 掩码引擎需环视 lookahead/lookbehind（regex 不支持，见 masking.rs）；dbnexus 地板=承诺兼容最低版本，允许滞后
+# 禁 `=` 精确钉（底层推进会逼顶层重发，下游产生双版本同图）
 dbnexus = { version = "0.6", default-features = false, features = ["sql-parser", "config-env", "macros", "permission", "observability", "retry", "failover", "replica-routing"] }
 # docs.rs 不能用 all-features：四数据库后端（sqlite/postgres/mysql/duckdb）互斥（见 [features] 说明），全开必然编译失败
 [package.metadata.docs.rs]
@@ -62,9 +62,8 @@ workspace = true
 [features]
 # i18n/cache 在 default 中；关闭两者时改用内嵌英文文案回退
 default = ["i18n", "cache"]
-# 国际化运行时：消息模板经 trait-kit I18nManager 宿主注册（双写基座）+ 本仓自渲染
-# （FSI 隔离语义逐 placeable 注入，与历史 fluent 引擎字节对齐）；sys-locale 检测；
-# 关闭后 tr/tr_args 回退到内嵌 en 文案
+# i18n 运行时：模板经 trait-kit I18nManager 宿主注册（双写）+ 本仓自渲染（FSI 逐 placeable 注入，对齐历史 fluent 字节）
+# sys-locale 检测；关闭后 tr/tr_args 回退到内嵌 en 文案
 i18n = ["dep:sys-locale", "trait-kit/i18n"]
 # 缓存后端：裁 icu/fluent 依赖树必须同时关闭 i18n 与 cache，否则 ObjectPool 不导出
 cache = ["dep:oxcache"]
@@ -96,8 +95,7 @@ compression = ["zstd"]
 gzip = ["dep:flate2"]
 # Parquet/Arrow export support for database sink archival.
 parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
-# Aho-Corasick multi-pattern masking acceleration.
-# Deprecated no-op 别名：Aho-Corasick 加速自 rc.12 起随 trait-kit/masking 常载，
+# Aho-Corasick 多模式掩码加速：rc.12 起随 trait-kit/masking 常载，本 feature 已成 no-op 别名
 # 保留 feature 名为兼容（docs.rs 特性表与既有 --features 用法不受影响）
 fast-masking = []
 # Secret 出站脱敏：值形态正则 + 熵扫描 + 逐模式计数，超限 fail-closed
