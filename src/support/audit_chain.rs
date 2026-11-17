@@ -22,6 +22,7 @@
 //! assert!(!ArchiveChain::verify_entries(&entries, b"archive-chain-key"));
 //! ```
 
+use crate::InklogError;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -126,6 +127,152 @@ pub fn seal_path_for_manifest(manifest: &std::path::Path) -> std::path::PathBuf 
         .and_then(|s| s.to_str())
         .unwrap_or_default();
     let name = format!("{stem}.seal.json");
+    match manifest.parent() {
+        Some(parent) => parent.join(name),
+        None => std::path::PathBuf::from(name),
+    }
+}
+
+// ---- 独立锚（链外第二密钥，change audit-anchor-failover-integrity Stage 1）----
+
+/// 锚定密钥 env（与链密钥 `INKLOG_AUDIT_KEY` 物理分离）。
+pub const ANCHOR_KEY_ENV: &str = "INKLOG_AUDIT_ANCHOR_KEY";
+
+/// 空链的链头约定值（全零 hex，64 字符）：锚定空链时签名覆盖该约定值，
+/// 首个条目追加后链头即变化，旧锚校验随 entries[index] 越界失败。
+pub const EMPTY_CHAIN_HEAD: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// 锚定输入：被签名的链外承诺（链头哈希 + 条目数 + 时间）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AnchorInput {
+    /// 链尾条目 hmac（hex）；空链用 [`EMPTY_CHAIN_HEAD`] 约定
+    pub chain_head: String,
+    /// 链内条目总数
+    pub count: u64,
+    /// UTC 秒级时间戳
+    pub timestamp: i64,
+}
+
+impl AnchorInput {
+    /// 规范化签名消息：`chain_head(hex) || b'\n' || count_be(8) || b'\n' || timestamp_be(8)`。
+    ///
+    /// 链头为纯 hex 无分隔符歧义；数值段用定长大端字节，规避平台字节序
+    /// 与文本编码差异——签名输入必须逐字节可复现。
+    fn signing_message(&self) -> Vec<u8> {
+        let mut message = Vec::with_capacity(self.chain_head.len() + 1 + 8 + 1 + 8);
+        message.extend_from_slice(self.chain_head.as_bytes());
+        message.push(b'\n');
+        message.extend_from_slice(&self.count.to_be_bytes());
+        message.push(b'\n');
+        message.extend_from_slice(&self.timestamp.to_be_bytes());
+        message
+    }
+}
+
+/// 锚签名器抽象：对链外承诺签发/校验签名。
+///
+/// `scheme` 标识写入锚记录（"hmac" / "ed25519"），校验方按方案选签名器；
+/// 对称方案同钥验证，非对称方案（Stage 2）公钥验证。
+pub trait AnchorSigner: Send + Sync {
+    /// 方案标识。
+    fn scheme(&self) -> &'static str;
+    /// 对锚定输入签发签名。
+    fn sign(&self, input: &AnchorInput) -> Result<Vec<u8>, InklogError>;
+    /// 校验签名。
+    fn verify(&self, input: &AnchorInput, sig: &[u8]) -> bool;
+}
+
+/// 独立锚密钥 HMAC 签名器（Stage 1，零新依赖）。
+///
+/// 密钥与链密钥（`INKLOG_AUDIT_KEY`）物理分离：持有链密钥的主体可重建
+/// 自洽的 manifest + seal，但无法伪造本签名器签出的锚——锚是「链本身被
+/// 整体重写」的检测锚点。密钥副本 Drop 时 zeroize。
+pub struct HmacAnchorSigner {
+    key: Vec<u8>,
+}
+
+impl HmacAnchorSigner {
+    /// 以锚密钥构建（复用本模块同款 RFC 2104 手工 HMAC）。
+    pub fn new(key: Vec<u8>) -> Self {
+        Self { key }
+    }
+
+    /// 从 env 读取锚密钥（[`ANCHOR_KEY_ENV`]）。
+    ///
+    /// 缺失或空值返回 `Ok(None)`——锚定是可选增强，调用方按「仅 seal 不锚」
+    /// 降级（与链密钥缺失时 warn + 禁用链的范式一致）。env 存在但不可读
+    /// （如含非 UTF-8）为配置错误，显性报错不静默。
+    pub fn from_env() -> Result<Option<Self>, InklogError> {
+        match std::env::var(ANCHOR_KEY_ENV) {
+            Ok(key) if !key.is_empty() => Ok(Some(Self::new(key.into_bytes()))),
+            Ok(_) => Ok(None),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(e) => Err(InklogError::ConfigError(format!(
+                "anchor key env unreadable: {e}"
+            ))),
+        }
+    }
+}
+
+impl Drop for HmacAnchorSigner {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+    }
+}
+
+impl AnchorSigner for HmacAnchorSigner {
+    fn scheme(&self) -> &'static str {
+        "hmac"
+    }
+
+    fn sign(&self, input: &AnchorInput) -> Result<Vec<u8>, InklogError> {
+        Ok(hmac_sha256(&self.key, &input.signing_message()).to_vec())
+    }
+
+    fn verify(&self, input: &AnchorInput, sig: &[u8]) -> bool {
+        if sig.len() != CHAIN_HASH_LEN {
+            return false;
+        }
+        let expected = hmac_sha256(&self.key, &input.signing_message());
+        // 常量时间比较（与链内校验同口径）；长度已对齐
+        bool::from(expected.ct_eq(sig))
+    }
+}
+
+/// 锚文件记录（JSONL 逐行，追加型）。
+///
+/// `scheme` 为 `String` 而非 design.md 草图的 `&'static str`：记录须支持
+/// `serde::Deserialize`（锚文件读取路径），借用生命周期不可反序列化；
+/// trait 侧仍返回 `&'static str`，落盘时 `to_string`（微小偏差，记录在案）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AnchorRecord {
+    /// 对应链条目 index（锚覆盖到的最新条目）
+    pub index: u64,
+    /// 被签名的链尾 hmac（hex；与 [`AnchorInput::chain_head`] 一致）
+    pub chain_head: String,
+    /// 签名时的条目总数
+    pub count: u64,
+    /// UTC 秒级时间戳
+    pub timestamp: i64,
+    /// 签名方案（[`AnchorSigner::scheme`]）
+    pub scheme: String,
+    /// 签名（hex）
+    pub sig: String,
+}
+
+/// 锚文件路径：由 manifest 路径推出（`<stem>.chain.jsonl` →
+/// `<stem>.chain.anchor.jsonl`）。
+///
+/// 与 [`seal_path_for_manifest`] 同一推导范式——锚与 manifest 同目录、
+/// 从 manifest 文件干派生，CLI 与 sink 写入侧共用同一命名规则。
+pub fn anchor_path_for_manifest(manifest: &std::path::Path) -> std::path::PathBuf {
+    let stem = manifest
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let name = format!("{stem}.anchor.jsonl");
     match manifest.parent() {
         Some(parent) => parent.join(name),
         None => std::path::PathBuf::from(name),
@@ -319,6 +466,7 @@ impl ArchiveChain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn event(kind: &str, file: &str) -> String {
         serde_json::json!({ "kind": kind, "file": file }).to_string()
@@ -502,5 +650,118 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert!(ArchiveChain::verify_entries(&parsed, b"key-1"));
+    }
+
+    // ---- 独立锚：HmacAnchorSigner（T001）----
+
+    #[test]
+    fn test_anchor_path_for_manifest_aligns_seal_derivation() {
+        let manifest = std::path::Path::new("/var/log/app.chain.jsonl");
+        assert_eq!(
+            anchor_path_for_manifest(manifest),
+            std::path::PathBuf::from("/var/log/app.chain.anchor.jsonl")
+        );
+        // 无父目录（裸文件名）回落当前目录
+        assert_eq!(
+            anchor_path_for_manifest(std::path::Path::new("app.chain.jsonl")),
+            std::path::PathBuf::from("app.chain.anchor.jsonl")
+        );
+    }
+
+    #[test]
+    fn test_hmac_anchor_sign_verify_roundtrip() {
+        let signer = HmacAnchorSigner::new(b"anchor-key-1".to_vec());
+        assert_eq!(signer.scheme(), "hmac");
+        let input = AnchorInput {
+            chain_head: "ab".repeat(CHAIN_HASH_LEN),
+            count: 3,
+            timestamp: 1_760_000_000,
+        };
+        let sig = signer.sign(&input).expect("hmac sign must not fail");
+        assert_eq!(sig.len(), CHAIN_HASH_LEN);
+        assert!(signer.verify(&input, &sig), "sign→verify must roundtrip");
+        // hex 编码后的记录签名同样可验（AnchorRecord 落盘形态）
+        let hex_sig = hex_encode(&sig);
+        let decoded = hex_decode(&hex_sig).unwrap();
+        assert!(signer.verify(&input, &decoded));
+    }
+
+    #[test]
+    fn test_hmac_anchor_verify_rejects_tampered_input_fields() {
+        let signer = HmacAnchorSigner::new(b"anchor-key-1".to_vec());
+        let input = AnchorInput {
+            chain_head: "cd".repeat(CHAIN_HASH_LEN),
+            count: 5,
+            timestamp: 1_760_000_001,
+        };
+        let sig = signer.sign(&input).unwrap();
+
+        // 篡改 chain_head
+        let mut tampered = input.clone();
+        tampered.chain_head = EMPTY_CHAIN_HEAD.to_string();
+        assert!(
+            !signer.verify(&tampered, &sig),
+            "tampered chain_head must fail verification"
+        );
+        // 篡改 count
+        let mut tampered = input.clone();
+        tampered.count = 4;
+        assert!(
+            !signer.verify(&tampered, &sig),
+            "tampered count must fail verification"
+        );
+        // 篡改 timestamp
+        let mut tampered = input.clone();
+        tampered.timestamp += 1;
+        assert!(
+            !signer.verify(&tampered, &sig),
+            "tampered timestamp must fail verification"
+        );
+        // 错误密钥签出的签名不可验
+        let foreign = HmacAnchorSigner::new(b"other-key".to_vec());
+        let foreign_sig = foreign.sign(&input).unwrap();
+        assert!(!signer.verify(&input, &foreign_sig));
+        // 长度不符的签名直接拒绝
+        assert!(!signer.verify(&input, &sig[..16]));
+    }
+
+    #[test]
+    #[serial]
+    fn test_hmac_anchor_from_env_missing_key_returns_none() {
+        // 缺失 → Ok(None)：锚定可选增强，调用方降级为仅 seal 不锚
+        unsafe {
+            std::env::remove_var(ANCHOR_KEY_ENV);
+        }
+        assert!(matches!(HmacAnchorSigner::from_env(), Ok(None)));
+        // 空值 → Ok(None)（与链密钥空值同判）
+        unsafe {
+            std::env::set_var(ANCHOR_KEY_ENV, "");
+        }
+        assert!(matches!(HmacAnchorSigner::from_env(), Ok(None)));
+        // 在位 → Some 且 scheme 为 hmac
+        unsafe {
+            std::env::set_var(ANCHOR_KEY_ENV, "env-anchor-key");
+        }
+        let signer = HmacAnchorSigner::from_env().expect("present key must not error");
+        assert!(signer.is_some());
+        assert_eq!(signer.unwrap().scheme(), "hmac");
+        unsafe {
+            std::env::remove_var(ANCHOR_KEY_ENV);
+        }
+    }
+
+    #[test]
+    fn test_anchor_record_jsonl_roundtrip() {
+        let record = AnchorRecord {
+            index: 2,
+            chain_head: "ef".repeat(CHAIN_HASH_LEN),
+            count: 3,
+            timestamp: 1_760_000_002,
+            scheme: "hmac".to_string(),
+            sig: hex_encode(&[0xab_u8; CHAIN_HASH_LEN]),
+        };
+        let line = serde_json::to_string(&record).unwrap();
+        let parsed: AnchorRecord = serde_json::from_str(&line).unwrap();
+        assert_eq!(parsed, record);
     }
 }
