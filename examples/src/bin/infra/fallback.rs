@@ -210,6 +210,8 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 100,
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -340,6 +342,8 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 10,
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -586,6 +590,8 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 100,
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -609,6 +615,8 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 100,
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     };

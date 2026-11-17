@@ -74,6 +74,8 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 1000,
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -145,6 +147,8 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 10, // 10ms flush 间隔
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     };
@@ -272,6 +276,8 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
         flush_interval_ms: 10, // 10ms flush 间隔
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         masking_enabled: false,
         output_format: Default::default(),
     };

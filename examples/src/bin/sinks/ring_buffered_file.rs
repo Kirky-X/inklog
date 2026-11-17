@@ -120,6 +120,8 @@ fn show_config_default() {
         base_config: FileSinkConfig {
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: 1,
             ..Default::default()
         },
         channel_capacity: 64,
@@ -169,6 +171,8 @@ async fn show_block_strategy() -> Result<(), Box<dyn std::error::Error>> {
             path: log_path.clone(),
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: 1,
             ..Default::default()
         },
         channel_capacity: 64,
@@ -252,6 +256,8 @@ async fn show_drop_newest_strategy() -> Result<(), Box<dyn std::error::Error>> {
             path: log_path.clone(),
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: 1,
             ..Default::default()
         },
         channel_capacity: 4,
@@ -317,6 +323,8 @@ async fn show_drop_oldest_strategy() -> Result<(), Box<dyn std::error::Error>> {
             path: log_path.clone(),
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: 1,
             ..Default::default()
         },
         channel_capacity: 4,
@@ -384,6 +392,8 @@ async fn show_metrics_tracking() -> Result<(), Box<dyn std::error::Error>> {
             path: log_path.clone(),
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: 1,
             ..Default::default()
         },
         channel_capacity: 16,

@@ -111,6 +111,8 @@ async fn write_plaintext_log(file_path: &str) -> Result<String, Box<dyn std::err
         flush_interval_ms: 100,
         fsync: false,
         audit_chain_enabled: false,
+        anchor_enabled: false,
+        anchor_every: 1,
         ..Default::default()
     };
 
