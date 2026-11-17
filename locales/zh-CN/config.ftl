@@ -178,3 +178,5 @@ config-tls_cert_path_empty = tls.cert_path 为空
 config-tls_key_path_empty = tls.key_path 为空
 config-tls_cert_path_missing = tls.cert_path "{ $path }" 不存在
 config-tls_key_path_missing = tls.key_path "{ $path }" 不存在
+config-anchor_requires_audit_chain = anchor_enabled 需要先启用 audit_chain_enabled（锚是链条的链外扩展，不是独立能力）
+config-anchor_every_zero = anchor_every 至少为 1，当前为 0

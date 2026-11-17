@@ -925,6 +925,8 @@ mod tests {
                 flush_interval_ms: 50,
                 fsync: false,
                 audit_chain_enabled: false,
+                anchor_enabled: false,
+                anchor_every: 1,
                 masking_enabled: false,
                 output_format: Default::default(),
             }),

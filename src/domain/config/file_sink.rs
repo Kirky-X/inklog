@@ -118,6 +118,20 @@ pub struct FileSinkConfig {
     #[serde(default)]
     pub audit_chain_enabled: bool,
 
+    /// 归档链条外锚定（audit-anchor-failover-integrity）：每追加
+    /// `anchor_every` 条链条目或写新封条时，把链头哈希用**独立锚密钥**
+    /// （`INKLOG_AUDIT_ANCHOR_KEY`，与链密钥物理分离）签名后追加到
+    /// `<stem>.chain.anchor.jsonl`——检测"持链密钥者整体重写 manifest +
+    /// seal"。依赖 `audit_chain_enabled`（validate 显性拒绝单独启用）；
+    /// 锚密钥缺失时仅 seal 不锚（warn）。默认关闭。
+    #[serde(default)]
+    pub anchor_enabled: bool,
+
+    /// 每 N 条链条目落一个锚（1 = 每条链条目都锚；封条落盘时无论该值
+    /// 如何都同步落锚）。0 在 validate 中显性拒绝。默认 1。
+    #[serde(default = "default_anchor_every")]
+    pub anchor_every: u32,
+
     /// Enable PII masking for file output: structured PII (emails, phone
     /// numbers, ID/bank card numbers) and values under sensitive field names
     /// are masked before the record is persisted.
@@ -165,6 +179,10 @@ fn default_max_total_size() -> String {
 fn default_cleanup_interval_minutes() -> u64 {
     60
 }
+fn default_anchor_every() -> u32 {
+    1
+}
+
 fn default_batch_size() -> usize {
     100
 }
@@ -192,6 +210,8 @@ impl Default for FileSinkConfig {
             flush_interval_ms: default_flush_interval_ms(),
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: default_anchor_every(),
             masking_enabled: default_true(),
             output_format: OutputFormat::default(),
         }
@@ -217,6 +237,12 @@ impl FileSinkConfig {
             .map_err(|e| format!("max_size \"{}\": {e}", self.max_size))?;
         parse_config_size(&self.max_total_size)
             .map_err(|e| format!("max_total_size \"{}\": {e}", self.max_total_size))?;
+        if self.anchor_enabled && !self.audit_chain_enabled {
+            return Err(crate::i18n::tr("config-anchor_requires_audit_chain"));
+        }
+        if self.anchor_every == 0 {
+            return Err(crate::i18n::tr("config-anchor_every_zero"));
+        }
         if self.encrypt {
             // key 来源：env 优先，其次 key 文件——二者必具其一（显性校验，
             // 禁止加密配置在无 key 的情况下静默运行）
@@ -286,6 +312,64 @@ fn parse_config_size(size_str: &str) -> Result<u64, String> {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    fn test_anchor_defaults_unchanged() {
+        // 默认值加载不变：锚定默认关、间隔为 1，默认配置 validate 通过
+        let config = FileSinkConfig::default();
+        assert!(!config.anchor_enabled);
+        assert_eq!(config.anchor_every, 1);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_anchor_without_audit_chain() {
+        let mut config = FileSinkConfig::default();
+        config.anchor_enabled = true;
+        config.audit_chain_enabled = false;
+        let err = config
+            .validate()
+            .expect_err("anchor without chain must be rejected");
+        assert!(
+            err.contains("audit_chain_enabled"),
+            "message must name the dependency: {err}"
+        );
+        // 经 InklogConfig::validate 归一为 ConfigError（T003 Red 断言）
+        let inklog_cfg = crate::domain::config::InklogConfig {
+            file_sink: Some(config),
+            ..Default::default()
+        };
+        assert!(matches!(
+            inklog_cfg.validate(),
+            Err(crate::InklogError::ConfigError(_))
+        ));
+    }
+
+    #[test]
+    fn test_validate_rejects_anchor_every_zero() {
+        let mut config = FileSinkConfig::default();
+        config.anchor_enabled = true;
+        config.audit_chain_enabled = true;
+        config.anchor_every = 0;
+        let err = config
+            .validate()
+            .expect_err("anchor_every == 0 must be rejected");
+        assert!(
+            err.contains("anchor_every"),
+            "message must name the field: {err}"
+        );
+        let inklog_cfg = crate::domain::config::InklogConfig {
+            file_sink: Some(config.clone()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            inklog_cfg.validate(),
+            Err(crate::InklogError::ConfigError(_))
+        ));
+        // 合法组合放行
+        config.anchor_every = 5;
+        assert!(config.validate().is_ok());
+    }
 
     #[test]
     fn test_validate_rejects_invalid_compression_level() {

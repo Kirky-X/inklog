@@ -2011,6 +2011,8 @@ mod tests {
             flush_interval_ms: 100,
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: 1,
             masking_enabled: true,
             output_format: Default::default(),
         };
@@ -3541,6 +3543,8 @@ mod tests {
             flush_interval_ms: 100,
             fsync: false,
             audit_chain_enabled: false,
+            anchor_enabled: false,
+            anchor_every: 1,
             masking_enabled: true,
             output_format: Default::default(),
         };

@@ -178,3 +178,5 @@ config-tls_cert_path_empty = tls.cert_path is empty
 config-tls_key_path_empty = tls.key_path is empty
 config-tls_cert_path_missing = tls.cert_path "{ $path }" does not exist
 config-tls_key_path_missing = tls.key_path "{ $path }" does not exist
+config-anchor_requires_audit_chain = anchor_enabled requires audit_chain_enabled to be enabled (anchors extend the audit chain, not a standalone feature)
+config-anchor_every_zero = anchor_every must be at least 1, got 0

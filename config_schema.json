@@ -415,6 +415,18 @@
           "type": "boolean",
           "default": false
         },
+        "anchor_enabled": {
+          "description": "归档链条外锚定（audit-anchor-failover-integrity）：每追加\n`anchor_every` 条链条目或写新封条时，把链头哈希用**独立锚密钥**\n（`INKLOG_AUDIT_ANCHOR_KEY`，与链密钥物理分离）签名后追加到\n`<stem>.chain.anchor.jsonl`——检测\"持链密钥者整体重写 manifest +\nseal\"。依赖 `audit_chain_enabled`（validate 显性拒绝单独启用）；\n锚密钥缺失时仅 seal 不锚（warn）。默认关闭。",
+          "type": "boolean",
+          "default": false
+        },
+        "anchor_every": {
+          "description": "每 N 条链条目落一个锚（1 = 每条链条目都锚；封条落盘时无论该值\n如何都同步落锚）。0 在 validate 中显性拒绝。默认 1。",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 1
+        },
         "masking_enabled": {
           "description": "Enable PII masking for file output: structured PII (emails, phone\nnumbers, ID/bank card numbers) and values under sensitive field names\nare masked before the record is persisted.\n\n推荐新名 `pii_masking_enabled`；旧名 `masking_enabled` 为兼容别名，\n继续接受（serde alias），序列化时始终输出旧名。\n\n# 三个易混淆开关的分工\n\n- **sanitizer**（`global.masking_enabled`，推荐名 `sanitizer_enabled`）：\n  注入转义与消息脱敏，作用于 subscriber 入口（全局）。\n- **pii_masking**（本字段，推荐名 `pii_masking_enabled`）：结构化 PII\n  掩码，作用于本 sink 持久化前。\n- **safe_message**（`InklogError::safe_message`，error.rs 的\n  SENSITIVE_PATTERNS）：错误消息出口脱敏，独立于以上两个开关。",
           "type": "boolean",
