@@ -29,7 +29,7 @@
 
 - **当前线**：接收缺陷修复与安全修复，修复随该线的最新发布版本提供。
 - **旧 minor 线**：在下一个 minor 线的首个版本发布时即进入 EOL，不再提供任何修复，安全补丁也不回移。
-- **不设 LTS**：1.0 之前不承诺跨 minor 的 API 兼容性，minor 位升级可能包含破坏性变更，升级前请阅读 [CHANGELOG](CHANGELOG.md)。
+- **不设 LTS**：1.0 之前不承诺跨 minor 的 API 兼容性，minor 位升级可能包含破坏性变更，升级前请阅读 [CHANGELOG](../CHANGELOG.md)。
 - **crates.io 可见性 ≠ 受支持**：旧版本保持可下载（除非因严重缺陷执行 yank），但不属于受支持范围。
 
 | 版本线 | 状态 | 说明 |
@@ -37,7 +37,7 @@
 | `0.3.x`（当前） | ✅ 支持 | 唯一接收修复的版本线 |
 | `≤ 0.2.x` | ❌ EOL | 已被当前线取代，不再维护，请升级 |
 
-> 历史安全修复示例：0.1.11 修复了 `table_name` SQL 注入防护、`FileSink` 路径穿越防护与 HTTP 认证 fail-closed 三项安全问题（详见 [更新日志](CHANGELOG.md)）；该线已 EOL，不会获得后续修复。
+> 历史安全修复示例：0.1.11 修复了 `table_name` SQL 注入防护、`FileSink` 路径穿越防护与 HTTP 认证 fail-closed 三项安全问题（详见 [更新日志](../CHANGELOG.md)）；该线已 EOL，不会获得后续修复。
 
 ## 🚨 漏洞报告流程
 
@@ -109,7 +109,7 @@
 查看当前已知安全问题：
 
 - **GitHub Security Advisories**：<https://github.com/Kirky-X/inklog/security/policy>
-- **更新日志**：[CHANGELOG](CHANGELOG.md)
+- **更新日志**：[CHANGELOG](../CHANGELOG.md)
 
 订阅安全更新：在 GitHub 仓库点击 **Watch → Custom**，勾选 **Releases** 与 **Security alerts**。
 
@@ -157,7 +157,7 @@ inklog 是安全优先的 Rust 日志基础设施，为需要严格数据保护�
 | 归档防篡改 | `support::audit_chain`（ArchiveChain） | HMAC-SHA256 归档链（随机链首盐），防删除、重排与伪造；`audit_chain_enabled = true` 后每次轮转自动登记 `{path, sha256, timestamp}` 并写穿 `<stem>.chain.jsonl` manifest 与 `<stem>.chain.seal.json` 封条（链外锚点：条目总数 + 尾哈希 + 封条 HMAC），`inklog-cli verify-chain --manifest <file> --key-env INKLOG_AUDIT_KEY` 校验（链完整退出码 0、篡改退出码 2；**空 manifest 与封条缺失均判为失败**——链内自洽性校验无法证明「没有条目被删掉」，空链与无锚点一律按 fail-closed 处理；**截尾到非空前缀由封条检出**，链内校验检不出截尾） |
 | 供应链安全 | `deny.toml` / lefthook | `cargo deny check` + `cargo audit` + pre-commit 私钥扫描 |
 
-> 说明：仓库维护 [`deny.toml`](../deny.toml)，CI 的 security job 与 lefthook pre-push 分别运行 `cargo deny check`（漏洞/许可证/重复依赖）与 `cargo audit`（RustSec 公告）。
+> 说明：仓库维护 [`deny.toml`](../../deny.toml)，CI 的 security job 与 lefthook pre-push 分别运行 `cargo deny check`（漏洞/许可证/重复依赖）与 `cargo audit`（RustSec 公告）。
 
 ### 归档审计链的威胁模型边界
 
@@ -558,7 +558,7 @@ let gate = SecretScanGate::new(SecretPatternRegistry::with_builtins())
 let probe = gate.clone();
 
 // 注入 sink 出站掩码点（console/file/net/ring_buffered/database 均经
-// with_masker 挂接；database 自 0.3.0-rc.6 起支持）
+// with_masker 挂接；database 自 0.3.0 起支持）
 let masker = DataMasker::builder().with_secret_scan(gate).build();
 
 let out = masker.mask_checked("token=sk-proj-abcdefghijklmnopqrstuvwxyz123456")?;
@@ -569,7 +569,7 @@ assert_eq!(probe.hit_count("openai_sk"), Some(1));
 
 #### 接线边界与语义边界（必读）
 
-- **声明式启用（0.3.0-rc.6 起）**：`console_sink.secret_scan_enabled` 与
+- **声明式启用（0.3.0 起）**：`console_sink.secret_scan_enabled` 与
   `database_sink.secret_scan_enabled`（均默认 `false`）在内置 sink 组装路径
   挂接 `secret_scan_masker()`（内置 PII 规则 + 出站门），无需再手工组装
   自定义 sink；builder 对应 `LoggerBuilder::console_secret_scan(bool)` /

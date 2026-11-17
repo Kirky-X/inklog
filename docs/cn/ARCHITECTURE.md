@@ -17,6 +17,7 @@
 - [⚡ 性能考虑](#-性能考虑)
 - [🧷 扩展点](#-扩展点)
 - [📦 依赖](#-依赖)
+- [🧱 进阶能力清单](#-进阶能力清单)
 
 </details>
 
@@ -525,12 +526,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | feature | 依赖 | 用途 |
 |---------|------|------|
-| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6.0-rc.6 | 数据库连接池与裸 SQL 执行（后端互斥） |
+| `sqlite` / `postgres` / `mysql` / `duckdb` | dbnexus 0.6 | 数据库连接池与裸 SQL 执行（后端互斥） |
 | `http` | axum 0.8、axum-server 0.8 | HTTP 端点（TLS 走 rustls） |
 | `cli` | clap、glob | `inklog-cli` |
 | `compression` / `gzip` | zstd / flate2 | Zstd / Gzip 压缩 |
 | `parquet` | parquet、arrow-array、arrow-schema | Parquet/Arrow 归档 |
-| `fast-masking` | aho-corasick | 多模式脱敏加速 |
+| `fast-masking` | —（已废弃 no-op 别名） | 加速随 trait-kit/masking 常载，无独立依赖 |
 | `net-sink` | rustls | TCP/UDP 转发 Sink |
 | `config-confers` / `kms` | confers | 配置加载与 watch、KMS 密钥提供 |
 | `kit` | trait-kit | 生命周期与可观测集成 |
@@ -543,7 +544,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | assert_cmd | CLI 命令测试 |
 | criterion | 基准测试（`benches/`） |
 
+## 🧱 进阶能力清单
+
+对应 `src/` 模块：
+
+- **Sink 家族**（`src/support/io/sink/`）：`console`、`file`（轮转/压缩/加密）、`database`（批量/分区/断路器）、`ring_buffered_file`（通道缓冲高吞吐）、`net`（TCP 可 TLS + UDP）、`otlp`、`middleware`、`sampling`、`rate_limit`
+- **处理层**（`src/support/processing/`）：`template` 模板引擎、`object_pool` LogRecord/字符串对象池；脱敏引擎（`DataMasker`/`MaskRuleRegistry`）由 [trait-kit](https://github.com/Kirky-X/trait-kit) 的 `masking` feature 承载，本仓经 re-export 保持 `inklog::DataMasker` 等路径兼容
+- **可观测性**（`src/support/observability/`）：`Metrics`、`HealthStatus`、`SinkHealthMonitor`、回退状态
+- **校验**（`src/validation/`）：`PathValidator` 路径穿越防护、`LogSanitizer` 日志内容净化
+- **归档防篡改**（`src/support/audit_chain.rs`）：归档 HMAC-SHA256 链，防删除、重排与伪造
+- **集成适配**（`src/integrations/`）：`OxCacheAdapter`、`InklogConfigAdapter`、`DbNexusAdapter`、trait-kit `InklogModule`、dbnexus 审计桥、confers 配置与 watch、confers 审计桥
+- **CLI**（`src/cli/`）：`decrypt`、`generate`、`validate`、`query`、`verify-chain` 五个子命令（`verify-chain` 校验归档审计链，参数 `--manifest` + `--key-env`）
+
 ---
 
-**文档版本**: 3.1（对应 inklog 0.3.0-rc.9）
+**文档版本**: 3.1（对应 inklog 0.3.0）
 **[⬆ 返回顶部](#️-inklog-架构设计)**

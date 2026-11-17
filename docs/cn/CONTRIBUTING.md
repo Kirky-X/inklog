@@ -2,7 +2,7 @@
 
 感谢你对 inklog 的关注！本指南介绍如何搭建开发环境、执行测试与质量门禁，以及提交 Pull Request 的完整流程。
 
-> 相关文档：[📖 用户指南](USER_GUIDE.md) · [📘 API 参考](API_REFERENCE.md) · [🏗️ 架构设计](ARCHITECTURE.md) · [🔒 安全文档](SECURITY.md) · [📋 更新日志](CHANGELOG.md)
+> 相关文档：[📖 用户指南](USER_GUIDE.md) · [📘 API 参考](API_REFERENCE.md) · [🏗️ 架构设计](ARCHITECTURE.md) · [🔒 安全文档](SECURITY.md) · [📋 更新日志](../CHANGELOG.md)
 
 <details open>
 <summary>📑 目录</summary>
@@ -155,7 +155,7 @@ cargo build --release  # 发布构建
 cargo build -p inklog  # 只构建主 crate
 ```
 
-> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 不可同时启用，本项目**不适用** `--all-features`（互斥原因见 [README · 特性标志](../README.md#-特性标志)）。请按后端分组启用，CI 与本地验证均使用统一 feature 组合（见下文测试章节）。
+> ⚠️ **数据库后端互斥**：`sqlite` / `postgres` / `mysql` / `duckdb` 不可同时启用，本项目**不适用** `--all-features`（互斥原因见 [用户指南 · 特性标志](USER_GUIDE.md#-特性标志)）。请按后端分组启用，CI 与本地验证均使用统一 feature 组合（见下文测试章节）。
 
 ### 构建诊断
 
@@ -402,12 +402,12 @@ pub struct FileSink {
 
 | 文档 | 内容 |
 |------|------|
-| [README.md](../README.md) | 项目概述与快速开始 |
+| [README_CN.md](../../README_CN.md) | 项目概述与快速开始 |
 | [docs/USER_GUIDE.md](USER_GUIDE.md) | 完整使用教程 |
 | [docs/API_REFERENCE.md](API_REFERENCE.md) | 公共 API 逐项说明 |
 | [docs/ARCHITECTURE.md](ARCHITECTURE.md) | 架构与设计决策 |
 | [docs/SECURITY.md](SECURITY.md) | 安全设计与报告流程 |
-| [docs/CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
+| [docs/CHANGELOG.md](../CHANGELOG.md) | 版本变更记录 |
 | Rustdoc | API 文档（`cargo doc --open`） |
 
 ### 文档更新清单
@@ -493,7 +493,7 @@ git commit -m "feat(file): add zstd compression support
 
 ## 🙏 致谢
 
-感谢 [tracing](https://github.com/tokio-rs/tracing)、[tokio](https://tokio.rs/)、[crossbeam](https://github.com/crossbeam-rs/crossbeam) 等 Rust 生态项目，以及所有为 inklog 做出贡献的开发者。完整致谢见 [README](../README.md#-致谢)。
+感谢 [tracing](https://github.com/tokio-rs/tracing)、[tokio](https://tokio.rs/)、[crossbeam](https://github.com/crossbeam-rs/crossbeam) 等 Rust 生态项目，以及所有为 inklog 做出贡献的开发者。完整致谢见 [README](../../README_CN.md#-致谢)。
 
 ## ⚡ 快速参考
 
