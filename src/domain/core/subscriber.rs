@@ -109,6 +109,11 @@ impl LoggerSubscriber {
     ) -> Self {
         // 压力救援裁决与 metrics 共享同一实例：丢弃计数同源
         let stress_relief = Arc::new(StressRelief::new(Arc::clone(&metrics)));
+        // 进程级敏感字段注册快照（初始化期 mark_sensitive_fields 声明）：
+        // 空集合零开销跳过，行为与未声明完全一致
+        let registered = crate::support::security::sensitive_fields();
+        let sensitive_redaction = (!registered.is_empty())
+            .then(|| Arc::new(SensitiveRedaction::new(registered.iter().cloned())));
         Self {
             console_sender,
             async_sender,
@@ -120,7 +125,7 @@ impl LoggerSubscriber {
             stress_relief,
             fallback_pending: Arc::new(AtomicBool::new(false)),
             journal: None,
-            sensitive_redaction: None,
+            sensitive_redaction,
         }
     }
 
@@ -1983,6 +1988,7 @@ mod tests {
 mod trace_context_tests {
     use super::*;
     use crossbeam_channel::bounded;
+    use serial_test::serial;
     use tracing::subscriber::with_default;
     use tracing_subscriber::prelude::*;
 
@@ -2165,5 +2171,44 @@ mod trace_context_tests {
             vec![serde_json::json!("<redacted:email>")],
             "user middleware must never observe the raw sensitive value"
         );
+    }
+
+    #[test]
+    #[serial]
+    fn test_new_subscriber_prewires_registered_sensitive_fields() {
+        // mark 后新建 subscriber 自动预装配；测试专属字段名避免与并行
+        // 测试的 subscriber 实例串扰（未注册该字段名的记录不受影响）
+        crate::support::security::sensitive_test_support::reset_sensitive_fields_for_tests();
+        crate::support::security::mark_sensitive_fields(["ssn_reg_probe"]);
+
+        let (console_tx, console_rx) = bounded(64);
+        let (async_tx, _async_rx) = bounded(64);
+        let metrics = Arc::new(Metrics::new());
+        let layer = LoggerSubscriber::new(console_tx, async_tx, metrics);
+        let registry = tracing_subscriber::registry().with(layer);
+
+        with_default(registry, || {
+            tracing::info!(
+                target: "t::registered",
+                message = "onboard",
+                ssn_reg_probe = "123-45-6789",
+                plain = "visible"
+            );
+        });
+
+        let received = console_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            received.fields.get("ssn_reg_probe").unwrap(),
+            &serde_json::json!("<redacted:ssn_reg_probe>"),
+            "new subscriber must prewire the process-level registry"
+        );
+        assert_eq!(
+            received.fields.get("plain").unwrap(),
+            &serde_json::json!("visible"),
+            "unregistered fields must pass through untouched"
+        );
+        crate::support::security::sensitive_test_support::reset_sensitive_fields_for_tests();
     }
 }

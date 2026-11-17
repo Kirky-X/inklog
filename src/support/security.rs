@@ -697,6 +697,49 @@ fn check_file_encryption(config: &crate::domain::config::InklogConfig) -> Postur
     }
 }
 
+// 进程级敏感字段注册（source-level-sensitive-fields Stage 2）
+
+use std::collections::HashSet;
+use std::sync::{Arc, OnceLock};
+
+/// 进程级敏感字段名全局槽（与 [`register_ops_channel`] 同风格：显式
+/// 注册函数 + 全局槽）。`RwLock` 允许初始化期多次 mark 合并去重；
+/// `sensitive_fields()` 返回冻结快照，热路径只读。
+static SENSITIVE_FIELDS: OnceLock<parking_lot::RwLock<HashSet<String>>> = OnceLock::new();
+
+/// 初始化期声明进程级敏感字段名；幂等，重复声明合并去重（`HashSet` 语义）。
+///
+/// `LoggerSubscriber::new` 默认读取该注册集合预装配源头改写中间件；
+/// 库内各集成适配器（confers_audit/oxcache_audit 等）可在各自初始化期
+/// mark，宿主无需手工接线。声明后已构建的 subscriber 不受影响（构建期
+/// 冻结快照），请先 mark 后建 subscriber。
+pub fn mark_sensitive_fields(fields: impl IntoIterator<Item = impl Into<String>>) {
+    let registry = SENSITIVE_FIELDS.get_or_init(|| parking_lot::RwLock::new(HashSet::new()));
+    registry.write().extend(fields.into_iter().map(Into::into));
+}
+
+/// 当前注册集合的冻结快照（Arc 共享，无注册时空集合）。
+pub fn sensitive_fields() -> Arc<HashSet<String>> {
+    match SENSITIVE_FIELDS.get() {
+        Some(registry) => Arc::new(registry.read().clone()),
+        None => Arc::new(HashSet::new()),
+    }
+}
+
+/// 全局注册是进程级单例：需要清空注册做隔离的测试经本 mod 操作，
+/// 生产构建下整体不编译（对齐 ops_event::test_support 范式）。
+#[cfg(test)]
+pub(crate) mod sensitive_test_support {
+    use super::SENSITIVE_FIELDS;
+
+    /// 清空注册（测试隔离用）。
+    pub(crate) fn reset_sensitive_fields_for_tests() {
+        if let Some(registry) = SENSITIVE_FIELDS.get() {
+            registry.write().clear();
+        }
+    }
+}
+
 #[cfg(test)]
 mod posture_assess_tests {
     use super::*;
@@ -1103,5 +1146,41 @@ mod posture_type_tests {
         assert_eq!(json["checks"][0]["status"], "critical");
         // detail_args 序列化为 map
         assert!(json["checks"][0]["detail_args"].is_object());
+    }
+}
+
+#[cfg(test)]
+mod sensitive_registry_tests {
+    use super::sensitive_test_support::reset_sensitive_fields_for_tests;
+    use super::{mark_sensitive_fields, sensitive_fields};
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn test_mark_sensitive_fields_merges_and_dedupes() {
+        reset_sensitive_fields_for_tests();
+        // 未注册 → 空快照
+        assert!(sensitive_fields().is_empty());
+        // mark 两次同名字段：合并去重，不重复计数
+        mark_sensitive_fields(["session_token", "ssn"]);
+        mark_sensitive_fields(["session_token"]);
+        let snapshot = sensitive_fields();
+        assert_eq!(snapshot.len(), 2, "duplicate marks must dedupe");
+        assert!(snapshot.contains("session_token"));
+        assert!(snapshot.contains("ssn"));
+        reset_sensitive_fields_for_tests();
+    }
+
+    #[test]
+    #[serial]
+    fn test_reset_clears_registry_for_isolation() {
+        reset_sensitive_fields_for_tests();
+        mark_sensitive_fields(["isolation_probe_field"]);
+        assert_eq!(sensitive_fields().len(), 1);
+        reset_sensitive_fields_for_tests();
+        assert!(
+            sensitive_fields().is_empty(),
+            "reset must clear the registry"
+        );
     }
 }
