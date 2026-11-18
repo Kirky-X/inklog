@@ -1576,14 +1576,15 @@ pub(crate) fn register_rotated_archive(
     // 独立锚落盘（audit-anchor-failover-integrity T004）：锚覆盖间隔命中
     // 即把链头用**独立锚密钥**签名后追加到 `<stem>.chain.anchor.jsonl`。
     // 追加型不复写：锚是「链被整体重写」的检测锚点，历史锚必须留存。
-    // 封条在本路径每次轮转都会重写（seal() 对非空链恒 Some），「新 seal
-    // 时同步落锚」由 count % anchor_every == 0 覆盖（every=1 即每次轮转
-    // 必锚）。锚密钥缺失在构建期已降级为 None（warn），此处不重复告警。
+    // 落锚时机（对齐 R-audit-anchor-001）：首次封条（count==1，给链一个
+    // 早期锚点）或每 anchor_every 条链条目（count % every == 0）。
+    // every=2 的 3 次轮转 → 落 count=1,2 两行锚。
+    // 锚密钥缺失在构建期已降级为 None（warn），此处不重复告警。
     // 写失败按审计降级处理（warn 不阻断轮转，与 manifest/seal 失败同判）。
     if let Some(ctx) = anchor {
         let count = chain.entries().len() as u64;
         if count > 0
-            && count.is_multiple_of(u64::from(ctx.every))
+            && (count == 1 || count.is_multiple_of(u64::from(ctx.every)))
             && let Some(last) = chain.entries().last()
         {
             match crate::support::audit_chain::create_anchor_record(
@@ -3824,6 +3825,43 @@ mod tests {
             verdict.all_valid(),
             "anchors must verify against the manifest: {verdict:?}"
         );
+    }
+
+    /// T015 (converge R-audit-anchor-001): 直接驱动共享落锚路径，
+    /// every=2 的 3 条链条目应产生 2 行锚（count=1 首次封条 + count=2）。
+    #[test]
+    fn test_anchor_every_two_three_entries_writes_two_anchors() {
+        use crate::support::audit_chain::{AnchorRecord, ArchiveChain, HmacAnchorSigner};
+
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("every2.log");
+        let chain = parking_lot::Mutex::new(ArchiveChain::new(b"every2-chain-key"));
+        let anchor_ctx = AnchorContext {
+            signer: Arc::new(HmacAnchorSigner::new(b"every2-anchor-key".to_vec())),
+            every: 2,
+        };
+
+        // 模拟 3 次轮转：每次造一个归档文件并调用共享注册路径
+        for i in 0..3 {
+            let rotated = dir.path().join(format!("every2.{i}.log"));
+            std::fs::write(&rotated, format!("archive {i}")).unwrap();
+            register_rotated_archive(&chain, &log_path, &rotated, Some(&anchor_ctx));
+        }
+
+        let anchor_data = std::fs::read_to_string(FileSink::anchor_file_path(&log_path))
+            .expect("anchor file must exist");
+        let anchors: Vec<AnchorRecord> = anchor_data
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("anchor line must be JSON"))
+            .collect();
+        assert_eq!(
+            anchors.len(),
+            2,
+            "every=2 over 3 chain entries must write 2 anchors, got {}",
+            anchors.len()
+        );
+        assert_eq!(anchors[0].count, 1, "first seal must be anchored");
+        assert_eq!(anchors[1].count, 2, "count=2 is the interval anchor");
     }
 
     #[test]
