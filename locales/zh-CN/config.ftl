@@ -180,3 +180,6 @@ config-tls_cert_path_missing = tls.cert_path "{ $path }" 不存在
 config-tls_key_path_missing = tls.key_path "{ $path }" 不存在
 config-anchor_requires_audit_chain = anchor_enabled 需要先启用 audit_chain_enabled（锚是链条的链外扩展，不是独立能力）
 config-anchor_every_zero = anchor_every 至少为 1，当前为 0
+config-mcp_level_invalid = mcp.allowed_levels["{ $level }"] 不是有效级别。有效级别: { $valid }
+config-mcp_unknown_tool = mcp.allow 含未知工具 "{ $tool }"
+config-mcp_audit_key_env_prefix = mcp.audit_key_env "{ $env }" 必须以 INKLOG_ 开头

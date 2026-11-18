@@ -180,3 +180,6 @@ config-tls_cert_path_missing = tls.cert_path "{ $path }" does not exist
 config-tls_key_path_missing = tls.key_path "{ $path }" does not exist
 config-anchor_requires_audit_chain = anchor_enabled requires audit_chain_enabled to be enabled (anchors extend the audit chain, not a standalone feature)
 config-anchor_every_zero = anchor_every must be at least 1, got 0
+config-mcp_level_invalid = mcp.allowed_levels["{ $level }"] is not a valid level. Valid: { $valid }
+config-mcp_unknown_tool = mcp.allow contains unknown tool "{ $tool }"
+config-mcp_audit_key_env_prefix = mcp.audit_key_env "{ $env }" must start with INKLOG_
