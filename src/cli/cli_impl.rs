@@ -278,6 +278,8 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             }
             doctor::run_doctor_security(config, args.json)
         }
+        #[cfg(feature = "mcp")]
+        Commands::Mcp { config } => super::mcp::run_mcp(config),
         Commands::Query {
             path,
             since,

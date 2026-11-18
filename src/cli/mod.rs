@@ -7,6 +7,8 @@ mod cli_impl;
 mod decrypt;
 mod doctor;
 mod generate;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod query;
 mod validate;
 
@@ -168,6 +170,15 @@ enum Commands {
 
         #[arg(short, long)]
         #[arg(help = inklog::i18n::tr("cli-doctor-help-config"))]
+        config: Option<PathBuf>,
+    },
+
+    #[cfg(feature = "mcp")]
+    #[command(name = "mcp")]
+    #[command(about = inklog::i18n::tr("cli-mcp-about"))]
+    Mcp {
+        #[arg(short, long)]
+        #[arg(help = inklog::i18n::tr("cli-mcp-help-config"))]
         config: Option<PathBuf>,
     },
 }
