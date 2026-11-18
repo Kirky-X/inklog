@@ -241,6 +241,140 @@ impl AnchorSigner for HmacAnchorSigner {
     }
 }
 
+// ---- Ed25519 非对称锚（Stage 2，feature 门控）----
+
+/// Ed25519 种子 env（写侧签名密钥，32 字节 hex）。
+#[cfg(feature = "audit-anchor")]
+pub const ED25519_SEED_ENV: &str = "INKLOG_AUDIT_ANCHOR_SEED";
+/// Ed25519 公钥 env（验侧，32 字节 hex）。
+#[cfg(feature = "audit-anchor")]
+pub const ED25519_PUBKEY_ENV: &str = "INKLOG_AUDIT_ANCHOR_PUBKEY";
+
+/// 非对称锚签名器：写侧持种子（[`SigningKey`]），验侧只持公钥
+/// （[`VerifyingKey`]）。持链密钥者若未持种子无法伪造锚，实现权限分离。
+#[cfg(feature = "audit-anchor")]
+pub struct Ed25519AnchorSigner {
+    /// 写侧密钥：`None` 表示验侧实例（只能 verify，sign 报错）。
+    signing: Option<ed25519_dalek::SigningKey>,
+    /// 验侧公钥：两侧都持有（写侧用自身公钥派生）。
+    verifying: ed25519_dalek::VerifyingKey,
+}
+
+#[cfg(feature = "audit-anchor")]
+impl Ed25519AnchorSigner {
+    /// 由 32 字节种子构造写侧签名器。
+    pub fn from_seed(seed: [u8; 32]) -> Result<Self, InklogError> {
+        let signing = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let verifying = signing.verifying_key();
+        Ok(Self {
+            signing: Some(signing),
+            verifying,
+        })
+    }
+
+    /// 从 [`ED25519_SEED_ENV`] 读 32 字节 hex 种子；缺失/空返回 `Ok(None)`。
+    pub fn from_seed_env() -> Result<Option<Self>, InklogError> {
+        let raw = match std::env::var(ED25519_SEED_ENV) {
+            Ok(raw) if !raw.is_empty() => raw,
+            Ok(_) | Err(std::env::VarError::NotPresent) => return Ok(None),
+            Err(e) => {
+                return Err(InklogError::ConfigError(format!(
+                    "ed25519 anchor seed env unreadable: {e}"
+                )));
+            }
+        };
+        let seed: [u8; 32] = decode_hex_32(&raw).ok_or_else(|| {
+            InklogError::ConfigError(format!(
+                "{ED25519_SEED_ENV} must be 32-byte hex (64 chars), got {} chars",
+                raw.len()
+            ))
+        })?;
+        Ok(Some(Self::from_seed(seed)?))
+    }
+
+    /// 由 32 字节公钥 hex 构造验侧实例（无签名能力）。
+    pub fn from_pubkey_hex(raw: &str) -> Result<Self, InklogError> {
+        let bytes: [u8; 32] = decode_hex_32(raw).ok_or_else(|| {
+            InklogError::ConfigError(format!(
+                "ed25519 pubkey must be 32-byte hex (64 chars), got {} chars",
+                raw.len()
+            ))
+        })?;
+        let verifying = ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+            .map_err(|e| InklogError::ConfigError(format!("invalid ed25519 pubkey: {e}")))?;
+        Ok(Self {
+            signing: None,
+            verifying,
+        })
+    }
+
+    /// 从 [`ED25519_PUBKEY_ENV`] 读公钥 hex；缺失/空返回 `Ok(None)`。
+    pub fn from_pubkey_hex_env() -> Result<Option<Self>, InklogError> {
+        let raw = match std::env::var(ED25519_PUBKEY_ENV) {
+            Ok(raw) if !raw.is_empty() => raw,
+            Ok(_) | Err(std::env::VarError::NotPresent) => return Ok(None),
+            Err(e) => {
+                return Err(InklogError::ConfigError(format!(
+                    "ed25519 anchor pubkey env unreadable: {e}"
+                )));
+            }
+        };
+        Ok(Some(Self::from_pubkey_hex(&raw)?))
+    }
+
+    /// 公钥原始字节（供测试/验证端导出 hex；生产路径不落种子）。
+    pub fn verifying_key_bytes(&self) -> [u8; 32] {
+        self.verifying.to_bytes()
+    }
+}
+
+#[cfg(feature = "audit-anchor")]
+impl AnchorSigner for Ed25519AnchorSigner {
+    fn scheme(&self) -> &'static str {
+        "ed25519"
+    }
+
+    fn sign(&self, input: &AnchorInput) -> Result<Vec<u8>, InklogError> {
+        let signing = self.signing.as_ref().ok_or_else(|| {
+            InklogError::ConfigError(
+                "ed25519 anchor verifier has no signing key (seed env required)".to_string(),
+            )
+        })?;
+        use ed25519_dalek::Signer;
+        Ok(signing
+            .sign(input.signing_message().as_slice())
+            .to_bytes()
+            .to_vec())
+    }
+
+    fn verify(&self, input: &AnchorInput, sig: &[u8]) -> bool {
+        let sig_array: [u8; 64] = match sig.try_into() {
+            Ok(array) => array,
+            Err(_) => return false,
+        };
+        let signature = ed25519_dalek::Signature::from_bytes(&sig_array);
+        use ed25519_dalek::Verifier;
+        self.verifying
+            .verify(input.signing_message().as_slice(), &signature)
+            .is_ok()
+    }
+}
+
+/// 32 字节 hex 解码（Ed25519 种子/公钥固定长度）。
+#[cfg(feature = "audit-anchor")]
+fn decode_hex_32(raw: &str) -> Option<[u8; 32]> {
+    if raw.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, pair) in raw.as_bytes().chunks_exact(2).enumerate() {
+        let hi = (pair[0] as char).to_digit(16)? as u8;
+        let lo = (pair[1] as char).to_digit(16)? as u8;
+        out[i] = (hi << 4) | lo;
+    }
+    Some(out)
+}
+
 /// 锚文件记录（JSONL 逐行，追加型）。
 ///
 /// `scheme` 为 `String` 而非 design.md 草图的 `&'static str`：记录须支持
@@ -986,5 +1120,95 @@ mod tests {
         let verdict = verify_anchors(&[], &entries, &signer);
         assert_eq!(verdict.total, 0);
         assert!(!verdict.all_valid());
+    }
+
+    #[cfg(feature = "audit-anchor")]
+    mod ed25519_anchor_tests {
+        use super::*;
+
+        fn seed() -> [u8; 32] {
+            [0x42; 32]
+        }
+
+        #[test]
+        fn test_ed25519_sign_verify_roundtrip_and_scheme() {
+            let signer = Ed25519AnchorSigner::from_seed(seed()).expect("valid seed");
+            let input = AnchorInput {
+                chain_head: "ab".repeat(CHAIN_HASH_LEN),
+                count: 7,
+                timestamp: 1_700_000_000,
+            };
+            let sig = signer.sign(&input).expect("sign");
+            assert!(signer.verify(&input, &sig));
+            assert_eq!(signer.scheme(), "ed25519");
+            assert_eq!(sig.len(), 64);
+
+            let pubkey_hex = hex_encode(&signer.verifying_key_bytes());
+            let verifier = Ed25519AnchorSigner::from_pubkey_hex(&pubkey_hex).expect("valid pubkey");
+            assert!(
+                verifier.verify(&input, &sig),
+                "pubkey-only verify must pass"
+            );
+        }
+
+        #[test]
+        fn test_ed25519_verify_rejects_wrong_pubkey() {
+            let signer = Ed25519AnchorSigner::from_seed(seed()).expect("valid seed");
+            let input = AnchorInput {
+                chain_head: "cd".repeat(CHAIN_HASH_LEN),
+                count: 1,
+                timestamp: 1_700_000_001,
+            };
+            let sig = signer.sign(&input).expect("sign");
+            let wrong = Ed25519AnchorSigner::from_seed([0x43; 32]).expect("valid seed");
+            let wrong_hex = hex_encode(&wrong.verifying_key_bytes());
+            let verifier = Ed25519AnchorSigner::from_pubkey_hex(&wrong_hex).expect("pubkey");
+            assert!(!verifier.verify(&input, &sig), "wrong pubkey must reject");
+        }
+
+        #[test]
+        fn test_ed25519_sign_without_seed_errors() {
+            let verifier =
+                Ed25519AnchorSigner::from_pubkey_hex(&hex_encode(&[0x11; 32])).expect("pubkey");
+            let input = AnchorInput {
+                chain_head: "ef".repeat(CHAIN_HASH_LEN),
+                count: 1,
+                timestamp: 0,
+            };
+            assert!(
+                verifier.sign(&input).is_err(),
+                "verify-only instance must not sign"
+            );
+        }
+
+        #[test]
+        #[serial_test::serial]
+        fn test_ed25519_from_env_reads_seed_and_pubkey() {
+            let signer = Ed25519AnchorSigner::from_seed(seed()).expect("seed");
+            let pubkey_hex = hex_encode(&signer.verifying_key_bytes());
+            let seed_hex = hex_encode(&seed());
+            unsafe {
+                std::env::set_var(ED25519_SEED_ENV, &seed_hex);
+            }
+            let from_env = Ed25519AnchorSigner::from_seed_env().expect("seed env read");
+            assert!(from_env.is_some(), "seed env must yield signer");
+            unsafe {
+                std::env::remove_var(ED25519_SEED_ENV);
+            }
+            assert!(
+                Ed25519AnchorSigner::from_seed_env()
+                    .expect("missing seed")
+                    .is_none(),
+                "missing seed env must yield None"
+            );
+            unsafe {
+                std::env::set_var(ED25519_PUBKEY_ENV, &pubkey_hex);
+            }
+            let verify = Ed25519AnchorSigner::from_pubkey_hex_env().expect("pubkey env read");
+            assert!(verify.is_some(), "pubkey env must yield verifier");
+            unsafe {
+                std::env::remove_var(ED25519_PUBKEY_ENV);
+            }
+        }
     }
 }
