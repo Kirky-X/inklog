@@ -639,6 +639,57 @@ mod tests {
         })
     }
 
+    /// T007 守卫：verify-chain 锚校验文案键（--help 两个 + 验证输出三个）
+    /// 必须在 en/zh-CN 双侧渲染为真实文案（不是消息 ID 原文），且带占位符
+    /// 的键插值后包含实参值——缺一侧翻译会让该语言退化成错误码式输出。
+    #[test]
+    fn test_verify_chain_anchor_keys_render_in_both_locales() {
+        init_locale();
+        const HELP_KEYS: &[&str] = &[
+            "cli-verify-chain-help-anchor",
+            "cli-verify-chain-help-anchor-key-env",
+        ];
+        const OUTPUT_KEYS: &[&str] = &[
+            "cli-verify-chain-anchor-ok",
+            "cli-verify-chain-anchor-fail",
+            "cli-verify-chain-anchor-no-anchor",
+        ];
+        for key in HELP_KEYS.iter().chain(OUTPUT_KEYS.iter()) {
+            for locale in ["en", "zh-CN"] {
+                let rendered = lookup(locale, key, &[])
+                    .unwrap_or_else(|| panic!("locale '{locale}': missing message id '{key}'"));
+                assert!(
+                    !rendered.is_empty() && rendered != *key,
+                    "locale '{locale}': '{key}' must render real text, got '{rendered}'"
+                );
+            }
+        }
+
+        let cases: &[(&str, &[(&str, &str)])] = &[
+            ("cli-verify-chain-anchor-ok", &[("count", "3/3")]),
+            (
+                "cli-verify-chain-anchor-fail",
+                &[("detail", "0/3 anchors valid")],
+            ),
+        ];
+        for (key, pairs) in cases {
+            let entries: Vec<(String, String)> = pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            for locale in ["en", "zh-CN"] {
+                let rendered = lookup(locale, key, &entries)
+                    .unwrap_or_else(|| panic!("locale '{locale}': missing message id '{key}'"));
+                let visible = strip_bidi_isolates(Some(&rendered)).unwrap();
+                assert!(
+                    visible.contains(pairs[0].1),
+                    "locale '{locale}': '{key}' must interpolate {{{}}}, got '{visible}'",
+                    pairs[0].0
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_parse_ftl_entries_cover_all_embedded_files() {
         // Guard: every embedded FTL file parses into non-empty entries —
