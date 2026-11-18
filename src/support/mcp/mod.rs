@@ -6,3 +6,5 @@
 
 #[cfg(feature = "mcp")]
 pub mod protocol;
+#[cfg(feature = "mcp")]
+pub mod tools;
