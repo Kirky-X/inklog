@@ -116,6 +116,8 @@ net-sink = ["dep:rustls"]
 insecure-tls = []
 # OTLP 日志导出 MVP（OTLP/HTTP JSON，手写传输，无新增依赖）
 otlp = []
+# 审计链非对称锚定（Ed25519 链头签名，验证端只需公钥）
+audit-anchor = ["dep:ed25519-dalek"]
 
 [dependencies]
 log = { workspace = true }
@@ -163,6 +165,7 @@ ipnet = { version = "2.12", default-features = false, features = ["std"] }
 subtle = { version = "2.6", default-features = false }
 sys-locale = { version = "0.3", default-features = false, optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"], optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
