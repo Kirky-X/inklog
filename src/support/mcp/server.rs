@@ -102,12 +102,24 @@ fn handle_request(request: &JsonRpcRequest, cfg: &McpConfig) -> serde_json::Valu
 }
 
 /// 运行 stdio 服务器：逐行读 stdin，回写 JSON-RPC 响应行；EOF 退出码 0。
+///
+/// 耗时帧处理（tools/call 的查询/验证）经 [`tokio::task::spawn_blocking`]
+/// 执行，不阻塞 stdin 读循环；逐请求串行等待响应后再读下一帧，保证响应顺序。
 pub async fn run_stdio_server(cfg: McpConfig) -> Result<i32> {
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
     let mut stdout = tokio::io::stdout();
     while let Some(line) = reader.next_line().await? {
-        if let Some(response) = process_line(&line, &cfg) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let frame_cfg = cfg.clone();
+        // 同步帧处理放进 blocking 线程池：查询/验证可能读大文件或算 HMAC，
+        // 留在异步读循环会阻塞后续帧接收。await 该任务保持逐请求串行语义。
+        let response = tokio::task::spawn_blocking(move || process_line(&line, &frame_cfg))
+            .await
+            .map_err(|e| anyhow::anyhow!("mcp frame task failed: {e}"))?;
+        if let Some(response) = response {
             stdout.write_all(response.as_bytes()).await?;
             stdout.write_all(b"\n").await?;
             stdout.flush().await?;
@@ -175,5 +187,54 @@ mod tests {
         )
         .expect("valid frame after bad must still work");
         assert!(serde_json::from_str::<serde_json::Value>(&ping).is_ok());
+    }
+
+    // ---- T013: allow 白名单过滤 ----
+    #[test]
+    fn test_tools_list_and_call_respect_allow_whitelist() {
+        let cfg = McpConfig {
+            allow: vec!["inklog_stats".to_string()],
+            ..Default::default()
+        };
+        let list = process_line(
+            r#"{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{}}"#,
+            &cfg,
+        )
+        .expect("tools/list must produce a response");
+        let json: serde_json::Value = serde_json::from_str(&list).unwrap();
+        let names: Vec<&str> = json["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["inklog_stats"], "allow must filter tools/list");
+
+        let call = process_line(
+            r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"inklog_query","arguments":{}}}"#,
+            &cfg,
+        )
+        .expect("tools/call must produce a response");
+        let call_json: serde_json::Value = serde_json::from_str(&call).unwrap();
+        assert!(
+            call_json.get("error").is_some(),
+            "calling a non-allowed tool must be an error"
+        );
+    }
+
+    // ---- T014: spawn_blocking 路径与同步处理同构 ----
+    #[tokio::test]
+    async fn test_spawn_blocking_response_matches_process_line() {
+        let cfg = McpConfig::default();
+        let line = r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"inklog_stats","arguments":{}}}"#.to_string();
+        let expected = process_line(&line, &cfg);
+        let frame_cfg = cfg.clone();
+        let actual = tokio::task::spawn_blocking(move || process_line(&line, &frame_cfg))
+            .await
+            .unwrap();
+        assert_eq!(
+            actual, expected,
+            "spawn_blocking must be response-equivalent"
+        );
     }
 }
