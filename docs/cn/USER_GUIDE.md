@@ -771,6 +771,15 @@ cargo run --package inklog-examples --bin <名称>
 
 ## 🛠️ 高级主题
 
+### 审计链锚定与故障转移标记
+
+归档链封条能检测截尾，但持有 `INKLOG_AUDIT_KEY` 的主体可重建一条自洽的链与封条。独立锚定增加一把独立的密钥，使仅持链密钥者无法伪造链头：
+
+- 在 `[file_sink]` 设置 `anchor_enabled = true`（要求 `audit_chain_enabled = true`）并设置 `INKLOG_AUDIT_ANCHOR_KEY`。每 `anchor_every` 条链条目，链头用这把独立密钥签名后追加到 `<stem>.chain.anchor.jsonl`。
+- `inklog verify-chain --manifest <stem>.chain.jsonl --key-env INKLOG_AUDIT_KEY --anchor-key-env INKLOG_AUDIT_ANCHOR_KEY` 同时校验两段。JSON 报告含 `anchor_status` 与 `anchors_valid`（`"N/N"`）。若尾部被重写且封条重签、但沿用旧锚，则 `anchors_valid` 变为 `"0/N"`，命令以非 0 退出。
+- 若需防抵赖，用 `--features audit-anchor` 构建并使用 `--anchor-pubkey <hex>`（Ed25519；写侧种子经 `INKLOG_AUDIT_ANCHOR_SEED` 提供，验侧只需公钥）。这样写权限与验权限分离：持链密钥者若未持种子仍无法伪造锚。HMAC 锚（`--anchor-key-env`）要求验侧持有同一把锚密钥，无法分离两种角色。
+- 故障转移与 journal 重放会在同一条链上留下 `failover_begin` / `failover_end` / `failover_replay` 标记。`verify-chain` 仍把每个标记作为普通条目逐条哈希校验，但单独报告 `failover_markers` 计数，避免把标记误报为篡改。
+
 ### 运行时级别热调
 
 不重启进程即可调整全局或 per-target 日志级别（经 `tracing_subscriber::reload` 换装 EnvFilter，`RUST_LOG` 附加指令跨重建保留）：

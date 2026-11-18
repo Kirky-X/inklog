@@ -775,6 +775,15 @@ Selected examples:
 
 ## 🛠️ Advanced Topics
 
+### Audit Chain Anchoring and Failover Markers
+
+The archive chain seal detects truncation, but anyone holding `INKLOG_AUDIT_KEY` can rebuild a self-consistent chain and seal. Independent anchoring adds a second, separate key so that a holder of only the chain key cannot forge the chain head:
+
+- Enable `anchor_enabled = true` on `[file_sink]` (requires `audit_chain_enabled = true`) and set `INKLOG_AUDIT_ANCHOR_KEY`. Each `anchor_every` chain entries, the chain head is signed with this separate key and appended to `<stem>.chain.anchor.jsonl`.
+- `inklog verify-chain --manifest <stem>.chain.jsonl --key-env INKLOG_AUDIT_KEY --anchor-key-env INKLOG_AUDIT_ANCHOR_KEY` verifies both sections. The JSON report carries `anchor_status` and `anchors_valid` (`"N/N"`). If the tail was rewritten and the seal re-signed while old anchors were kept, `anchors_valid` becomes `"0/N"` and the command exits non-zero.
+- For non-repudiation, build with `--features audit-anchor` and use `--anchor-pubkey <hex>` (Ed25519, write-side seed via `INKLOG_AUDIT_ANCHOR_SEED`, verify-side public key only). This separates write and verify permissions: a holder of the chain key still cannot forge an anchor without the seed. HMAC anchors (`--anchor-key-env`) require the verifier to hold the same anchor key, so they cannot separate the two roles.
+- Failover and journal replay leave `failover_begin` / `failover_end` / `failover_replay` markers on the same chain. `verify-chain` still hashes every marker as a normal entry, but reports `failover_markers` separately so markers are not mistaken for tampering.
+
 ### Runtime Level Hot-Reload
 
 Adjust global or per-target log levels without restarting the process (via `tracing_subscriber::reload` swapping the EnvFilter; additional `RUST_LOG` directives survive rebuilds):

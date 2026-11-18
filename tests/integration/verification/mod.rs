@@ -4,4 +4,5 @@
 //!
 //! 测试各种功能的正确性验证
 
+mod audit_anchor;
 mod file_sink;
