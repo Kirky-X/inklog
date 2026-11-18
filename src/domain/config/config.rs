@@ -55,6 +55,9 @@ pub struct InklogConfig {
     /// 按 target 前缀分组的限流配额（未配置 = 订阅器不接线，全局行为不变）。
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
+    /// MCP 工具面策略（未配置 = 默认策略；仅 `mcp` feature 的 stdio 服务器消费）。
+    #[serde(default)]
+    pub mcp: crate::domain::config::mcp::McpConfig,
 }
 
 fn default_console_sink() -> Option<ConsoleSinkConfig> {
@@ -613,6 +616,7 @@ impl Default for InklogConfig {
             target_levels: HashMap::new(),
             sampling: SamplingConfig::default(),
             rate_limit: RateLimitConfig::default(),
+            mcp: crate::domain::config::mcp::McpConfig::default(),
         }
     }
 }
@@ -2336,6 +2340,15 @@ sample_every_n = 2
             config.sampling.is_empty(),
             "absent [sampling] section must yield an empty policy"
         );
+    }
+
+    #[test]
+    fn test_mcp_section_absent_defaults_to_default_policy() {
+        // T003: 无 [mcp] 段的旧配置 TOML 加载后 mcp 取默认值（serde default 兼容）。
+        let config: InklogConfig = "[global]\nlevel = \"info\"\n"
+            .parse()
+            .expect("old TOML must parse");
+        assert_eq!(config.mcp, crate::domain::config::mcp::McpConfig::default());
     }
 
     #[test]

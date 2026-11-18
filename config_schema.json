@@ -118,6 +118,20 @@
       "default": {
         "rules": {}
       }
+    },
+    "mcp": {
+      "description": "MCP 工具面策略（未配置 = 默认策略；仅 `mcp` feature 的 stdio 服务器消费）。",
+      "$ref": "#/$defs/McpConfig",
+      "default": {
+        "allow": [],
+        "max_limit": 1000,
+        "allowed_levels": null,
+        "allowed_target_prefixes": null,
+        "redact": true,
+        "allowed_roots": [],
+        "audit_key_env": null,
+        "allowed_manifest_dirs": []
+      }
     }
   },
   "$defs": {
@@ -818,6 +832,78 @@
             "minimum": 0
           },
           "default": {}
+        }
+      }
+    },
+    "McpConfig": {
+      "description": "MCP 工具面策略。",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "允许暴露的工具名；空 = 全部启用",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "max_limit": {
+          "description": "inklog_query 返回条数上限（工具参数 limit 钳制到该值）",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 1000
+        },
+        "allowed_levels": {
+          "description": "允许的 level 集合；None = 不限",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "allowed_target_prefixes": {
+          "description": "允许的 target 前缀集合；None = 不限",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "redact": {
+          "description": "查询结果是否强制过 DataMasker（默认 true；false 需显式声明）",
+          "type": "boolean",
+          "default": true
+        },
+        "allowed_roots": {
+          "description": "允许读取的日志根目录列表（realpath 前缀校验）",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "audit_key_env": {
+          "description": "inklog_audit_verify 使用的密钥 env 名（工具参数不接受 env 名）",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "allowed_manifest_dirs": {
+          "description": "verify-chain manifest 允许的父目录白名单；空 = 不限",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       }
     }

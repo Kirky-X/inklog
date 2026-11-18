@@ -9,7 +9,6 @@ pub mod database;
 pub mod file_sink;
 pub mod global;
 pub mod http;
-#[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod performance;
 pub mod rate_limit;
