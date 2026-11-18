@@ -433,6 +433,25 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_escape_from_allowed_root_is_rejected() {
+        let allowed = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        // 白名单目录内放一个软链，指向白名单外的真实日志文件
+        let outside_log = outside.path().join("secret.log");
+        std::fs::write(&outside_log, "2026-09-11T01:00:00Z [INFO] app - secret\n").unwrap();
+        let link = allowed.path().join("link.log");
+        std::os::unix::fs::symlink(&outside_log, &link).unwrap();
+
+        let tool = QueryTool::new(cfg_with_roots(vec![allowed.path().to_path_buf()]));
+        let result = tool.call(serde_json::json!({"paths": [link.display().to_string()]}));
+        assert!(
+            result.is_error,
+            "symlink escaping allowed_roots must be rejected (realpath check)"
+        );
+    }
+
     #[test]
     fn test_limit_is_clamped_to_max_limit() {
         let dir = tempfile::tempdir().unwrap();
