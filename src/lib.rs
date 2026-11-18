@@ -302,6 +302,9 @@ pub use support::processing::{
     MaskRuleRegistry, ObjectPoolConfig, OutputFormat, get_log_record, get_string_buffer,
     put_log_record, put_string_buffer, secret_scan_masker,
 };
+// MCP stdio 工具面（feature `mcp`）
+#[cfg(feature = "mcp")]
+pub use support::mcp::server::run_stdio_server;
 // 速率/按 target 配额限流（feature `limiteron-rate-limit`）
 pub use support::processing::{
     GlobalRateLimitMiddleware, RateLimiter, TargetQuotaMiddleware, TargetQuotaVerdict,

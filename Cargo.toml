@@ -119,7 +119,7 @@ otlp = []
 # 审计链非对称锚定（Ed25519 链头签名，验证端只需公钥）
 audit-anchor = ["dep:ed25519-dalek"]
 # MCP stdio 服务器（Agent 工具面：query/audit_verify/stats，策略在工具内强制执行；手写 JSON-RPC，零新依赖）
-mcp = []
+mcp = ["tokio/io-std"]
 
 [dependencies]
 log = { workspace = true }
