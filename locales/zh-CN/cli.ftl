@@ -172,11 +172,13 @@ cli-query-help-since = 仅返回该时间之后的记录（RFC3339，如 2026-09
 cli-query-help-until = 仅返回该时间之前的记录（RFC3339）
 cli-query-help-level = 最低级别: trace/debug/info/warn/error/fatal
 cli-query-help-grep = 对消息与 target 应用子串过滤
+cli-query-help-field = 结构化字段过滤（k=v，可重复；AND 语义）
 cli-query-help-limit = 最大返回记录数（0 = 不限制）
 cli-query-help-key-env = 存放 .enc 文件解密密钥的环境变量名
 
 cli-query-err-invalid-rfc3339 = --{ $flag } '{ $raw }' 无效: 期望 RFC3339 时间戳 ({ $err })
 cli-query-err-no-path = query 至少需要一个 --path（文件或目录）
+cli-query-err-invalid-field = --field '{ $raw }' 无效：期望 k=v
 
 cli-verify-chain-about = 校验归档审计链（HMAC-SHA256）manifest 是否被篡改
 cli-verify-chain-help-manifest = 审计链 manifest（<stem>.chain.jsonl）

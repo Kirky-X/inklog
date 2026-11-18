@@ -172,11 +172,13 @@ cli-query-help-since = Only records at/after this time (RFC3339, e.g. 2026-09-11
 cli-query-help-until = Only records at/before this time (RFC3339)
 cli-query-help-level = Minimum level: trace/debug/info/warn/error/fatal
 cli-query-help-grep = Substring filter applied to message and target
+cli-query-help-field = Structured field filter (k=v, repeatable; AND semantics)
 cli-query-help-limit = Maximum number of records to return (0 = unlimited)
 cli-query-help-key-env = Environment variable name holding the decryption key for .enc files
 
 cli-query-err-invalid-rfc3339 = invalid --{ $flag } '{ $raw }': expected RFC3339 ({ $err })
 cli-query-err-no-path = query requires at least one --path (file or directory)
+cli-query-err-invalid-field = invalid --field '{ $raw }': expected k=v
 
 cli-verify-chain-about = Verify the archive audit chain (HMAC-SHA256) manifest for tampering
 cli-verify-chain-help-manifest = Audit chain manifest (<stem>.chain.jsonl)

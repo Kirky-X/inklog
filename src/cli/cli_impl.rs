@@ -286,6 +286,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             until,
             level,
             grep,
+            field,
             limit,
             key_env,
         } => {
@@ -295,6 +296,7 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
                 until,
                 level,
                 grep,
+                field,
                 limit,
                 key_env,
                 json: args.json,
@@ -1057,6 +1059,7 @@ mod exit_code_tests {
                 until: None,
                 level: None,
                 grep: Some("no-such-keyword".to_string()),
+                field: Vec::new(),
                 limit: 100,
                 key_env: None,
             },

@@ -24,6 +24,7 @@ pub struct QueryArgs {
     pub until: Option<String>,
     pub level: Option<String>,
     pub grep: Option<String>,
+    pub field: Vec<String>,
     pub limit: usize,
     pub key_env: Option<String>,
     pub json: bool,
@@ -49,6 +50,34 @@ pub fn run_query(args: &QueryArgs) -> Result<i32> {
     if args.path.is_empty() {
         anyhow::bail!("{}", inklog::i18n::tr("cli-query-err-no-path"));
     }
+    // --field <k=v>：解析为 FieldPredicate；非法格式（无 = 或空键）→ 错误退出码 1
+    let mut fields = Vec::new();
+    for raw in &args.field {
+        let Some((key, value)) = raw.split_once('=') else {
+            let mut fargs = inklog::i18n::MsgArgs::new();
+            fargs.set("raw", raw);
+            anyhow::bail!(
+                "{}",
+                inklog::i18n::tr_args("cli-query-err-invalid-field", fargs)
+            );
+        };
+        if key.is_empty() || value.is_empty() {
+            let mut fargs = inklog::i18n::MsgArgs::new();
+            fargs.set("raw", raw);
+            anyhow::bail!(
+                "{}",
+                inklog::i18n::tr_args("cli-query-err-invalid-field", fargs)
+            );
+        }
+        let value_json = value
+            .parse::<i64>()
+            .map(serde_json::Value::from)
+            .unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
+        fields.push(inklog::support::query::FieldPredicate {
+            key: key.to_string(),
+            value: value_json,
+        });
+    }
     let opts = QueryOptions {
         since: args
             .since
@@ -63,7 +92,7 @@ pub fn run_query(args: &QueryArgs) -> Result<i32> {
         level: args.level.clone(),
         keyword: args.grep.clone(),
         limit: args.limit,
-        fields: Vec::new(),
+        fields,
     };
     let entries = query_paths(&args.path, &opts, args.key_env.as_deref())?;
 
@@ -149,6 +178,41 @@ mod tests {
         assert!(
             err.contains("--since"),
             "error must name the offending flag"
+        );
+    }
+
+    #[test]
+    fn test_query_field_filter_and_invalid_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("structured.log");
+        std::fs::write(
+            &path,
+            "{\"timestamp\":\"2026-09-11T01:00:00Z\",\"level\":\"INFO\",\"message\":\"hit\",\"user_id\":42}\n\
+             {\"timestamp\":\"2026-09-11T01:00:01Z\",\"level\":\"INFO\",\"message\":\"miss\",\"user_id\":7}\n",
+        )
+        .unwrap();
+
+        // T010: --field user_id=42 只命中一行（退出码 0）
+        let args = QueryArgs {
+            path: vec![path.clone()],
+            field: vec!["user_id=42".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            run_query(&args).unwrap(),
+            0,
+            "field match must yield results"
+        );
+
+        // 无 k=v 分隔符 → 错误（退出码 1 路径：run_query 返回 Err）
+        let args = QueryArgs {
+            path: vec![path.clone()],
+            field: vec!["no-separator".to_string()],
+            ..Default::default()
+        };
+        assert!(
+            run_query(&args).is_err(),
+            "malformed --field must be an error"
         );
     }
 

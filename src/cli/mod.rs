@@ -118,6 +118,10 @@ enum Commands {
         #[arg(help = inklog::i18n::tr("cli-query-help-grep"))]
         grep: Option<String>,
 
+        #[arg(long = "field")]
+        #[arg(help = inklog::i18n::tr("cli-query-help-field"))]
+        field: Vec<String>,
+
         #[arg(long, default_value = "1000")]
         #[arg(help = inklog::i18n::tr("cli-query-help-limit"))]
         limit: usize,
