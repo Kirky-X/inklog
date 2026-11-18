@@ -116,6 +116,8 @@ pub struct FileSink {
     /// 当前是否处于 fallback 降级状态（首次进入/退出时向链落 begin/end 标记）；
     /// Arc 共享以使轮转派生实例继承同一状态。
     failover_active: Arc<AtomicBool>,
+    /// replayed 记录触发的 failover_replay 标记是否已写（每次启动仅一次）。
+    replay_marked: Arc<AtomicBool>,
     /// 独立锚上下文（anchor_enabled 且锚密钥在位时启用；构建期冻结）
     anchor: Option<Arc<AnchorContext>>,
     /// 可变内部状态（Arc 共享给轮转定时线程执行空闲 flush）
@@ -187,6 +189,23 @@ impl FileSink {
     fn mark_failover_end(&self) {
         if self.failover_active.swap(false, Ordering::AcqRel) {
             append_failover_marker(self.audit_chain.as_ref(), &self.config.path, "failover_end");
+        }
+    }
+
+    /// FallbackJournal::replay 注入的记录带 `fields.replayed = true`。
+    /// 首次见到该标记时向链落一次 `failover_replay`（每次启动仅一次）。
+    fn mark_replay_if_needed(&self, record: &LogRecord) {
+        if record
+            .fields
+            .get("replayed")
+            .is_some_and(|v| v == &serde_json::Value::Bool(true))
+            && !self.replay_marked.swap(true, Ordering::AcqRel)
+        {
+            append_failover_marker(
+                self.audit_chain.as_ref(),
+                &self.config.path,
+                "failover_replay",
+            );
         }
     }
 
@@ -267,6 +286,7 @@ impl FileSink {
             audit_chain,
             anchor,
             failover_active: Arc::new(AtomicBool::new(false)),
+            replay_marked: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(RwLock::new(inner)),
         };
 
@@ -1720,6 +1740,8 @@ impl LogSink for LazyFileSink {
 #[async_trait]
 impl LogSink for FileSink {
     async fn write(&self, record: &LogRecord) -> Result<(), InklogError> {
+        // FallbackJournal::replay 注入的 replayed 记录 → 链上落 failover_replay
+        self.mark_replay_if_needed(record);
         // 检查断路器（使用 read lock，作用域内释放后再 await）
         let circuit_open = {
             let inner = self.inner.read();
@@ -2034,6 +2056,7 @@ impl Clone for FileSink {
             audit_chain: self.audit_chain.clone(),
             anchor: self.anchor.clone(),
             failover_active: self.failover_active.clone(),
+            replay_marked: self.replay_marked.clone(),
             inner: Arc::new(RwLock::new(inner)),
         }
     }
@@ -2110,6 +2133,7 @@ mod tests {
             masker: DataMasker::new(),
             audit_chain: None,
             failover_active: Arc::new(AtomicBool::new(false)),
+            replay_marked: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(RwLock::new(inner)),
         }
     }
@@ -3679,6 +3703,55 @@ mod tests {
         assert!(
             ArchiveChain::verify_entries(&entries, b"failover-chain-key"),
             "chain with markers must still verify"
+        );
+    }
+
+    /// T012: FallbackJournal::replay 调用方注入的 replayed 记录触发 failover_replay 标记。
+    #[tokio::test]
+    async fn test_replayed_record_appends_failover_replay_marker() {
+        use crate::support::audit_chain::{ArchiveChain, ArchiveChainEntry};
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("replay.log");
+        let chain = Arc::new(parking_lot::Mutex::new(ArchiveChain::new(
+            b"replay-chain-key",
+        )));
+        let config = FileSinkConfig {
+            path: path.clone(),
+            enabled: true,
+            audit_chain_enabled: true,
+            ..Default::default()
+        };
+        let mut sink = create_test_file_sink(config);
+        sink.audit_chain = Some(chain.clone());
+
+        let mut rec = create_test_record("replayed record");
+        rec.fields
+            .insert("replayed".to_string(), serde_json::Value::Bool(true));
+        sink.write(&rec).await.unwrap();
+        sink.flush().await.unwrap();
+
+        let manifest = FileSink::audit_manifest_path(&path);
+        let data = std::fs::read_to_string(&manifest)
+            .expect("replay marker must be persisted to manifest");
+        let entries: Vec<ArchiveChainEntry> = data
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("manifest line must be JSON"))
+            .collect();
+        let has_replay = entries.iter().any(|e| {
+            serde_json::from_str::<serde_json::Value>(&e.event)
+                .ok()
+                .and_then(|v| v.get("op").and_then(|o| o.as_str()).map(str::to_string))
+                .as_deref()
+                == Some("failover_replay")
+        });
+        assert!(
+            has_replay,
+            "replayed record must append failover_replay marker"
+        );
+        assert!(
+            ArchiveChain::verify_entries(&entries, b"replay-chain-key"),
+            "chain with replay marker must verify"
         );
     }
 
