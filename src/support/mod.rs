@@ -5,6 +5,8 @@
 pub mod audit_chain;
 pub mod fallback_journal;
 pub mod io;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod observability;
 pub mod ops_event;
 pub mod processing;
