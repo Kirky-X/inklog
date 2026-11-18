@@ -113,6 +113,9 @@ pub struct FileSink {
     masker: DataMasker,
     /// 归档审计链（audit_chain_enabled 时启用；轮转成功后 append 并写穿 manifest）
     audit_chain: Option<Arc<parking_lot::Mutex<crate::support::audit_chain::ArchiveChain>>>,
+    /// 当前是否处于 fallback 降级状态（首次进入/退出时向链落 begin/end 标记）；
+    /// Arc 共享以使轮转派生实例继承同一状态。
+    failover_active: Arc<AtomicBool>,
     /// 独立锚上下文（anchor_enabled 且锚密钥在位时启用；构建期冻结）
     anchor: Option<Arc<AnchorContext>>,
     /// 可变内部状态（Arc 共享给轮转定时线程执行空闲 flush）
@@ -167,6 +170,24 @@ impl FileSink {
     /// 锚文件路径：`<stem>.chain.jsonl` → `<stem>.chain.anchor.jsonl`。
     pub(crate) fn anchor_file_path(log_path: &std::path::Path) -> std::path::PathBuf {
         crate::support::audit_chain::anchor_path_for_manifest(&Self::audit_manifest_path(log_path))
+    }
+
+    /// 进入 fallback 时标记：仅在状态从未激活变为激活时落 `failover_begin`。
+    fn mark_failover_begin(&self) {
+        if !self.failover_active.swap(true, Ordering::AcqRel) {
+            append_failover_marker(
+                self.audit_chain.as_ref(),
+                &self.config.path,
+                "failover_begin",
+            );
+        }
+    }
+
+    /// 退出 fallback 时标记：仅在状态从激活变为未激活时落 `failover_end`。
+    fn mark_failover_end(&self) {
+        if self.failover_active.swap(false, Ordering::AcqRel) {
+            append_failover_marker(self.audit_chain.as_ref(), &self.config.path, "failover_end");
+        }
     }
 
     /// Creates a new FileSink with the given configuration.
@@ -245,6 +266,7 @@ impl FileSink {
             masker: DataMasker::new(),
             audit_chain,
             anchor,
+            failover_active: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(RwLock::new(inner)),
         };
 
@@ -1529,50 +1551,7 @@ pub(crate) fn register_rotated_archive(
     })
     .to_string();
     chain.append(&event);
-    let manifest = FileSink::audit_manifest_path(base_path);
-    let mut body = String::new();
-    for entry in chain.entries() {
-        body.push_str(&serde_json::to_string(entry).unwrap_or_default());
-        body.push('\n');
-    }
-    // manifest 原子替换：tmp + rename。`fs::write` 是覆盖写（非原子），
-    // 崩溃或并发轮转落在截断与写入之间会留下半截 manifest——校验时会被
-    // 判为失败，却无法区分「归档被篡改」与「manifest 写坏了」。
-    let manifest_tmp = manifest.with_extension("manifest.tmp");
-    let write_result =
-        fs::write(&manifest_tmp, body).and_then(|_| fs::rename(&manifest_tmp, &manifest));
-    if let Err(e) = write_result {
-        let _ = fs::remove_file(&manifest_tmp);
-        let mut args = crate::i18n::MsgArgs::new();
-        args.set("path", manifest.display().to_string());
-        args.set("err", &e);
-        error!(
-            "{}",
-            crate::i18n::tr_args("sink-audit_manifest_write_failed", args)
-        );
-    }
-
-    // 封条（链外锚点）：条目总数 + 尾哈希 + 封条 HMAC，单独落盘。
-    // manifest 被截尾到非空前缀时链内校验仍自洽，只有与封条比对才能判定
-    // 截断；封条以链密钥签发，无法伪造。封条必须与 manifest 分文件——
-    // 同文件内的封条会随截尾一并丢失。
-    if let Some(seal) = chain.seal() {
-        let seal_path = FileSink::audit_seal_path(base_path);
-        let seal_tmp = seal_path.with_extension("tmp");
-        let seal_body = serde_json::to_string(&seal).unwrap_or_default();
-        let seal_result =
-            fs::write(&seal_tmp, seal_body).and_then(|_| fs::rename(&seal_tmp, &seal_path));
-        if let Err(e) = seal_result {
-            let _ = fs::remove_file(&seal_tmp);
-            let mut args = crate::i18n::MsgArgs::new();
-            args.set("path", seal_path.display().to_string());
-            args.set("err", &e);
-            error!(
-                "{}",
-                crate::i18n::tr_args("sink-audit_seal_write_failed", args)
-            );
-        }
-    }
+    persist_chain(&chain, base_path);
 
     // 独立锚落盘（audit-anchor-failover-integrity T004）：锚覆盖间隔命中
     // 即把链头用**独立锚密钥**签名后追加到 `<stem>.chain.anchor.jsonl`。
@@ -1614,6 +1593,71 @@ pub(crate) fn register_rotated_archive(
             }
         }
     }
+}
+
+/// 把链当前状态写穿 manifest + 封条（原子替换）。
+///
+/// 轮转与 failover 标记共用同一落盘路径——两条路径写出的 manifest/seal
+/// 必须同构，否则 verify_chain 会对标记条目与轮转条目用不同规则。
+fn persist_chain(chain: &crate::support::audit_chain::ArchiveChain, base_path: &Path) {
+    let manifest = FileSink::audit_manifest_path(base_path);
+    let mut body = String::new();
+    for entry in chain.entries() {
+        body.push_str(&serde_json::to_string(entry).unwrap_or_default());
+        body.push('\n');
+    }
+    let manifest_tmp = manifest.with_extension("manifest.tmp");
+    let write_result =
+        fs::write(&manifest_tmp, body).and_then(|_| fs::rename(&manifest_tmp, &manifest));
+    if let Err(e) = write_result {
+        let _ = fs::remove_file(&manifest_tmp);
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("path", manifest.display().to_string());
+        args.set("err", &e);
+        error!(
+            "{}",
+            crate::i18n::tr_args("sink-audit_manifest_write_failed", args)
+        );
+    }
+    if let Some(seal) = chain.seal() {
+        let seal_path = FileSink::audit_seal_path(base_path);
+        let seal_tmp = seal_path.with_extension("tmp");
+        let seal_body = serde_json::to_string(&seal).unwrap_or_default();
+        let seal_result =
+            fs::write(&seal_tmp, seal_body).and_then(|_| fs::rename(&seal_tmp, &seal_path));
+        if let Err(e) = seal_result {
+            let _ = fs::remove_file(&seal_tmp);
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", seal_path.display().to_string());
+            args.set("err", &e);
+            error!(
+                "{}",
+                crate::i18n::tr_args("sink-audit_seal_write_failed", args)
+            );
+        }
+    }
+}
+
+/// 向审计链追加 failover 标记事件（`failover_begin` / `failover_end` /
+/// `failover_replay`），与轮转条目同链、同 manifest/seal 落盘路径。
+/// 未启用链的 sink 传入 `None`，本函数立即返回（行为不变）。
+pub(crate) fn append_failover_marker(
+    chain: Option<&Arc<parking_lot::Mutex<crate::support::audit_chain::ArchiveChain>>>,
+    base_path: &Path,
+    op: &str,
+) {
+    let Some(chain) = chain else {
+        return;
+    };
+    let event = serde_json::json!({
+        "op": op,
+        "sink": base_path.display().to_string(),
+        "ts": chrono::Utc::now().timestamp(),
+    })
+    .to_string();
+    let mut guard = chain.lock();
+    guard.append(&event);
+    persist_chain(&guard, base_path);
 }
 
 /// 构建期不触碰文件系统的 [`FileSink`] 惰性包装。
@@ -1682,6 +1726,8 @@ impl LogSink for FileSink {
             !inner.circuit_breaker.can_execute()
         };
         if circuit_open {
+            // 进入 fallback：审计链落 failover_begin（首次进入才写，幂等）
+            self.mark_failover_begin();
             // 熔断打开时记录不能静默吞掉——降级失败/无 fallback 时
             // 记录已终态丢失，必须 error + stderr + 置不健康。
             let fallback = self.inner.read().fallback_sink.clone();
@@ -1706,6 +1752,8 @@ impl LogSink for FileSink {
 
         // 检查磁盘空间（sync，不持有锁）
         if !self.check_disk_space()? {
+            // 进入 fallback：审计链落 failover_begin（首次进入才写，幂等）
+            self.mark_failover_begin();
             // 磁盘不足且无法降级时记录不能静默吞掉
             warn!("{}", crate::i18n::tr("sink-low_disk_space_check"));
             let fallback = self.inner.read().fallback_sink.clone();
@@ -1791,7 +1839,12 @@ impl LogSink for FileSink {
 
         // 轮转失败路径：await fallback sink 的 write（lock 已释放，安全 await）
         if let Some(sink) = rotation_failed_fallback {
+            // 进入 fallback：审计链落 failover_begin（首次进入才写，幂等）
+            self.mark_failover_begin();
             let _ = sink.write(record).await;
+        } else {
+            // 主路径成功（无降级）：若此前处于 fallback，落 failover_end 标记
+            self.mark_failover_end();
         }
 
         Ok(())
@@ -1980,6 +2033,7 @@ impl Clone for FileSink {
             masker: DataMasker::new(),
             audit_chain: self.audit_chain.clone(),
             anchor: self.anchor.clone(),
+            failover_active: self.failover_active.clone(),
             inner: Arc::new(RwLock::new(inner)),
         }
     }
@@ -2055,6 +2109,7 @@ mod tests {
             anchor: None,
             masker: DataMasker::new(),
             audit_chain: None,
+            failover_active: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(RwLock::new(inner)),
         }
     }
@@ -3553,6 +3608,77 @@ mod tests {
         assert!(
             !ArchiveChain::verify_entries(&tampered, b"audit-chain-test-key-01"),
             "tampered manifest must fail verification"
+        );
+    }
+
+    /// T011: fallback 转移在链上落 failover_begin 标记，恢复轮转后落 failover_end。
+    #[tokio::test]
+    async fn test_failover_markers_appended_to_audit_chain() {
+        use crate::support::audit_chain::{ArchiveChain, ArchiveChainEntry};
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("failover.log");
+        let chain = Arc::new(parking_lot::Mutex::new(ArchiveChain::new(
+            b"failover-chain-key",
+        )));
+        let config = FileSinkConfig {
+            path: path.clone(),
+            enabled: true,
+            audit_chain_enabled: true,
+            ..Default::default()
+        };
+        let mut sink = create_test_file_sink(config);
+        sink.audit_chain = Some(chain.clone());
+
+        let write_count = Arc::new(parking_lot::Mutex::new(0usize));
+        let mock = MockFallbackSink {
+            write_count: write_count.clone(),
+        };
+        {
+            let mut inner = sink.inner.write();
+            inner.fallback_sink = Some(Arc::new(mock));
+            for _ in 0..5 {
+                inner.circuit_breaker.record_failure();
+            }
+        }
+
+        // 熔断打开 → 走 fallback 路径，应落 failover_begin 标记
+        let rec = create_test_record("failover begin");
+        sink.write(&rec).await.unwrap();
+        assert_eq!(*write_count.lock(), 1, "fallback sink must be used");
+
+        // 恢复：熔断重置后写一条记录触发正常路径 → 应落 failover_end 标记
+        {
+            let inner = sink.inner.write();
+            inner.circuit_breaker.reset();
+        }
+        let rec2 = create_test_record("failover end");
+        sink.write(&rec2).await.unwrap();
+        sink.flush().await.unwrap();
+
+        let manifest = FileSink::audit_manifest_path(&path);
+        let data = std::fs::read_to_string(&manifest)
+            .expect("failover markers must be persisted to manifest");
+        let entries: Vec<ArchiveChainEntry> = data
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("manifest line must be JSON"))
+            .collect();
+        let ops: Vec<String> = entries
+            .iter()
+            .filter_map(|e| serde_json::from_str::<serde_json::Value>(&e.event).ok())
+            .filter_map(|v| v.get("op").and_then(|o| o.as_str()).map(str::to_string))
+            .collect();
+        assert!(
+            ops.iter().any(|op| op == "failover_begin"),
+            "manifest must contain failover_begin marker, got {ops:?}"
+        );
+        assert!(
+            ops.iter().any(|op| op == "failover_end"),
+            "manifest must contain failover_end marker, got {ops:?}"
+        );
+        assert!(
+            ArchiveChain::verify_entries(&entries, b"failover-chain-key"),
+            "chain with markers must still verify"
         );
     }
 
