@@ -197,6 +197,7 @@ cli-verify-chain-generation-mismatch = chain seal does not match manifest (seal 
 cli-verify-chain-anchor-ok = anchors verified ok ({ $count }) — independent-key anchoring confirms the chain head
 cli-verify-chain-anchor-fail = anchors FAILED: { $detail } — integrity cannot be proven
 cli-verify-chain-anchor-no-anchor = chain not anchored (no <stem>.anchor.jsonl next to the manifest) — anchor protection disabled
+cli-verify-chain-failover-markers = chain contains { $count } failover markers (begin/end/replay) — checked as normal chain entries
 
 # CLI generate schema errors
 

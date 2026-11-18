@@ -357,6 +357,9 @@ pub(crate) struct ChainVerification {
     pub(crate) rotated: bool,
     /// 与封条判定同一代的 entries 快照（锚校验段共用，避免二次读取错代）
     pub(crate) entries: Vec<ArchiveChainEntry>,
+    /// 链内已知 failover 标记条目数（failover_begin/end/replay）。
+    /// 标记仍逐条参与哈希校验，仅在报告语义上单列，不与篡改混报。
+    pub(crate) failover_markers: usize,
 }
 
 /// 一代 manifest + 封条的读取结果。
@@ -501,6 +504,7 @@ impl ChainReport {
             "entries": self.outcome.entry_count,
             "status": self.outcome.verdict.json_status(),
             "anchor_status": anchor_status,
+            "failover_markers": self.outcome.failover_markers,
         });
         if let Some(valid) = anchors_valid {
             value["anchors_valid"] = serde_json::json!(valid);
@@ -654,6 +658,7 @@ pub(crate) fn verify_chain(
             entry_count: 0,
             rotated: false,
             entries: Vec::new(),
+            failover_markers: 0,
         });
     }
     let key = key()?;
@@ -682,21 +687,25 @@ pub(crate) fn verify_chain_pair(
     let seal = match seal {
         Ok(seal) => seal,
         Err(err) => {
+            let failover_markers = count_failover_markers(&entries);
             return Ok(ChainVerification {
                 verdict: ChainVerdict::SealUnreadable { err },
                 entry_count: entries.len(),
                 rotated: false,
                 entries,
+                failover_markers,
             });
         }
     };
     if seal.count == entries.len() as u64 {
         let verdict = chain_verdict(&entries, &seal, key);
+        let failover_markers = count_failover_markers(&entries);
         return Ok(ChainVerification {
             verdict,
             entry_count: entries.len(),
             rotated: false,
             entries,
+            failover_markers,
         });
     }
 
@@ -705,25 +714,30 @@ pub(crate) fn verify_chain_pair(
     let seal = match seal {
         Ok(seal) => seal,
         Err(err) => {
+            let failover_markers = count_failover_markers(&entries);
             return Ok(ChainVerification {
                 verdict: ChainVerdict::SealUnreadable { err },
                 entry_count: entries.len(),
                 rotated: false,
                 entries,
+                failover_markers,
             });
         }
     };
     if seal.count == entries.len() as u64 {
         // 重读后配对一致：校验期间发生轮转，按重读后的实际结果判定
         let verdict = chain_verdict(&entries, &seal, key);
+        let failover_markers = count_failover_markers(&entries);
         return Ok(ChainVerification {
             verdict,
             entry_count: entries.len(),
             rotated: true,
             entries,
+            failover_markers,
         });
     }
     // 重读后仍不配对：manifest 与封条不属于同一代——无法证明完整性
+    let failover_markers = count_failover_markers(&entries);
     Ok(ChainVerification {
         verdict: ChainVerdict::GenerationMismatch {
             seal_count: seal.count,
@@ -731,7 +745,27 @@ pub(crate) fn verify_chain_pair(
         entry_count: entries.len(),
         rotated: false,
         entries,
+        failover_markers,
     })
+}
+
+/// 统计链内已知 failover 标记条目数（op ∈ {failover_begin, failover_end, failover_replay}）。
+/// 标记仍逐条参与哈希校验，本计数只用于报告语义分段，不改变 verdict。
+fn count_failover_markers(entries: &[ArchiveChainEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|e| {
+            serde_json::from_str::<serde_json::Value>(&e.event)
+                .ok()
+                .and_then(|v| v.get("op").and_then(|o| o.as_str()).map(str::to_string))
+                .is_some_and(|op| {
+                    matches!(
+                        op.as_str(),
+                        "failover_begin" | "failover_end" | "failover_replay"
+                    )
+                })
+        })
+        .count()
 }
 
 /// 链内自洽 + 封条比对 → 判定。
@@ -848,6 +882,14 @@ fn print_verdict(manifest: &std::path::Path, report: &ChainReport) {
         }
     }
     print_anchor_section(&report.anchor);
+    if outcome.failover_markers > 0 {
+        let mut args = inklog::i18n::MsgArgs::new();
+        args.set("count", outcome.failover_markers);
+        println!(
+            "{}",
+            inklog::i18n::tr_args("cli-verify-chain-failover-markers", args)
+        );
+    }
 }
 
 /// 输出锚校验段（本地化文案）。
@@ -1455,6 +1497,43 @@ mod anchor_verify_tests {
             2,
             "present anchors without a key cannot be verified: fail closed"
         );
+    }
+
+    /// T013: 含 failover 标记的 manifest → 独立计数 failover_markers，
+    /// 标记仍逐条参与哈希校验，退出码不受标记影响。
+    #[test]
+    fn test_failover_markers_counted_separately() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut chain = ArchiveChain::new(b"marker-count-key");
+        chain.append(r#"{"path":"a.log","sha256":"aa","timestamp":"t"}"#);
+        chain.append(r#"{"op":"failover_begin","sink":"a.log","ts":1}"#);
+        chain.append(r#"{"op":"failover_end","sink":"a.log","ts":2}"#);
+        chain.append(r#"{"path":"b.log","sha256":"bb","timestamp":"t"}"#);
+
+        let manifest = dir.path().join("markers.chain.jsonl");
+        let body = chain
+            .entries()
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&manifest, body).unwrap();
+        std::fs::write(
+            inklog::support::audit_chain::seal_path_for_manifest(&manifest),
+            serde_json::to_string(&chain.seal().unwrap()).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = verify_chain_with_key(&manifest, b"marker-count-key").unwrap();
+        assert_eq!(outcome.verdict, ChainVerdict::Intact);
+        assert_eq!(outcome.failover_markers, 2);
+
+        let report = ChainReport {
+            outcome,
+            anchor: AnchorSection::NoAnchor,
+        };
+        assert_eq!(report.exit_code(), 0, "markers must not change exit code");
+        assert_eq!(report.json(&manifest)["failover_markers"], 2);
     }
 }
 

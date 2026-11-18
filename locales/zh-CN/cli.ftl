@@ -197,6 +197,7 @@ cli-verify-chain-generation-mismatch = 链封条与 manifest 不匹配（封条�
 cli-verify-chain-anchor-ok = 锚校验通过（{ $count }）——独立密钥锚定确认链头
 cli-verify-chain-anchor-fail = 锚校验失败：{ $detail }——完整性无法证明
 cli-verify-chain-anchor-no-anchor = 链未锚定（manifest 同目录无 <stem>.anchor.jsonl）——锚保护未启用
+cli-verify-chain-failover-markers = 链内含 { $count } 个故障转移标记（begin/end/replay）——已作为普通链条目逐条校验
 
 # CLI generate schema 错误
 
