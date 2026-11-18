@@ -903,9 +903,12 @@ impl InklogConfig {
             && db.driver != DatabaseDriver::SQLite
             && db.pool_size == 0
         {
-            return Err(InklogError::ConfigError(format!(
-                "database_sink.pool_size must be at least 1 for the {} driver, got 0",
-                db.driver
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("field", "database_sink.pool_size");
+            args.set("driver", &db.driver);
+            return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                "config-db_pool_size_zero",
+                args,
             )));
         }
         // 口令位是脱敏占位符：这条 DSN 认证必然失败，显式拒绝而不是

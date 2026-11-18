@@ -16,3 +16,11 @@ sanitize-token_invariant = hardcoded token regex is valid
 sanitize-api_key_invariant = hardcoded api_key regex is valid
 sanitize-bearer_token_invariant = hardcoded Bearer token regex is valid
 sanitize-basic_auth_invariant = hardcoded Basic auth regex is valid
+
+# LoggerBuilder validation errors (accumulated into validation_errors)
+
+builder-invalid-level = Invalid log level '{ $level }'. Valid levels: { $levels }
+builder-driver-conflict-explicit = Database driver '{ $driver }' (explicitly set) conflicts with driver '{ $inferred }' inferred from URL '{ $url }'. The inferred driver takes precedence.
+builder-driver-conflict = Database driver '{ $driver }' conflicts with driver '{ $inferred }' inferred from URL '{ $url }'.
+builder-http-port-invalid = HTTP port must be between 1 and 65535
+builder-http-error-mode-unknown = Unknown HTTP error mode '{ $mode }'. Valid modes: warn, strict. Using default 'strict'.

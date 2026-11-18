@@ -138,6 +138,7 @@ cli-decrypt-err-input-dir-symlink = 输入目录是符号链接: { $path }
 cli-decrypt-err-subdir-symlink = 子目录条目是符号链接（已跳过）: { $path }
 
 cli-decrypt-err-truncated-v2 = v2 头部被截断: 期望 40 字节（含 16 字节 PBKDF2 盐），实际 { $read_count }
+cli-decrypt-err-v1-password-unrecoverable = 用密码派生密钥写入的 v1 加密文件无法恢复：v1 头部不存储 PBKDF2 盐，原始密钥无法重新派生（v2 已修复）。请用当前版本 inklog 重新加密源文件，或提供原始 raw/Base64 32 字节密钥。
 
 # CLI generate 路径验证
 
@@ -199,6 +200,10 @@ cli-verify-chain-generation-mismatch = 链封条与 manifest 不匹配（封条�
 cli-verify-chain-anchor-ok = 锚校验通过（{ $count }）——独立密钥锚定确认链头
 cli-verify-chain-anchor-fail = 锚校验失败：{ $detail }——完整性无法证明
 cli-verify-chain-anchor-no-anchor = 链未锚定（manifest 同目录无 <stem>.anchor.jsonl）——锚保护未启用
+cli-verify-chain-detail-anchors-valid = { $valid }/{ $total } 个锚校验通过
+cli-verify-chain-detail-first-mismatch = ；首个不匹配：锚 #{ $position }（链索引 { $index }）
+cli-verify-chain-detail-no-key = 锚密钥不可用（--anchor-key-env）
+cli-verify-chain-detail-unreadable = 锚文件无法读取：{ $err }
 cli-verify-chain-failover-markers = 链内含 { $count } 个故障转移标记（begin/end/replay）——已作为普通链条目逐条校验
 
 # CLI generate schema 错误

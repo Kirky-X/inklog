@@ -134,6 +134,7 @@ config-http_ip_whitelist_entry_invalid = ip_whitelist 条目不是合法 IP 或 
 # 数据库连接池限幅与运行时调级告警
 config-db_pool_size_capped = 数据库 pool_size 已收敛到 min(configured, num_cpus, 4)
 config-injected_db_pool_above_limit = 注入的 Database 配置的 pool_size 超过 effective_db_worker_limit；请在适配器层收敛连接池
+config-db_pool_size_zero = 对 { $driver } 驱动，{ $field } 必须至少为 1，当前为 0
 config-set_level_no_live_filter = set_level：没有可替换的已安装过滤器（detached build？）；指令集已更新
 
 # 配置修复与适配器告警

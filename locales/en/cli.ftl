@@ -138,6 +138,7 @@ cli-decrypt-err-input-dir-symlink = Input directory is a symbolic link: { $path 
 cli-decrypt-err-subdir-symlink = Subdirectory entry is a symbolic link (skipping): { $path }
 
 cli-decrypt-err-truncated-v2 = truncated v2 header: expected 40 bytes (including the 16-byte PBKDF2 salt), got { $read_count }
+cli-decrypt-err-v1-password-unrecoverable = v1 encrypted files written with a password-derived key are unrecoverable: the v1 header does not store the PBKDF2 salt, so the original key cannot be re-derived (fixed in v2). Re-encrypt the source with the current inklog version, or supply the original raw/Base64 32-byte key.
 
 # CLI generate path validation
 
@@ -199,6 +200,10 @@ cli-verify-chain-generation-mismatch = chain seal does not match manifest (seal 
 cli-verify-chain-anchor-ok = anchors verified ok ({ $count }) — independent-key anchoring confirms the chain head
 cli-verify-chain-anchor-fail = anchors FAILED: { $detail } — integrity cannot be proven
 cli-verify-chain-anchor-no-anchor = chain not anchored (no <stem>.anchor.jsonl next to the manifest) — anchor protection disabled
+cli-verify-chain-detail-anchors-valid = { $valid }/{ $total } anchors valid
+cli-verify-chain-detail-first-mismatch = ; first mismatch: anchor #{ $position } (chain index { $index })
+cli-verify-chain-detail-no-key = anchor key unavailable (--anchor-key-env)
+cli-verify-chain-detail-unreadable = anchor file unreadable: { $err }
 cli-verify-chain-failover-markers = chain contains { $count } failover markers (begin/end/replay) — checked as normal chain entries
 
 # CLI generate schema errors

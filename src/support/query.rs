@@ -122,18 +122,19 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
 
     if raw.starts_with(ENCRYPTED_MAGIC) {
         let env = key_env.ok_or_else(|| {
-            InklogError::ConfigError(format!(
-                "encrypted log file '{}' requires a key env var (use --key-env, \
-                 conventionally INKLOG_ENCRYPTION_KEY)",
-                path.display()
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", path.display());
+            InklogError::ConfigError(crate::i18n::tr_args(
+                "query-encrypted-file-needs-key-env",
+                args,
             ))
         })?;
         let plaintext = decrypt_bytes(&raw, path, env)?;
         return String::from_utf8(plaintext).map_err(|e| {
-            InklogError::ConfigError(format!(
-                "decrypted log file '{}' is not valid UTF-8: {e}",
-                path.display()
-            ))
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("path", path.display());
+            args.set("err", e);
+            InklogError::ConfigError(crate::i18n::tr_args("query-decrypted-not-utf8", args))
         });
     }
 
@@ -148,7 +149,11 @@ pub fn read_log_file(path: &Path, key_env: Option<&str>) -> Result<String, Inklo
 #[cfg(feature = "zstd")]
 fn decode_zst(raw: &[u8], path: &Path) -> Result<String, InklogError> {
     let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(raw)).map_err(|e| {
-        InklogError::ConfigError(format!("zstd decode failed for '{}': {e}", path.display()))
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("codec", "zstd");
+        args.set("path", path.display());
+        args.set("err", e);
+        InklogError::ConfigError(crate::i18n::tr_args("query-decode-failed", args))
     })?;
     // 流式读取 + 输出上限：恶意高压缩比样本不再可 OOM 查询进程
     read_with_limit(&mut decoder, path, "zstd")
@@ -157,9 +162,13 @@ fn decode_zst(raw: &[u8], path: &Path) -> Result<String, InklogError> {
 #[cfg(not(feature = "zstd"))]
 fn decode_zst(raw: &[u8], path: &Path) -> Result<String, InklogError> {
     let _ = (raw, path);
-    Err(InklogError::ConfigError(
-        "'.zst' log files require the 'compression' feature".to_string(),
-    ))
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("ext", ".zst");
+    args.set("feature", "compression");
+    Err(InklogError::ConfigError(crate::i18n::tr_args(
+        "query-compression-feature-missing",
+        args,
+    )))
 }
 
 /// `.gz` 归档解包（`gzip` feature 未启用时返回配置错误）。
@@ -172,18 +181,22 @@ fn decode_gz(raw: &[u8], path: &Path) -> Result<String, InklogError> {
 #[cfg(not(feature = "gzip"))]
 fn decode_gz(raw: &[u8], path: &Path) -> Result<String, InklogError> {
     let _ = (raw, path);
-    Err(InklogError::ConfigError(
-        "'.gz' log files require the 'gzip' feature".to_string(),
-    ))
+    let mut args = crate::i18n::MsgArgs::new();
+    args.set("ext", ".gz");
+    args.set("feature", "gzip");
+    Err(InklogError::ConfigError(crate::i18n::tr_args(
+        "query-compression-feature-missing",
+        args,
+    )))
 }
 
 /// 未压缩归档：按 UTF-8 文本读取。
 fn decode_utf8(raw: Vec<u8>, path: &Path) -> Result<String, InklogError> {
     String::from_utf8(raw).map_err(|e| {
-        InklogError::ConfigError(format!(
-            "log file '{}' is not valid UTF-8: {e}",
-            path.display()
-        ))
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("path", path.display());
+        args.set("err", e);
+        InklogError::ConfigError(crate::i18n::tr_args("query-not-utf8", args))
     })
 }
 
@@ -247,10 +260,11 @@ pub(crate) fn read_with_limit_inner(
     let mut total: u64 = 0;
     loop {
         let n = reader.read(&mut chunk).map_err(|e| {
-            InklogError::ConfigError(format!(
-                "{codec} decode failed for '{}': {e}",
-                path.display()
-            ))
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("codec", codec);
+            args.set("path", path.display());
+            args.set("err", e);
+            InklogError::ConfigError(crate::i18n::tr_args("query-decode-failed", args))
         })?;
         if n == 0 {
             break;
@@ -264,10 +278,10 @@ pub(crate) fn read_with_limit_inner(
         out.extend_from_slice(&chunk[..n]);
     }
     String::from_utf8(out).map_err(|e| {
-        InklogError::ConfigError(format!(
-            "decompressed log file '{}' is not valid UTF-8: {e}",
-            path.display()
-        ))
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("path", path.display());
+        args.set("err", e);
+        InklogError::ConfigError(crate::i18n::tr_args("query-decompressed-not-utf8", args))
     })
 }
 
@@ -277,9 +291,11 @@ fn decrypt_bytes(raw: &[u8], path: &Path, key_env: &str) -> Result<Vec<u8>, Inkl
     use aes_gcm::{Aes256Gcm, KeyInit};
 
     if raw.len() < 10 {
-        return Err(InklogError::ConfigError(format!(
-            "encrypted file '{}' too small for a header",
-            path.display()
+        let mut args = crate::i18n::MsgArgs::new();
+        args.set("path", path.display());
+        return Err(InklogError::ConfigError(crate::i18n::tr_args(
+            "query-encrypted-file-too-small",
+            args,
         )));
     }
     let version = u16::from_le_bytes([raw[8], raw[9]]);
@@ -297,37 +313,40 @@ fn decrypt_bytes(raw: &[u8], path: &Path, key_env: &str) -> Result<Vec<u8>, Inkl
             let algo = u16::from_le_bytes([raw[10], raw[11]]);
             let (nonce_bytes, ciphertext): ([u8; 12], &[u8]) = if algo == 1 {
                 if raw.len() < 24 {
-                    return Err(InklogError::ConfigError("truncated v1 header".into()));
+                    return Err(InklogError::ConfigError(crate::i18n::tr(
+                        "query-truncated-v1-header",
+                    )));
                 }
                 (raw[12..24].try_into().expect("12 bytes"), &raw[24..])
             } else {
                 // Legacy：MAGIC(8) + VER(2) + NONCE(12)
                 if raw.len() < 22 {
-                    return Err(InklogError::ConfigError("truncated legacy header".into()));
+                    return Err(InklogError::ConfigError(crate::i18n::tr(
+                        "query-truncated-legacy-header",
+                    )));
                 }
                 (raw[10..22].try_into().expect("12 bytes"), &raw[22..])
             };
             // v1 头不含盐：密码模式不可恢复，提前给出与 CLI 一致的诊断
             if crate::support::io::sink::encryption::env_key_is_password(key_env) {
-                return Err(InklogError::ConfigError(
-                    "v1 encrypted files written with a password-derived key are \
-                     unrecoverable: the v1 header does not store the PBKDF2 salt"
-                        .to_string(),
-                ));
+                return Err(InklogError::ConfigError(crate::i18n::tr(
+                    "cli-decrypt-err-v1-password-unrecoverable",
+                )));
             }
             let key = key_from_env(None)?;
             let cipher = Aes256Gcm::new((&*key).into());
             let nonce = aes_gcm::Nonce::from(nonce_bytes);
-            cipher
-                .decrypt(&nonce, ciphertext)
-                .map_err(|_| InklogError::ConfigError("decryption failed (wrong key?)".into()))
+            cipher.decrypt(&nonce, ciphertext).map_err(|_| {
+                InklogError::ConfigError(crate::i18n::tr("query-decryption-failed-wrong-key"))
+            })
         }
         2 => {
             if raw.len() < 40 {
-                return Err(InklogError::ConfigError(format!(
-                    "truncated v2 header in '{}': expected 40 bytes, got {}",
-                    path.display(),
-                    raw.len()
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("read_count", raw.len());
+                return Err(InklogError::ConfigError(crate::i18n::tr_args(
+                    "cli-decrypt-err-truncated-v2",
+                    args,
                 )));
             }
             let salt: [u8; 16] = raw[12..28].try_into().expect("16 bytes");
@@ -335,14 +354,22 @@ fn decrypt_bytes(raw: &[u8], path: &Path, key_env: &str) -> Result<Vec<u8>, Inkl
             let nonce: [u8; 12] = raw[28..40].try_into().expect("12 bytes");
             let cipher = Aes256Gcm::new((&*key).into());
             let nonce = aes_gcm::Nonce::from(nonce);
-            cipher
-                .decrypt(&nonce, &raw[40..])
-                .map_err(|_| InklogError::ConfigError("decryption failed (wrong key?)".into()))
+            cipher.decrypt(&nonce, &raw[40..]).map_err(|_| {
+                InklogError::ConfigError(crate::i18n::tr("query-decryption-failed-wrong-key"))
+            })
         }
-        other => Err(InklogError::ConfigError(format!(
-            "unsupported encryption version {other} in '{}'",
-            path.display()
-        ))),
+        other => {
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("version", other);
+            args.set("path", path.display());
+            // Fluent 的双向隔离符会插在版本号两侧；错误文案按纯文本比对
+            // 时去掉隔离符（路径仍保留翻译文案本身）。
+            let text: String = crate::i18n::tr_args("query-unsupported-encryption-version", args)
+                .chars()
+                .filter(|c| *c != '\u{2068}' && *c != '\u{2069}')
+                .collect();
+            Err(InklogError::ConfigError(text))
+        }
     }
 }
 

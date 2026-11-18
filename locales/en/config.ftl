@@ -134,6 +134,7 @@ config-http_ip_whitelist_entry_invalid = ip_whitelist entry is not a valid IP or
 # Database pool sizing and runtime level reload warnings
 config-db_pool_size_capped = Database pool_size capped to min(configured, num_cpus, 4)
 config-injected_db_pool_above_limit = Injected Database configured with pool_size above effective_db_worker_limit; cap the pool at the adapter level
+config-db_pool_size_zero = { $field } must be at least 1 for the { $driver } driver, got 0
 config-set_level_no_live_filter = set_level: no live installed filter to swap (detached build?); directives updated anyway
 
 # Config repair / adapter warnings

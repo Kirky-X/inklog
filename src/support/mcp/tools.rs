@@ -260,7 +260,14 @@ impl AuditVerifyTool {
         let entries: Vec<crate::support::audit_chain::ArchiveChainEntry> = body
             .lines()
             .filter(|l| !l.trim().is_empty())
-            .map(|l| serde_json::from_str(l).map_err(|e| format!("invalid manifest line: {e}")))
+            .map(|l| {
+                serde_json::from_str(l).map_err(|e| {
+                    format!(
+                        "{}: {e}",
+                        crate::i18n::tr("cli-verify-chain-err-line-invalid")
+                    )
+                })
+            })
             .collect::<Result<_, _>>()?;
         if entries.is_empty() {
             return Ok(serde_json::json!({

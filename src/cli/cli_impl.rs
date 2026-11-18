@@ -462,17 +462,28 @@ impl AnchorSection {
     fn fail_detail(&self) -> String {
         match self {
             AnchorSection::Verified(v) => {
-                let mut detail = format!("{}/{} anchors valid", v.valid, v.total);
+                let mut args = inklog::i18n::MsgArgs::new();
+                args.set("valid", v.valid);
+                args.set("total", v.total);
+                let mut detail =
+                    inklog::i18n::tr_args("cli-verify-chain-detail-anchors-valid", args);
                 if let Some((position, index)) = v.first_mismatch {
-                    detail.push_str(&format!(
-                        "; first mismatch: anchor #{} (chain index {})",
-                        position, index
+                    let mut args = inklog::i18n::MsgArgs::new();
+                    args.set("position", position);
+                    args.set("index", index);
+                    detail.push_str(&inklog::i18n::tr_args(
+                        "cli-verify-chain-detail-first-mismatch",
+                        args,
                     ));
                 }
                 detail
             }
-            AnchorSection::NoKey => "anchor key unavailable (--anchor-key-env)".to_string(),
-            AnchorSection::Unreadable { err } => format!("anchor file unreadable: {err}"),
+            AnchorSection::NoKey => inklog::i18n::tr("cli-verify-chain-detail-no-key"),
+            AnchorSection::Unreadable { err } => {
+                let mut args = inklog::i18n::MsgArgs::new();
+                args.set("err", err);
+                inklog::i18n::tr_args("cli-verify-chain-detail-unreadable", args)
+            }
             AnchorSection::NoAnchor => String::new(),
         }
     }

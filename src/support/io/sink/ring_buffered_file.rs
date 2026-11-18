@@ -680,18 +680,11 @@ impl ChannelBufferedFileSink {
             } else {
                 // rename+copy 双失败：轮转产物缺位且源文件被续写——持续失败
                 // 环境轮转永久失效，必须显性上报（对齐 process_rotated 失败路径）
-                // 日志面走 i18n；ops_event 的 payload 保留英文原始描述（机器可读面，
-                // 与 file.rs / 本文件 archive 失败路径的既有约定一致）
-                let detail = format!(
-                    "rotation rename and copy both failed for {}",
-                    base_path.display()
-                );
+                // 日志面与 ops_event payload 共用同一条翻译文案，避免中英双份
                 let mut args = crate::i18n::MsgArgs::new();
                 args.set("path", base_path.display());
-                tracing::error!(
-                    "{}",
-                    crate::i18n::tr_args("sink-rotate_rename_copy_both_failed", args)
-                );
+                let detail = crate::i18n::tr_args("sink-rotate_rename_copy_both_failed", args);
+                tracing::error!("{}", detail);
                 crate::support::ops_event::publish_internal(
                     "sink_degraded",
                     Some("file"),

@@ -654,10 +654,10 @@ impl DatabaseSinkConfig {
                 self.pool_size = 1;
             }
         } else if self.pool_size == 0 {
-            return Err(format!(
-                "pool_size must be at least 1 for the {} driver, got 0",
-                self.driver
-            ));
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("field", "pool_size");
+            args.set("driver", &self.driver);
+            return Err(crate::i18n::tr_args("config-db_pool_size_zero", args));
         }
         if self.batch_size == 0 {
             tracing::warn!("{}", crate::i18n::tr("warn-db_batch_size_zero"));

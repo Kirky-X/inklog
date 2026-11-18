@@ -560,11 +560,11 @@ impl LoggerBuilder {
     pub fn level(mut self, level: impl Into<String>) -> Self {
         let level_str = level.into();
         if !crate::LogLevel::is_valid_level(&level_str) {
-            self.validation_errors.push(format!(
-                "Invalid log level '{}'. Valid levels: {}",
-                level_str,
-                crate::LogLevel::VALID_LEVEL_STRINGS.join(", ")
-            ));
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("level", &level_str);
+            args.set("levels", crate::LogLevel::VALID_LEVEL_STRINGS.join(", "));
+            self.validation_errors
+                .push(crate::i18n::tr_args("builder-invalid-level", args));
             return self;
         }
         self.config.global.level = level_str;
@@ -627,9 +627,13 @@ impl LoggerBuilder {
             && let Some(ref target) = inferred
             && db.driver != *target
         {
-            self.validation_errors.push(format!(
-                "Database driver '{}' (explicitly set) conflicts with driver '{}' inferred from URL '{}'. The inferred driver takes precedence.",
-                db.driver, target, url_str
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("driver", &db.driver);
+            args.set("inferred", target);
+            args.set("url", &url_str);
+            self.validation_errors.push(crate::i18n::tr_args(
+                "builder-driver-conflict-explicit",
+                args,
             ));
         }
         if let Some(ref mut db) = self.config.database_sink {
@@ -678,10 +682,12 @@ impl LoggerBuilder {
             && let Some(target) = Self::infer_driver(&db.url)
             && target != driver
         {
-            self.validation_errors.push(format!(
-                "Database driver '{}' conflicts with driver '{}' inferred from URL '{}'.",
-                driver, target, db.url
-            ));
+            let mut args = crate::i18n::MsgArgs::new();
+            args.set("driver", &driver);
+            args.set("inferred", target);
+            args.set("url", &db.url);
+            self.validation_errors
+                .push(crate::i18n::tr_args("builder-driver-conflict", args));
         }
         self.db_driver_explicit = true;
         if let Some(ref mut db) = self.config.database_sink {
@@ -962,7 +968,7 @@ impl LoggerBuilder {
     pub fn http_port(mut self, port: u16) -> Self {
         if port == 0 {
             self.validation_errors
-                .push("HTTP port must be between 1 and 65535".to_string());
+                .push(crate::i18n::tr("builder-http-port-invalid"));
             return self;
         }
         if let Some(ref mut http) = self.config.http_server {
@@ -1021,9 +1027,11 @@ impl LoggerBuilder {
             "warn" => crate::HttpErrorMode::Warn,
             "strict" => crate::HttpErrorMode::Strict,
             _ => {
-                self.validation_errors.push(format!(
-                    "Unknown HTTP error mode '{}'. Valid modes: warn, strict. Using default 'strict'.",
-                    mode_str
+                let mut args = crate::i18n::MsgArgs::new();
+                args.set("mode", &mode_str);
+                self.validation_errors.push(crate::i18n::tr_args(
+                    "builder-http-error-mode-unknown",
+                    args,
                 ));
                 crate::HttpErrorMode::default()
             }

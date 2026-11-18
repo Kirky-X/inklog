@@ -235,11 +235,8 @@ pub fn decrypt_file_compatible(input_path: &Path, output_path: &Path, key_env: &
             // 提前给出明确诊断，而非误导性的 "decryption failed"。
             if inklog::sink::encryption::env_key_is_password(key_env) {
                 return Err(anyhow!(
-                    "v1 encrypted files written with a password-derived key are \
-                     unrecoverable: the v1 header does not store the PBKDF2 salt, so \
-                     the original key cannot be re-derived (fixed in v2). Re-encrypt \
-                     the source with the current inklog version, or supply the \
-                     original raw/Base64 32-byte key."
+                    "{}",
+                    inklog::i18n::tr("cli-decrypt-err-v1-password-unrecoverable")
                 ));
             }
             let key = get_encryption_key_cli(key_env).with_context(|| {
