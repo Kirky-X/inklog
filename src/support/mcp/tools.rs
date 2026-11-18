@@ -154,13 +154,29 @@ impl McpTool for QueryTool {
             return McpToolResult::error("level not allowed by policy");
         }
 
-        // field 键值经 sanitize 校验（去掉控制字符/ANSI 后作为 grep 补充语义）
+        // field 键值经 sanitize 校验后解析为 FieldPredicate，交给 query.rs 共用过滤链
+        let mut field_predicates: Vec<crate::support::query::FieldPredicate> = Vec::new();
         if let Some(field) = args.get("field").and_then(Value::as_str) {
             let sanitizer = crate::validation::sanitize::LogSanitizer::new();
             let cleaned = sanitizer.strip_ansi(field);
             if cleaned.contains(|c: char| c.is_control()) {
                 return McpToolResult::error("field contains control characters");
             }
+            let Some((key, value)) = cleaned.split_once('=') else {
+                return McpToolResult::error("field must be k=v");
+            };
+            if key.is_empty() || value.is_empty() {
+                return McpToolResult::error("field must be k=v");
+            }
+            // 数值字符串用 Number，否则用 String（matches_field 支持跨类型等值）
+            let value_json = value
+                .parse::<i64>()
+                .map(serde_json::Value::from)
+                .unwrap_or_else(|_| Value::String(value.to_string()));
+            field_predicates.push(crate::support::query::FieldPredicate {
+                key: key.to_string(),
+                value: value_json,
+            });
         }
 
         let raw_limit = args
@@ -188,6 +204,7 @@ impl McpTool for QueryTool {
             level,
             keyword: args.get("grep").and_then(Value::as_str).map(str::to_string),
             limit,
+            fields: field_predicates,
         };
         match query_paths(&paths, &opts, None) {
             Ok(entries) => McpToolResult::ok(entries_to_text(&entries, self.cfg.redact)),

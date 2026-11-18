@@ -45,6 +45,8 @@ pub struct QueryOptions {
     pub keyword: Option<String>,
     /// 最多返回的记录数（0 = 不限制）
     pub limit: usize,
+    /// 结构化字段谓词（全部满足 = AND）
+    pub fields: Vec<FieldPredicate>,
 }
 
 /// 检索结果条目。
@@ -60,6 +62,36 @@ pub struct LogEntry {
     pub message: String,
     /// 来源文件路径
     pub source: PathBuf,
+    /// 结构化字段（JSON 行的顶层键值；默认文本模板解析为空）
+    #[serde(default)]
+    pub fields: serde_json::Map<String, serde_json::Value>,
+}
+
+/// 结构化字段过滤谓词：字段存在且值相等（字符串或数值等值）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldPredicate {
+    /// 字段名
+    pub key: String,
+    /// 期望值
+    pub value: serde_json::Value,
+}
+
+/// 判断条目是否满足单条字段谓词。
+///
+/// 数值与字符串可跨类型等值：`42`（数值）与 `"42"`（字符串文本）视为相等；
+/// 布尔/其它类型按 JSON 值严格比较。
+pub fn matches_field(entry: &LogEntry, predicate: &FieldPredicate) -> bool {
+    let Some(actual) = entry.fields.get(&predicate.key) else {
+        return false;
+    };
+    if actual == &predicate.value {
+        return true;
+    }
+    match (actual, &predicate.value) {
+        (serde_json::Value::String(s), serde_json::Value::Number(n)) => s == &n.to_string(),
+        (serde_json::Value::Number(n), serde_json::Value::String(s)) => n.to_string() == *s,
+        _ => false,
+    }
 }
 
 /// 级别 → 序数（用于最低级别过滤）。
@@ -351,6 +383,7 @@ pub(crate) fn parse_line(line: &str, source: &Path) -> Option<LogEntry> {
                 })
                 .unwrap_or_default(),
             source: source.to_path_buf(),
+            fields: json.as_object().cloned().unwrap_or_default(),
         });
     }
     // 默认模板：{timestamp} [{level}] {target} - {message}
@@ -375,6 +408,7 @@ pub(crate) fn parse_line(line: &str, source: &Path) -> Option<LogEntry> {
         target,
         message,
         source: source.to_path_buf(),
+        fields: serde_json::Map::new(),
     })
 }
 
@@ -429,6 +463,9 @@ fn entry_passes_filters(entry: &LogEntry, opts: &QueryOptions, min_rank: Option<
         && !entry.message.contains(keyword.as_str())
         && !entry.target.contains(keyword.as_str())
     {
+        return false;
+    }
+    if !opts.fields.iter().all(|p| matches_field(entry, p)) {
         return false;
     }
     true
@@ -489,6 +526,88 @@ pub fn query_exit_code(entries: &[LogEntry]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- T009: 字段谓词 ----
+
+    fn entry_with_fields(fields: serde_json::Map<String, serde_json::Value>) -> LogEntry {
+        LogEntry {
+            timestamp: None,
+            level: "INFO".to_string(),
+            target: "test".to_string(),
+            message: "m".to_string(),
+            source: PathBuf::from("test.log"),
+            fields,
+        }
+    }
+
+    #[test]
+    fn test_matches_field_string_equality() {
+        let mut fields = serde_json::Map::new();
+        fields.insert("user".to_string(), serde_json::json!("alice"));
+        let entry = entry_with_fields(fields);
+        assert!(matches_field(
+            &entry,
+            &FieldPredicate {
+                key: "user".to_string(),
+                value: serde_json::json!("alice")
+            }
+        ));
+        assert!(!matches_field(
+            &entry,
+            &FieldPredicate {
+                key: "user".to_string(),
+                value: serde_json::json!("bob")
+            }
+        ));
+    }
+
+    #[test]
+    fn test_matches_field_number_string_cross_equality() {
+        let mut fields = serde_json::Map::new();
+        fields.insert("code".to_string(), serde_json::json!(42));
+        let entry = entry_with_fields(fields);
+        assert!(matches_field(
+            &entry,
+            &FieldPredicate {
+                key: "code".to_string(),
+                value: serde_json::json!("42")
+            }
+        ));
+        assert!(matches_field(
+            &entry,
+            &FieldPredicate {
+                key: "code".to_string(),
+                value: serde_json::json!(42)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_multiple_predicates_and_semantics() {
+        let mut fields = serde_json::Map::new();
+        fields.insert("user".to_string(), serde_json::json!("alice"));
+        fields.insert("code".to_string(), serde_json::json!(42));
+        let entry = entry_with_fields(fields);
+        let opts = QueryOptions {
+            fields: vec![
+                FieldPredicate {
+                    key: "user".to_string(),
+                    value: serde_json::json!("alice"),
+                },
+                FieldPredicate {
+                    key: "code".to_string(),
+                    value: serde_json::json!(42),
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(opts.fields.iter().all(|p| matches_field(&entry, p)));
+        let fail = FieldPredicate {
+            key: "user".to_string(),
+            value: serde_json::json!("bob"),
+        };
+        assert!(!matches_field(&entry, &fail));
+    }
 
     fn write_file(dir: &Path, name: &str, content: &str) -> PathBuf {
         let p = dir.join(name);

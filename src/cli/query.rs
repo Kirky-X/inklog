@@ -63,6 +63,7 @@ pub fn run_query(args: &QueryArgs) -> Result<i32> {
         level: args.level.clone(),
         keyword: args.grep.clone(),
         limit: args.limit,
+        fields: Vec::new(),
     };
     let entries = query_paths(&args.path, &opts, args.key_env.as_deref())?;
 
