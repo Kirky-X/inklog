@@ -508,6 +508,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_audit_verify_valid_manifest_fields() {
         use crate::support::audit_chain::{
             ArchiveChain, HmacAnchorSigner, anchor_path_for_manifest, create_anchor_record,
