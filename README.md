@@ -159,6 +159,24 @@ The five core concepts — initialization, recording, sinks, configuration, and 
 
 For the full feature list, defaults, and how to enable them, see the [📖 User Guide](docs/en/USER_GUIDE.md) "🎨 Feature Flags" section; the database-backend exclusivity note (`--all-features` unsupported) is in the same section.
 
+### MCP tool surface (`mcp`)
+
+Build with `--features "cli,mcp"` to expose a read-only MCP stdio server for Agent hosts:
+
+```bash
+inklog-cli mcp --config inklog_config.toml
+```
+
+The server implements JSON-RPC 2.0 over newline-delimited JSON on stdin/stdout with three tools: `inklog_query`, `inklog_audit_verify`, and `inklog_stats`. **Security policy is enforced inside the tools** — the Agent cannot bypass masking, level/target allowlists, result limits, or path boundaries through tool arguments. Configure the policy in `[mcp]`:
+
+- `allowed_roots`: `inklog_query` paths are realpath-checked against these roots (symlinks escaping the root are rejected).
+- `redact` (default `true`): query results pass through the same `DataMasker` used by sinks. Setting `redact = false` is an explicit security concession; document it in your deployment.
+- `max_limit` (default 1000): tool `limit` is clamped to this value.
+- `allowed_levels` / `allow`: tool and level allowlists.
+- `audit_key_env`: env name for `inklog_audit_verify` (must be `INKLOG_` prefixed); the tool never accepts an env name from the Agent.
+
+MCP is local stdio only (no remote transport); remote transports are deferred. See the user guides for the full policy reference.
+
 ---
 
 ## 📚 Documentation

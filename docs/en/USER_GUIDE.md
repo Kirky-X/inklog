@@ -775,6 +775,18 @@ Selected examples:
 
 ## 🛠️ Advanced Topics
 
+### MCP Tool Surface (`mcp` feature)
+
+Build with `--features "cli,mcp"` and run `inklog-cli mcp --config <path>` to expose a read-only [Model Context Protocol](https://modelcontextprotocol.io/) stdio server. It speaks JSON-RPC 2.0 as newline-delimited JSON on stdin/stdout and offers three tools:
+
+- `inklog_query` — `{paths, since, until, level, grep, field, limit}`; returns JSONL text blocks.
+- `inklog_audit_verify` — `{manifest}`; returns the segmented chain/seal/anchor verdict (same fields as `verify-chain --json`).
+- `inklog_stats` — read-only metrics and sink health snapshot.
+
+**Security model:** policy is enforced inside the tools, not trusted from Agent arguments. `[mcp]` config provides: `allow` (tool allowlist), `max_limit` (default 1000), `allowed_levels`, `allowed_target_prefixes`, `redact` (default `true`), `allowed_roots` (realpath boundary for `paths`, symlink escapes rejected), `audit_key_env` (must be `INKLOG_`-prefixed; the verify tool never accepts an env name), and `allowed_manifest_dirs`. `redact = false` is an explicit security concession — the Agent then sees unmasked results. MCP is stdio-only; remote transports are deferred.
+
+`--field <k=v>` (repeatable, AND semantics) is shared between the MCP query tool and `inklog-cli query`; numeric values match both `42` and `"42"`.
+
 ### Audit Chain Anchoring and Failover Markers
 
 The archive chain seal detects truncation, but anyone holding `INKLOG_AUDIT_KEY` can rebuild a self-consistent chain and seal. Independent anchoring adds a second, separate key so that a holder of only the chain key cannot forge the chain head:

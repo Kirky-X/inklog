@@ -771,6 +771,18 @@ cargo run --package inklog-examples --bin <名称>
 
 ## 🛠️ 高级主题
 
+### MCP 工具面（`mcp` 特性）
+
+用 `--features "cli,mcp"` 构建并运行 `inklog-cli mcp --config <path>`，即可暴露一个只读的 [Model Context Protocol](https://modelcontextprotocol.io/) stdio 服务器。它在 stdin/stdout 上以按行 JSON 形式讲 JSON-RPC 2.0，提供三个工具：
+
+- `inklog_query`：`{paths, since, until, level, grep, field, limit}`；返回 JSONL 文本块。
+- `inklog_audit_verify`：`{manifest}`；返回链/封条/锚分段结论（字段与 `verify-chain --json` 同构）。
+- `inklog_stats`：只读的指标与 sink 健康快照。
+
+**安全模型**：策略在工具内部强制执行，不信任 Agent 参数。`[mcp]` 配置提供：`allow`（工具白名单）、`max_limit`（默认 1000）、`allowed_levels`、`allowed_target_prefixes`、`redact`（默认 `true`）、`allowed_roots`（`paths` 的 realpath 边界，拒绝软链逃逸）、`audit_key_env`（须以 `INKLOG_` 开头；验证工具不接受 env 名）以及 `allowed_manifest_dirs`。`redact = false` 是显式安全让步——此时 Agent 看到未脱敏结果。MCP 仅支持 stdio；远程传输已 Deferred。
+
+`--field <k=v>`（可重复，AND 语义）由 MCP query 工具与 `inklog-cli query` 共用；数值可同时匹配 `42` 与 `"42"`。
+
 ### 审计链锚定与故障转移标记
 
 归档链封条能检测截尾，但持有 `INKLOG_AUDIT_KEY` 的主体可重建一条自洽的链与封条。独立锚定增加一把独立的密钥，使仅持链密钥者无法伪造链头：

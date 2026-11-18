@@ -202,6 +202,11 @@ path = "tests/integration/mod.rs"
 required-features = ["sqlite", "http", "cli", "compression", "parquet", "test-utils"]
 
 [[test]]
+name = "mcp_e2e"
+path = "tests/integration/mcp/mod.rs"
+required-features = ["cli", "mcp"]
+
+[[test]]
 name = "combinations"
 path = "tests/combinations/mod.rs"
 # complex_features/multi_sink_fallback 使用 DatabaseSink（db 后端需求）
