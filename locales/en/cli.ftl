@@ -183,6 +183,7 @@ cli-verify-chain-help-manifest = Audit chain manifest (<stem>.chain.jsonl)
 cli-verify-chain-help-key-env = Environment variable name holding the audit chain key
 cli-verify-chain-help-anchor = Anchor file (default: probe <stem>.anchor.jsonl next to the manifest; verified when present)
 cli-verify-chain-help-anchor-key-env = Environment variable name holding the HMAC anchor key (pass the variable name, not the key value)
+cli-verify-chain-help-anchor-pubkey = Ed25519 public key (hex) for asymmetric anchor verification (audit-anchor feature)
 cli-verify-chain-err-manifest-unreadable = Cannot read audit chain manifest
 cli-verify-chain-err-line-invalid = Invalid manifest line
 cli-verify-chain-err-key-missing = Audit key environment variable is not set

@@ -149,6 +149,13 @@ enum Commands {
         #[arg(help = inklog::i18n::tr("cli-verify-chain-help-anchor-key-env"))]
         #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
         anchor_key_env: Option<String>,
+
+        /// Ed25519 公钥（hex）——由 audit-anchor feature 提供非对称验签路径
+        #[cfg(feature = "audit-anchor")]
+        #[arg(long)]
+        #[arg(help = inklog::i18n::tr("cli-verify-chain-help-anchor-pubkey"))]
+        #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        anchor_pubkey: Option<String>,
     },
 
     #[command(name = "doctor")]

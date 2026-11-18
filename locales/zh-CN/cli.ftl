@@ -183,6 +183,7 @@ cli-verify-chain-help-manifest = 审计链 manifest（<stem>.chain.jsonl）
 cli-verify-chain-help-key-env = 存放审计链密钥的环境变量名
 cli-verify-chain-help-anchor = 锚文件（缺省探测 manifest 同目录 <stem>.anchor.jsonl，存在即校验）
 cli-verify-chain-help-anchor-key-env = 持有 HMAC 锚密钥的环境变量名（传变量名，非密钥值）
+cli-verify-chain-help-anchor-pubkey = Ed25519 公钥（hex），用于非对称锚校验（audit-anchor feature）
 cli-verify-chain-err-manifest-unreadable = 无法读取审计链 manifest
 cli-verify-chain-err-line-invalid = manifest 行格式非法
 cli-verify-chain-err-key-missing = 审计链密钥环境变量未设置

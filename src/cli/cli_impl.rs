@@ -240,13 +240,34 @@ pub(crate) fn run_with_args(args: Cli) -> Result<i32> {
             key_env,
             anchor,
             anchor_key_env,
-        } => verify_chain_manifest(
-            &manifest,
-            &key_env,
-            anchor.as_deref(),
-            anchor_key_env.as_deref(),
-            args.json,
-        ),
+            #[cfg(feature = "audit-anchor")]
+            anchor_pubkey,
+        } => {
+            #[cfg(feature = "audit-anchor")]
+            if let Some(pubkey) = anchor_pubkey.as_deref() {
+                let report = verify_chain_with_anchor_pubkey(
+                    &manifest,
+                    || {
+                        std::env::var(&key_env)
+                            .with_context(|| inklog::i18n::tr("cli-verify-chain-err-key-missing"))
+                            .map(String::into_bytes)
+                    },
+                    Some(pubkey),
+                )?;
+                print_verdict(&manifest, &report);
+                if args.json {
+                    println!("{}", report.json(&manifest));
+                }
+                return Ok(report.exit_code());
+            }
+            verify_chain_manifest(
+                &manifest,
+                &key_env,
+                anchor.as_deref(),
+                anchor_key_env.as_deref(),
+                args.json,
+            )
+        }
 
         Commands::Doctor { security, config } => {
             if !security {
@@ -503,15 +524,25 @@ pub(crate) fn verify_chain_with_anchors(
     Ok(ChainReport { outcome, anchor })
 }
 
-/// 锚校验段执行：探测/显式锚文件 → 读取 → `verify_anchors`。
-///
-/// 锚校验复用链判定读到的同一份 entries 快照——锚与链必须对同一代
-/// manifest 判定，二次读取可能在轮转竞态下产生假失配。
-fn verify_anchor_section(
+/// 非对称锚校验（feature `audit-anchor`）：验侧只需 Ed25519 公钥 hex。
+/// pubkey 无效（解析失败/格式错）→ 锚段按 fail-closed 处理。
+#[cfg(feature = "audit-anchor")]
+pub(crate) fn verify_chain_with_anchor_pubkey(
+    manifest: &std::path::Path,
+    key: impl FnOnce() -> Result<Vec<u8>>,
+    pubkey_hex: Option<&str>,
+) -> Result<ChainReport> {
+    let outcome = verify_chain(manifest, key)?;
+    let anchor = verify_anchor_section_pubkey(manifest, pubkey_hex, &outcome.entries);
+    Ok(ChainReport { outcome, anchor })
+}
+
+/// 通用锚段执行：解析锚文件后用调用方提供的签名器逐锚校验。
+fn verify_anchor_records_with_signer(
     manifest: &std::path::Path,
     anchor_path: Option<&std::path::Path>,
-    anchor_key: Option<Vec<u8>>,
     entries: &[ArchiveChainEntry],
+    signer: &dyn inklog::support::audit_chain::AnchorSigner,
 ) -> AnchorSection {
     let resolved = match anchor_path {
         Some(path) => Some(path.to_path_buf()),
@@ -527,14 +558,68 @@ fn verify_anchor_section(
         Ok(records) => records,
         Err(err) => return AnchorSection::Unreadable { err },
     };
-    let Some(key) = anchor_key else {
-        return AnchorSection::NoKey;
-    };
     AnchorSection::Verified(inklog::support::audit_chain::verify_anchors(
-        &records,
+        &records, entries, signer,
+    ))
+}
+
+/// 锚校验段执行：探测/显式锚文件 → 读取 → `verify_anchors`。
+///
+/// 锚校验复用链判定读到的同一份 entries 快照——锚与链必须对同一代
+/// manifest 判定，二次读取可能在轮转竞态下产生假失配。
+fn verify_anchor_section(
+    manifest: &std::path::Path,
+    anchor_path: Option<&std::path::Path>,
+    anchor_key: Option<Vec<u8>>,
+    entries: &[ArchiveChainEntry],
+) -> AnchorSection {
+    let Some(key) = anchor_key else {
+        // 无密钥时仍需判定是否存在锚文件（存在即 fail-closed，避免静默通过）
+        let resolved = match anchor_path {
+            Some(path) => Some(path.to_path_buf()),
+            None => {
+                let probe = inklog::support::audit_chain::anchor_path_for_manifest(manifest);
+                probe.exists().then_some(probe)
+            }
+        };
+        return if resolved.is_some() {
+            AnchorSection::NoKey
+        } else {
+            AnchorSection::NoAnchor
+        };
+    };
+    verify_anchor_records_with_signer(
+        manifest,
+        anchor_path,
         entries,
         &inklog::support::audit_chain::HmacAnchorSigner::new(key),
-    ))
+    )
+}
+
+/// 非对称验侧锚段（feature `audit-anchor`）：公钥无效按 Unreadable fail-closed。
+#[cfg(feature = "audit-anchor")]
+fn verify_anchor_section_pubkey(
+    manifest: &std::path::Path,
+    pubkey_hex: Option<&str>,
+    entries: &[ArchiveChainEntry],
+) -> AnchorSection {
+    let Some(raw) = pubkey_hex else {
+        let probe = inklog::support::audit_chain::anchor_path_for_manifest(manifest);
+        return if probe.exists() {
+            AnchorSection::NoKey
+        } else {
+            AnchorSection::NoAnchor
+        };
+    };
+    let signer = match inklog::support::audit_chain::Ed25519AnchorSigner::from_pubkey_hex(raw) {
+        Ok(signer) => signer,
+        Err(err) => {
+            return AnchorSection::Unreadable {
+                err: err.to_string(),
+            };
+        }
+    };
+    verify_anchor_records_with_signer(manifest, None, entries, &signer)
 }
 
 /// 读取并解析锚文件（JSONL，每行一条 [`inklog::support::audit_chain::AnchorRecord`]）。
@@ -1357,7 +1442,7 @@ mod anchor_verify_tests {
     /// 锚文件存在但锚密钥不可用 → 无法验证（fail-closed，退出码 2）。
     #[test]
     fn test_anchor_without_key_fails_closed() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let (manifest, entries) = build_chain(dir.path(), "nokey", b"chain-key-t006", 2);
         write_anchor_file(&manifest, &entries, b"anchor-key-t006");
 
@@ -1370,5 +1455,101 @@ mod anchor_verify_tests {
             2,
             "present anchors without a key cannot be verified: fail closed"
         );
+    }
+}
+
+/// T010: verify-chain `--anchor-pubkey` 的非对称验签路径（feature 门控）。
+#[cfg(all(test, feature = "audit-anchor"))]
+mod ed25519_anchor_verify_tests {
+    use super::*;
+    use inklog::support::audit_chain::{
+        Ed25519AnchorSigner, anchor_path_for_manifest, create_anchor_record,
+    };
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn build_chain(
+        dir: &std::path::Path,
+        key: &[u8],
+        n: usize,
+    ) -> (PathBuf, Vec<ArchiveChainEntry>) {
+        let mut chain = ArchiveChain::new(key);
+        for i in 0..n {
+            chain.append(&format!("{{\"n\":{i}}}"));
+        }
+        let manifest = dir.join("ed25519.chain.jsonl");
+        let body = chain
+            .entries()
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&manifest, body).unwrap();
+        std::fs::write(
+            inklog::support::audit_chain::seal_path_for_manifest(&manifest),
+            serde_json::to_string(&chain.seal().expect("seal")).unwrap(),
+        )
+        .unwrap();
+        (manifest, chain.entries().to_vec())
+    }
+
+    fn write_ed25519_anchors(
+        manifest: &std::path::Path,
+        entries: &[ArchiveChainEntry],
+        signer: &Ed25519AnchorSigner,
+    ) {
+        let records: Vec<_> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| create_anchor_record(signer, i as u64, &e.hmac, i as u64 + 1).unwrap())
+            .collect();
+        let body = records
+            .iter()
+            .map(|r| serde_json::to_string(r).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(anchor_path_for_manifest(manifest), body).unwrap();
+    }
+
+    #[test]
+    fn test_ed25519_pubkey_verifies_anchors() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, entries) = build_chain(dir.path(), b"chain-key-t010", 3);
+        let signer = Ed25519AnchorSigner::from_seed([0x42; 32]).unwrap();
+        write_ed25519_anchors(&manifest, &entries, &signer);
+
+        let pubkey_hex = hex(&signer.verifying_key_bytes());
+        let report = verify_chain_with_anchor_pubkey(
+            &manifest,
+            || Ok(b"chain-key-t010".to_vec()),
+            Some(&pubkey_hex),
+        )
+        .unwrap();
+        let AnchorSection::Verified(verdict) = &report.anchor else {
+            panic!("valid pubkey must trigger verification");
+        };
+        assert!(verdict.all_valid());
+        assert_eq!(report.json(&manifest)["anchors_valid"], "3/3");
+        assert_eq!(report.exit_code(), 0);
+    }
+
+    #[test]
+    fn test_ed25519_wrong_pubkey_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, entries) = build_chain(dir.path(), b"chain-key-t010", 2);
+        let signer = Ed25519AnchorSigner::from_seed([0x42; 32]).unwrap();
+        write_ed25519_anchors(&manifest, &entries, &signer);
+
+        let wrong = Ed25519AnchorSigner::from_seed([0x43; 32]).unwrap();
+        let wrong_hex = hex(&wrong.verifying_key_bytes());
+        let report = verify_chain_with_anchor_pubkey(
+            &manifest,
+            || Ok(b"chain-key-t010".to_vec()),
+            Some(&wrong_hex),
+        )
+        .unwrap();
+        assert_ne!(report.exit_code(), 0, "wrong pubkey must fail verification");
     }
 }
