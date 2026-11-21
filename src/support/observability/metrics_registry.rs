@@ -107,6 +107,54 @@ struct RegistryInner {
     families: Mutex<BTreeMap<String, MetricFamily>>,
 }
 
+/// 收编 counter/gauge/histogram 子序列访问器的公共骨架：
+/// 锁定 families → 解构对应 MetricFamily 变体（否则 `unreachable!` 带 i18n key）→
+/// 按标签取值取（或创建零值）子序列 → clone。
+///
+/// 两臂分别表达两种返回类型：`atomic` 返回 `Arc<AtomicU64>`（counter/gauge），
+/// `histogram` 返回 `Arc<HistogramSeries>`（多 buckets 克隆）。
+macro_rules! metric_series_accessors {
+    ($(#[$doc:meta])* atomic $name:ident($variant:ident, $key:literal);) => {
+        $(#[$doc])*
+        fn $name(&self, name: &str, values: &[String]) -> Arc<AtomicU64> {
+            let mut families = self.families.lock().unwrap();
+            let Some(MetricFamily::$variant { series, .. }) = families.get_mut(name) else {
+                unreachable!("{}", crate::i18n::tr($key));
+            };
+            series
+                .entry(values.to_vec())
+                .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+                .clone()
+        }
+    };
+    ($(#[$doc:meta])* histogram $name:ident($key:literal);) => {
+        $(#[$doc])*
+        fn $name(&self, name: &str, values: &[String]) -> Arc<HistogramSeries> {
+            let mut families = self.families.lock().unwrap();
+            let Some(MetricFamily::Histogram {
+                buckets, series, ..
+            }) = families.get_mut(name)
+            else {
+                unreachable!("{}", crate::i18n::tr($key));
+            };
+            let buckets = buckets.clone();
+            series
+                .entry(values.to_vec())
+                .or_insert_with(|| {
+                    Arc::new(HistogramSeries {
+                        bucket_counts: buckets
+                            .iter()
+                            .map(|_| AtomicU64::new(0))
+                            .collect::<Vec<_>>(),
+                        sum_bits: AtomicU64::new(0),
+                        count: AtomicU64::new(0),
+                    })
+                })
+                .clone()
+        }
+    };
+}
+
 impl RegistryInner {
     /// 注册（或校验已注册）指标族；参数不一致时 panic（编程期错误显性失败）。
     fn register(
@@ -196,56 +244,19 @@ impl RegistryInner {
         }
     }
 
-    /// 取（或创建）counter 子序列。
-    fn counter_series(&self, name: &str, values: &[String]) -> Arc<AtomicU64> {
-        let mut families = self.families.lock().unwrap();
-        let Some(MetricFamily::Counter { series, .. }) = families.get_mut(name) else {
-            unreachable!("{}", crate::i18n::tr("metrics-registry-counter-registered"));
-        };
-        series
-            .entry(values.to_vec())
-            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
-            .clone()
+    metric_series_accessors! {
+        /// 取（或创建）counter 子序列。
+        atomic counter_series(Counter, "metrics-registry-counter-registered");
     }
 
-    /// 取（或创建）gauge 子序列。
-    fn gauge_series(&self, name: &str, values: &[String]) -> Arc<AtomicU64> {
-        let mut families = self.families.lock().unwrap();
-        let Some(MetricFamily::Gauge { series, .. }) = families.get_mut(name) else {
-            unreachable!("{}", crate::i18n::tr("metrics-registry-gauge-registered"));
-        };
-        series
-            .entry(values.to_vec())
-            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
-            .clone()
+    metric_series_accessors! {
+        /// 取（或创建）gauge 子序列。
+        atomic gauge_series(Gauge, "metrics-registry-gauge-registered");
     }
 
-    /// 取（或创建）histogram 子序列。
-    fn histogram_series(&self, name: &str, values: &[String]) -> Arc<HistogramSeries> {
-        let mut families = self.families.lock().unwrap();
-        let Some(MetricFamily::Histogram {
-            buckets, series, ..
-        }) = families.get_mut(name)
-        else {
-            unreachable!(
-                "{}",
-                crate::i18n::tr("metrics-registry-histogram-registered")
-            );
-        };
-        let buckets = buckets.clone();
-        series
-            .entry(values.to_vec())
-            .or_insert_with(|| {
-                Arc::new(HistogramSeries {
-                    bucket_counts: buckets
-                        .iter()
-                        .map(|_| AtomicU64::new(0))
-                        .collect::<Vec<_>>(),
-                    sum_bits: AtomicU64::new(0),
-                    count: AtomicU64::new(0),
-                })
-            })
-            .clone()
+    metric_series_accessors! {
+        /// 取（或创建）histogram 子序列。
+        histogram histogram_series("metrics-registry-histogram-registered");
     }
 }
 
