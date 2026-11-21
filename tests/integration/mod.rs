@@ -11,6 +11,9 @@
 //! - 稳定性测试
 //! - 验证测试
 
+#[path = "../common/parquet_verify.rs"]
+mod parquet_verify;
+
 mod additional_tests;
 mod batch;
 mod comprehensive_validation_test;

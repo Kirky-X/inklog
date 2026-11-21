@@ -15,6 +15,13 @@
 
 // 通用集成测试
 
+#[cfg(all(
+    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
+    feature = "parquet"
+))]
+#[path = "common/parquet_verify.rs"]
+mod parquet_verify;
+
 use inklog::LoggerManager;
 use inklog::sink::LogSink;
 use inklog::tracing::{error, info};
@@ -865,27 +872,6 @@ fn verify_parquet_schema(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-/// Verifies Parquet file data content
-#[cfg(all(
-    any(feature = "sqlite", feature = "postgres", feature = "mysql"),
-    feature = "parquet"
-))]
-fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    let bytes = Bytes::copy_from_slice(data);
-    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
-
-    let mut total_rows = 0;
-    for batch in reader {
-        let batch = batch?;
-        assert!(batch.num_rows() > 0, "Batch should have rows");
-        total_rows += batch.num_rows();
-    }
-
-    assert!(total_rows > 0, "Parquet file should contain data");
-
-    Ok(())
-}
-
 /// Complete Parquet file verification (schema + data)
 #[cfg(all(
     any(feature = "sqlite", feature = "postgres", feature = "mysql"),
@@ -893,7 +879,7 @@ fn verify_parquet_data(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 ))]
 fn verify_parquet_file(data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     verify_parquet_schema(data)?;
-    verify_parquet_data(data)?;
+    crate::parquet_verify::verify_parquet_data(data)?;
     Ok(())
 }
 
