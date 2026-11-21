@@ -1094,21 +1094,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_env_mutation_holds_process_wide_serial_lock() {
-        assert!(
-            serial_test::is_locked_serially(None),
-            "env mutation must run under the process-wide serial lock, \
-             not a module-local mutex"
-        );
-        unsafe {
-            std::env::set_var("INKLOG_TEST_SERIAL_LOCK_PROBE", "1");
-        }
-        assert_eq!(
-            std::env::var("INKLOG_TEST_SERIAL_LOCK_PROBE").as_deref(),
-            Ok("1"),
-            "env mutation must be observable while the lock is held"
-        );
-        unsafe {
-            std::env::remove_var("INKLOG_TEST_SERIAL_LOCK_PROBE");
-        }
+        crate::support::test_support::assert_env_mutation_runs_under_serial_lock();
     }
 }
