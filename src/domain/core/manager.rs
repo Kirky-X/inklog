@@ -1355,8 +1355,8 @@ mod tests {
     }
 
     use super::*;
-    use chrono::Utc;
     use serial_test::serial;
+    use time::OffsetDateTime;
 
     // LoggerBuilder 测试 - 验证配置传播
 
@@ -2288,7 +2288,7 @@ worker_threads = 1
             .expect("Failed to build manager with file sink");
 
         let record = Arc::new(LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "worker_test".to_string(),
             message: "worker_write_unique_marker_12345".to_string(),
@@ -2331,7 +2331,7 @@ worker_threads = 1
 
         for i in 0..10u32 {
             let record = Arc::new(LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "drain_test".to_string(),
                 message: format!("drain_record_{:02}", i),
@@ -2399,7 +2399,7 @@ worker_threads = 1
             .expect("Failed to build manager");
 
         let record = Arc::new(LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "console_test".to_string(),
             message: "console_marker_98765".to_string(),
@@ -3453,7 +3453,7 @@ worker_threads = 1
 
         // 验证 file worker 实际启动并写入文件（证明配置完整生效）
         let record = Arc::new(LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "config_provider_test".to_string(),
             message: "from_provider_unique_marker_abc123".to_string(),
@@ -3764,7 +3764,7 @@ worker_threads = 1
 
         // 发送一条记录让 file worker 进入正常 recv_timeout 路径
         let record = Arc::new(LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "recover_test".to_string(),
             message: "before_recover_marker".to_string(),
@@ -3792,7 +3792,7 @@ worker_threads = 1
 
         // 发送第二条记录，验证 file worker 在 recover 后仍能正常工作
         let record2 = Arc::new(LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "recover_test".to_string(),
             message: "after_recover_marker".to_string(),

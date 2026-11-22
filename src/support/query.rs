@@ -21,14 +21,14 @@
 //! };
 //! let entries = query_paths(&[PathBuf::from("logs/app.log")], &opts, None).unwrap();
 //! for e in entries {
-//!     println!("{} {} {}", e.timestamp.map(|t| t.to_rfc3339()).unwrap_or_default(), e.level, e.message);
+//!     println!("{} {} {}", e.timestamp.map(|t| t.format(&time::format_description::well_known::Rfc3339).unwrap()).unwrap_or_default(), e.level, e.message);
 //! }
 //! ```
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::{InklogError, open_validated_file};
 
@@ -36,9 +36,9 @@ use crate::{InklogError, open_validated_file};
 #[derive(Debug, Clone, Default)]
 pub struct QueryOptions {
     /// 仅保留该时刻（含）之后的记录（RFC3339 语义）
-    pub since: Option<DateTime<Utc>>,
+    pub since: Option<OffsetDateTime>,
     /// 仅保留该时刻（含）之前的记录
-    pub until: Option<DateTime<Utc>>,
+    pub until: Option<OffsetDateTime>,
     /// 最低级别过滤（如 "warn" → 保留 WARN/ERROR/FATAL）
     pub level: Option<String>,
     /// 消息/target 子串过滤（大小写敏感）
@@ -53,7 +53,8 @@ pub struct QueryOptions {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogEntry {
     /// 记录时间戳（无法解析行的行格式缺省为 None）
-    pub timestamp: Option<DateTime<Utc>>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub timestamp: Option<OffsetDateTime>,
     /// 日志级别
     pub level: String,
     /// 目标模块
@@ -440,13 +441,18 @@ pub(crate) fn parse_line(line: &str, source: &Path) -> Option<LogEntry> {
 }
 
 /// 宽容的时间戳解析：RFC3339 → `%Y-%m-%dT%H:%M:%S%.3fZ`（FileSink 默认渲染）。
-fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
-    if let Ok(t) = DateTime::parse_from_rfc3339(raw) {
-        return Some(t.with_timezone(&Utc));
+fn parse_timestamp(raw: &str) -> Option<OffsetDateTime> {
+    let rfc3339 = time::format_description::well_known::Rfc3339;
+    if let Ok(t) = OffsetDateTime::parse(raw, &rfc3339) {
+        return Some(t.to_offset(time::UtcOffset::UTC));
     }
-    chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.3fZ")
-        .ok()
-        .map(|naive| naive.and_utc())
+    OffsetDateTime::parse(
+        raw,
+        time::macros::format_description!(
+            "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+        ),
+    )
+    .ok()
 }
 
 /// 展开输入路径：文件原样收集，目录递归收集全部文件（排序保证确定性）。
@@ -661,7 +667,7 @@ not a log line
         assert_eq!(entry.target, "app::boot");
         assert_eq!(entry.message, "service started");
         assert_eq!(
-            entry.timestamp.unwrap().to_rfc3339(),
+            crate::support::time_format::to_rfc3339(&entry.timestamp.unwrap()),
             "2026-09-11T01:00:00.123+00:00"
         );
     }
@@ -714,14 +720,18 @@ not a log line
         // 时间范围
         let opts = QueryOptions {
             since: Some(
-                DateTime::parse_from_rfc3339("2026-09-11T03:00:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
+                OffsetDateTime::parse(
+                    "2026-09-11T03:00:00Z",
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .unwrap(),
             ),
             until: Some(
-                DateTime::parse_from_rfc3339("2026-09-11T03:45:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
+                OffsetDateTime::parse(
+                    "2026-09-11T03:45:00Z",
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .unwrap(),
             ),
             ..Default::default()
         };

@@ -36,7 +36,7 @@ tracing = { version = "0.1", default-features = false }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
-chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
+time = { version = "0.3", default-features = false, features = ["std", "serde", "parsing", "formatting", "macros"] }
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 base64 = { version = "0.23", default-features = false, features = ["std"] }
 rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
@@ -141,7 +141,7 @@ confers = { version = "0.6", default-features = false, features = ["toml", "watc
 thiserror = { version = "2.0", default-features = false }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-chrono = { workspace = true }
+time = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["json", "tokio", "http1"], optional = true }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls"], optional = true }
 is-terminal = { version = "0.4", default-features = false }

@@ -8,8 +8,8 @@
 //! 系统与事后审计消费（与 [`crate::support::audit_chain`] 的防篡改链互补：
 //! 链防外部篡改，本事件流记内部运维）。
 
-use chrono::Utc;
 use serde_json::Value;
+use time::OffsetDateTime;
 
 use crate::LogRecord;
 
@@ -33,7 +33,7 @@ pub struct InklogOpsEvent {
     /// `records_dropped` / `level_changed`）
     pub kind: String,
     /// 事件时间（UTC）
-    pub timestamp: chrono::DateTime<Utc>,
+    pub timestamp: OffsetDateTime,
     /// 关联 sink 名（可空）
     pub sink: Option<String>,
     /// 结构化细节（自由 JSON）
@@ -45,7 +45,7 @@ impl InklogOpsEvent {
     pub fn now(kind: impl Into<String>, sink: Option<&str>, detail: Value) -> Self {
         Self {
             kind: kind.into(),
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             sink: sink.map(str::to_string),
             detail,
         }

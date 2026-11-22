@@ -59,7 +59,7 @@ fn test_file_sink_long_message() {
     let sink = inklog::sink::FileSink::new(config).unwrap();
     let long_message = "A".repeat(1000);
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: long_message,
@@ -86,7 +86,7 @@ fn test_file_sink_unicode_message() {
     let sink = inklog::sink::FileSink::new(config).unwrap();
     let unicode_message = "Hello Unicode Test 中文 Emoji 🎉";
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: unicode_message.to_string(),
@@ -115,7 +115,7 @@ fn test_file_sink_different_levels() {
 
     for level in levels {
         let record = inklog::LogRecord {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             level: level.to_string(),
             target: "test".to_string(),
             message: format!("{} message", level),
@@ -142,7 +142,7 @@ fn test_file_sink_with_fields() {
 
     let sink = inklog::sink::FileSink::new(config).unwrap();
     let mut record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "With fields test".to_string(),
@@ -193,7 +193,7 @@ async fn test_database_sink_disabled() {
     let config = make_test_db_config("test", false);
     let sink = inklog::sink::DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "Disabled sink write".to_string(),
@@ -215,7 +215,7 @@ async fn test_database_sink_message_count() {
     let config = make_test_db_config("test", true);
     let sink = inklog::sink::DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "Count test".to_string(),
@@ -245,7 +245,7 @@ async fn test_database_sink_write_single() {
     let config = make_test_db_config("test", true);
     let sink = inklog::sink::DatabaseSink::new_with_config(mock_db.clone(), Some(config)).unwrap();
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "Single write test".to_string(),
@@ -276,7 +276,7 @@ fn test_console_sink_disabled() {
     );
     // config 字段私有：enabled=false 的 sink 构造成功且写入不 panic（输出静默由实现保证）
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "disabled sink write".to_string(),
@@ -316,7 +316,7 @@ fn test_console_sink_write_unicode() {
         inklog::LogTemplate::default(),
     );
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "Unicode 测试 你好世界 🎉".to_string(),
@@ -345,7 +345,7 @@ fn test_console_sink_different_levels() {
 
     for level in levels {
         let record = inklog::LogRecord {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             level: level.to_string(),
             target: "test".to_string(),
             message: format!("{} message", level),
@@ -1034,7 +1034,7 @@ fn test_masking_no_match() {
 #[test]
 fn test_log_record_creation() {
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "Test message".to_string(),
@@ -1052,7 +1052,7 @@ fn test_log_record_creation() {
 #[test]
 fn test_log_record_with_fields() {
     let mut record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "Test message".to_string(),
@@ -1118,7 +1118,7 @@ async fn test_database_sink_masks_sensitive_field_keys() {
         serde_json::Value::String("plain note".to_string()),
     );
     let record = inklog::LogRecord {
-        timestamp: chrono::Utc::now(),
+        timestamp: time::OffsetDateTime::now_utc(),
         level: "INFO".to_string(),
         target: "test".to_string(),
         message: "db key masking test".to_string(),

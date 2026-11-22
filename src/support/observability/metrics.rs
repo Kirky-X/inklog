@@ -977,7 +977,7 @@ pub struct SinkHealthMonitor {
 /// 降级事件记录
 #[derive(Debug, Clone)]
 pub struct FallbackEvent {
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: time::OffsetDateTime,
     pub sink_name: String,
     pub from_state: FallbackState,
     pub to_state: FallbackState,
@@ -1425,7 +1425,7 @@ impl SinkHealthMonitor {
     /// 记录降级事件
     fn log_event(&self, sink_name: &str, from: FallbackState, to: FallbackState, reason: String) {
         let event = FallbackEvent {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             sink_name: sink_name.to_string(),
             from_state: from,
             to_state: to,
@@ -2107,7 +2107,7 @@ mod metrics_tests {
     #[test]
     fn test_fallback_event_structure() {
         let event = FallbackEvent {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             sink_name: "database".to_string(),
             from_state: FallbackState::Active,
             to_state: FallbackState::Fallback {

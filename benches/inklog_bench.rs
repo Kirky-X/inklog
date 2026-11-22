@@ -353,7 +353,7 @@ fn bench_parquet_conversion(c: &mut Criterion) {
                 );
 
                 LogRecord {
-                    timestamp: chrono::Utc::now(),
+                    timestamp: time::OffsetDateTime::now_utc(),
                     level: Level::INFO.to_string(),
                     target: format!("target_{}", i % 10),
                     message: format!(
@@ -682,7 +682,7 @@ fn bench_zero_allocation(c: &mut Criterion) {
     group.bench_function("hot_path_with_pool", |b| {
         b.iter(|| {
             let mut record = get_log_record();
-            record.timestamp = chrono::Utc::now();
+            record.timestamp = time::OffsetDateTime::now_utc();
             record.level = Level::INFO.to_string();
             record.target = "hot_path_target".to_string();
             record.message = "Hot path test message".to_string();

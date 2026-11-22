@@ -20,7 +20,7 @@ use std::time::Instant;
 fn create_test_logs(count: usize) -> Vec<inklog::LogRecord> {
     (0..count)
         .map(|i| inklog::LogRecord {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             level: match i % 5 {
                 0 => "trace".to_string(),
                 1 => "debug".to_string(),

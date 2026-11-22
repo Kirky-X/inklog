@@ -432,7 +432,7 @@ pub fn convert_logs_to_parquet(
     let ids: Vec<i64> = (1..=logs.len() as i64).collect();
     let timestamps: Vec<i64> = logs
         .iter()
-        .map(|l| l.timestamp.timestamp_millis())
+        .map(|l| (l.timestamp.unix_timestamp_nanos() / 1_000_000) as i64)
         .collect();
     let levels: Vec<&str> = logs.iter().map(|l| l.level.as_str()).collect();
     let targets: Vec<&str> = logs.iter().map(|l| l.target.as_str()).collect();

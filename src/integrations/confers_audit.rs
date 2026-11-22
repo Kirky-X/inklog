@@ -278,9 +278,9 @@ impl AuditSink for ConfersAuditSink {
 mod tests {
     use super::*;
     use crate::InklogError;
-    use chrono::Utc;
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
+    use time::OffsetDateTime;
 
     /// 测试 sink：记录写入的 LogRecord；可注入失败与阻塞。
     struct RecordingSink {
@@ -326,7 +326,7 @@ mod tests {
     }
 
     fn sample_events() -> Vec<AuditEvent> {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         vec![
             AuditEvent::KeyAccess {
                 key: "db.password".to_string(),
@@ -551,7 +551,7 @@ mod tests {
         // 时序二：writer 已启动后无 runtime——接收端在位，正常入队不计数
         let late = vec![AuditEvent::LoadSuccess {
             source: "late".to_string(),
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
         }];
         bridge.write(&late);
         assert_eq!(
@@ -595,7 +595,7 @@ mod tests {
         drop(_enter);
         let more = vec![AuditEvent::LoadSuccess {
             source: "after-shutdown".to_string(),
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
         }];
         bridge.write(&more);
         assert_eq!(bridge.dropped(), 6);
@@ -612,7 +612,7 @@ mod tests {
         let events: Vec<AuditEvent> = (0..10)
             .map(|i| AuditEvent::LoadSuccess {
                 source: format!("src-{i}"),
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
             })
             .collect();
         bridge.write(&events);

@@ -17,10 +17,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use confers::audit::{AuditEvent, AuditWriter};
-use inklog::chrono::Utc;
 use inklog::config::ConsoleSinkConfig;
 use inklog::integrations::ConfersAuditSink;
 use inklog::sink::console::ConsoleSink;
+use inklog::time::OffsetDateTime;
 use inklog_examples::common::{print_section, print_separator};
 
 #[tokio::main]
@@ -55,16 +55,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let events = vec![
         AuditEvent::KeyAccess {
             key: "db.password".to_string(),
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
         },
         AuditEvent::Decrypt {
             field: "api_key".to_string(),
             success: true,
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
         },
         AuditEvent::LoadSuccess {
             source: "app.toml".to_string(),
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
         },
     ];
     for event in &events {

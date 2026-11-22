@@ -38,9 +38,9 @@
 //! | metadata | TEXT | 元数据 |
 
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
-use inklog::chrono::Utc;
-#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog::config::{DatabaseDriver, DatabaseSinkConfig};
+#[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
+use inklog::time::OffsetDateTime;
 use inklog_examples::common::tr;
 #[cfg(any(feature = "sqlite", feature = "postgres", feature = "mysql"))]
 use inklog_examples::common::{print_section, print_separator, tr_args};
@@ -231,7 +231,7 @@ fn memory_database() -> Result<(), Box<dyn std::error::Error>> {
             // 所有插值字符串必须转义后再拼入 SQL，防止 SQL 注入
             let sql = format!(
                 "INSERT INTO logs (timestamp, level, target, message, thread_id) VALUES ('{}', '{}', '{}', '{}', '{}')",
-                escape_sql_string(&Utc::now().to_rfc3339(), &config.driver),
+                escape_sql_string(&OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).expect("RFC3339 format"), &config.driver),
                 escape_sql_string(level, &config.driver),
                 escape_sql_string(target, &config.driver),
                 escape_sql_string(message, &config.driver),
@@ -388,7 +388,7 @@ fn batch_write() -> Result<(), Box<dyn std::error::Error>> {
                     format!(r#"{{"round":"{}","sequence":"{}"}}"#, round, i + 1);
                 let sql = format!(
                     "INSERT INTO logs (timestamp, level, target, message, fields, thread_id) VALUES ('{}', '{}', '{}', '{}', '{}', '{}')",
-                    escape_sql_string(&Utc::now().to_rfc3339(), &config.driver),
+                    escape_sql_string(&OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).expect("RFC3339 format"), &config.driver),
                     escape_sql_string(levels[i], &config.driver),
                     escape_sql_string(targets[i], &config.driver),
                     escape_sql_string(messages[i], &config.driver),
@@ -505,7 +505,7 @@ fn query_demo() -> Result<(), Box<dyn std::error::Error>> {
             // 本示例硬编码 SQLite，所有插值字符串转义后再拼入 SQL
             let sql = format!(
                 "INSERT INTO logs (timestamp, level, target, message, thread_id) VALUES ('{}', '{}', '{}', '{}', '{}')",
-                escape_sql_string(&Utc::now().to_rfc3339(), &DatabaseDriver::SQLite),
+                escape_sql_string(&OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).expect("RFC3339 format"), &DatabaseDriver::SQLite),
                 escape_sql_string(level, &DatabaseDriver::SQLite),
                 escape_sql_string(target, &DatabaseDriver::SQLite),
                 escape_sql_string(message, &DatabaseDriver::SQLite),

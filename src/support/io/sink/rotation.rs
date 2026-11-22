@@ -5,16 +5,21 @@
 //! This module provides a strategy pattern implementation for log file rotation,
 //! allowing flexible rotation policies based on size, time, or custom criteria.
 
-use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use time::OffsetDateTime;
 
 /// Shared helper for generating rotation file paths.
 ///
 /// Both `SizeBasedRotation` and `TimeBasedRotation` produce identical path formats.
 /// This function eliminates duplication between their `generate_next_path` implementations.
 fn generate_rotation_path(base_path: &Path, context: &RotationContext) -> PathBuf {
-    let timestamp = context.now.format("%Y%m%d_%H%M%S");
+    let timestamp = context
+        .now
+        .format(time::macros::format_description!(
+            "[year][month][day]_[hour][minute][second]"
+        ))
+        .expect("rotation timestamp format");
     let seq = context.sequence;
 
     let stem = base_path
@@ -62,7 +67,7 @@ pub struct RotationContext {
     /// Last rotation time
     pub last_rotation: Instant,
     /// Current timestamp
-    pub now: DateTime<Utc>,
+    pub now: OffsetDateTime,
     /// Current sequence number
     pub sequence: u32,
 }
@@ -343,7 +348,7 @@ mod tests {
             max_size: None,
             file_opened_at: Instant::now() - Duration::from_secs(elapsed_secs),
             last_rotation: Instant::now() - Duration::from_secs(elapsed_secs),
-            now: Utc::now(),
+            now: OffsetDateTime::now_utc(),
             sequence: 1,
         }
     }

@@ -1088,7 +1088,6 @@ fn count_segments(data: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Datelike as _;
 
     fn record(msg: &str) -> LogRecord {
         let mut r = LogRecord::new(
@@ -1119,7 +1118,10 @@ mod tests {
             Some("0123456789abcdef0123456789abcdef") // pragma: allowlist secret — 测试夹具 trace id
         );
         assert_eq!(records[0].fields.get("k"), Some(&serde_json::json!("v")));
-        assert_eq!(records[0].timestamp.year(), chrono::Utc::now().year());
+        assert_eq!(
+            records[0].timestamp.year(),
+            time::OffsetDateTime::now_utc().year()
+        );
 
         // 重放后清空：二次重放为空
         let (records, _) = journal.replay();

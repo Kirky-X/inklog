@@ -14,11 +14,11 @@
 //! cargo run --bin rotation
 //! ```
 
-use inklog::chrono::Utc;
 use inklog::config::FileSinkConfig;
 use inklog::sink::rotation::{
     CompositeRotation, RotationContext, RotationStrategy, SizeBasedRotation, TimeBasedRotation,
 };
+use inklog::time::OffsetDateTime;
 use inklog_examples::common::{print_section, print_separator, tr, tr_args};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 构造一个 RotationContext（last_rotation 距今 elapsed_secs 秒）
 fn make_context(current_size: u64, elapsed_secs: u64, sequence: u32) -> RotationContext {
-    let now = Utc::now();
+    let now = OffsetDateTime::now_utc();
     let last_rotation = Instant::now() - Duration::from_secs(elapsed_secs);
     RotationContext {
         current_path: PathBuf::from("/var/log/app.log"),

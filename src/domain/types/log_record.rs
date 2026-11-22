@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 use crate::DataMasker;
 use crate::{get_log_record, get_string_buffer};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use time::OffsetDateTime;
 use tracing::{Event, Level};
 
 /// Represents a single log record with all associated metadata.
@@ -61,7 +61,8 @@ use tracing::{Event, Level};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LogRecord {
     /// UTC timestamp when this log record was created.
-    pub timestamp: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub timestamp: OffsetDateTime,
 
     /// Log severity level (e.g., "INFO", "ERROR", "DEBUG", "WARN", "TRACE").
     pub level: String,
@@ -138,7 +139,7 @@ impl std::fmt::Debug for LogRecord {
 impl Default for LogRecord {
     fn default() -> Self {
         Self {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: String::new(),
             message: String::new(),
@@ -184,7 +185,7 @@ impl LogRecord {
     /// assert!(record.message.is_empty());
     /// ```
     pub fn reset(&mut self) {
-        self.timestamp = Utc::now();
+        self.timestamp = OffsetDateTime::now_utc();
         self.level.clear();
         self.level.push_str("INFO");
         self.target.clear();
@@ -228,7 +229,7 @@ impl LogRecord {
     /// ```
     pub fn new(level: Level, target: String, message: String) -> Self {
         Self {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: level.to_string(),
             target,
             message,
@@ -885,11 +886,11 @@ mod tests {
 
     #[test]
     fn test_log_record_timestamp() {
-        use chrono::Utc;
+        use time::OffsetDateTime;
 
-        let before = Utc::now();
+        let before = OffsetDateTime::now_utc();
         let record = LogRecord::new(Level::INFO, "test".to_string(), "test".to_string());
-        let after = Utc::now();
+        let after = OffsetDateTime::now_utc();
 
         assert!(record.timestamp >= before);
         assert!(record.timestamp <= after);
@@ -1404,6 +1405,29 @@ mod trace_id_tests {
         let record: LogRecord = serde_json::from_str(old).expect("old JSON must deserialize");
         assert!(record.trace_id.is_none());
         assert!(record.span_id.is_none());
+    }
+
+    #[test]
+    fn test_log_record_serde_timestamp_format_pinned() {
+        // chrono→time 迁移钉格式：审计行 serde 的 timestamp 必须是 Z 后缀、零小数位省略的 RFC3339。
+
+        let record = LogRecord {
+            timestamp: OffsetDateTime::from_unix_timestamp(1_767_225_600).unwrap(),
+            level: "INFO".to_string(),
+            target: "pin".to_string(),
+            message: "m".to_string(),
+            fields: HashMap::new(),
+            file: None,
+            line: None,
+            thread_id: "ThreadId(1)".to_string(),
+            trace_id: None,
+            span_id: None,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        assert_eq!(
+            json,
+            r#"{"timestamp":"2026-01-01T00:00:00Z","level":"INFO","target":"pin","message":"m","fields":{},"file":null,"line":null,"thread_id":"ThreadId(1)","trace_id":null,"span_id":null}"#
+        );
     }
 
     #[test]

@@ -12,8 +12,8 @@
 use anyhow::Result;
 use inklog::LogRecord;
 use inklog::LogSink;
-use inklog::chrono::Utc;
 use inklog::config::FileSinkConfig;
+use inklog::time::OffsetDateTime;
 use std::path::{Path, PathBuf};
 
 /// 构造 FileSink 配置。
@@ -51,7 +51,7 @@ pub fn create_file_config(path: &str, max_size: &str, compress: bool) -> FileSin
 /// 时间戳使用当前 UTC 时间，`thread_id` 固定为 `"main"`，便于测试断言。
 pub fn create_log_record(level: &str, message: &str, target: &str) -> LogRecord {
     LogRecord {
-        timestamp: Utc::now(),
+        timestamp: OffsetDateTime::now_utc(),
         level: level.to_string(),
         message: message.to_string(),
         target: target.to_string(),
@@ -157,9 +157,12 @@ mod tests {
         assert!(record.file.is_none());
         assert!(record.line.is_none());
         // timestamp 必须是"刚刚"的时间，防止误用零值
-        let now = Utc::now();
-        let diff = now.signed_duration_since(record.timestamp);
-        assert!(diff.num_seconds().abs() < 5, "timestamp should be current");
+        let now = OffsetDateTime::now_utc();
+        let diff = now - record.timestamp;
+        assert!(
+            diff.whole_seconds().abs() < 5,
+            "timestamp should be current"
+        );
     }
 
     #[tokio::test]

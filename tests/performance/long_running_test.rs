@@ -55,7 +55,7 @@ mod tests {
             tracing::info!(
                 "long-running test log #{} - time: {:?}",
                 log_count,
-                chrono::Utc::now()
+                time::OffsetDateTime::now_utc()
             );
             log_count += 1;
 

@@ -18,7 +18,6 @@ use crate::validation::PathValidatorConfig;
 use aes_gcm::KeyInit;
 use aes_gcm::aead::Aead;
 use async_trait::async_trait;
-use chrono::{DateTime, Datelike, Utc};
 use parking_lot::RwLock;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -28,6 +27,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
+use time::OffsetDateTime;
 use tracing::{debug, error, info, warn};
 use zeroize::Zeroizing;
 
@@ -56,7 +56,7 @@ struct FileSinkInner {
     /// 上次轮转时间
     last_rotation: Instant,
     /// 下次轮转时间
-    next_rotation_time: Option<DateTime<Utc>>,
+    next_rotation_time: Option<OffsetDateTime>,
     /// 上次轮转日期
     last_rotation_date: Option<i32>,
     /// 序列号（用于区分同名轮转文件）
@@ -122,6 +122,12 @@ pub struct FileSink {
     anchor: Option<Arc<AnchorContext>>,
     /// 可变内部状态（Arc 共享给轮转定时线程执行空闲 flush）
     inner: Arc<RwLock<FileSinkInner>>,
+}
+
+/// chrono `Datelike::num_days_from_ce()` 的等价实现：0001-01-01 为第 1 天。
+fn days_from_ce(date: time::Date) -> i32 {
+    let epoch = time::Date::from_calendar_date(1, time::Month::January, 1).expect("CE epoch");
+    (date - epoch).whole_days() as i32 + 1
 }
 
 /// FileSink 的实现，包含所有文件日志操作的核心逻辑
@@ -559,9 +565,9 @@ impl FileSink {
         // 最旧在前，保证删除时优先删最旧的日志
         candidates.sort_by_key(|(_, modified)| *modified);
 
-        let cutoff_date = Utc::now()
-            .checked_sub_signed(chrono::Duration::days(config.retention_days as i64))
-            .unwrap_or_else(Utc::now);
+        let cutoff_date = OffsetDateTime::now_utc()
+            .checked_sub(time::Duration::days(config.retention_days as i64))
+            .unwrap_or_else(OffsetDateTime::now_utc);
 
         let total_size: u64 = candidates
             .iter()
@@ -605,7 +611,7 @@ impl FileSink {
         // 年龄清理：独立于大小分支执行——此前藏在 else 里，max_total_size
         // 不可解析时过期文件永远不会被清理
         for (path, modified) in candidates.iter().take(deletable) {
-            let modified_utc: DateTime<Utc> = (*modified).into();
+            let modified_utc: OffsetDateTime = (*modified).into();
             if modified_utc < cutoff_date
                 && let Err(e) = fs::remove_file(path)
             {
@@ -744,46 +750,50 @@ impl FileSink {
     }
 
     /// 计算下次轮转时间
-    fn calculate_next_rotation_time(rotation_time: &str) -> Option<DateTime<Utc>> {
-        Self::calculate_next_rotation_time_from(rotation_time, Utc::now())
+    fn calculate_next_rotation_time(rotation_time: &str) -> Option<OffsetDateTime> {
+        Self::calculate_next_rotation_time_from(rotation_time, OffsetDateTime::now_utc())
     }
 
     /// [`Self::calculate_next_rotation_time`] 的可注入时钟变体（便于测试）。
     fn calculate_next_rotation_time_from(
         rotation_time: &str,
-        now: DateTime<Utc>,
-    ) -> Option<DateTime<Utc>> {
+        now: OffsetDateTime,
+    ) -> Option<OffsetDateTime> {
+        let next_midnight = |days: i64| {
+            let next = now + time::Duration::days(days);
+            next.date().with_time(time::Time::MIDNIGHT).assume_utc()
+        };
         match rotation_time {
-            "hourly" => Some(now + chrono::Duration::hours(1)),
-            "daily" => {
-                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
-                Some(next_naive.and_utc())
-            }
-            "weekly" => {
-                let next_naive =
-                    now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::weeks(1);
-                Some(next_naive.and_utc())
-            }
+            "hourly" => Some(now + time::Duration::hours(1)),
+            "daily" => Some(next_midnight(1)),
+            "weekly" => Some(next_midnight(7)),
             "monthly" => {
                 // 原实现误写为“明天零点”，导致 monthly 实际每天轮转。
-                // 正确语义为“下个月同日的零点”；`checked_add_months` 在月末
-                // 溢出时钳制到次月最后一天（如 1 月 31 日 → 2 月 28 日）。
-                let next_date = now
-                    .date_naive()
-                    .checked_add_months(chrono::Months::new(1))?;
-                Some(next_date.and_hms_opt(0, 0, 0)?.and_utc())
+                // 正确语义为“下个月同日的零点”；月末溢出时钳制到次月最后一天
+                //（如 1 月 31 日 → 2 月 28 日），对齐原 checked_add_months 行为。
+                let (year, month) = if now.month() == time::Month::December {
+                    (now.year() + 1, time::Month::January)
+                } else {
+                    (now.year(), now.month().next())
+                };
+                let day = now.day().min(month.length(year));
+                Some(
+                    time::Date::from_calendar_date(year, month, day)
+                        .ok()?
+                        .with_time(time::Time::MIDNIGHT)
+                        .assume_utc(),
+                )
             }
             _ => {
                 // 默认每日轮转
-                let next_naive = now.date_naive().and_hms_opt(0, 0, 0)? + chrono::Duration::days(1);
-                Some(next_naive.and_utc())
+                Some(next_midnight(1))
             }
         }
     }
 
     fn should_rotate_by_time_inner(&self, inner: &FileSinkInner) -> bool {
-        let now = Utc::now();
-        let current_date = now.date_naive().num_days_from_ce();
+        let now = OffsetDateTime::now_utc();
+        let current_date = days_from_ce(now.date());
 
         if (self.config.rotation_time == "daily" || self.config.rotation_time == "weekly")
             && let Some(last_date) = inner.last_rotation_date
@@ -883,7 +893,7 @@ impl FileSink {
                                 } else {
                                     format!(
                                         "{} [{}] {} - {}",
-                                        record.timestamp.to_rfc3339(),
+                                        crate::support::time_format::to_rfc3339(&record.timestamp),
                                         record.level,
                                         record.target,
                                         record.message
@@ -944,7 +954,7 @@ impl FileSink {
                     writeln!(
                         file,
                         "{} [{}] {} - {}",
-                        record.timestamp.to_rfc3339(),
+                        crate::support::time_format::to_rfc3339(&record.timestamp),
                         record.level,
                         record.target,
                         record.message
@@ -1053,7 +1063,11 @@ impl FileSink {
         // 重命名当前日志文件
         // `%Y%m%d_%H%M%S` 为秒级精度，同秒二次轮转会静默覆盖既有轮转
         // 产物。目标已存在时追加 `.1`、`.2` … 序号后缀，保证永不覆盖。
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let timestamp = time::OffsetDateTime::now_utc()
+            .format(time::macros::format_description!(
+                "[year][month][day]_[hour][minute][second]"
+            ))
+            .expect("rotation timestamp format");
         let new_path = resolve_rotation_target(&self.config.path, &timestamp);
 
         if self.config.path.exists()
@@ -1567,7 +1581,7 @@ pub(crate) fn register_rotated_archive(
     let event = serde_json::json!({
         "path": rotated_path.display().to_string(),
         "sha256": digest,
-        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "timestamp": crate::support::time_format::to_rfc3339(&time::OffsetDateTime::now_utc()),
     })
     .to_string();
     chain.append(&event);
@@ -1673,7 +1687,7 @@ pub(crate) fn append_failover_marker(
     let event = serde_json::json!({
         "op": op,
         "sink": base_path.display().to_string(),
-        "ts": chrono::Utc::now().timestamp(),
+        "ts": time::OffsetDateTime::now_utc().unix_timestamp(),
     })
     .to_string();
     let mut guard = chain.lock();
@@ -1811,7 +1825,8 @@ impl LogSink for FileSink {
                 record.clone()
             };
 
-            let record_len = masked_record.timestamp.to_rfc3339().len()
+            let record_len = crate::support::time_format::to_rfc3339(&masked_record.timestamp)
+                .len()
                 + masked_record.level.len()
                 + masked_record.target.len()
                 + masked_record.message.len()
@@ -2083,15 +2098,14 @@ mod tests {
     use crate::LogRecord;
     use crate::support::io::sink::encryption::validate_key_entropy;
     use base64::Engine;
-    use chrono::Timelike;
-    use chrono::Utc;
     use serial_test::serial;
     use std::collections::HashMap;
     use tempfile::tempdir;
+    use time::OffsetDateTime;
 
     fn create_test_record(message: &str) -> LogRecord {
         LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test_module".to_string(),
             message: message.to_string(),
@@ -2318,7 +2332,7 @@ mod tests {
         let sink = FileSink::new(config).unwrap();
 
         let record = LogRecord {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test".to_string(),
             message: "Test message".to_string(),
@@ -2574,7 +2588,7 @@ mod tests {
 
     #[test]
     fn test_calculate_next_rotation_time_hourly() {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let result = FileSink::calculate_next_rotation_time("hourly");
         assert!(result.is_some());
         let next = result.unwrap();
@@ -2582,15 +2596,15 @@ mod tests {
         // hourly 应该是大约 1 小时后（允许 1 分钟误差）
         let diff = next - now;
         assert!(
-            diff.num_minutes() >= 59 && diff.num_minutes() <= 61,
+            diff.whole_minutes() >= 59 && diff.whole_minutes() <= 61,
             "hourly rotation should be ~60 minutes away, got {}",
-            diff.num_minutes()
+            diff.whole_minutes()
         );
     }
 
     #[test]
     fn test_calculate_next_rotation_time_daily() {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let result = FileSink::calculate_next_rotation_time("daily");
         assert!(result.is_some());
         let next = result.unwrap();
@@ -2603,7 +2617,7 @@ mod tests {
 
     #[test]
     fn test_calculate_next_rotation_time_weekly() {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let result = FileSink::calculate_next_rotation_time("weekly");
         assert!(result.is_some());
         let next = result.unwrap();
@@ -2678,7 +2692,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
         let mut inner = sink.inner.write();
-        inner.next_rotation_time = Some(Utc::now() - chrono::Duration::hours(1));
+        inner.next_rotation_time = Some(OffsetDateTime::now_utc() - time::Duration::hours(1));
         let result = sink.should_rotate_by_time_inner(&inner);
         assert!(result);
     }
@@ -2695,7 +2709,7 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
         let mut inner = sink.inner.write();
-        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::hours(1));
+        inner.next_rotation_time = Some(OffsetDateTime::now_utc() + time::Duration::hours(1));
         let result = sink.should_rotate_by_time_inner(&inner);
         assert!(!result);
     }
@@ -2712,9 +2726,9 @@ mod tests {
         };
         let sink = create_test_file_sink(config);
         let mut inner = sink.inner.write();
-        let yesterday = Utc::now().date_naive().num_days_from_ce() - 1;
+        let yesterday = days_from_ce(OffsetDateTime::now_utc().date()) - 1;
         inner.last_rotation_date = Some(yesterday);
-        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::days(1));
+        inner.next_rotation_time = Some(OffsetDateTime::now_utc() + time::Duration::days(1));
         let result = sink.should_rotate_by_time_inner(&inner);
         assert!(result);
     }
@@ -2836,7 +2850,7 @@ mod tests {
         let mut inner = sink.inner.write();
         sink.open_file_inner(&mut inner).unwrap();
         inner.current_size = 100; // 远小于 1MB
-        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::days(1));
+        inner.next_rotation_time = Some(OffsetDateTime::now_utc() + time::Duration::days(1));
 
         let result = sink.check_rotation_inner(&mut inner);
         assert!(result.is_ok());
@@ -2860,7 +2874,7 @@ mod tests {
         // 文件需有内容才能被 rotate 重命名
         std::fs::write(sink.config.path.clone(), "x").unwrap();
         inner.current_size = 200; // 超过 100
-        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::days(1));
+        inner.next_rotation_time = Some(OffsetDateTime::now_utc() + time::Duration::days(1));
 
         let result = sink.check_rotation_inner(&mut inner);
         assert!(result.is_ok());
@@ -4216,7 +4230,7 @@ mod tests {
         };
         let sink = FileSink::new(config).unwrap();
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test".to_string(),
             // 值需 >= 16 字符才会被 generic_secret 规则匹配
@@ -4251,7 +4265,7 @@ mod tests {
         };
         let sink = FileSink::new(config).unwrap();
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test".to_string(),
             // 值 19 字符 >= 16，会被 generic_secret 规则匹配
@@ -4293,7 +4307,7 @@ mod tests {
         );
 
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "ERROR".to_string(),
             target: "lazy_test".to_string(),
             message: "first error event".to_string(),
@@ -4343,7 +4357,7 @@ mod tests {
         };
         let sink = FileSink::new(config).unwrap();
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test".to_string(),
             message: "task execution completed for E12345678".to_string(),
@@ -5016,7 +5030,7 @@ mod tests {
         // 文件需有内容才能被 rotate 重命名
         std::fs::write(sink.config.path.clone(), "x").unwrap();
         // 设置 next_rotation_time 在过去，触发时间轮转
-        inner.next_rotation_time = Some(Utc::now() - chrono::Duration::hours(1));
+        inner.next_rotation_time = Some(OffsetDateTime::now_utc() - time::Duration::hours(1));
 
         let result = sink.check_rotation_inner(&mut inner);
         assert!(result.is_ok());
@@ -5039,10 +5053,10 @@ mod tests {
         let sink = create_test_file_sink(config);
         let mut inner = sink.inner.write();
         // last_rotation_date 为上周 → 应触发轮转
-        let last_week = Utc::now().date_naive().num_days_from_ce() - 7;
+        let last_week = days_from_ce(OffsetDateTime::now_utc().date()) - 7;
         inner.last_rotation_date = Some(last_week);
         // next_rotation_time 在未来（不应触发时间轮转）
-        inner.next_rotation_time = Some(Utc::now() + chrono::Duration::days(1));
+        inner.next_rotation_time = Some(OffsetDateTime::now_utc() + time::Duration::days(1));
 
         let result = sink.should_rotate_by_time_inner(&inner);
         assert!(
@@ -6006,13 +6020,20 @@ mod tests {
     fn test_calculate_next_rotation_time_monthly_july_31_is_august_31() {
         // 回归：7 月 31 日 20:00 的 monthly 下次轮转必须是 8 月 31 日，
         // 而不是旧实现算出的“明天（7 月）零点”。
-        use chrono::TimeZone;
-        let now = Utc.with_ymd_and_hms(2026, 7, 31, 20, 0, 0).unwrap();
+        let now = OffsetDateTime::parse(
+            "2026-07-31T20:00:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
         let next = FileSink::calculate_next_rotation_time_from("monthly", now)
             .expect("monthly rotation time must be computable");
         assert_eq!(
             next,
-            Utc.with_ymd_and_hms(2026, 8, 31, 0, 0, 0).unwrap(),
+            OffsetDateTime::parse(
+                "2026-08-31T00:00:00Z",
+                &time::format_description::well_known::Rfc3339
+            )
+            .unwrap(),
             "monthly rotation on Jul 31 must land on Aug 31, not any day in July"
         );
     }
@@ -6020,19 +6041,32 @@ mod tests {
     #[test]
     fn test_calculate_next_rotation_time_monthly_clamps_month_end() {
         // 月末溢出：1 月 31 日 + 1 个月应钳制到 2 月最后一天（2026 非闰年 → 28 日）
-        use chrono::TimeZone;
-        let now = Utc.with_ymd_and_hms(2026, 1, 31, 12, 0, 0).unwrap();
+        let now = OffsetDateTime::parse(
+            "2026-01-31T12:00:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
         let next = FileSink::calculate_next_rotation_time_from("monthly", now).unwrap();
-        assert_eq!(next, Utc.with_ymd_and_hms(2026, 2, 28, 0, 0, 0).unwrap());
+        assert_eq!(
+            next,
+            OffsetDateTime::parse(
+                "2026-02-28T00:00:00Z",
+                &time::format_description::well_known::Rfc3339
+            )
+            .unwrap()
+        );
     }
 
     #[test]
     fn test_calculate_next_rotation_time_monthly_lands_in_next_month() {
-        use chrono::TimeZone;
-        let now = Utc.with_ymd_and_hms(2026, 9, 9, 10, 30, 0).unwrap();
+        let now = OffsetDateTime::parse(
+            "2026-09-09T10:30:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
         let next = FileSink::calculate_next_rotation_time_from("monthly", now).unwrap();
         assert!(next > now);
-        assert_eq!((next.year(), next.month()), (2026, 10));
+        assert_eq!((next.year(), u8::from(next.month())), (2026, 10));
         assert_eq!((next.hour(), next.minute(), next.second()), (0, 0, 0));
     }
 
@@ -6198,10 +6232,16 @@ mod tests {
         let log_path = dir.path().join("test.log");
 
         // 预创建“本秒/下一秒”两个可能的时间戳目标，模拟同秒二次轮转
-        let t0 = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let t1 = (Utc::now() + chrono::Duration::seconds(1))
-            .format("%Y%m%d_%H%M%S")
-            .to_string();
+        let t0 = OffsetDateTime::now_utc()
+            .format(time::macros::format_description!(
+                "[year][month][day]_[hour][minute][second]"
+            ))
+            .expect("rotation timestamp format");
+        let t1 = (OffsetDateTime::now_utc() + time::Duration::seconds(1))
+            .format(time::macros::format_description!(
+                "[year][month][day]_[hour][minute][second]"
+            ))
+            .expect("rotation timestamp format");
         let candidate0 = dir.path().join(format!("test_{t0}.log"));
         let candidate1 = dir.path().join(format!("test_{t1}.log"));
         std::fs::write(&candidate0, "PRECIOUS0").unwrap();

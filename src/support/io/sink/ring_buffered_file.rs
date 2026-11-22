@@ -671,7 +671,11 @@ impl ChannelBufferedFileSink {
         }
         let _ = file.take();
 
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let timestamp = time::OffsetDateTime::now_utc()
+            .format(time::macros::format_description!(
+                "[year][month][day]_[hour][minute][second]"
+            ))
+            .expect("rotation timestamp format");
         let rotated_path = resolve_rotation_target(base_path, &timestamp);
         if base_path.exists() && std::fs::rename(base_path, &rotated_path).is_err() {
             // 改名失败（跨设备等）：复制后删除兜底，与 FileSink 一致

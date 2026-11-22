@@ -119,7 +119,7 @@ impl AuditStorage for InklogAuditStorage {
     /// 写入桥不支持清理（MVP）：返回带指引的错误。
     async fn cleanup(
         &self,
-        _before: &chrono::DateTime<chrono::Utc>,
+        _before: &time::OffsetDateTime,
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         Err(Self::write_only_error("cleanup"))
     }
@@ -227,7 +227,7 @@ mod tests {
             .expect_err("query must be unsupported");
         assert!(err.to_string().contains("write-only"));
         let err = storage
-            .cleanup(&chrono::Utc::now())
+            .cleanup(&time::OffsetDateTime::now_utc())
             .await
             .expect_err("cleanup must be unsupported");
         assert!(err.to_string().contains("write-only"));

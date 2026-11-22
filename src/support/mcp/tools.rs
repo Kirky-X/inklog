@@ -187,16 +187,12 @@ impl McpTool for QueryTool {
             .unwrap_or(usize::MAX)
             .min(self.cfg.max_limit);
 
-        let since = args
-            .get("since")
-            .and_then(Value::as_str)
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc));
-        let until = args
-            .get("until")
-            .and_then(Value::as_str)
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc));
+        let since = args.get("since").and_then(Value::as_str).and_then(|s| {
+            time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+        });
+        let until = args.get("until").and_then(Value::as_str).and_then(|s| {
+            time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+        });
 
         let opts = QueryOptions {
             since,

@@ -8,12 +8,12 @@ use crate::InklogConfig;
 use crate::Metrics;
 use crate::support::io::LogSink;
 use crate::{InklogError, LogRecord};
-use chrono::Utc;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use time::OffsetDateTime;
 
 /// DatabaseSink 工厂闭包类型
 #[cfg(feature = "database")]
@@ -357,10 +357,7 @@ struct SinkWorker<'a> {
 
 /// 记录从产生到被处理的延迟。
 fn record_age(record: &LogRecord) -> Duration {
-    Utc::now()
-        .signed_duration_since(record.timestamp)
-        .to_std()
-        .unwrap_or(Duration::ZERO)
+    (OffsetDateTime::now_utc() - record.timestamp).unsigned_abs()
 }
 
 impl SinkWorker<'_> {
@@ -507,7 +504,7 @@ impl SinkWorker<'_> {
             return;
         };
         let error_record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "ERROR".to_string(),
             target: self.desc.error_target.to_string(),
             message: format!("{} sink error: {}", self.desc.label, error),
@@ -1337,7 +1334,7 @@ mod tests {
                 thread::spawn(move || {
                     for i in 0..100 {
                         let record = Arc::new(LogRecord {
-                            timestamp: Utc::now(),
+                            timestamp: OffsetDateTime::now_utc(),
                             level: "INFO".to_string(),
                             target: format!("concurrent::{t}"),
                             message: format!("concurrent write {t}-{i}"),
@@ -1432,7 +1429,7 @@ mod tests {
         const N: u64 = 5;
         for i in 0..N {
             let record = Arc::new(LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "degraded::factory".to_string(),
                 message: format!("degraded record {i}"),
@@ -1595,7 +1592,7 @@ mod tests {
         const N: u64 = 3;
         for i in 0..N {
             let record = Arc::new(LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "db::write_failure".to_string(),
                 message: format!("db write failure record {i}"),
@@ -1774,7 +1771,7 @@ mod tests {
 
         let record = || {
             Arc::new(LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "db::lifecycle".to_string(),
                 message: "db lifecycle record".to_string(),
@@ -1952,7 +1949,7 @@ mod tests {
 
         let record = |i: usize| {
             Arc::new(LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "custom::drain".to_string(),
                 message: format!("pending record {i}"),
@@ -2063,7 +2060,7 @@ mod tests {
         for i in 0..11 {
             db_tx
                 .send(Arc::new(LogRecord {
-                    timestamp: Utc::now(),
+                    timestamp: OffsetDateTime::now_utc(),
                     level: "INFO".to_string(),
                     target: "db::health".to_string(),
                     message: format!("degraded record {i}"),
@@ -2100,7 +2097,7 @@ mod tests {
         // 恢复后的写入能力（恢复真实生效，而非仅健康标记复位）
         db_tx
             .send(Arc::new(LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "db::health".to_string(),
                 message: "post-recovery record".to_string(),
@@ -2349,7 +2346,7 @@ mod custom_sink_worker_tests {
         // 投递 3 条记录
         for i in 0..3 {
             tx.send(Arc::new(LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "custom::sink".to_string(),
                 message: format!("custom record {i}"),
@@ -2416,7 +2413,7 @@ mod custom_sink_worker_tests {
         }
 
         tx.send(Arc::new(LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "custom::fail".to_string(),
             message: "doomed record".to_string(),
@@ -2488,7 +2485,7 @@ mod custom_sink_worker_tests {
         }
 
         tx.send(Arc::new(LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "custom::exact".to_string(),
             message: "record with exactly three attempts".to_string(),

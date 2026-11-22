@@ -107,7 +107,7 @@ mod async_file_test {
         let mut sink = AsyncFileSink::new(config, template).unwrap();
 
         let record = inklog::LogRecord {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test".to_string(),
             message: "Test message".to_string(),
@@ -155,7 +155,7 @@ mod async_file_test {
         // 多次写入
         for i in 0..10 {
             let record = inklog::LogRecord {
-                timestamp: chrono::Utc::now(),
+                timestamp: time::OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "test".to_string(),
                 message: format!("Message {}", i),
@@ -217,7 +217,7 @@ mod async_file_test {
         let mut sink = AsyncFileSink::new(config, template).unwrap();
 
         let record = inklog::LogRecord {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test".to_string(),
             message: "Before shutdown".to_string(),
@@ -266,7 +266,7 @@ mod async_file_test {
 
         for i in 0..iterations {
             let record = inklog::LogRecord {
-                timestamp: chrono::Utc::now(),
+                timestamp: time::OffsetDateTime::now_utc(),
                 level: "DEBUG".to_string(),
                 target: "perf_test".to_string(),
                 message: format!("Performance test message {}", i),
@@ -317,7 +317,7 @@ mod async_file_test {
 
         for i in 0..100 {
             let record = inklog::LogRecord {
-                timestamp: chrono::Utc::now(),
+                timestamp: time::OffsetDateTime::now_utc(),
                 level: "INFO".to_string(),
                 target: "compression_test".to_string(),
                 message: format!("Compressible data {}", i),
@@ -361,7 +361,7 @@ mod async_file_test {
 
         // 写入应该能在超时内完成（或失败）
         let record = inklog::LogRecord {
-            timestamp: chrono::Utc::now(),
+            timestamp: time::OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "timeout_test".to_string(),
             message: format!("Timeout test"),

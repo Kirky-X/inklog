@@ -21,10 +21,10 @@
 //! - **数据脱敏**：可选的敏感信息脱敏功能
 
 use inklog::LogRecord;
-use inklog::chrono::Utc;
 use inklog::config::ConsoleSinkConfig;
 use inklog::sink::LogSink;
 use inklog::sink::console::ConsoleSink;
+use inklog::time::OffsetDateTime;
 use inklog_examples::common::{print_section, print_separator, tr};
 
 /// 示例1: 基础控制台输出（无颜色）
@@ -47,7 +47,7 @@ async fn basic_console() -> Result<(), Box<dyn std::error::Error>> {
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     for level in levels {
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: level.to_string(),
             message: format!("this is a {} level log", level),
             target: "console_example::basic".to_string(),
@@ -100,7 +100,7 @@ async fn colored_console() -> Result<(), Box<dyn std::error::Error>> {
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     for level in levels {
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: level.to_string(),
             message: format!("this is a {} level log (colored)", level),
             target: "console_example::colored".to_string(),
@@ -170,7 +170,7 @@ async fn stderr_levels() -> Result<(), Box<dyn std::error::Error>> {
 
     for (level, message) in test_cases {
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: level.to_string(),
             message: message.to_string(),
             target: "console_example::stderr".to_string(),

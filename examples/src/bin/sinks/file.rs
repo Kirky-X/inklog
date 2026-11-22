@@ -34,10 +34,10 @@
 //! - 压缩日志: `app.log.1.zst`, `app.log.2.zst`, ...
 
 use inklog::LogRecord;
-use inklog::chrono::Utc;
 use inklog::config::FileSinkConfig;
 use inklog::sink::LogSink;
 use inklog::sink::file::FileSink;
+use inklog::time::OffsetDateTime;
 use inklog_examples::common::{print_section, print_separator, temp_file_path, tr, tr_args};
 use std::path::PathBuf;
 
@@ -86,7 +86,7 @@ async fn basic_file() -> Result<(), Box<dyn std::error::Error>> {
     let levels = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
     for level in levels {
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: level.to_string(),
             message: format!("this is a {} level log", level),
             target: "file_example::basic".to_string(),
@@ -158,7 +158,7 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     print_section(&tr("example-file-write-logs-trigger-rotation"));
     for i in 1..=50 {
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             message: format!(
                 "log message #{:03} - a longer log message that triggers rotation",
@@ -200,7 +200,12 @@ async fn file_rotation() -> Result<(), Box<dyn std::error::Error>> {
     all_files.sort_by_key(|entry| entry.file_name());
 
     // 轮转文件名带创建年份后缀；按运行时当前年份识别，避免硬编码过期
-    let year_tag = format!("_{}", chrono::Utc::now().format("%Y"));
+    let year_tag = format!(
+        "_{}",
+        time::OffsetDateTime::now_utc()
+            .format(time::macros::format_description!("[year]"))
+            .expect("year format")
+    );
 
     let mut rotation_count = 0;
     for file in &all_files {
@@ -287,7 +292,7 @@ async fn file_compression() -> Result<(), Box<dyn std::error::Error>> {
     print_section(&tr("example-file-write-logs-trigger-rotation-and"));
     for i in 1..=50 {
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             message: format!(
                 "log message #{:03} - repeated content shows compression well (AAABBBCCCDDDEEEFFF)",

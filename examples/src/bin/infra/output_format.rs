@@ -208,7 +208,7 @@ fn show_json_format_rendering() {
 
     // Json 格式输出为 NDJSON（每行一个 JSON 对象）
     let json_line = serde_json::to_string(&serde_json::json!({
-        "timestamp": record.timestamp.to_rfc3339(),
+        "timestamp": record.timestamp.format(&time::format_description::well_known::Rfc3339).expect("RFC3339 format"),
         "level": record.level,
         "target": record.target,
         "message": record.message,

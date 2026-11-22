@@ -30,9 +30,9 @@ pub struct QueryArgs {
     pub json: bool,
 }
 
-fn parse_time(raw: &str, flag: &str) -> Result<chrono::DateTime<chrono::Utc>> {
-    chrono::DateTime::parse_from_rfc3339(raw)
-        .map(|t| t.with_timezone(&chrono::Utc))
+fn parse_time(raw: &str, flag: &str) -> Result<time::OffsetDateTime> {
+    time::OffsetDateTime::parse(raw, &time::format_description::well_known::Rfc3339)
+        .map(|t| t.to_offset(time::UtcOffset::UTC))
         .map_err(|e| {
             let mut args = inklog::i18n::MsgArgs::new();
             args.set("flag", flag);
@@ -105,7 +105,11 @@ pub fn run_query(args: &QueryArgs) -> Result<i32> {
             println!(
                 "{} [{}] {} - {}  ({})",
                 e.timestamp
-                    .map(|t| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+                    .map(|t| t
+                        .format(time::macros::format_description!(
+                            "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+                        ))
+                        .expect("CLI timestamp format"))
                     .unwrap_or_else(|| "-".to_string()),
                 e.level,
                 e.target,

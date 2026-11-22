@@ -10,8 +10,8 @@
 use anyhow::Result;
 use inklog::LogRecord;
 use inklog::LogSink;
-use inklog::chrono::Utc;
 use inklog::config::ConsoleSinkConfig;
+use inklog::time::OffsetDateTime;
 
 /// 构造 ConsoleSink 配置。
 ///
@@ -38,7 +38,7 @@ pub async fn write_test_cases(sink: &dyn LogSink, cases: &[(&str, &str)]) -> Res
     let mut written = 0;
     for (level, message) in cases {
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: level.to_string(),
             message: message.to_string(),
             target: "console_ops".to_string(),

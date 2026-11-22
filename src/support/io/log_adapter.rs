@@ -8,10 +8,10 @@
 use crate::LogRecord;
 use crate::Metrics;
 use crate::validation::LogSanitizer;
-use chrono::Utc;
 use crossbeam_channel::Sender;
 use log::{Level, LevelFilter, Metadata, Record};
 use std::sync::Arc;
+use time::OffsetDateTime;
 
 /// `log` crate 适配器，实现 `log::Log` trait
 ///
@@ -110,7 +110,7 @@ impl LogAdapter {
         let (trace_id, span_id) =
             crate::domain::core::subscriber::LoggerSubscriber::derive_trace_ids_from_current();
         LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: Self::level_to_string(record.level()).to_string(),
             target: self.sanitizer.sanitize(record.target()),
             message: self.sanitizer.sanitize(&record.args().to_string()),

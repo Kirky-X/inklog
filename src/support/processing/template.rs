@@ -92,7 +92,7 @@ impl FromStr for OutputFormat {
 /// ```
 /// use inklog::template::LogTemplate;
 /// use inklog::log_record::LogRecord;
-/// use chrono::Utc;
+/// use time::OffsetDateTime;
 /// use std::collections::HashMap;
 /// use serde_json::Value;
 ///
@@ -101,7 +101,7 @@ impl FromStr for OutputFormat {
 ///
 /// // Render a log record
 /// let record = LogRecord {
-///     timestamp: Utc::now(),
+///     timestamp: OffsetDateTime::now_utc(),
 ///     level: "INFO".to_string(),
 ///     target: "my_app::api".to_string(),
 ///     message: "Request processed".to_string(),
@@ -313,12 +313,12 @@ impl LogTemplate {
     /// ```
     /// use inklog::template::LogTemplate;
     /// use inklog::log_record::LogRecord;
-    /// use chrono::Utc;
+    /// use time::OffsetDateTime;
     /// use std::collections::HashMap;
     ///
     /// let template = LogTemplate::new("[{level}] {message}");
     /// let record = LogRecord {
-    ///     timestamp: Utc::now(),
+    ///     timestamp: OffsetDateTime::now_utc(),
     ///     level: "INFO".to_string(),
     ///     target: "my_module".to_string(),
     ///     message: "Task completed".to_string(),
@@ -342,8 +342,8 @@ impl LogTemplate {
                     result.push_str(
                         &record
                             .timestamp
-                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                            .to_string(),
+                            .format(time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"))
+                            .expect("template timestamp format"),
                     );
                 }
                 Placeholder::Level => {
@@ -412,13 +412,13 @@ mod tests {
     use super::*;
 
     use crate::LogRecord;
-    use chrono::Utc;
     use serde_json::Value;
     use std::collections::HashMap;
+    use time::OffsetDateTime;
 
     fn create_test_record() -> LogRecord {
         LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "test_module".to_string(),
             message: "Test message".to_string(),
@@ -769,14 +769,14 @@ mod tests {
 #[cfg(test)]
 mod trace_placeholder_tests {
     use super::*;
-    use chrono::Utc;
     use std::collections::HashMap;
+    use time::OffsetDateTime;
 
     #[test]
     fn test_trace_placeholders_render_when_present() {
         let template = LogTemplate::new("{timestamp} [{level}] {trace_id}/{span_id} {message}");
         let record = LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             target: "t".to_string(),
             message: "hello".to_string(),

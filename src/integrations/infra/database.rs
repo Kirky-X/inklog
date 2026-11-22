@@ -579,7 +579,7 @@ pub(crate) fn build_duckdb_param_statements(
             let fields_json =
                 serde_json::to_string(&record.fields).unwrap_or_else(|_| "{}".to_string());
             let params = vec![
-                DuckValue::Text(record.timestamp.to_rfc3339()),
+                DuckValue::Text(crate::support::time_format::to_rfc3339(&record.timestamp)),
                 DuckValue::Text(record.level.clone()),
                 DuckValue::Text(record.target.clone()),
                 DuckValue::Text(record.message.clone()),
@@ -651,7 +651,7 @@ impl Database for DbNexusAdapter {
                 let driver = &self.driver;
                 // timestamp 同样过转义：rfc3339 输出虽受类型约束，
                 // 但拼入 SQL 前不得依赖调用方不变量（防纵深失效）
-                let timestamp = escape_sql_string(&record.timestamp.to_rfc3339(), driver);
+                let timestamp = escape_sql_string(&crate::support::time_format::to_rfc3339(&record.timestamp), driver);
                 let level = escape_sql_string(&record.level, driver);
                 let target = escape_sql_string(&record.target, driver);
                 let message = escape_sql_string(&record.message, driver);

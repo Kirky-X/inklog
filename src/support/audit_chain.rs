@@ -495,7 +495,7 @@ pub fn create_anchor_record(
     let input = AnchorInput {
         chain_head: chain_head.to_string(),
         count,
-        timestamp: chrono::Utc::now().timestamp(),
+        timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
     };
     let sig = signer.sign(&input)?;
     Ok(AnchorRecord {

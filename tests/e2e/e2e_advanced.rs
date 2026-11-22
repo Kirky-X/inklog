@@ -227,7 +227,7 @@ mod rotation_strategy_e2e {
     use std::time::Instant;
 
     fn build_context(size: u64, max_size: Option<u64>, sequence: u32) -> RotationContext {
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         let instant = Instant::now();
         RotationContext {
             current_path: PathBuf::from("/tmp/test.log"),
@@ -336,7 +336,7 @@ mod rotation_strategy_e2e {
     fn test_time_based_rotation_should_rotate_after_interval() {
         let strategy = TimeBasedRotation::new(3600, "hourly".to_string());
         // 模拟文件打开时间在 2 小时前
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         let file_opened_at = Instant::now() - Duration::from_secs(7200);
         let ctx = RotationContext {
             current_path: PathBuf::from("/tmp/test.log"),
@@ -354,7 +354,7 @@ mod rotation_strategy_e2e {
     #[test]
     fn test_time_based_rotation_no_rotate_within_interval() {
         let strategy = TimeBasedRotation::new(3600, "hourly".to_string());
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         let file_opened_at = Instant::now() - Duration::from_secs(60); // 仅过去 1 分钟
         let ctx = RotationContext {
             current_path: PathBuf::from("/tmp/test.log"),
@@ -377,7 +377,7 @@ mod rotation_strategy_e2e {
             CompositeRotation::new(vec![Box::new(size_strategy), Box::new(time_strategy)]);
 
         // 大小超限但时间未到 → 应轮转
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         let recent = Instant::now() - Duration::from_secs(60);
         let ctx = RotationContext {
             current_path: PathBuf::from("/tmp/test.log"),
@@ -402,7 +402,7 @@ mod rotation_strategy_e2e {
         let composite =
             CompositeRotation::new(vec![Box::new(size_strategy), Box::new(time_strategy)]);
 
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         let recent = Instant::now() - Duration::from_secs(60);
         let ctx = RotationContext {
             current_path: PathBuf::from("/tmp/test.log"),
@@ -423,7 +423,7 @@ mod rotation_strategy_e2e {
         composite.add(SizeBasedRotation::new(1024));
         composite.add(TimeBasedRotation::new(3600, "hourly".to_string()));
 
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         let recent = Instant::now();
         let ctx = RotationContext {
             current_path: PathBuf::from("/tmp/test.log"),

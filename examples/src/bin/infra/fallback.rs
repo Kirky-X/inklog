@@ -26,12 +26,12 @@
 
 use async_trait::async_trait;
 use inklog::LogTemplate;
-use inklog::chrono::Utc;
 use inklog::config::{ConsoleSinkConfig, FileSinkConfig};
 use inklog::log_record::LogRecord;
 use inklog::sink::LogSink;
 use inklog::sink::console::ConsoleSink;
 use inklog::sink::file::FileSink;
+use inklog::time::OffsetDateTime;
 use inklog::tokio::sync::Mutex;
 use inklog::{SinkHealth, SinkStatus};
 use inklog_examples::common::{print_section, print_separator, temp_file_path, tr, tr_args};
@@ -49,7 +49,7 @@ struct FallbackState {
     /// degraded事件计数
     fallback_count: u32,
     /// 最后degraded时间
-    last_fallback_time: Option<chrono::DateTime<Utc>>,
+    last_fallback_time: Option<OffsetDateTime>,
 }
 
 impl FallbackState {
@@ -67,7 +67,14 @@ impl FallbackState {
             tr_args(
                 "example-fallback-degrading",
                 &[
-                    ("value", &(Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"))),
+                    (
+                        "value",
+                        &(OffsetDateTime::now_utc()
+                            .format(time::macros::format_description!(
+                                "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
+                            ))
+                            .expect("fallback timestamp format"))
+                    ),
                     ("active_sink", &self.active_sink),
                     ("new_sink", &new_sink)
                 ]
@@ -75,7 +82,7 @@ impl FallbackState {
         );
         self.active_sink = new_sink.to_string();
         self.fallback_count += 1;
-        self.last_fallback_time = Some(Utc::now());
+        self.last_fallback_time = Some(OffsetDateTime::now_utc());
     }
 }
 
@@ -220,7 +227,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
 
     let records = vec![
         LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             message: "application started successfully".to_string(),
             target: "fallback::multi_sink".to_string(),
@@ -232,7 +239,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
             span_id: None,
         },
         LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             message: "database connection established".to_string(),
             target: "fallback::multi_sink".to_string(),
@@ -244,7 +251,7 @@ async fn multi_sink_config() -> Result<(), Box<dyn std::error::Error>> {
             span_id: None,
         },
         LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "WARN".to_string(),
             message: "config parameters use defaults".to_string(),
             target: "fallback::multi_sink".to_string(),
@@ -366,7 +373,7 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
 
     let test_records: Vec<LogRecord> = (1..=8)
         .map(|i| LogRecord {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             level: "INFO".to_string(),
             message: format!("test log message #{}", i),
             target: "fallback::simulate".to_string(),
@@ -393,7 +400,14 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
                     tr_args(
                         "example-fallback-primary-sink-write-succeeded",
                         &[
-                            ("value", &(Utc::now().format("%H:%M:%S%.3f"))),
+                            (
+                                "value",
+                                &(OffsetDateTime::now_utc()
+                                    .format(time::macros::format_description!(
+                                        "[hour]:[minute]:[second].[subsecond digits:3]"
+                                    ))
+                                    .expect("fallback timestamp format"))
+                            ),
                             ("success_count", &success_count)
                         ]
                     )
@@ -414,7 +428,14 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
                     "{}",
                     tr_args(
                         "example-fallback-fallback-sink-took-over-writing",
-                        &[("value", &(Utc::now().format("%H:%M:%S%.3f")))]
+                        &[(
+                            "value",
+                            &(OffsetDateTime::now_utc()
+                                .format(time::macros::format_description!(
+                                    "[hour]:[minute]:[second].[subsecond digits:3]"
+                                ))
+                                .expect("fallback timestamp format"))
+                        )]
                     )
                 );
                 backup_sink.write(record).await?;
@@ -439,7 +460,11 @@ async fn simulate_failure() -> Result<(), Box<dyn std::error::Error>> {
                 "value",
                 &(state
                     .last_fallback_time
-                    .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .map(|t| t
+                        .format(time::macros::format_description!(
+                            "[year]-[month]-[day] [hour]:[minute]:[second]"
+                        ))
+                        .expect("fallback timestamp format"))
                     .unwrap_or_else(|| "none".to_string()))
             )]
         )
@@ -634,7 +659,7 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
                 "ERROR"
             };
             LogRecord {
-                timestamp: Utc::now(),
+                timestamp: OffsetDateTime::now_utc(),
                 level: level.to_string(),
                 message: format!("log message #{} [{}]", i, level),
                 target: "fallback::demo".to_string(),
@@ -660,7 +685,14 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
                 "\n{}",
                 tr_args(
                     "example-fallback-primary-sink-failed",
-                    &[("value", &(Utc::now().format("%H:%M:%S%.3f")))]
+                    &[(
+                        "value",
+                        &(OffsetDateTime::now_utc()
+                            .format(time::macros::format_description!(
+                                "[hour]:[minute]:[second].[subsecond digits:3]"
+                            ))
+                            .expect("fallback timestamp format"))
+                    )]
                 )
             );
             println!(
@@ -699,7 +731,11 @@ async fn fallback_demo() -> Result<(), Box<dyn std::error::Error>> {
 
         println!(
             "[{}] [{}] #{}: {}",
-            Utc::now().format("%H:%M:%S%.3f"),
+            OffsetDateTime::now_utc()
+                .format(time::macros::format_description!(
+                    "[hour]:[minute]:[second].[subsecond digits:3]"
+                ))
+                .expect("fallback timestamp format"),
             sink_name,
             log_num,
             record.message
